@@ -1,0 +1,10 @@
+[package]
+name = "rey-v0"
+version = "0.1.0"
+edition = "2021"
+
+description = "Rey v0 reference interpreter"
+license = "MIT"
+authors = ["Misbah Khursheed <your@email.com>"]
+
+[dependencies]
