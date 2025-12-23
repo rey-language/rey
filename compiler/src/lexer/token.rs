@@ -1,3 +1,4 @@
+use crate::lexer::span::Span;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
@@ -7,6 +8,7 @@ pub struct Token {
 //this enum will grow over time
 // for v0, keeping it simple
 //contains all tokens supported for v0
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     //single char tokens
     LeftParen,

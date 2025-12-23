@@ -6,6 +6,7 @@ pub struct LexError {
     pub span: Span,
 }   
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum  LexerError {
     UnexpectedCharacter {
         found: char,
