@@ -12,13 +12,11 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-
     if: github.actor == 'IMisbahk'
-
     steps:
       - name: Enable auto-merge
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.REY_MERGE_TOKEN }}
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: merge
