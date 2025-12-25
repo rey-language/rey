@@ -25,4 +25,8 @@ impl<'a> Cursor<'a> {
     pub fn position(&self) -> usize {
         self.position
     }
+
+    pub fn peek_ahead(&self, n: usize) -> Option<char> {
+        self.source[self.position..].chars().nth(n)
+    }
 }

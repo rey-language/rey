@@ -1,5 +1,6 @@
 use crate::ast::{Expr, Literal, Parameter, Stmt, Type};
 use crate::lexer::{Token, TokenKind};
+use crate::parser::error::ParserError;
 
 //impl for recursive descent parser
 pub struct Parser {
@@ -10,67 +11,67 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, current: 0 }
     }
-    pub fn parse(&mut self) -> Vec<Stmt> {
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, ParserError> {
         let mut statements = Vec::new();
         while !self.isAtEnd() {
-            if let Some(stmt) = self.parseStatement() {
+            if let Some(stmt) = self.parseStatement()? {
                 statements.push(stmt);
             }
         }
-        statements
+        Ok(statements)
     }
 
     //parsing statements
-    fn parseStatement(&mut self) -> Option<Stmt> {
+    fn parseStatement(&mut self) -> Result<Option<Stmt>, ParserError> {
         if self.isAtEnd() {
-            return None;
+            return Ok(None);
         }
         if self.matchToken(&TokenKind::Var) {
-            Some(self.parseVarDeclaration())
+            Ok(Some(self.parseVarDeclaration()?))
         } else if self.matchToken(&TokenKind::Func) {
-            Some(self.parseFuncDeclaration())
+            Ok(Some(self.parseFuncDeclaration()?))
         } else {
-            Some(self.parseExpressionStatement())
+            Ok(Some(self.parseExpressionStatement()?))
         }
     }
-    fn parseVarDeclaration(&mut self) -> Stmt {
+    fn parseVarDeclaration(&mut self) -> Result<Stmt, ParserError> {
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
-            _ => self.error("Expected variable name."),
+            _ => return Err(self.error("Expected variable name.")),
         };
         self.advance();
 
-        let ty = self.parseTypeAnnotation();
+        let ty = self.parseTypeAnnotation()?;
 
-        self.consume(&TokenKind::Equal, "Expected '=' after variable name.");
-        let initializer = self.parseExpression();
+        self.consume(&TokenKind::Equal, "Expected '=' after variable name.")?;
+        let initializer = self.parseExpression()?;
         self.consume(
             &TokenKind::Semicolon,
             "Expected ';' after variable declaration.",
-        );
+        )?;
 
-        Stmt::VarDecl { name, ty, initializer }
+        Ok(Stmt::VarDecl { name, ty, initializer })
     }
 
-    fn parseFuncDeclaration(&mut self) -> Stmt {
+    fn parseFuncDeclaration(&mut self) -> Result<Stmt, ParserError> {
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
-            _ => self.error("Expected function name."),
+            _ => return Err(self.error("Expected function name.")),
         };
         self.advance();
 
-        self.consume(&TokenKind::LeftParen, "Expected '(' after function name.");
+        self.consume(&TokenKind::LeftParen, "Expected '(' after function name.")?;
 
         let mut params = Vec::new();
         if !self.check(&TokenKind::RightParen) {
             loop {
                 let param_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
-                    _ => self.error("Expected parameter name."),
+                    _ => return Err(self.error("Expected parameter name.")),
                 };
                 self.advance();
 
-                let param_ty = self.parseTypeAnnotation();
+                let param_ty = self.parseTypeAnnotation()?;
 
                 params.push(Parameter {
                     name: param_name,
@@ -82,65 +83,65 @@ impl Parser {
                 }
             }
         }
-        self.consume(&TokenKind::RightParen, "Expected ')' after parameters.");
+        self.consume(&TokenKind::RightParen, "Expected ')' after parameters.")?;
 
-        let return_ty = self.parseTypeAnnotation();
+        let return_ty = self.parseTypeAnnotation()?;
 
-        self.consume(&TokenKind::LeftBrace, "Expected '{' before function body.");
+        self.consume(&TokenKind::LeftBrace, "Expected '{' before function body.")?;
 
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
-            if let Some(stmt) = self.parseStatement() {
+            if let Some(stmt) = self.parseStatement()? {
                 body.push(stmt);
             }
         }
-        self.consume(&TokenKind::RightBrace, "Expected '}' after function body.");
+        self.consume(&TokenKind::RightBrace, "Expected '}' after function body.")?;
 
-        Stmt::FuncDecl {
+        Ok(Stmt::FuncDecl {
             name,
             params,
             return_ty,
             body,
-        }
+        })
     }
 
-    fn parseExpressionStatement(&mut self) -> Stmt {
-        let expr = self.parseExpression();
-        self.consume(&TokenKind::Semicolon, "Expected ';' after expression.");
-        Stmt::ExprStmt(expr)
+    fn parseExpressionStatement(&mut self) -> Result<Stmt, ParserError> {
+        let expr = self.parseExpression()?;
+        self.consume(&TokenKind::Semicolon, "Expected ';' after expression.")?;
+        Ok(Stmt::ExprStmt(expr))
     }
 
-    fn parseTypeAnnotation(&mut self) -> Option<Type> {
+    fn parseTypeAnnotation(&mut self) -> Result<Option<Type>, ParserError> {
         if self.matchToken(&TokenKind::Colon) {
             match &self.peek().kind {
                 TokenKind::Identifier(name) => {
                     let ty = Type { name: name.clone() };
                     self.advance();
-                    Some(ty)
+                    Ok(Some(ty))
                 }
-                _ => self.error("Expected type name after ':'"),
+                _ => Err(self.error("Expected type name after ':'")),
             }
         } else {
-            None
+            Ok(None)
         }
     }
 
-    fn parseUnary(&mut self) -> Expr {
+    fn parseUnary(&mut self) -> Result<Expr, ParserError> {
         match &self.peek().kind {
             TokenKind::Minus => {
                 self.advance();
-                let expr = self.parseUnary();
-                Expr::Binary {
+                let expr = self.parseUnary()?;
+                Ok(Expr::Binary {
                     left: Box::new(Expr::Literal(Literal::Number(0.0))),
                     op: TokenKind::Minus,
                     right: Box::new(expr),
-                }
+                })
             }
             _ => self.parsePrimary(),
         }
     }
 
-    fn parsePrimary(&mut self) -> Expr {
+    fn parsePrimary(&mut self) -> Result<Expr, ParserError> {
         match self.peek().kind.clone() {
             TokenKind::Identifier(name) => {
                 self.advance();
@@ -151,52 +152,52 @@ impl Parser {
 
                     if !self.check(&TokenKind::RightParen) {
                         loop {
-                            args.push(self.parseExpression());
+                            args.push(self.parseExpression()?);
                             if !self.matchToken(&TokenKind::Comma) {
                                 break;
                             }
                         }
                     }
-                    self.consume(&TokenKind::RightParen, "Expected ')' after function arguments.");
-                    Expr::Call {
+                    self.consume(&TokenKind::RightParen, "Expected ')' after function arguments.")?;
+                    Ok(Expr::Call {
                         callee: Box::new(callee),
                         args,
-                    }
+                    })
                 } else {
-                    Expr::Variable(name)
+                    Ok(Expr::Variable(name))
                 }
             }
             TokenKind::StringLiteral(value) => {
                 self.advance();
-                Expr::Literal(Literal::String(value))
+                Ok(Expr::Literal(Literal::String(value)))
             }
             TokenKind::NumberLiteral(value) => {
                 self.advance();
-                Expr::Literal(Literal::Number(value))
+                Ok(Expr::Literal(Literal::Number(value)))
             }
             TokenKind::True => {
                 self.advance();
-                Expr::Literal(Literal::Bool(true))
+                Ok(Expr::Literal(Literal::Bool(true)))
             }
             TokenKind::False => {
                 self.advance();
-                Expr::Literal(Literal::Bool(false))
+                Ok(Expr::Literal(Literal::Bool(false)))
             }
             TokenKind::Null => {
                 self.advance();
-                Expr::Literal(Literal::Null)
+                Ok(Expr::Literal(Literal::Null))
             }
-            _ => self.error("Expected expression."),
+            _ => Err(self.error("Expected expression.")),
         }
     }
 
-    fn parseAdditive(&mut self) -> Expr {
-        let mut expr = self.parseUnary();
+    fn parseAdditive(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parseUnary()?;
 
         while matches!(self.peek().kind, TokenKind::Plus | TokenKind::Minus) {
             let op = self.peek().kind.clone();
             self.advance();
-            let right = self.parseUnary();
+            let right = self.parseUnary()?;
 
             expr = Expr::Binary {
                 left: Box::new(expr),
@@ -204,11 +205,11 @@ impl Parser {
                 right: Box::new(right),
             };
         }
-        expr
+        Ok(expr)
     }
 
     //expressions
-    fn parseExpression(&mut self) -> Expr {
+    fn parseExpression(&mut self) -> Result<Expr, ParserError> {
         self.parseAdditive()
     }
 
@@ -221,19 +222,21 @@ impl Parser {
             false
         }
     }
-    fn consume(&mut self, kind: &TokenKind, message: &str) {
+    fn consume(&mut self, kind: &TokenKind, message: &str) -> Result<(), ParserError> {
         if self.check(kind) {
             self.advance();
+            Ok(())
         } else {
-            self.error(message);
+            Err(self.error(message))
         }
     }
-    fn consumeIdentifier(&mut self, message: &str) {
+    fn consumeIdentifier(&mut self, message: &str) -> Result<(), ParserError> {
         match &self.peek().kind {
             TokenKind::Identifier(_) => {
                 self.advance();
+                Ok(())
             }
-            _ => self.error(message),
+            _ => Err(self.error(message)),
         }
     }
     fn check(&self, kind: &TokenKind) -> bool {
@@ -263,7 +266,11 @@ impl Parser {
     }
 
     //error
-    fn error(&self, message: &str) -> ! {
-        panic!("Parse error at {:?}: {}", self.peek().span, message);
+    fn error(&self, message: &str) -> ParserError {
+        ParserError::Custom {
+            message: message.to_string(),
+            span: self.peek().span,
+        }
     }
+    
 }

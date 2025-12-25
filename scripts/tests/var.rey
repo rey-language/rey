@@ -9,7 +9,7 @@ immutable type, mutable value
 
 var name = "misbah";
 name = 10; //allowed
-name = "testing" //allowed
+name = "testing";  //allowed
 
 var age = 10: int;
 age = 20;//allowed

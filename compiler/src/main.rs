@@ -4,15 +4,13 @@ mod parser;
 
 use lexer::{Lexer, TokenKind};
 use parser::Parser;
+use std::fs;
 
 fn main() {
-    let source = r#"
-        func main(): Void {
-            println("Hello World!");
-        }
-    "#;
+    let source = fs::read_to_string("../scripts/tests/hello.rey")
+        .expect("Failed to read hello.rey file");
 
-    let mut lexer = Lexer::new(source);
+    let mut lexer = Lexer::new(&source);
     let mut tokens = Vec::new();
 
     loop {
@@ -32,10 +30,16 @@ fn main() {
     }
     println!("Parsing Started.");
     let mut parser = Parser::new(tokens);
-    let ast = parser.parse();
-    println!("Program parsed!");
-    println!("AST:");
-    for stmt in &ast {
-        println!("{:?}", stmt);
+    match parser.parse() {
+        Ok(ast) => {
+            println!("Program parsed!");
+            println!("AST:");
+            for stmt in &ast {
+                println!("{:?}", stmt);
+            }
+        }
+        Err(err) => {
+            println!("Parser error: {:?}", err);
+        }
     }
 }
