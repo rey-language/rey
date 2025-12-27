@@ -1,0 +1,6 @@
+var x: int = 10;
+var y = 20;
+var result: int= x+y;
+func main() {
+    println(result);
+}
