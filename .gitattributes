@@ -1,1 +1,1 @@
-*.rey linguist-language=Rey
+*.rey linguist-language=Rey linguist-detectable=true
