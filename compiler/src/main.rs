@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod ast;
+mod interpreter;
 mod lexer;
 mod parser;
 
