@@ -360,8 +360,11 @@ impl Parser {
                     };
                     continue;
                 }
-
-                return Err(self.error("Property access is not implemented yet (use method call syntax: obj.method())."));
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                };
+                continue;
             }
 
             break;

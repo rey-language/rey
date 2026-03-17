@@ -165,6 +165,17 @@ impl Executor {
                     _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
+            Expr::Get { object, name } => {
+                let obj = self.evaluate_expr(object, env)?;
+                match obj {
+                    Value::Dict(d) => d
+                        .borrow()
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| "Dictionary key not found".to_string()),
+                    _ => Err("Property access is only supported for dictionaries".to_string()),
+                }
+            }
             Expr::MethodCall { receiver, name, args } => {
                 let recv = self.evaluate_expr(receiver, env)?;
                 let mut evaluated_args = Vec::new();

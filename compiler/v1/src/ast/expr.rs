@@ -24,6 +24,10 @@ pub enum Expr {
         target: Box<Expr>,
         index: Box<Expr>,
     },
+    Get {
+        object: Box<Expr>,
+        name: String,
+    },
     MethodCall {
         receiver: Box<Expr>,
         name: String,
