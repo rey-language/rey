@@ -1,5 +1,17 @@
 // Array usage
 
 func main(): Void {
-    println("arrays are not implemented yet");
+    var xs: [int] = [1, 2, 3];
+
+    println(xs);
+    println(len(xs));
+    println(xs[0]);
+
+    push(xs, 4);
+    println(xs);
+    println(xs[3]);
+
+    println(pop(xs));
+    println(xs);
+    println(len(xs));
 }

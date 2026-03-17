@@ -1,4 +1,4 @@
-use crate::ast::Stmt;
+use crate::ast::{Expr, Stmt};
 use super::environment::Environment;
 use super::executor::Executor;
 use super::std::StdLib;
@@ -25,6 +25,15 @@ impl Interpreter {
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), String> {
         self.executor.execute_block(statements, &mut self.environment)?;
+
+        if self.environment.get("main").is_some() {
+            let call = Expr::Call {
+                callee: Box::new(Expr::Variable("main".to_string())),
+                args: vec![],
+            };
+            self.executor.evaluate_expr(&call, &mut self.environment)?;
+        }
+
         Ok(())
     }
 }

@@ -27,18 +27,71 @@ impl StdLib {
                     if i > 0 {
                         print!(" ");
                     }
-                    match arg {
-                        Value::String(s) => print!("{}", s),
-                        Value::Number(n) => print!("{}", n),
-                        Value::Bool(b) => print!("{}", b),
-                        Value::Null => print!("null"),
-                        Value::Function(_) => print!("<function>"),
-                    }
+                    print!("{}", Self::formatValue(arg));
                 }
                 println!();
                 Some(Ok(Value::Null))
             }
+            "len" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("len expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::String(s) => Some(Ok(Value::Number(s.chars().count() as f64))),
+                    Value::Array(arr) => Some(Ok(Value::Number(arr.borrow().len() as f64))),
+                    _ => Some(Err("len expects a string or array".to_string())),
+                }
+            }
+            "push" => {
+                if args.len() != 2 {
+                    return Some(Err(format!("push expects 2 arguments, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        arr.borrow_mut().push(args[1].clone());
+                        Some(Ok(Value::Null))
+                    }
+                    _ => Some(Err("push expects an array as first argument".to_string())),
+                }
+            }
+            "pop" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("pop expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        let v = arr.borrow_mut().pop().unwrap_or(Value::Null);
+                        Some(Ok(v))
+                    }
+                    _ => Some(Err("pop expects an array".to_string())),
+                }
+            }
             _ => None, // Not a built-in function
+        }
+    }
+
+    fn formatValue(value: &Value) -> String {
+        match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => {
+                if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{}", n)
+                }
+            }
+            Value::Bool(b) => format!("{}", b),
+            Value::Null => "null".to_string(),
+            Value::Function(_) => "<function>".to_string(),
+            Value::Array(arr) => {
+                let items = arr
+                    .borrow()
+                    .iter()
+                    .map(Self::formatValue)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", items)
+            }
         }
     }
 }

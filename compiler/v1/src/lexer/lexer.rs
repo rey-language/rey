@@ -48,6 +48,8 @@ impl<'a> Lexer<'a> {
             ')' => Ok(self.simpleToken(TokenKind::RightParen, start)),
             '{' => Ok(self.simpleToken(TokenKind::LeftBrace, start)),
             '}' => Ok(self.simpleToken(TokenKind::RightBrace, start)),
+            '[' => Ok(self.simpleToken(TokenKind::LeftBracket, start)),
+            ']' => Ok(self.simpleToken(TokenKind::RightBracket, start)),
             ';' => Ok(self.simpleToken(TokenKind::Semicolon, start)),
             '+' => Ok(self.simpleToken(TokenKind::Plus, start)),
             '-' => Ok(self.simpleToken(TokenKind::Minus, start)),

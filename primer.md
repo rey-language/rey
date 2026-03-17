@@ -1,5 +1,5 @@
 # Primer — rey-lang
-Last updated: Mar 17, 2026 (session end)
+Last updated: Mar 17, 2026 (session start)
 
 ## What this project is
 Rey is a custom programming language built by Misbah. Currently on v0 — a tree-walking interpreter written in Rust. The language has C-like syntax with type inference, functions, control flow, and basic builtins. v0 is the working prototype; future versions will likely move toward compilation.
@@ -41,6 +41,17 @@ cargo run -- src/tests/variables.rey
 - String methods (.length())
 - Property access (obj.prop)
 - Type enforcement at compile time (parsed, not enforced)
+
+## Current session plan
+Implement and verify, in order (commit after each):
+1. arrays + indexing + push/pop/len + typed arrays ([int])
+2. dictionaries + indexing + typed dictionaries
+3. string methods: length/upper/lower/contains/split
+4. input() builtin
+5. property access (obj.prop)
+6. compile-time type enforcement
+
+After all: run full build, run every `.rey` test file, update `syntax.md`, build release binaries (macos arm64 + windows x86_64), stage `releases/0.0.4-pre/` and open one final PR.
 
 ## Test files
 compiler/v1/src/tests/ — .rey files for each feature

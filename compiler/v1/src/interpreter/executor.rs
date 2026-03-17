@@ -5,6 +5,8 @@ use super::control_flow::ControlFlow;
 use super::environment::Environment;
 use super::function::Function;
 use super::value::Value;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Executor;
 
@@ -120,6 +122,34 @@ impl Executor {
                 let left_val = self.evaluate_expr(left, env)?;
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
+            }
+            Expr::ArrayLiteral { elements } => {
+                let mut evaluated = Vec::new();
+                for el in elements {
+                    evaluated.push(self.evaluate_expr(el, env)?);
+                }
+                Ok(Value::Array(Rc::new(RefCell::new(evaluated))))
+            }
+            Expr::Index { target, index } => {
+                let target_val = self.evaluate_expr(target, env)?;
+                let index_val = self.evaluate_expr(index, env)?;
+                match (target_val, index_val) {
+                    (Value::Array(arr), Value::Number(n)) => {
+                        if n.fract() != 0.0 {
+                            return Err("Array index must be an integer".to_string());
+                        }
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("Array index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        arr.borrow()
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Array index out of bounds".to_string())
+                    }
+                    _ => Err("Indexing is only supported for arrays with numeric indices".to_string()),
+                }
             }
             Expr::Unary { op, right } => {
                 let right_val = self.evaluate_expr(right, env)?;
