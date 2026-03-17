@@ -2,6 +2,14 @@
 
 func main(): Void {
     var s: String = "Rey Language";
-    println(s);
-    println("string methods are not implemented yet");
+    println(s.length());
+    println(s.upper());
+    println(s.lower());
+    println(s.contains("Lang"));
+    println(s.contains("nope"));
+
+    var parts = s.split(" ");
+    println(len(parts));
+    println(parts[0]);
+    println(parts[1]);
 }

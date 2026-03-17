@@ -335,6 +335,35 @@ impl Parser {
                 continue;
             }
 
+            if self.matchToken(&TokenKind::Dot) {
+                let name = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected identifier after '.'.")),
+                };
+                self.advance();
+
+                if self.matchToken(&TokenKind::LeftParen) {
+                    let mut args = Vec::new();
+                    if !self.check(&TokenKind::RightParen) {
+                        loop {
+                            args.push(self.parseExpression()?);
+                            if !self.matchToken(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(&TokenKind::RightParen, "Expected ')' after method arguments.")?;
+                    expr = Expr::MethodCall {
+                        receiver: Box::new(expr),
+                        name,
+                        args,
+                    };
+                    continue;
+                }
+
+                return Err(self.error("Property access is not implemented yet (use method call syntax: obj.method())."));
+            }
+
             break;
         }
 

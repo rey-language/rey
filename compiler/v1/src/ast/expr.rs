@@ -24,6 +24,11 @@ pub enum Expr {
         target: Box<Expr>,
         index: Box<Expr>,
     },
+    MethodCall {
+        receiver: Box<Expr>,
+        name: String,
+        args: Vec<Expr>,
+    },
     Unary {
         op: TokenKind,
         right: Box<Expr>,

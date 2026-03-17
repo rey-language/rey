@@ -165,6 +165,14 @@ impl Executor {
                     _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
+            Expr::MethodCall { receiver, name, args } => {
+                let recv = self.evaluate_expr(receiver, env)?;
+                let mut evaluated_args = Vec::new();
+                for a in args {
+                    evaluated_args.push(self.evaluate_expr(a, env)?);
+                }
+                self.evaluate_method_call(recv, name, &evaluated_args)
+            }
             Expr::Unary { op, right } => {
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_unary(op, right_val)
@@ -247,6 +255,55 @@ impl Executor {
                     }
                 }
             }
+        }
+    }
+
+    fn evaluate_method_call(&self, receiver: Value, name: &str, args: &[Value]) -> Result<Value, String> {
+        match (receiver, name) {
+            (Value::String(s), "length") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.length() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::Number(s.chars().count() as f64))
+            }
+            (Value::String(s), "upper") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.upper() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::String(s.to_uppercase()))
+            }
+            (Value::String(s), "lower") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.lower() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::String(s.to_lowercase()))
+            }
+            (Value::String(s), "contains") => {
+                if args.len() != 1 {
+                    return Err(format!("{}.contains() expects 1 argument, got {}", "String", args.len()));
+                }
+                match &args[0] {
+                    Value::String(needle) => Ok(Value::Bool(s.contains(needle))),
+                    _ => Err("String.contains() expects a string argument".to_string()),
+                }
+            }
+            (Value::String(s), "split") => {
+                if args.len() != 1 {
+                    return Err(format!("{}.split() expects 1 argument, got {}", "String", args.len()));
+                }
+                let delim = match &args[0] {
+                    Value::String(d) => d.clone(),
+                    _ => return Err("String.split() expects a string delimiter".to_string()),
+                };
+                let parts = if delim.is_empty() {
+                    s.chars().map(|c| c.to_string()).collect::<Vec<_>>()
+                } else {
+                    s.split(&delim).map(|p| p.to_string()).collect::<Vec<_>>()
+                };
+                let arr = parts.into_iter().map(Value::String).collect::<Vec<_>>();
+                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            }
+            (other, _) => Err(format!("Method call not supported on {:?}", other)),
         }
     }
 
