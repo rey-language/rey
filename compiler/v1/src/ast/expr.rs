@@ -23,8 +23,4 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
-    Get {
-        object: Box<Expr>,
-        name: String,
-    },
 }

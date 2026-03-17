@@ -16,18 +16,4 @@ impl ControlFlow {
     pub fn return_value(value: Value) -> Self {
         ControlFlow::Return(value)
     }
-
-    pub fn unwrap_normal(self) -> Value {
-        match self {
-            ControlFlow::Normal(value) => value,
-            _ => panic!("Expected normal control flow"),
-        }
-    }
-
-    pub fn unwrap_return(self) -> Value {
-        match self {
-            ControlFlow::Return(value) => value,
-            _ => panic!("Expected return control flow"),
-        }
-    }
 }
