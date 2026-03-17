@@ -1,6 +1,7 @@
 use super::value::Value;
 use super::function::Function;
 use crate::lexer::span::Span;
+use std::io::{self, Write};
 
 pub struct StdLib;
 
@@ -65,6 +66,31 @@ impl StdLib {
                         Some(Ok(v))
                     }
                     _ => Some(Err("pop expects an array".to_string())),
+                }
+            }
+            "input" => {
+                if args.len() > 1 {
+                    return Some(Err(format!("input expects 0 or 1 arguments, got {}", args.len())));
+                }
+                if args.len() == 1 {
+                    match &args[0] {
+                        Value::String(s) => {
+                            print!("{}", s);
+                            let _ = io::stdout().flush();
+                        }
+                        _ => return Some(Err("input prompt must be a string".to_string())),
+                    }
+                }
+
+                let mut line = String::new();
+                match io::stdin().read_line(&mut line) {
+                    Ok(_) => {
+                        while line.ends_with('\n') || line.ends_with('\r') {
+                            line.pop();
+                        }
+                        Some(Ok(Value::String(line)))
+                    }
+                    Err(e) => Some(Err(format!("failed to read input: {}", e))),
                 }
             }
             _ => None, // Not a built-in function
