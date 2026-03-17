@@ -32,6 +32,7 @@ cargo run -- src/tests/variables.rey
 - Functions with optional typed params and return types
 - Builtins: println(), len(), push(), pop(), input()
 - Arrays: literals, indexing, typed arrays ([int])
+- Array methods: length(), push()
 - Dictionaries: literals, indexing, typed dicts ({String:int})
 - String methods: length/upper/lower/contains/split
 - Property access: obj.prop (dictionary key lookup)
