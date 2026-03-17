@@ -1,0 +1,23 @@
+// Type enforcement
+
+func add(a: int, b: int): int {
+    return a + b;
+}
+
+func main(): Void {
+    var x: int = 1;
+    x = x + 2;
+
+    var y: float = 1.5;
+    println(y);
+
+    var z: int = add(x, 3);
+    println(z);
+
+    var xs: [int] = [1, 2];
+    push(xs, 3);
+    println(xs[2]);
+
+    var d: {String:String} = {"k": "v"};
+    println(d.k);
+}

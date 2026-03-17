@@ -1,4 +1,5 @@
 use crate::ast::{Expr, Stmt};
+use crate::typecheck::TypeChecker;
 use super::environment::Environment;
 use super::executor::Executor;
 use super::std::StdLib;
@@ -24,6 +25,9 @@ impl Interpreter {
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), String> {
+        let mut checker = TypeChecker::new();
+        checker.checkProgram(statements)?;
+
         self.executor.execute_block(statements, &mut self.environment)?;
 
         if self.environment.get("main").is_some() {
