@@ -2,5 +2,6 @@ target/
 .DS_Store
 *.lock
 
-test_all.rey
+
 resumes.txt
+test_all.rey

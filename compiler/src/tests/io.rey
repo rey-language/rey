@@ -1,7 +1,0 @@
-// Input / output simulation
-
-func main(): Void {
-    println("Enter name:");
-    var name = input();
-    println("Hello " + name);
-}
