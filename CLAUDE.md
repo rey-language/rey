@@ -72,3 +72,4 @@ From the codebase and CONTRIBUTING.md:
 - I never add dependencies without asking Misbah first.
 - I never rewrite entire files for small fixes.
 - I never delete files without asking.
+- At the Start of every session, instead of going through the code, i'll go through CLAUDE.md, primer.md and other readme files to get context

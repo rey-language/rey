@@ -1,0 +1,138 @@
+func add(a: int, b: int): int {
+    return a + b;
+}
+
+func sub(a: int, b: int): int {
+    return a - b;
+}
+
+func mul(a: int, b: int): int {
+    return a * b;
+}
+
+func div(a: int, b: int): int {
+    return a / b;
+}
+
+func fib(n: int): int {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+func echo(x) {
+    return x;
+}
+
+func greet(name: String): String {
+    return name;
+}
+
+func compute(): Void {
+    var sum = 0;
+    var i = 0;
+    while (i < 10) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    println(sum);
+}
+
+func main(): Void {
+    var x = 10;
+    x = 20;
+    println(x);
+
+    var name = "Rey";
+    println(name);
+
+    var flag = true;
+    println(flag);
+
+    var f = 3.14;
+    println(f);
+
+    var i: int = 42;
+    println(i);
+
+    var fs: float = 2.71;
+    println(fs);
+
+    var s: String = "hello";
+    println(s);
+
+    var b: bool = false;
+    println(b);
+
+    println(add(10, 5));
+    println(sub(10, 5));
+    println(mul(10, 5));
+    println(div(10, 5));
+
+    var neg = -42;
+    println(neg);
+
+    var notflag = !true;
+    println(notflag);
+
+    println(10 == 10);
+    println(10 != 5);
+    println(3 < 5);
+    println(5 > 3);
+
+    if (x > 10) {
+        println("x is big");
+    } else {
+        println("x is small");
+    }
+
+    var count = 0;
+    while (count < 5) {
+        println(count);
+        count = count + 1;
+    }
+
+    var k = 0;
+    while (true) {
+        if (k == 3) {
+            break;
+        }
+        k = k + 1;
+    }
+    println(k);
+
+    var j = 0;
+    while (j < 6) {
+        j = j + 1;
+        if (j == 3) {
+            continue;
+        }
+        println(j);
+    }
+
+    for n in range(0, 5) {
+        println(n);
+    }
+
+    compute();
+    println(echo("untyped param works"));
+    println(greet("Misbah"));
+
+    var fi = 0;
+    while (fi < 8) {
+        println(fib(fi));
+        fi = fi + 1;
+    }
+
+    var a = 5;
+    var c = 15;
+    if (a < 10) {
+        if (c > 10) {
+            println("nested if works");
+        }
+    }
+
+    var result = add(mul(2, 3), sub(10, 4));
+    println(result);
+}
