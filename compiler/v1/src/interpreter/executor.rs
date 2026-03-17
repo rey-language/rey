@@ -271,6 +271,19 @@ impl Executor {
 
     fn evaluate_method_call(&self, receiver: Value, name: &str, args: &[Value]) -> Result<Value, String> {
         match (receiver, name) {
+            (Value::Array(arr), "length") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.length() expects 0 arguments, got {}", "Array", args.len()));
+                }
+                Ok(Value::Number(arr.borrow().len() as f64))
+            }
+            (Value::Array(arr), "push") => {
+                if args.len() != 1 {
+                    return Err(format!("{}.push() expects 1 argument, got {}", "Array", args.len()));
+                }
+                arr.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
             (Value::String(s), "length") => {
                 if !args.is_empty() {
                     return Err(format!("{}.length() expects 0 arguments, got {}", "String", args.len()));

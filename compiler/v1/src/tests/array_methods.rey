@@ -1,0 +1,16 @@
+// Array method support
+
+func main(): Void {
+    var ints: [int] = [1, 2, 3];
+    println(ints.length());
+
+    var any = [];
+    any.push(1);
+    any.push("a");
+    println(any.length());
+
+    var result: [int] = [];
+    result.push(1);
+    result.push(2);
+    println(result.length());
+}

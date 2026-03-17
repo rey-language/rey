@@ -1,5 +1,10 @@
 # Changelog
 
+## [fix] — 2026-03-17
+- Added array methods: `.length()` and `.push()`
+- Allowed typed empty array assignment like `var xs: [int] = []`
+- Added `compiler/v1/src/tests/array_methods.rey` regression test
+
 ## [init] — 2026-03-17
 - Claude initialized as contributor
 - Created CLAUDE.md and primer.md

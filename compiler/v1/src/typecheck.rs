@@ -172,7 +172,12 @@ impl TypeChecker {
                 let initTy = self.exprTy(initializer)?;
                 let finalTy = if let Some(ann) = ty {
                     let annTy = Ty::fromAnnotation(ann)?;
-                    if !initTy.isAssignableTo(&annTy) {
+                    let allowEmptyTypedArray = matches!(
+                        (initializer, &initTy, &annTy),
+                        (Expr::ArrayLiteral { elements }, Ty::Array(inner), Ty::Array(_))
+                            if elements.is_empty() && matches!(inner.as_ref(), Ty::Any)
+                    );
+                    if !initTy.isAssignableTo(&annTy) && !allowEmptyTypedArray {
                         return Err(format!(
                             "Type error: variable '{}' expected {:?} but got {:?}",
                             name, annTy, initTy
@@ -393,6 +398,25 @@ impl TypeChecker {
 
     fn methodTy(&mut self, receiver: &Ty, name: &str, args: &[Expr]) -> Result<Ty, String> {
         match (receiver, name) {
+            (Ty::Array(_), "length") => {
+                if !args.is_empty() {
+                    return Err("Type error: Array.length() expects 0 arguments".to_string());
+                }
+                Ok(Ty::Int)
+            }
+            (Ty::Array(inner), "push") => {
+                if args.len() != 1 {
+                    return Err("Type error: Array.push() expects 1 argument".to_string());
+                }
+                let a0 = self.exprTy(&args[0])?;
+                if !a0.isAssignableTo(inner.as_ref()) {
+                    return Err(format!(
+                        "Type error: Array.push() expected element {:?} but got {:?}",
+                        inner, a0
+                    ));
+                }
+                Ok(Ty::Void)
+            }
             (Ty::String, "length") | (Ty::String, "upper") | (Ty::String, "lower") => {
                 if !args.is_empty() {
                     return Err(format!("Type error: String.{}() expects 0 arguments", name));
