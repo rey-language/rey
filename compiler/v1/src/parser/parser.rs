@@ -9,7 +9,7 @@
 #![allow(non_snake_case)]
 
 use crate::ast::{Expr, Literal, Parameter, Stmt, Type};
-use crate::lexer::{Token, TokenKind};
+use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
 
 //impl for recursive descent parser
@@ -18,7 +18,13 @@ pub struct Parser {
     current: usize,
 } 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(mut tokens: Vec<Token>) -> Self {
+        if tokens.is_empty() {
+            tokens.push(Token {
+                kind: TokenKind::Eof,
+                span: Span::new(0, 0),
+            });
+        }
         Self { tokens, current: 0 }
     }
     pub fn parse(&mut self) -> Result<Vec<Stmt>, ParserError> {
@@ -261,6 +267,14 @@ impl Parser {
                     right: Box::new(expr),
                 })
             }
+            TokenKind::Not => {
+                self.advance();
+                let expr = self.parseUnary()?;
+                Ok(Expr::Unary {
+                    op: TokenKind::Not,
+                    right: Box::new(expr),
+                })
+            }
             _ => self.parsePrimary(),
         }
     }
@@ -315,23 +329,6 @@ impl Parser {
         }
     }
 
-    fn parseAdditive(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.parseUnary()?;
-
-        while matches!(self.peek().kind, TokenKind::Plus | TokenKind::Minus) {
-            let op = self.peek().kind.clone();
-            self.advance();
-            let right = self.parseUnary()?;
-
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                op,
-                right: Box::new(right),
-            };
-        }
-        Ok(expr)
-    }
-    
     fn parseAssignment(&mut self) -> Result<Expr, ParserError> {
         let expr = self.parseLogicOr()?;
     
@@ -372,7 +369,7 @@ fn parseLogicAnd(&mut self) -> Result<Expr, ParserError> {
 }
 fn parseEquality(&mut self) -> Result<Expr, ParserError> {
     let mut expr = self.parseComparison()?;
-    while matches!(self.peek().kind, TokenKind::EqualEqual | TokenKind::BangEqual) {
+    while matches!(self.peek().kind, TokenKind::EqualEqual | TokenKind::NotEqual) {
         let op = self.peek().kind.clone();
         self.advance();
         let right = self.parseComparison()?;
@@ -383,7 +380,10 @@ fn parseEquality(&mut self) -> Result<Expr, ParserError> {
 
 fn parseComparison(&mut self) -> Result<Expr, ParserError> {
     let mut expr = self.parseTerm()?;
-    while matches!(self.peek().kind, TokenKind::Greater | TokenKind::Less) {
+    while matches!(
+        self.peek().kind,
+        TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
+    ) {
         let op = self.peek().kind.clone();
         self.advance();
         let right = self.parseTerm()?;
@@ -415,15 +415,6 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
             Err(self.error(message))
         }
     }
-    fn consumeIdentifier(&mut self, message: &str) -> Result<(), ParserError> {
-        match &self.peek().kind {
-            TokenKind::Identifier(_) => {
-                self.advance();
-                Ok(())
-            }
-            _ => Err(self.error(message)),
-        }
-    }
     fn check(&self, kind: &TokenKind) -> bool {
         if self.isAtEnd() {
             return false;
@@ -440,7 +431,9 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
         matches!(self.peek().kind, TokenKind::Eof)
     }
     fn peek(&self) -> &Token {
-        &self.tokens[self.current]
+        self.tokens
+            .get(self.current)
+            .unwrap_or_else(|| self.tokens.last().expect("parser requires at least one token"))
     }
     fn previous(&self) -> &Token {
         if self.current == 0 {
@@ -449,40 +442,6 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
             &self.tokens[self.current - 1]
         }
     }
-
-fn parseCall(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.parsePrimary()?;
-    
-        loop {
-            if self.matchToken(&TokenKind::LeftParen) {
-                let mut args = Vec::new();
-                if !self.check(&TokenKind::RightParen) {
-                    loop {
-                        args.push(self.parseExpression()?);
-                        if !self.matchToken(&TokenKind::Comma) {
-                            break;
-                        }
-                    }
-                }
-                self.consume(&TokenKind::RightParen, "Expected ')' after arguments.")?;
-                expr = Expr::Call { callee: Box::new(expr), args };
-            }
-            else if self.matchToken(&TokenKind::Dot) {
-                let name = match &self.peek().kind {
-                    TokenKind::Identifier(n) => n.clone(),
-                    _ => return Err(self.error("Expected property name after '.'")),
-                };
-                self.advance();
-                expr = Expr::Get { object: Box::new(expr), name };
-            }
-            else {
-                break;
-            }
-        }
-    
-        Ok(expr)
-    }
-    
     fn parseTerm(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.parseFactor()?;
         while matches!(self.peek().kind, TokenKind::Plus | TokenKind::Minus) {

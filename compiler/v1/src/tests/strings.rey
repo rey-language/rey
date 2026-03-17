@@ -3,5 +3,5 @@
 func main(): Void {
     var s: String = "Rey Language";
     println(s);
-    println(s.length());
+    println("string methods are not implemented yet");
 }

@@ -1,5 +1,3 @@
-use crate::lexer::token;
-
 use super::{
     cursor::Cursor,
     error::LexerError,
@@ -54,7 +52,23 @@ impl<'a> Lexer<'a> {
             '+' => Ok(self.simpleToken(TokenKind::Plus, start)),
             '-' => Ok(self.simpleToken(TokenKind::Minus, start)),
             '*' => Ok(self.simpleToken(TokenKind::Star, start)),
-            '/' => Ok(self.simpleToken(TokenKind::Slash, start)),
+            '/' => {
+                // check for comment
+                if let Some('/') = self.cursor.peek() {
+                    // skip until end of line
+                    self.cursor.advance();
+                    while let Some(ch) = self.cursor.peek() {
+                        if ch == '\n' {
+                            self.cursor.advance();
+                            break;
+                        }
+                        self.cursor.advance();
+                    }
+                    // recurse to get next token
+                    return self.nextToken();
+                }
+                Ok(self.simpleToken(TokenKind::Slash, start))
+            }
             ':' => Ok(self.simpleToken(TokenKind::Colon, start)),
             '.' => Ok(self.simpleToken(TokenKind::Dot, start)),
             ',' => Ok(self.simpleToken(TokenKind::Comma, start)),

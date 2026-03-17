@@ -1,11 +1,16 @@
 // Standard library mock
 
 func max(a: int, b: int): int {
-    if a > b { return a; }
+    if (a > b) { return a; }
     return b;
 }
 
 func min(a: int, b: int): int {
-    if a < b { return a; }
+    if (a < b) { return a; }
     return b;
+}
+
+func main(): Void {
+    println(max(10, 5));
+    println(min(10, 5));
 }

@@ -24,11 +24,12 @@ fn main() {
     }
 
     let source = fs::read_to_string(&filename)
-        .expect(&format!("Failed to read {} file", filename));
+        .unwrap_or_else(|_| panic!("Failed to read {} file", filename));
 
     let mut lexer = Lexer::new(&source);
     let mut tokens = Vec::new();
 
+    let mut has_lexer_error = false;
     loop {
         match lexer.nextToken() {
             Ok(token) => {
@@ -39,9 +40,13 @@ fn main() {
             }
             Err(err) => {
                 println!("Lexer error: {:?}", err);
+                has_lexer_error = true;
                 break;
             }
         }
+    }
+    if has_lexer_error {
+        return;
     }
     println!("Parsing Started.");
     let mut parser = Parser::new(tokens);

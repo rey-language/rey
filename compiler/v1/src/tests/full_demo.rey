@@ -1,4 +1,4 @@
-// Rey Language v0.0.2-pre ACTUAL Supported Demo
+// Rey Language v0.0.3-pre ACTUAL Supported Demo
 
 // 1. Recursive Function (Supported natively)
 func factorial(n: int): int {
@@ -11,25 +11,26 @@ func factorial(n: int): int {
 func main(): Void {
     // 2. Variable Declarations (Supported)
     var status = "Operational";
-    var version: String = "0.0.2-pre";
+    var version: String = "0.0.3-pre";
     var count = 5;
     
-    println("--- Rey Language v0.0.2-pre ---");
-    println("Status:", status);
-    println("Version:", version);
+    println("--- Rey Language v0.0.3-pre ---");
+    println(status);
+    println(version);
 
     // 3. Conditional Logic (Supported)
     if (count == 5) {
-        println("Count is 5, starting demo loop.");
+        println("count is 5");
     } else {
-        println("Unexpected count:", count);
+        println("unexpected count");
     }
 
     // 4. For-in-range Loop (Special native support)
     println("Factorial calculations:");
     for i in range(1, 6) {
         var result = factorial(i);
-        println("n =", i, "| n! =", result);
+        println(i);
+        println(result);
     }
 
     // 5. While Loop (Supported)

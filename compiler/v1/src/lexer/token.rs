@@ -27,17 +27,6 @@ pub enum TokenKind {
     Not,
     AndAnd,
     OrOr,
-    BangEqual,
-    Bang,
-    Tilde,
-    PlusPlus,
-    MinusMinus,
-    PlusEqual,
-    MinusEqual,
-    StarEqual,
-    SlashEqual,
-    PercentEqual,
-    ColonEqual,
 
     //keywords
     Var,
@@ -58,7 +47,6 @@ pub enum TokenKind {
     Identifier(String),
     StringLiteral(String),
     NumberLiteral(f64),
-    BooleanLiteral(bool),
 
     //operators
     Equal,
@@ -68,8 +56,6 @@ pub enum TokenKind {
     NotEqual,
     Less,
     LessEqual,
-    And,
-    Or,
 
     //special
     Eof,

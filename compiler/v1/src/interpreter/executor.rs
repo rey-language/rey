@@ -203,9 +203,6 @@ impl Executor {
                     }
                 }
             }
-            Expr::Get { .. } => {
-                Err("Property access not implemented yet".to_string())
-            }
         }
     }
 
@@ -233,7 +230,7 @@ impl Executor {
                 }
             }
             (Value::Number(l), EqualEqual, Value::Number(r)) => Ok(Value::Bool(l == r)),
-            (Value::Number(l), BangEqual, Value::Number(r)) => Ok(Value::Bool(l != r)),
+            (Value::Number(l), NotEqual, Value::Number(r)) => Ok(Value::Bool(l != r)),
             (Value::Number(l), Less, Value::Number(r)) => Ok(Value::Bool(l < r)),
             (Value::Number(l), LessEqual, Value::Number(r)) => Ok(Value::Bool(l <= r)),
             (Value::Number(l), Greater, Value::Number(r)) => Ok(Value::Bool(l > r)),
@@ -241,12 +238,12 @@ impl Executor {
 
             (Value::String(l), Plus, Value::String(r)) => Ok(Value::String(l + &r)),
             (Value::String(l), EqualEqual, Value::String(r)) => Ok(Value::Bool(l == r)),
-            (Value::String(l), BangEqual, Value::String(r)) => Ok(Value::Bool(l != r)),
+            (Value::String(l), NotEqual, Value::String(r)) => Ok(Value::Bool(l != r)),
 
             (Value::Bool(l), EqualEqual, Value::Bool(r)) => Ok(Value::Bool(l == r)),
-            (Value::Bool(l), BangEqual, Value::Bool(r)) => Ok(Value::Bool(l != r)),
-            (Value::Bool(l), And, Value::Bool(r)) => Ok(Value::Bool(l && r)),
-            (Value::Bool(l), Or, Value::Bool(r)) => Ok(Value::Bool(l || r)),
+            (Value::Bool(l), NotEqual, Value::Bool(r)) => Ok(Value::Bool(l != r)),
+            (Value::Bool(l), AndAnd, Value::Bool(r)) => Ok(Value::Bool(l && r)),
+            (Value::Bool(l), OrOr, Value::Bool(r)) => Ok(Value::Bool(l || r)),
 
             _ => Err("Invalid binary operation".to_string()),
         }
@@ -257,7 +254,7 @@ impl Executor {
 
         match (op, right) {
             (Minus, Value::Number(n)) => Ok(Value::Number(-n)),
-            (Bang, Value::Bool(b)) => Ok(Value::Bool(!b)),
+            (Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             _ => Err("Invalid unary operation".to_string()),
         }
     }
