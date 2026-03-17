@@ -1,5 +1,8 @@
 # Changelog
 
+## [tooling] — 2026-03-17
+- Added Linguist submission prep files: `languages/Rey.yaml`, `languages/samples/Rey.rey`, `LINGUIST.md`
+
 ## [fix] — 2026-03-17
 - Added array methods: `.length()` and `.push()`
 - Allowed typed empty array assignment like `var xs: [int] = []`
