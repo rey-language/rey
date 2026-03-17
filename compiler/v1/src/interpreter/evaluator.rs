@@ -79,7 +79,7 @@ impl Evaluator {
 
         match (op, right) {
             (Minus, Value::Number(n)) => Ok(Value::Number(-n)),
-            (Bang, Value::Bool(b)) => Ok(Value::Bool(!b)),
+            (Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             _ => Err("Invalid unary operation".to_string()),
         }
     }
