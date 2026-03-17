@@ -1,5 +1,12 @@
 // Dictionary-like structures
 
 func main(): Void {
-    println("dictionaries are not implemented yet");
+    var d: {String:int} = {"a": 1, "b": 2};
+    println(d["a"]);
+    println(d["b"]);
+
+    var d2 = {x: 10, y: 20};
+    println(d2["x"]);
+    println(d2["y"]);
+    println(len(d2));
 }

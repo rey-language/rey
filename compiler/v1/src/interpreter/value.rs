@@ -1,6 +1,7 @@
 use crate::ast::Literal;
 
 use super::function::Function;
+use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -11,6 +12,7 @@ pub enum Value {
     Bool(bool),
     Function(Function),
     Array(Rc<RefCell<Vec<Value>>>),
+    Dict(Rc<RefCell<HashMap<String, Value>>>),
     Null,
 }
 
@@ -25,6 +27,20 @@ impl PartialEq for Value {
                 let a = a.borrow();
                 let b = b.borrow();
                 a.as_slice() == b.as_slice()
+            }
+            (Value::Dict(a), Value::Dict(b)) => {
+                let a = a.borrow();
+                let b = b.borrow();
+                if a.len() != b.len() {
+                    return false;
+                }
+                for (k, av) in a.iter() {
+                    match b.get(k) {
+                        Some(bv) if av == bv => {}
+                        _ => return false,
+                    }
+                }
+                true
             }
             (Value::Null, Value::Null) => true,
             _ => false,

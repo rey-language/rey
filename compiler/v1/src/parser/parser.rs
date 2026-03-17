@@ -251,6 +251,20 @@ impl Parser {
                 self.advance();
                 self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
                 Ok(Some(Type { name: format!("[{}]", inner) }))
+            } else if self.matchToken(&TokenKind::LeftBrace) {
+                let key = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected key type name inside '{}'.")),
+                };
+                self.advance();
+                self.consume(&TokenKind::Colon, "Expected ':' between dict key/value types.")?;
+                let value = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected value type name inside '{}'.")),
+                };
+                self.advance();
+                self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
+                Ok(Some(Type { name: format!("{{{}:{}}}", key, value) }))
             } else {
                 match &self.peek().kind {
                     TokenKind::Identifier(name) => {
@@ -372,6 +386,33 @@ impl Parser {
                 }
                 self.consume(&TokenKind::RightBracket, "Expected ']' after array literal.")?;
                 Ok(Expr::ArrayLiteral { elements })
+            }
+            TokenKind::LeftBrace => {
+                self.advance();
+                let mut entries = Vec::new();
+                if !self.check(&TokenKind::RightBrace) {
+                    loop {
+                        let key = match self.peek().kind.clone() {
+                            TokenKind::Identifier(name) => {
+                                self.advance();
+                                name
+                            }
+                            TokenKind::StringLiteral(s) => {
+                                self.advance();
+                                s
+                            }
+                            _ => return Err(self.error("Expected identifier or string as dictionary key.")),
+                        };
+                        self.consume(&TokenKind::Colon, "Expected ':' after dictionary key.")?;
+                        let value = self.parseExpression()?;
+                        entries.push((key, value));
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RightBrace, "Expected '}' after dictionary literal.")?;
+                Ok(Expr::DictLiteral { entries })
             }
             _ => Err(self.error("Expected expression.")),
         }

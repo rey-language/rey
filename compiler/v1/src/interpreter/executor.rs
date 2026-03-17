@@ -5,6 +5,7 @@ use super::control_flow::ControlFlow;
 use super::environment::Environment;
 use super::function::Function;
 use super::value::Value;
+use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -130,6 +131,14 @@ impl Executor {
                 }
                 Ok(Value::Array(Rc::new(RefCell::new(evaluated))))
             }
+            Expr::DictLiteral { entries } => {
+                let mut m = HashMap::new();
+                for (k, v) in entries {
+                    let value = self.evaluate_expr(v, env)?;
+                    m.insert(k.clone(), value);
+                }
+                Ok(Value::Dict(Rc::new(RefCell::new(m))))
+            }
             Expr::Index { target, index } => {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
@@ -148,7 +157,12 @@ impl Executor {
                             .cloned()
                             .ok_or_else(|| "Array index out of bounds".to_string())
                     }
-                    _ => Err("Indexing is only supported for arrays with numeric indices".to_string()),
+                    (Value::Dict(d), Value::String(s)) => d
+                        .borrow()
+                        .get(&s)
+                        .cloned()
+                        .ok_or_else(|| "Dictionary key not found".to_string()),
+                    _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
             Expr::Unary { op, right } => {

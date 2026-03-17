@@ -39,7 +39,8 @@ impl StdLib {
                 match &args[0] {
                     Value::String(s) => Some(Ok(Value::Number(s.chars().count() as f64))),
                     Value::Array(arr) => Some(Ok(Value::Number(arr.borrow().len() as f64))),
-                    _ => Some(Err("len expects a string or array".to_string())),
+                    Value::Dict(d) => Some(Ok(Value::Number(d.borrow().len() as f64))),
+                    _ => Some(Err("len expects a string, array, or dictionary".to_string())),
                 }
             }
             "push" => {
@@ -91,6 +92,20 @@ impl StdLib {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("[{}]", items)
+            }
+            Value::Dict(d) => {
+                let d = d.borrow();
+                let mut keys = d.keys().cloned().collect::<Vec<_>>();
+                keys.sort();
+                let items = keys
+                    .into_iter()
+                    .map(|k| {
+                        let v = d.get(&k).expect("key came from map");
+                        format!("{}: {}", k, Self::formatValue(v))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{}}}", items)
             }
         }
     }

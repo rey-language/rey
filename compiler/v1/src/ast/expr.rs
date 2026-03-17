@@ -17,6 +17,9 @@ pub enum Expr {
     ArrayLiteral {
         elements: Vec<Expr>,
     },
+    DictLiteral {
+        entries: Vec<(String, Expr)>,
+    },
     Index {
         target: Box<Expr>,
         index: Box<Expr>,
