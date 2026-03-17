@@ -52,3 +52,6 @@ Run any of them with cargo run -- src/tests/.rey
 ## For next session
 - Consider tightening the language spec (what is int vs float at runtime, truthiness rules, dictionary key restrictions).
 - Add negative tests for type errors once there's a harness for expected-failure cases.
+- Submit upstream PRs:
+  - `github-linguist/linguist` for Rey language recognition
+  - VSCode Marketplace publish for `rey-vscode/` (optional)
