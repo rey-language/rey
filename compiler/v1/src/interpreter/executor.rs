@@ -5,6 +5,9 @@ use super::control_flow::ControlFlow;
 use super::environment::Environment;
 use super::function::Function;
 use super::value::Value;
+use std::collections::HashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Executor;
 
@@ -121,6 +124,66 @@ impl Executor {
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
             }
+            Expr::ArrayLiteral { elements } => {
+                let mut evaluated = Vec::new();
+                for el in elements {
+                    evaluated.push(self.evaluate_expr(el, env)?);
+                }
+                Ok(Value::Array(Rc::new(RefCell::new(evaluated))))
+            }
+            Expr::DictLiteral { entries } => {
+                let mut m = HashMap::new();
+                for (k, v) in entries {
+                    let value = self.evaluate_expr(v, env)?;
+                    m.insert(k.clone(), value);
+                }
+                Ok(Value::Dict(Rc::new(RefCell::new(m))))
+            }
+            Expr::Index { target, index } => {
+                let target_val = self.evaluate_expr(target, env)?;
+                let index_val = self.evaluate_expr(index, env)?;
+                match (target_val, index_val) {
+                    (Value::Array(arr), Value::Number(n)) => {
+                        if n.fract() != 0.0 {
+                            return Err("Array index must be an integer".to_string());
+                        }
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("Array index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        arr.borrow()
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Array index out of bounds".to_string())
+                    }
+                    (Value::Dict(d), Value::String(s)) => d
+                        .borrow()
+                        .get(&s)
+                        .cloned()
+                        .ok_or_else(|| "Dictionary key not found".to_string()),
+                    _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
+                }
+            }
+            Expr::Get { object, name } => {
+                let obj = self.evaluate_expr(object, env)?;
+                match obj {
+                    Value::Dict(d) => d
+                        .borrow()
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| "Dictionary key not found".to_string()),
+                    _ => Err("Property access is only supported for dictionaries".to_string()),
+                }
+            }
+            Expr::MethodCall { receiver, name, args } => {
+                let recv = self.evaluate_expr(receiver, env)?;
+                let mut evaluated_args = Vec::new();
+                for a in args {
+                    evaluated_args.push(self.evaluate_expr(a, env)?);
+                }
+                self.evaluate_method_call(recv, name, &evaluated_args)
+            }
             Expr::Unary { op, right } => {
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_unary(op, right_val)
@@ -203,6 +266,55 @@ impl Executor {
                     }
                 }
             }
+        }
+    }
+
+    fn evaluate_method_call(&self, receiver: Value, name: &str, args: &[Value]) -> Result<Value, String> {
+        match (receiver, name) {
+            (Value::String(s), "length") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.length() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::Number(s.chars().count() as f64))
+            }
+            (Value::String(s), "upper") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.upper() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::String(s.to_uppercase()))
+            }
+            (Value::String(s), "lower") => {
+                if !args.is_empty() {
+                    return Err(format!("{}.lower() expects 0 arguments, got {}", "String", args.len()));
+                }
+                Ok(Value::String(s.to_lowercase()))
+            }
+            (Value::String(s), "contains") => {
+                if args.len() != 1 {
+                    return Err(format!("{}.contains() expects 1 argument, got {}", "String", args.len()));
+                }
+                match &args[0] {
+                    Value::String(needle) => Ok(Value::Bool(s.contains(needle))),
+                    _ => Err("String.contains() expects a string argument".to_string()),
+                }
+            }
+            (Value::String(s), "split") => {
+                if args.len() != 1 {
+                    return Err(format!("{}.split() expects 1 argument, got {}", "String", args.len()));
+                }
+                let delim = match &args[0] {
+                    Value::String(d) => d.clone(),
+                    _ => return Err("String.split() expects a string delimiter".to_string()),
+                };
+                let parts = if delim.is_empty() {
+                    s.chars().map(|c| c.to_string()).collect::<Vec<_>>()
+                } else {
+                    s.split(&delim).map(|p| p.to_string()).collect::<Vec<_>>()
+                };
+                let arr = parts.into_iter().map(Value::String).collect::<Vec<_>>();
+                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            }
+            (other, _) => Err(format!("Method call not supported on {:?}", other)),
         }
     }
 

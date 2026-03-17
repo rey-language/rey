@@ -1,6 +1,7 @@
 use super::value::Value;
 use super::function::Function;
 use crate::lexer::span::Span;
+use std::io::{self, Write};
 
 pub struct StdLib;
 
@@ -27,18 +28,111 @@ impl StdLib {
                     if i > 0 {
                         print!(" ");
                     }
-                    match arg {
-                        Value::String(s) => print!("{}", s),
-                        Value::Number(n) => print!("{}", n),
-                        Value::Bool(b) => print!("{}", b),
-                        Value::Null => print!("null"),
-                        Value::Function(_) => print!("<function>"),
-                    }
+                    print!("{}", Self::formatValue(arg));
                 }
                 println!();
                 Some(Ok(Value::Null))
             }
+            "len" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("len expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::String(s) => Some(Ok(Value::Number(s.chars().count() as f64))),
+                    Value::Array(arr) => Some(Ok(Value::Number(arr.borrow().len() as f64))),
+                    Value::Dict(d) => Some(Ok(Value::Number(d.borrow().len() as f64))),
+                    _ => Some(Err("len expects a string, array, or dictionary".to_string())),
+                }
+            }
+            "push" => {
+                if args.len() != 2 {
+                    return Some(Err(format!("push expects 2 arguments, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        arr.borrow_mut().push(args[1].clone());
+                        Some(Ok(Value::Null))
+                    }
+                    _ => Some(Err("push expects an array as first argument".to_string())),
+                }
+            }
+            "pop" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("pop expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::Array(arr) => {
+                        let v = arr.borrow_mut().pop().unwrap_or(Value::Null);
+                        Some(Ok(v))
+                    }
+                    _ => Some(Err("pop expects an array".to_string())),
+                }
+            }
+            "input" => {
+                if args.len() > 1 {
+                    return Some(Err(format!("input expects 0 or 1 arguments, got {}", args.len())));
+                }
+                if args.len() == 1 {
+                    match &args[0] {
+                        Value::String(s) => {
+                            print!("{}", s);
+                            let _ = io::stdout().flush();
+                        }
+                        _ => return Some(Err("input prompt must be a string".to_string())),
+                    }
+                }
+
+                let mut line = String::new();
+                match io::stdin().read_line(&mut line) {
+                    Ok(_) => {
+                        while line.ends_with('\n') || line.ends_with('\r') {
+                            line.pop();
+                        }
+                        Some(Ok(Value::String(line)))
+                    }
+                    Err(e) => Some(Err(format!("failed to read input: {}", e))),
+                }
+            }
             _ => None, // Not a built-in function
+        }
+    }
+
+    fn formatValue(value: &Value) -> String {
+        match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => {
+                if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{}", n)
+                }
+            }
+            Value::Bool(b) => format!("{}", b),
+            Value::Null => "null".to_string(),
+            Value::Function(_) => "<function>".to_string(),
+            Value::Array(arr) => {
+                let items = arr
+                    .borrow()
+                    .iter()
+                    .map(Self::formatValue)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", items)
+            }
+            Value::Dict(d) => {
+                let d = d.borrow();
+                let mut keys = d.keys().cloned().collect::<Vec<_>>();
+                keys.sort();
+                let items = keys
+                    .into_iter()
+                    .map(|k| {
+                        let v = d.get(&k).expect("key came from map");
+                        format!("{}: {}", k, Self::formatValue(v))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{}}}", items)
+            }
         }
     }
 }

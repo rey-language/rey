@@ -4,6 +4,7 @@ mod ast;
 mod interpreter;
 mod lexer;
 mod parser;
+mod typecheck;
 
 use interpreter::Interpreter;
 use lexer::{Lexer, TokenKind};

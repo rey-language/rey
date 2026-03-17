@@ -243,13 +243,37 @@ impl Parser {
 
     fn parseTypeAnnotation(&mut self) -> Result<Option<Type>, ParserError> {
         if self.matchToken(&TokenKind::Colon) {
-            match &self.peek().kind {
-                TokenKind::Identifier(name) => {
-                    let ty = Type { name: name.clone() };
-                    self.advance();
-                    Ok(Some(ty))
+            if self.matchToken(&TokenKind::LeftBracket) {
+                let inner = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected type name inside '[]'.")),
+                };
+                self.advance();
+                self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
+                Ok(Some(Type { name: format!("[{}]", inner) }))
+            } else if self.matchToken(&TokenKind::LeftBrace) {
+                let key = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected key type name inside '{}'.")),
+                };
+                self.advance();
+                self.consume(&TokenKind::Colon, "Expected ':' between dict key/value types.")?;
+                let value = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected value type name inside '{}'.")),
+                };
+                self.advance();
+                self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
+                Ok(Some(Type { name: format!("{{{}:{}}}", key, value) }))
+            } else {
+                match &self.peek().kind {
+                    TokenKind::Identifier(name) => {
+                        let ty = Type { name: name.clone() };
+                        self.advance();
+                        Ok(Some(ty))
+                    }
+                    _ => Err(self.error("Expected type name after ':'")),
                 }
-                _ => Err(self.error("Expected type name after ':'")),
             }
         } else {
             Ok(None)
@@ -275,19 +299,51 @@ impl Parser {
                     right: Box::new(expr),
                 })
             }
-            _ => self.parsePrimary(),
+            _ => self.parsePostfix(),
         }
     }
 
-    fn parsePrimary(&mut self) -> Result<Expr, ParserError> {
-        match self.peek().kind.clone() {
-            TokenKind::Identifier(name) => {
-                self.advance();
-                if self.matchToken(&TokenKind::LeftParen) {
-                    // Function call
-                    let callee = Expr::Variable(name);
-                    let mut args = Vec::new();
+    fn parsePostfix(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parsePrimary()?;
 
+        loop {
+            if self.matchToken(&TokenKind::LeftParen) {
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        args.push(self.parseExpression()?);
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RightParen, "Expected ')' after function arguments.")?;
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                };
+                continue;
+            }
+
+            if self.matchToken(&TokenKind::LeftBracket) {
+                let index = self.parseExpression()?;
+                self.consume(&TokenKind::RightBracket, "Expected ']' after index.")?;
+                expr = Expr::Index {
+                    target: Box::new(expr),
+                    index: Box::new(index),
+                };
+                continue;
+            }
+
+            if self.matchToken(&TokenKind::Dot) {
+                let name = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected identifier after '.'.")),
+                };
+                self.advance();
+
+                if self.matchToken(&TokenKind::LeftParen) {
+                    let mut args = Vec::new();
                     if !self.check(&TokenKind::RightParen) {
                         loop {
                             args.push(self.parseExpression()?);
@@ -296,14 +352,32 @@ impl Parser {
                             }
                         }
                     }
-                    self.consume(&TokenKind::RightParen, "Expected ')' after function arguments.")?;
-                    Ok(Expr::Call {
-                        callee: Box::new(callee),
+                    self.consume(&TokenKind::RightParen, "Expected ')' after method arguments.")?;
+                    expr = Expr::MethodCall {
+                        receiver: Box::new(expr),
+                        name,
                         args,
-                    })
-                } else {
-                    Ok(Expr::Variable(name))
+                    };
+                    continue;
                 }
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                };
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(expr)
+    }
+
+    fn parsePrimary(&mut self) -> Result<Expr, ParserError> {
+        match self.peek().kind.clone() {
+            TokenKind::Identifier(name) => {
+                self.advance();
+                Ok(Expr::Variable(name))
             }
             TokenKind::StringLiteral(value) => {
                 self.advance();
@@ -324,6 +398,53 @@ impl Parser {
             TokenKind::Null => {
                 self.advance();
                 Ok(Expr::Literal(Literal::Null))
+            }
+            TokenKind::LeftParen => {
+                self.advance();
+                let expr = self.parseExpression()?;
+                self.consume(&TokenKind::RightParen, "Expected ')' after expression.")?;
+                Ok(expr)
+            }
+            TokenKind::LeftBracket => {
+                self.advance();
+                let mut elements = Vec::new();
+                if !self.check(&TokenKind::RightBracket) {
+                    loop {
+                        elements.push(self.parseExpression()?);
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RightBracket, "Expected ']' after array literal.")?;
+                Ok(Expr::ArrayLiteral { elements })
+            }
+            TokenKind::LeftBrace => {
+                self.advance();
+                let mut entries = Vec::new();
+                if !self.check(&TokenKind::RightBrace) {
+                    loop {
+                        let key = match self.peek().kind.clone() {
+                            TokenKind::Identifier(name) => {
+                                self.advance();
+                                name
+                            }
+                            TokenKind::StringLiteral(s) => {
+                                self.advance();
+                                s
+                            }
+                            _ => return Err(self.error("Expected identifier or string as dictionary key.")),
+                        };
+                        self.consume(&TokenKind::Colon, "Expected ':' after dictionary key.")?;
+                        let value = self.parseExpression()?;
+                        entries.push((key, value));
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RightBrace, "Expected '}' after dictionary literal.")?;
+                Ok(Expr::DictLiteral { entries })
             }
             _ => Err(self.error("Expected expression.")),
         }

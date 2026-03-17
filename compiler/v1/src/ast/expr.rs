@@ -14,6 +14,25 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    ArrayLiteral {
+        elements: Vec<Expr>,
+    },
+    DictLiteral {
+        entries: Vec<(String, Expr)>,
+    },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Get {
+        object: Box<Expr>,
+        name: String,
+    },
+    MethodCall {
+        receiver: Box<Expr>,
+        name: String,
+        args: Vec<Expr>,
+    },
     Unary {
         op: TokenKind,
         right: Box<Expr>,

@@ -1,0 +1,7 @@
+// Property access
+
+func main(): Void {
+    var user = {name: "Rey", id: 42};
+    println(user.name);
+    println(user.id);
+}
