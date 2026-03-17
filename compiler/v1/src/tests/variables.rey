@@ -1,0 +1,16 @@
+// Variable behavior
+
+func main(): Void {
+    var x = 10;
+    x = 20;
+    x = 30;
+
+    var name = "Rey";
+    println(name);
+
+    var typed: int = 42;
+    typed = 100;
+
+    var flag = true;
+    println(flag);
+}

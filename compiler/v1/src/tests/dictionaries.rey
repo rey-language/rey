@@ -1,0 +1,12 @@
+// Dictionary-like structures
+
+func main(): Void {
+    var user = {
+        "name": "Misbah",
+        "age": 18,
+        "active": true
+    };
+
+    println(user["name"]);
+    println(user["age"]);
+}

@@ -1,0 +1,16 @@
+
+
+func fib(n: int): int {
+    if n <= 1 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+func main(): Void {
+    var i: int = 0;
+    while i < 10 {
+        println(fib(i));
+        i = i + 1;
+    }
+}
