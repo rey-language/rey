@@ -1,5 +1,5 @@
 # Primer — rey-lang
-Last updated: Mar 17, 2026 (session start)
+Last updated: Mar 17, 2026 (session end)
 
 ## What this project is
 Rey is a custom programming language built by Misbah. Currently on v0 — a tree-walking interpreter written in Rust. The language has C-like syntax with type inference, functions, control flow, and basic builtins. v0 is the working prototype; future versions will likely move toward compilation.
@@ -30,42 +30,24 @@ cargo run -- src/tests/variables.rey
 - if/else, while, for x in range(start, end)
 - break, continue
 - Functions with optional typed params and return types
-- println() builtin
-- Entry point: func main(): Void
-
-## What's NOT implemented yet
-- Arrays ([1, 2, 3])
-- Dictionaries ({key: value})
-- Index access (arr[i], dict["key"])
-- input() builtin
-- String methods (.length())
-- Property access (obj.prop)
-- Type enforcement at compile time (parsed, not enforced)
-
-## Current session plan
-Implement and verify, in order (commit after each):
-1. arrays + indexing + push/pop/len + typed arrays ([int])
-2. dictionaries + indexing + typed dictionaries
-3. string methods: length/upper/lower/contains/split
-4. input() builtin
-5. property access (obj.prop)
-6. compile-time type enforcement
-
-After all: run full build, run every `.rey` test file, update `syntax.md`, build release binaries (macos arm64 + windows x86_64), stage `releases/0.0.4-pre/` and open one final PR.
+- Builtins: println(), len(), push(), pop(), input()
+- Arrays: literals, indexing, typed arrays ([int])
+- Dictionaries: literals, indexing, typed dicts ({String:int})
+- String methods: length/upper/lower/contains/split
+- Property access: obj.prop (dictionary key lookup)
+- Compile-time type enforcement for annotated vars/functions + common builtins
+- Entry point: calls main() if present
 
 ## Test files
 compiler/v1/src/tests/ — .rey files for each feature
 Run any of them with cargo run -- src/tests/.rey
 
 ## Current status
-`rey v0.0.3-pre` release work is complete on `codex`:
-- lexer now skips `//` comments
-- compiler builds clean with zero warnings
-- parser no longer panics on lexer failures
-- all files in `compiler/v1/src/tests/` run without lexer/parser/runtime errors
-- release binaries and release notes are in `releases/0.0.3-pre/`
+`rey v0.0.4-pre` is implemented and staged on `codex`:
+- all files in `compiler/v1/src/tests/` run successfully
+- `cargo build --release` succeeds
+- release binaries + notes are staged in `releases/0.0.4-pre/`
 
 ## For next session
-- Start from this primer + CLAUDE.md
-- Pick one limitation and implement it end-to-end (arrays or dictionaries are highest impact)
-- Keep test fixtures aligned with supported syntax as parser evolves
+- Consider tightening the language spec (what is int vs float at runtime, truthiness rules, dictionary key restrictions).
+- Add negative tests for type errors once there's a harness for expected-failure cases.

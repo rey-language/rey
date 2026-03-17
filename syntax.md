@@ -66,6 +66,25 @@ typed = 100;          // OK - int matches int
 | `null` | `null` | Null value |
 | `Void` | `Void` | Function return type (no value) |
 
+### Collection Types
+
+Arrays:
+
+```rey
+var xs = [1, 2, 3];
+var ys: [int] = [1, 2, 3];
+println(xs[0]);
+```
+
+Dictionaries (string-keyed):
+
+```rey
+var d = {name: "Rey", id: 42};
+var typed: {String:int} = {"a": 1, "b": 2};
+println(d["name"]);
+println(d.name);
+```
+
 ### Type Inference
 
 When no type annotation is provided, the type is inferred from the initializer:
@@ -97,9 +116,9 @@ var b = true;         // inferred as bool
 | `==` | Equal | `a == b` |
 | `!=` | Not equal | `a != b` |
 | `<` | Less than | `a < b` |
+| `<=` | Less than or equal | `a <= b` |
 | `>` | Greater than | `a > b` |
-
-Note: `<=` and `>=` are NOT implemented.
+| `>=` | Greater than or equal | `a >= b` |
 
 ### Logical Operators
 
@@ -167,7 +186,7 @@ while (i < 10) {
 }
 ```
 
-### For Loans
+### For Loops
 
 For loops iterate over a range:
 
@@ -259,6 +278,50 @@ println(42);
 println(true);
 ```
 
+### `len`
+
+Get the length of a string, array, or dictionary.
+
+```rey
+println(len("abc"));
+println(len([1, 2, 3]));
+println(len({a: 1, b: 2}));
+```
+
+### `push` / `pop`
+
+Mutate arrays.
+
+```rey
+var xs: [int] = [1, 2];
+push(xs, 3);
+println(pop(xs));
+```
+
+### `input`
+
+Read a line from stdin (optionally with a prompt).
+
+```rey
+var name = input("Enter name: ");
+println(name);
+```
+
+---
+
+## String Methods
+
+Supported methods on `String`:
+
+```rey
+var s: String = "Rey Language";
+println(s.length());
+println(s.upper());
+println(s.lower());
+println(s.contains("Lang"));
+println(s.split(" ")[0]);
+```
+
 ---
 
 ## Program Structure
@@ -317,13 +380,6 @@ The following features are NOT implemented:
 
 | Feature | Status |
 |---------|--------|
-| Arrays (`[1, 2, 3]`) | Not implemented |
-| Dictionaries (`{key: value}`) | Not implemented |
-| Index access (`arr[i]`, `dict["key"]`) | Not implemented |
-| Type enforcement at compile time | Parsed but not enforced |
-| `input()` builtin | Not implemented |
-| String methods (`.length()`) | Not implemented |
-| Comments (`// ...`) | Lexer does not tokenize comments |
 | Modulo operator (`%`) | Lexer token exists but parser doesn't use it |
 | Compound assignment (`+=`, `-=`, etc) | Not implemented |
 | Increment/decrement (`++`, `--`) | Not implemented |
