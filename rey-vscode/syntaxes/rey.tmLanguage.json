@@ -1,0 +1,113 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rey",
+  "scopeName": "source.rey",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#booleans" },
+    { "include": "#null" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#functionDecl" },
+    { "include": "#functionCall" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.rey",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.rey",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.rey",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.rey",
+          "match": "\\b\\d+(?:\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "booleans": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.rey",
+          "match": "\\b(?:true|false)\\b"
+        }
+      ]
+    },
+    "null": {
+      "patterns": [
+        {
+          "name": "constant.language.null.rey",
+          "match": "\\bnull\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.rey",
+          "match": "\\b(?:func|var|return|if|else|while|for|in|break|continue)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.rey",
+          "match": "\\b(?:int|float|String|bool|Void|null)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.rey",
+          "match": "\\b(?:println|len|push|pop|input|range)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "functionDecl": {
+      "patterns": [
+        {
+          "name": "meta.function.declaration.rey",
+          "match": "\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "0": { "name": "keyword.control.rey" },
+            "1": { "name": "entity.name.function.rey" }
+          }
+        }
+      ]
+    },
+    "functionCall": {
+      "patterns": [
+        {
+          "name": "meta.function-call.rey",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.function.rey" }
+          }
+        }
+      ]
+    }
+  }
+}
