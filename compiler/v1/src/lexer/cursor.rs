@@ -16,6 +16,10 @@ impl<'a> Cursor<'a> {
         self.source[self.position..].chars().next()
     }
 
+    pub fn peekN(&self, n: usize) -> Option<char> {
+        self.source[self.position..].chars().nth(n)
+    }
+
     pub fn advance(&mut self) -> Option<char> {
         let ch = self.peek()?;
         self.position += ch.len_utf8();

@@ -40,7 +40,15 @@ impl<'a> Lexer<'a> {
             }
         };
         match ch {
-            '"' => self.lexString(start),
+            '"' => {
+                if self.cursor.peek() == Some('"') && self.cursor.peekN(1) == Some('"') {
+                    self.cursor.advance();
+                    self.cursor.advance();
+                    self.lexMultilineString(start)
+                } else {
+                    self.lexString(start)
+                }
+            }
             '\'' => self.lexChar(start),
 
             c if c.is_alphabetic() || c == '_' => Ok(self.lexIdentifier(start, c)),
@@ -229,6 +237,31 @@ impl<'a> Lexer<'a> {
 
         while let Some(ch) = self.cursor.advance() {
             if ch == '"' {
+                return Ok(Token {
+                    kind: TokenKind::StringLiteral(value),
+                    span: Span::new(start, self.cursor.position()),
+                });
+            }
+            value.push(ch);
+        }
+
+        Err(LexerError::UnterminatedString {
+            span: Span::new(start, self.cursor.position()),
+        })
+    }
+
+    fn lexMultilineString(&mut self, start: usize) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while let Some(ch) = self.cursor.advance() {
+            if ch == '"' && self.cursor.peek() == Some('"') && self.cursor.peekN(1) == Some('"') {
+                self.cursor.advance();
+                self.cursor.advance();
+                if value.starts_with("\r\n") {
+                    value.drain(..2);
+                } else if value.starts_with('\n') {
+                    value.drain(..1);
+                }
                 return Ok(Token {
                     kind: TokenKind::StringLiteral(value),
                     span: Span::new(start, self.cursor.position()),
