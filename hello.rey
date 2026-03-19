@@ -1,5 +1,0 @@
-
-
-func main(): Void{ 
-    println("Hello, World");
-}

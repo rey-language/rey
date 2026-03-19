@@ -36,6 +36,7 @@
                 "isDefault": true
             },
             "presentation": {
+                "clear": true,
                 "reveal": "always",
                 "panel": "shared"
             }

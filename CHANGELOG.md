@@ -17,7 +17,11 @@
 - Allowed typed empty array assignment like `var xs: [int] = []`
 - Added `compiler/v1/src/tests/array_methods.rey` regression test
 
-## [init] — 2026-03-17
+## [fix] — 2026-03-19
+- Fixed struct method resolution with typed parameters - methods now properly resolve when parameters have struct type annotations
+- Fixed string interpolation with nested quotes - parser now handles `{scores["alice"]}` syntax using escaped quotes
+- Fixed array type parsing in struct fields - `[int]`, `[String]`, etc. now work as field types
+- Added comprehensive test file `compiler/v1/src/tests/struct_advanced.rey` covering all three fixes
 - Claude initialized as contributor
 - Created CLAUDE.md and primer.md
 - Branch `claude` created off `main`
