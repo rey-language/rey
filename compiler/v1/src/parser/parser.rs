@@ -421,6 +421,7 @@ impl Parser {
                     left: Box::new(Expr::Literal(Literal::Number(0.0))),
                     op: TokenKind::Minus,
                     right: Box::new(expr),
+                    span: self.previous().span,
                 })
             }
             TokenKind::Not => {
@@ -752,6 +753,7 @@ impl Parser {
                 left: Box::new(res),
                 op: TokenKind::Plus,
                 right: Box::new(part),
+                span: Span::new(0, 0),
             };
         }
         Ok(res)
@@ -794,6 +796,7 @@ impl Parser {
                     left: Box::new(Expr::Variable(name.clone())),
                     op,
                     right: Box::new(value),
+                    span: self.previous().span,
                 };
                 return Ok(Expr::Assign {
                     name,
@@ -815,6 +818,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)
@@ -829,6 +833,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)
@@ -846,6 +851,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)
@@ -864,6 +870,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)
@@ -930,6 +937,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)
@@ -948,6 +956,7 @@ impl Parser {
                 left: Box::new(expr),
                 op,
                 right: Box::new(right),
+                span: self.previous().span,
             };
         }
         Ok(expr)

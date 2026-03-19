@@ -1,0 +1,126 @@
+struct Shell {
+    user: String,
+    history: [String],
+    historySize: int,
+    running: bool,
+
+    pub func create(username: String): Shell {
+        return Shell { user: username, history: [], historySize: 0, running: true };
+    }
+
+    pub func addHistory(cmd: String): Void {
+        push(history, cmd);
+        historySize++;
+    }
+
+    pub func printHistory(): Void {
+        if (historySize == 0) {
+            println("no commands yet.");
+        } else {
+            var i: int = 0;
+            while (i < historySize) {
+                println("{i}: {history[i]}");
+                i++;
+            }
+        }
+    }
+    pub func stop(): Void {
+        running = false;
+        println("bye, {user}!");
+    }
+
+    pub func printHelp(): Void {
+        println("available commands:");
+        println("  help              show this message");
+        println("  echo <text>       print text back");
+        println("  history           show command history");
+        println("  whoami            show current user");
+        println("  ls                list fake directory");
+        println("  calc <a> <b>      do math on two numbers");
+        println("  clear             clear the screen");
+        println("  exit              quit the shell");
+    }
+
+    pub func printWhoami(): Void {
+        println("user:    {user}");
+        println("shell:   rey-shell v0.1");
+        println("lang:    rey v0.0.6-pre");
+        println("os:      reyOS (fake)");
+    }
+
+    pub func printLs(): Void {
+        println("drwxr-xr-x  main.rey");
+        println("drwxr-xr-x  README.md");
+        println("drwxr-xr-x  src/");
+        println("drwxr-xr-x  tests/");
+        println("drwxr-xr-x  rey.toml");
+    }
+
+    pub func clear(): Void {
+        var i: int = 0;
+        while (i < 40) {
+            println("");
+            i++;
+        }
+    }
+}
+
+func startsWith(str: String, prefix: String): bool {
+    return str.contains(prefix);
+}
+
+func main(): Void {
+    println("rey-shell v0.1 — type 'help' for commands");
+    println("-------------------------------------------");
+    var username = input("enter your name: ");
+    println("welcome, {username}!");
+    println("");
+
+    var shell = Shell.create(username);
+
+    while (shell.running) {
+        var cmd = input("{shell.user} $ ");
+
+        if (cmd == "") {
+            continue;
+        }
+
+        shell.addHistory(cmd);
+    //havent implemented else if yet idk why, so using nested if statements
+        if (cmd == "help") {
+    shell.printHelp();
+    } else {
+    if (cmd == "history") {
+        shell.printHistory();
+    } else {
+        if (cmd == "whoami") {
+            shell.printWhoami();
+        } else {
+            if (cmd == "ls") {
+                shell.printLs();
+            } else {
+                if (cmd == "clear") {
+                    shell.clear();
+                } else {
+                    if (cmd == "exit") {
+                        shell.stop();
+                    } else {
+                        if (cmd.contains("echo ")) {
+                            println("{cmd}");
+                        } 
+                        else {
+                            if (cmd.contains("calc ")) {
+                                println("calc coming soon — need arg parsing!");
+                            } else {
+                                println("rey-shell: command not found: {cmd}");
+                                println("type 'help' for available commands");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+    }
+}

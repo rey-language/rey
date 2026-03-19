@@ -78,51 +78,52 @@ struct LinkedList {
     }
 }
 
-struct BubbleSorter {
-    data: [int],
-    size: int,
-    comparisons: int,
-    swaps: int,
+//struct BubbleSorter {
+//    data: [int],
+//    size: int,
+//    comparisons: int,
+//    swaps: int,
+//
+//    pub func create(arr: [int]): BubbleSorter {
+//        return BubbleSorter { data: arr, size: len(arr), comparisons: 0, swaps: 0 };
+//    }
+//
+//    pub func sort(): Void {
+//        var i: int = 0;
+//        while (i < size - 1) {
+//            var j: int = 0;
+//            while (j < size - i - 1) {
+//                comparisons++;
+//                if (data[j] > data[j + 1]) {
+//                    var temp = data[j];
+//                    data[j] = data[j + 1];
+//                    data[j + 1] = temp;
+//                    swaps++;
+//                }
+//                j++;
+//            }
+//            i++;
+//        }
+//    }
+//
+//    pub func print(): Void {
+//        println("Sorted: {data}");
+//        println("Comparisons: {comparisons}, Swaps: {swaps}");
+//    }
+//}
 
-    pub func create(arr: [int]): BubbleSorter {
-        return BubbleSorter { data: arr, size: len(arr), comparisons: 0, swaps: 0 };
-    }
-
-    pub func sort(): Void {
-        var i: int = 0;
-        while (i < size - 1) {
-            var j: int = 0;
-            while (j < size - i - 1) {
-                comparisons++;
-                if (data[j] > data[j + 1]) {
-                    var temp = data[j];
-                    data[j] = data[j + 1];
-                    data[j + 1] = temp;
-                    swaps++;
-                }
-                j++;
-            }
-            i++;
-        }
-    }
-
-    pub func print(): Void {
-        println("Sorted: {data}");
-        println("Comparisons: {comparisons}, Swaps: {swaps}");
-    }
-}
-
-func collatz(n: int): int {
+func collatz(n): int {
     var steps: int = 0;
     while (n != 1) {
         if (n % 2 == 0) {
             n = n / 2;
         } else {
-            n = n * 3 + 1;
+           n = n * 3 + 1;  
         }
         steps++;
     }
     return steps;
+    //println(n);
 }
 
 func gcd(a: int, b: int): int {
@@ -135,7 +136,9 @@ func gcd(a: int, b: int): int {
 }
 
 func lcm(a: int, b: int): int {
-    return a / gcd(a, b) * b;
+    var g = gcd(a, b);
+    var divided = a / g;
+    return divided * b;
 }
 
 func main(): Void {
@@ -165,10 +168,10 @@ func main(): Void {
     var reversed = list.reverse();
     reversed.print();
 
-    println("=== Bubble Sort ===");
-    var sorter = BubbleSorter.create([64, 34, 25, 12, 22, 11, 90]);
-    sorter.sort();
-    sorter.print();
+    //println("=== Bubble Sort ===");
+    //var sorter = BubbleSorter.create([64, 34, 25, 12, 22, 11, 90]);
+    //sorter.sort();
+    //sorter.print();
 
     println("=== Collatz Sequences ===");
     var nums = [6, 11, 27, 97, 871];

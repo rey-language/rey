@@ -365,8 +365,8 @@ impl TypeChecker {
                 if let Some(expected) = &self.currentReturn {
                     if !rty.isAssignableTo(expected) {
                         return Err(format!(
-                            "Type error: return expected {:?} but got {:?}",
-                            expected, rty
+                            "Type error: return expected {:?} but got {:?} at line {}",
+                            expected, rty, expr.span().start
                         ));
                     }
                 }
@@ -383,31 +383,13 @@ impl TypeChecker {
         }
     }
 
-    fn exprTy(&mut self, expr: &Expr) -> Result<Ty, String> {
-        match expr {
-            Expr::Literal(lit) => Ok(self.literalTy(lit)),
-            Expr::Variable(name) => self.lookup(name).map(|(t, _)| t),
-            Expr::Assign { name, value } => {
-                let vty = self.exprTy(value)?;
-                let (cur, is_const) = self.lookup(name)?;
-                if is_const {
-                    return Err(format!(
-                        "Type error: cannot assign to constant variable '{}'",
-                        name
-                    ));
-                }
-                if cur != Ty::Any && !vty.isAssignableTo(&cur) {
-                    return Err(format!(
-                        "Type error: assignment to '{}' expected {:?} but got {:?}",
-                        name, cur, vty
-                    ));
-                }
                 Ok(cur)
-            }
+            },
             Expr::Update {
                 name,
                 op: _,
                 prefix: _,
+                span,
             } => {
                 let (cur, is_const) = self.lookup(name)?;
                 if is_const {
@@ -454,8 +436,8 @@ impl TypeChecker {
                             let aty = self.exprTy(a)?;
                             if !aty.isAssignableTo(p) {
                                 return Err(format!(
-                                    "Type error: argument expected {:?} but got {:?}",
-                                    p, aty
+                                    "Type error: argument expected {:?} but got {:?} at line {}",
+                                    p, aty, a.span().start
                                 ));
                             }
                         }
