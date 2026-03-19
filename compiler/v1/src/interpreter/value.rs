@@ -1,9 +1,18 @@
 use crate::ast::Literal;
 
 use super::function::Function;
-use std::collections::HashMap;
+use crate::ast::{FieldDecl, MethodDecl};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
+
+/// A stored struct definition (registered when `struct Foo { ... }` is executed)
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<FieldDecl>,
+    pub methods: Vec<MethodDecl>,
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -14,7 +23,51 @@ pub enum Value {
     Function(Function),
     Array(Rc<RefCell<Vec<Value>>>),
     Dict(Rc<RefCell<HashMap<String, Value>>>),
+    StructInstance {
+        struct_name: String,
+        fields: Rc<RefCell<HashMap<String, Value>>>,
+    },
     Null,
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::String(s) => write!(f, "{}", s),
+            Value::Char(c) => write!(f, "{}", c),
+            Value::Number(n) => {
+                if n.fract() == 0.0 {
+                    write!(f, "{}", *n as i64)
+                } else {
+                    write!(f, "{}", n)
+                }
+            }
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Function(func) => write!(f, "<func {}>", func.name),
+            Value::Array(arr) => {
+                let arr = arr.borrow();
+                let items: Vec<String> = arr.iter().map(|v| format!("{}", v)).collect();
+                write!(f, "[{}]", items.join(", "))
+            }
+            Value::Dict(d) => {
+                let d = d.borrow();
+                let items: Vec<String> = d.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+                write!(f, "{{{}}}", items.join(", "))
+            }
+            Value::StructInstance {
+                struct_name,
+                fields,
+            } => {
+                let fields = fields.borrow();
+                let items: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                write!(f, "{} {{ {} }}", struct_name, items.join(", "))
+            }
+            Value::Null => write!(f, "null"),
+        }
+    }
 }
 
 impl PartialEq for Value {
@@ -57,6 +110,7 @@ impl From<Literal> for Value {
             Literal::Char(c) => Value::Char(c),
             Literal::Number(n) => Value::Number(n),
             Literal::Bool(b) => Value::Bool(b),
-            Literal::Null => Value::Null, }
+            Literal::Null => Value::Null,
+        }
     }
 }

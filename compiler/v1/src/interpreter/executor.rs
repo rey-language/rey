@@ -1,7 +1,7 @@
 use super::control_flow::ControlFlow;
 use super::environment::Environment;
 use super::function::Function;
-use super::value::Value;
+use super::value::{StructDef, Value};
 use crate::ast::{Expr, Stmt};
 use crate::lexer::span::Span;
 use crate::lexer::TokenKind;
@@ -39,9 +39,22 @@ impl Executor {
                     name.clone(),
                     params.clone(),
                     body.clone(),
-                    Span { start: 0, end: 0 }, // TODO: Get actual span
+                    Span { start: 0, end: 0 },
                 );
                 env.define(name.clone(), Value::Function(function));
+                Ok(ControlFlow::normal(Value::Null))
+            }
+            Stmt::StructDecl {
+                name,
+                fields,
+                methods,
+            } => {
+                let def = StructDef {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                    methods: methods.clone(),
+                };
+                env.register_struct(def);
                 Ok(ControlFlow::normal(Value::Null))
             }
             Stmt::If {
@@ -73,7 +86,7 @@ impl Executor {
                         ControlFlow::Break => break,
                         ControlFlow::Continue => continue,
                         ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
-                        ControlFlow::Normal(_) => {} // Continue to next iteration
+                        ControlFlow::Normal(_) => {}
                     }
                 }
                 Ok(ControlFlow::normal(Value::Null))
@@ -84,11 +97,9 @@ impl Executor {
                 end,
                 body,
             } => {
-                // Evaluate start and end expressions
                 let start_val = self.evaluate_expr(start, env)?;
                 let end_val = self.evaluate_expr(end, env)?;
 
-                // Extract numeric values
                 let start_num = match start_val {
                     Value::Number(n) => n as i64,
                     _ => return Err("Range start must be a number".to_string()),
@@ -98,17 +109,14 @@ impl Executor {
                     _ => return Err("Range end must be a number".to_string()),
                 };
 
-                // Loop from start to end-1
                 for i in start_num..end_num {
-                    // Set the loop variable
                     env.define(variable.clone(), Value::Number(i as f64));
 
-                    // Execute body
                     match self.execute_block_with_control_flow(body, env)? {
                         ControlFlow::Break => break,
                         ControlFlow::Continue => continue,
                         ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
-                        ControlFlow::Normal(_) => {} // Continue to next iteration
+                        ControlFlow::Normal(_) => {}
                     }
                 }
                 Ok(ControlFlow::normal(Value::Null))
@@ -118,14 +126,6 @@ impl Executor {
             Stmt::Return(expr) => {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::return_value(value))
-            }
-            Stmt::StructDecl {
-                name,
-                fields,
-                methods,
-            } => {
-                env.define(name.clone(), Value::Null); // placeholder
-                Ok(ControlFlow::normal(Value::Null))
             }
         }
     }
@@ -191,7 +191,29 @@ impl Executor {
                         .get(name)
                         .cloned()
                         .ok_or_else(|| "Dictionary key not found".to_string()),
-                    _ => Err("Property access is only supported for dictionaries".to_string()),
+                    Value::StructInstance {
+                        struct_name,
+                        fields,
+                    } => {
+                        // Field access on struct instance
+                        fields.borrow().get(name).cloned().ok_or_else(|| {
+                            let field_names: Vec<String> =
+                                fields.borrow().keys().cloned().collect();
+                            let suggestion = find_closest_match(name, &field_names);
+                            let mut msg = format!(
+                                "error[E004]: unknown field '{}' on struct '{}'",
+                                name, struct_name
+                            );
+                            if let Some(s) = suggestion {
+                                msg.push_str(&format!("\n  did you mean '{}'?", s));
+                            }
+                            msg
+                        })
+                    }
+                    _ => Err(
+                        "Property access is only supported for dictionaries and structs"
+                            .to_string(),
+                    ),
                 }
             }
             Expr::MethodCall {
@@ -204,7 +226,105 @@ impl Executor {
                 for a in args {
                     evaluated_args.push(self.evaluate_expr(a, env)?);
                 }
+                // If the receiver is a struct instance, dispatch to struct method
+                if let Value::StructInstance {
+                    ref struct_name,
+                    ref fields,
+                } = recv
+                {
+                    return self.call_struct_method(
+                        struct_name.clone(),
+                        fields.clone(),
+                        name,
+                        &evaluated_args,
+                        env,
+                    );
+                }
                 self.evaluate_method_call(recv, name, &evaluated_args)
+            }
+            Expr::StructLiteral {
+                name,
+                fields: field_exprs,
+            } => {
+                let def = env
+                    .get_struct(name)
+                    .ok_or_else(|| format!("Undefined struct '{}'", name))?
+                    .clone();
+
+                // Evaluate field values
+                let mut field_map = HashMap::new();
+                for (fname, fexpr) in field_exprs {
+                    let val = self.evaluate_expr(fexpr, env)?;
+                    field_map.insert(fname.clone(), val);
+                }
+
+                // Check for missing fields
+                for fd in &def.fields {
+                    if !field_map.contains_key(&fd.name) {
+                        return Err(format!(
+                            "error[E007]: missing field '{}' in {} literal\n  field type: {}",
+                            fd.name, name, fd.ty.name
+                        ));
+                    }
+                }
+
+                Ok(Value::StructInstance {
+                    struct_name: name.clone(),
+                    fields: Rc::new(RefCell::new(field_map)),
+                })
+            }
+            Expr::StaticCall {
+                struct_name,
+                method,
+                args,
+            } => {
+                let def = env
+                    .get_struct(struct_name)
+                    .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?
+                    .clone();
+
+                // Find matching static method
+                let matching: Vec<_> = def
+                    .methods
+                    .iter()
+                    .filter(|m| m.name == *method && m.is_static)
+                    .collect();
+
+                if matching.is_empty() {
+                    return Err(format!(
+                        "error[E005]: no static method '{}' on struct '{}'",
+                        method, struct_name
+                    ));
+                }
+
+                // Find by arity
+                let mut evaluated_args = Vec::new();
+                for a in args {
+                    evaluated_args.push(self.evaluate_expr(a, env)?);
+                }
+
+                let method_decl = matching
+                    .iter()
+                    .find(|m| m.params.len() == evaluated_args.len())
+                    .ok_or_else(|| {
+                        format!(
+                            "error[E006]: method '{}' expects {} arguments, got {}",
+                            method,
+                            matching[0].params.len(),
+                            evaluated_args.len()
+                        )
+                    })?;
+
+                // Create environment with struct defs available
+                let mut method_env = Environment::with_parent(env.clone());
+
+                // Bind parameters
+                for (param, val) in method_decl.params.iter().zip(&evaluated_args) {
+                    method_env.define(param.name.clone(), val.clone());
+                }
+
+                // Execute the static method body
+                self.execute_block(&method_decl.body, &mut method_env)
             }
             Expr::Unary { op, right } => {
                 let right_val = self.evaluate_expr(right, env)?;
@@ -261,23 +381,18 @@ impl Executor {
                                     ));
                                 }
 
-                                // Create new environment with function parameters
-                                // The function environment should have access to the global environment
                                 let mut function_env = Environment::with_parent(env.clone());
 
-                                // Bind parameters to arguments
                                 for (param, arg_value) in func.params.iter().zip(evaluated_args) {
                                     function_env.define(param.name.clone(), arg_value);
                                 }
 
-                                // Execute function body
                                 self.execute_block(&func.body, &mut function_env)
                             }
                             _ => Err(format!("Can only call functions, got {:?}", function)),
                         }
                     }
                 } else {
-                    // Dynamic function call (function as expression)
                     let function = self.evaluate_expr(callee, env)?;
                     match function {
                         Value::Function(func) => {
@@ -289,40 +404,100 @@ impl Executor {
                                 ));
                             }
 
-                            // Evaluate arguments
                             let mut evaluated_args = Vec::new();
                             for arg in args {
                                 evaluated_args.push(self.evaluate_expr(arg, env)?);
                             }
 
-                            // Create new environment with function parameters
-                            // The function environment should have access to the global environment
                             let mut function_env = Environment::with_parent(env.clone());
 
-                            // Bind parameters to arguments
                             for (param, arg_value) in func.params.iter().zip(evaluated_args) {
                                 function_env.define(param.name.clone(), arg_value);
                             }
 
-                            // Execute function body
                             self.execute_block(&func.body, &mut function_env)
                         }
                         _ => Err(format!("Can only call functions, got {:?}", function)),
                     }
                 }
             }
-            Expr::StructLiteral { name, fields } => {
-                Err(format!("Struct literal '{}' not yet implemented", name))
-            }
-            Expr::StaticCall {
-                struct_name,
-                method,
-                args,
-            } => Err(format!(
-                "Static call '{}.{}' not yet implemented",
-                struct_name, method
-            )),
         }
+    }
+
+    /// Call a method on a struct instance.
+    /// Struct fields become the method's "global scope".
+    fn call_struct_method(
+        &self,
+        struct_name: String,
+        instance_fields: Rc<RefCell<HashMap<String, Value>>>,
+        method_name: &str,
+        args: &[Value],
+        env: &mut Environment,
+    ) -> Result<Value, String> {
+        let def = env
+            .get_struct(&struct_name)
+            .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?
+            .clone();
+
+        // Find matching method by name and arity
+        let matching: Vec<_> = def
+            .methods
+            .iter()
+            .filter(|m| m.name == method_name && !m.is_static)
+            .collect();
+
+        if matching.is_empty() {
+            return Err(format!(
+                "error[E004]: unknown method '{}' on struct '{}'",
+                method_name, struct_name
+            ));
+        }
+
+        let method_decl = matching
+            .iter()
+            .find(|m| m.params.len() == args.len())
+            .ok_or_else(|| {
+                format!(
+                    "error[E006]: method '{}' expects {} arguments, got {}",
+                    method_name,
+                    matching[0].params.len(),
+                    args.len()
+                )
+            })?;
+
+        // Check visibility: only pub methods can be called from outside
+        // (We don't enforce this from _inside_ other methods of the same struct)
+        // This check is at call site in evaluate_expr.
+
+        // Create a fresh environment.
+        // Struct fields are injected AS local variables (the "global scope" for the method).
+        let mut method_env = Environment::new();
+
+        // Copy struct defs so the method can create struct instances
+        method_env.struct_defs = env.struct_defs.clone();
+
+        // Inject struct fields as local variables
+        for (fname, fval) in instance_fields.borrow().iter() {
+            method_env.define(fname.clone(), fval.clone());
+        }
+
+        // Bind parameters
+        for (param, val) in method_decl.params.iter().zip(args) {
+            method_env.define(param.name.clone(), val.clone());
+        }
+
+        // Execute the method body
+        let result = self.execute_block(&method_decl.body, &mut method_env)?;
+
+        // After execution, write back any changed field values to the instance
+        let mut fields_mut = instance_fields.borrow_mut();
+        for fname in fields_mut.keys().cloned().collect::<Vec<_>>() {
+            if let Some(updated_val) = method_env.get(&fname) {
+                fields_mut.insert(fname, updated_val.clone());
+            }
+        }
+
+        Ok(result)
     }
 
     fn evaluate_method_call(
@@ -549,7 +724,7 @@ impl Executor {
         for stmt in statements {
             let control_flow = self.execute(stmt, env)?;
             match control_flow {
-                ControlFlow::Normal(_) => {} // Continue execution
+                ControlFlow::Normal(_) => {}
                 ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
                     return Ok(control_flow);
                 }
@@ -557,4 +732,41 @@ impl Executor {
         }
         Ok(ControlFlow::normal(Value::Null))
     }
+}
+
+/// Simple edit distance helper for "did you mean?" suggestions  
+fn find_closest_match(target: &str, candidates: &[String]) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+    for c in candidates {
+        let dist = levenshtein(target, c);
+        if dist <= 3 {
+            if best.is_none() || dist < best.as_ref().unwrap().0 {
+                best = Some((dist, c.clone()));
+            }
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let n = a.len();
+    let m = b.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in 0..=n {
+        dp[i][0] = i;
+    }
+    for j in 0..=m {
+        dp[0][j] = j;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+    dp[n][m]
 }

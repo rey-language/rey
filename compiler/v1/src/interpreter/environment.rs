@@ -1,10 +1,11 @@
+use super::value::{StructDef, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
-use super::value::Value;
 
 pub struct Environment {
     values: HashMap<String, Value>,
     parent: Option<Rc<Environment>>,
+    pub struct_defs: HashMap<String, StructDef>,
 }
 
 impl Clone for Environment {
@@ -12,6 +13,7 @@ impl Clone for Environment {
         Self {
             values: self.values.clone(),
             parent: self.parent.clone(),
+            struct_defs: self.struct_defs.clone(),
         }
     }
 }
@@ -21,11 +23,13 @@ impl Environment {
         Self {
             values: HashMap::new(),
             parent: None,
+            struct_defs: HashMap::new(),
         }
     }
     pub fn with_parent(parent: Environment) -> Self {
         Self {
             values: HashMap::new(),
+            struct_defs: parent.struct_defs.clone(),
             parent: Some(Rc::new(parent)),
         }
     }
@@ -44,8 +48,6 @@ impl Environment {
         }
     }
 
-
-    
     pub fn assign(&mut self, name: &str, value: Value) -> Result<(), String> {
         if self.values.contains_key(name) {
             self.values.insert(name.to_string(), value);
@@ -55,5 +57,11 @@ impl Environment {
         }
     }
 
+    pub fn register_struct(&mut self, def: StructDef) {
+        self.struct_defs.insert(def.name.clone(), def);
+    }
 
+    pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
+        self.struct_defs.get(name)
+    }
 }
