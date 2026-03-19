@@ -119,6 +119,14 @@ impl Executor {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::return_value(value))
             }
+            Stmt::StructDecl {
+                name,
+                fields,
+                methods,
+            } => {
+                env.define(name.clone(), Value::Null); // placeholder
+                Ok(ControlFlow::normal(Value::Null))
+            }
         }
     }
 
@@ -303,6 +311,17 @@ impl Executor {
                     }
                 }
             }
+            Expr::StructLiteral { name, fields } => {
+                Err(format!("Struct literal '{}' not yet implemented", name))
+            }
+            Expr::StaticCall {
+                struct_name,
+                method,
+                args,
+            } => Err(format!(
+                "Static call '{}.{}' not yet implemented",
+                struct_name, method
+            )),
         }
     }
 

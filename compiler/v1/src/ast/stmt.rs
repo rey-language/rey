@@ -7,6 +7,23 @@ pub struct Parameter {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FieldDecl {
+    pub name: String,
+    pub ty: Type,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodDecl {
+    pub name: String,
+    pub params: Vec<Parameter>,
+    pub return_ty: Option<Type>,
+    pub body: Vec<Stmt>,
+    pub is_pub: bool,
+    pub is_static: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     VarDecl {
         is_const: bool,
@@ -19,6 +36,11 @@ pub enum Stmt {
         params: Vec<Parameter>,
         return_ty: Option<Type>,
         body: Vec<Stmt>,
+    },
+    StructDecl {
+        name: String,
+        fields: Vec<FieldDecl>,
+        methods: Vec<MethodDecl>,
     },
     If {
         condition: Expr,

@@ -5,5 +5,5 @@ pub mod ty;
 
 pub use expr::Expr;
 pub use literal::Literal;
-pub use stmt::{Parameter, Stmt};
+pub use stmt::{FieldDecl, MethodDecl, Parameter, Stmt};
 pub use ty::Type;

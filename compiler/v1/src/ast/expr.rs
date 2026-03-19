@@ -33,6 +33,15 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
+    StaticCall {
+        struct_name: String,
+        method: String,
+        args: Vec<Expr>,
+    },
     Unary {
         op: TokenKind,
         right: Box<Expr>,
