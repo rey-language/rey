@@ -1,0 +1,47 @@
+struct Player {
+    health: int,
+    name: String,
+    gold: int,
+
+    pub func create(n: String, h: int): Player {
+        if (h < 0) {
+            h = 0;
+        }
+        return Player { name: n, health: h, gold: 0 };
+    }
+
+    func heal(amount: int): Void {
+        health += amount;
+        println("{name} healed for {amount}. HP: {health}");
+    }
+
+    func takeDamage(amount: int): Void {
+        health -= amount;
+        println("{name} took {amount} damage. HP: {health}");
+    }
+
+    func isAlive(): bool {
+        return health > 0;
+    }
+
+    func addGold(amount: int): Void {
+        gold += amount;
+        println("{name} earned {amount} gold. Total: {gold}");
+    }
+
+    pub func status(): Void {
+        println("--- {name} ---");
+        println("HP: {health}");
+        println("Gold: {gold}");
+    }
+}
+
+func main(): Void {
+    var p = Player.create("Misbah", 100);
+    p.status();
+    p.heal(10);
+    p.takeDamage(25);
+    p.addGold(50);
+    println(p.isAlive());
+    p.status();
+}

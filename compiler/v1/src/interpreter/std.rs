@@ -219,6 +219,17 @@ impl StdLib {
                     .join(", ");
                 format!("{{{}}}", items)
             }
+            Value::StructInstance {
+                struct_name,
+                fields,
+            } => {
+                let fields = fields.borrow();
+                let items: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, Self::formatValue(v)))
+                    .collect();
+                format!("{} {{ {} }}", struct_name, items.join(", "))
+            }
         }
     }
 }
