@@ -15,6 +15,7 @@ enum Ty {
     Float,
     Double,
     Byte,
+    Nullable(Box<Ty>),
     Array(Box<Ty>),
     Dict(Box<Ty>, Box<Ty>),
     Function { params: Vec<Ty>, ret: Box<Ty> },
@@ -23,6 +24,12 @@ enum Ty {
 impl Ty {
     fn fromAnnotation(ty: &Type) -> Result<Ty, String> {
         let name = ty.name.trim();
+        if let Some(base) = name.strip_suffix('?') {
+            let baseTy = Ty::fromAnnotation(&Type {
+                name: base.trim().to_string(),
+            })?;
+            return Ok(Ty::Nullable(Box::new(baseTy)));
+        }
         match name {
             "Void" => Ok(Ty::Void),
             "null" => Ok(Ty::Null),
@@ -69,7 +76,11 @@ impl Ty {
             (_, Ty::Any) => true,
             (Ty::Any, _) => true,
             (Ty::Null, Ty::Null) => true,
+            (Ty::Null, Ty::Nullable(_)) => true,
             (Ty::Null, _) => false,
+            (Ty::Nullable(inner), Ty::Nullable(targetInner)) => inner.isAssignableTo(targetInner),
+            (inner, Ty::Nullable(targetInner)) => inner.isAssignableTo(targetInner),
+            (Ty::Nullable(_), _) => false,
             (a, b) if isIntLike(a) && isIntLike(b) => true,
             (a, b) if isFloatLike(a) && isFloatLike(b) => true,
             (a, b) if isIntLike(a) && isFloatLike(b) => true,
@@ -656,6 +667,25 @@ impl TypeChecker {
         }
         if a == b {
             return a.clone();
+        }
+        match (a, b) {
+            (Ty::Null, other) => {
+                return match other {
+                    Ty::Nullable(_) => other.clone(),
+                    _ => Ty::Nullable(Box::new(other.clone())),
+                };
+            }
+            (other, Ty::Null) => {
+                return match other {
+                    Ty::Nullable(_) => other.clone(),
+                    _ => Ty::Nullable(Box::new(other.clone())),
+                };
+            }
+            (Ty::Nullable(inner), other) | (other, Ty::Nullable(inner)) => {
+                let joined = self.join(inner.as_ref(), other);
+                return Ty::Nullable(Box::new(joined));
+            }
+            _ => {}
         }
         match (a, b) {
             (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ty::Float,

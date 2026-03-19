@@ -382,6 +382,10 @@ impl Executor {
                     Ok(Value::Number(l % r))
                 }
             }
+            (Value::Null, EqualEqual, Value::Null) => Ok(Value::Bool(true)),
+            (Value::Null, NotEqual, Value::Null) => Ok(Value::Bool(false)),
+            (Value::Null, EqualEqual, _) | (_, EqualEqual, Value::Null) => Ok(Value::Bool(false)),
+            (Value::Null, NotEqual, _) | (_, NotEqual, Value::Null) => Ok(Value::Bool(true)),
             (Value::Number(l), EqualEqual, Value::Number(r)) => Ok(Value::Bool(l == r)),
             (Value::Number(l), NotEqual, Value::Number(r)) => Ok(Value::Bool(l != r)),
             (Value::Number(l), Less, Value::Number(r)) => Ok(Value::Bool(l < r)),

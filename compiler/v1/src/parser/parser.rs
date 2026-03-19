@@ -250,7 +250,11 @@ impl Parser {
                 };
                 self.advance();
                 self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
-                Ok(Some(Type { name: format!("[{}]", inner) }))
+                let mut name = format!("[{}]", inner);
+                if self.matchToken(&TokenKind::Question) {
+                    name.push('?');
+                }
+                Ok(Some(Type { name }))
             } else if self.matchToken(&TokenKind::LeftBrace) {
                 let key = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
@@ -264,13 +268,20 @@ impl Parser {
                 };
                 self.advance();
                 self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
-                Ok(Some(Type { name: format!("{{{}:{}}}", key, value) }))
+                let mut name = format!("{{{}:{}}}", key, value);
+                if self.matchToken(&TokenKind::Question) {
+                    name.push('?');
+                }
+                Ok(Some(Type { name }))
             } else {
                 match &self.peek().kind {
                     TokenKind::Identifier(name) => {
-                        let ty = Type { name: name.clone() };
+                        let mut n = name.clone();
                         self.advance();
-                        Ok(Some(ty))
+                        if self.matchToken(&TokenKind::Question) {
+                            n.push('?');
+                        }
+                        Ok(Some(Type { name: n }))
                     }
                     _ => Err(self.error("Expected type name after ':'")),
                 }

@@ -26,6 +26,7 @@ pub enum TokenKind {
     Star,
     Percent,
     Colon,
+    Question,
     Not,
     AndAnd,
     OrOr,
