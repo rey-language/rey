@@ -1,129 +1,206 @@
 # Contributing to Rey
 
-Thanks for your interest in contributing to **Rey**.  
-Rey is an experimental programming language focused on language design, interpreters, and execution models. Contributions are welcome, but the bar for correctness and clarity is intentionally high.
+Rey is an open, ambitious project. We're building a language from scratch — the compiler, the toolchain, the stdlib, the ecosystem. Everything. If that sounds exciting, you're in the right place.
 
-Please read this document carefully before opening an issue or pull request.
-
----
-
-## Project Philosophy
-
-Rey prioritizes:
-
-- Simplicity over cleverness  
-- Explicit design decisions over implicit behavior  
-- Small, well-reasoned primitives  
-- Clear separation between specification and implementation  
-
-If a change adds complexity, it must justify itself.
+This isn't a finished project looking for minor fixes. It's a living language actively being designed and built. Your contributions don't just fix bugs — they shape what Rey becomes.
 
 ---
 
-## Ways to Contribute
+## The vision
 
-You can contribute by:
+> Rust power without Rust complexity.
 
-- Reporting bugs or inconsistencies
-- Improving documentation or specifications
-- Proposing language features or semantics
-- Implementing interpreter or tooling changes
-- Adding tests or examples
-
-Speculative or vague contributions are discouraged. Prefer concrete proposals.
+Rey is designed to be the language that doesn't make you choose between fast and simple. The compiler handles the hard parts. You write clean code. Read `VISION.md` before anything else — it's the north star for every decision in this project.
 
 ---
 
-## Before You Start
+## Who we're looking for
 
-1. Read the `README.md`
-2. Read the language specification under `spec/`
-3. Search existing issues and pull requests
-4. Understand the current scope of **v0**
+Anyone who is:
 
-If you’re unsure whether something belongs in v0, open a discussion first.
+- Excited about language design and compiler engineering
+- Willing to learn (you don't need to be an expert)
+- Opinionated about how programming should feel
+- Able to write clean, reasoned code
+- Interested in building something real from the ground up
 
----
-
-## Issues
-
-When opening an issue:
-
-- Use a clear and descriptive title
-- Explain the problem, not just the symptom
-- Include examples (code snippets, expected vs actual behavior)
-- Reference relevant spec sections if applicable
-
-Feature requests should explain:
-- The problem being solved
-- Why existing mechanisms are insufficient
-- How the proposal fits Rey’s design goals
+We don't care about your resume. We care about your ideas and your work.
 
 ---
 
-## Pull Requests
+## What needs to be built
 
-All pull requests should:
+Rey is early. Almost everything is fair game. Here's where the work is:
 
-- Be focused on a single change
-- Include a clear explanation of *why* the change exists
-- Reference related issues or discussions
-- Update documentation/specs if behavior changes
-- Avoid unrelated refactors
+### Compiler (Rust)
+The heart of Rey. Written in Rust, lives in `compiler/v1/`.
 
-Large changes should be discussed before implementation.
+- **Bug fixes** — see the issue tracker, there's always something broken
+- **New syntax** — enums, match, generics, closures, traits
+- **Import system** — the module resolution and import pipeline
+- **LLVM backend** — the big one. Turn AST → LLVM IR → native binary
+- **Error messages** — make them better, clearer, more helpful
+- **Type system** — generics, union types, type inference improvements
+
+### Standard Library (Rey)
+Lives in `rey-language/std`. Written in Rey itself (once the import system lands).
+
+- `std::fs` — file I/O
+- `std::process` — args, exit, env
+- `std::math` — math functions
+- `std::http` — HTTP client/server
+- `std::json` — JSON parsing
+- anything else the language needs
+
+### reyc (Rey)
+The package manager and toolchain. Think cargo for Rey.
+
+- `reyc run` — compile and run
+- `reyc init` — scaffold a project
+- `reyc build` — compile to binary
+- `reyc add` — install a package
+- `reyc publish` — publish to reyc.io
+
+### Tooling
+- **VSCode extension** — lives in `rey-language/rey-vscode`. Syntax highlighting is done, LSP is next.
+- **rey-website** — rey-lang.com. Docs, playground, getting started.
+- **reyc.io** — the package registry website.
+
+### Language design
+Not all contributions are code. If you have strong opinions about:
+- How memory should work in Rey
+- What the import syntax should look like
+- How enums and match should behave
+- What belongs in the standard library
+
+Open a discussion. Language design decisions matter more than any single implementation.
 
 ---
 
-## Code Style
+## How to contribute
 
-- Prefer clarity over brevity
-- Avoid unnecessary abstractions
-- Keep functions small and readable
-- Name things explicitly
-- Comments should explain *why*, not *what*
+### 1. Read first
+- `README.md` — what Rey is
+- `VISION.md` — where Rey is going
+- `syntax.md` — what the language looks like today
+- `primer.md` — current state of the project
 
-Consistency matters more than personal preference.
+### 2. Find something to work on
+- Check the issue tracker for open issues
+- Look at the bug/feature list in `primer.md`
+- Have an idea? Open a discussion first
+
+### 3. Branch discipline
+- `master` — stable, owned by the core team
+- `claude` — Claude's branch (AI contributor)
+- `codex` — Codex's branch (AI contributor)
+- your contributions → open a PR to `master`
+
+Create your branch off master:
+```bash
+git checkout master
+git checkout -b your-name/feature-name
+```
+
+### 4. Make your changes
+- Small, focused commits
+- Conventional commit messages: `feat(lexer): add comment tokenization`
+- Test your changes — run the test files in `compiler/v1/src/tests/`
+- Don't break existing tests
+
+### 5. Open a PR
+- Clear title and description
+- Explain what you changed and WHY
+- Reference related issues
+- If it's a language change, update `syntax.md`
+- If it's a big change, discuss it first
 
 ---
 
-## Specifications vs Implementation
+## Commit style
 
-- The `spec/` directory defines **what Rey is**
-- The implementation defines **how it runs**
+We use conventional commits:
 
-Implementation must follow the spec, not the other way around.  
-If behavior changes, the spec must be updated first or alongside the change.
+```
+feat(scope): what you added
+fix(scope): what you fixed
+chore(scope): maintenance, cleanup
+docs(scope): documentation
+test(scope): tests
+refactor(scope): refactor without behavior change
+```
+
+Examples:
+```
+feat(structs): implement method overloading
+fix(parser): handle empty array literal
+chore(release): bump to v0.0.7-pre
+docs(syntax): add enum documentation
+```
 
 ---
 
-## Versioning
+## Running the compiler
 
-- v0 is intentionally minimal
-- Breaking changes are acceptable in v0, but must be justified
-- Experimental features should be clearly marked
+```bash
+cd compiler/v1
+cargo build --release
+./target/release/rey-v0 your-file.rey
+```
+
+Run all tests:
+```bash
+for f in src/tests/*.rey; do
+    echo "Testing $f..."
+    ./target/release/rey-v0 $f
+done
+```
 
 ---
 
-## Community Expectations
+## The AI contributors
 
-- Be respectful and constructive
-- Assume good intent
-- Critique ideas, not people
-- Keep discussions technical and grounded
+Rey has two autonomous AI contributors — `claude` and `codex` — each with their own git branch. They commit real code, open real PRs, and are treated as contributors.
 
-This is a learning-focused, long-term project.
+This is an experiment in human-AI collaborative development. If you want to set up a similar workflow, read `CLAUDE.md` and `AGENTS.md`.
+
+---
+
+## What we value
+
+**Simplicity** — if it's complex, it needs to justify itself  
+**Clarity** — code and decisions should be easy to reason about  
+**Boldness** — Rey is making big bets. Don't be afraid to propose big ideas  
+**Honesty** — if something is broken or wrong, say so  
+**Craft** — care about the details. Languages are used by people.
+
+---
+
+## What we don't want
+
+- Vague PRs with no explanation
+- Changes that break existing behavior without discussion
+- Overengineered solutions to simple problems
+- Ego. Critique ideas, not people.
+
+---
+
+## Communication
+
+- **Issues** — bugs, feature requests, questions
+- **Discussions** — language design, big ideas, proposals
+- **PRs** — concrete changes with clear rationale
+
+We're a small team. Response times vary. Be patient.
 
 ---
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project’s license.
+By contributing, you agree your contributions will be licensed under the MIT license.
 
 ---
 
-## Questions
+Rey is early. The decisions made now will define what this language becomes. If you want to be part of that — welcome.
 
-If you’re unsure about anything, open a discussion instead of guessing.
-
-Thanks for helping build Rey.
+https://github.com/rey-language/rey
