@@ -7,7 +7,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::ast::{Expr, Literal, Parameter, Stmt, Type};
+use crate::ast::{Expr, FieldDecl, Literal, MethodDecl, Parameter, Stmt, Type};
 use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
 
@@ -47,6 +47,8 @@ impl Parser {
             Ok(Some(self.parseVarDeclaration(true)?))
         } else if self.matchToken(&TokenKind::Func) {
             Ok(Some(self.parseFuncDeclaration()?))
+        } else if self.matchToken(&TokenKind::Struct) {
+            Ok(Some(self.parseStructDeclaration()?))
         } else if self.matchToken(&TokenKind::If) {
             Ok(Some(self.parseIfStatement()?))
         } else if self.matchToken(&TokenKind::While) {
@@ -136,6 +138,107 @@ impl Parser {
             params,
             return_ty,
             body,
+        })
+    }
+
+    fn parseStructDeclaration(&mut self) -> Result<Stmt, ParserError> {
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => return Err(self.error("Expected struct name.")),
+        };
+        self.advance();
+
+        self.consume(&TokenKind::LeftBrace, "Expected '{' after struct name.")?;
+
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
+        while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
+            let is_pub = self.matchToken(&TokenKind::Pub);
+
+            if self.matchToken(&TokenKind::Func) {
+                // Parse method
+                let method_name = match &self.peek().kind {
+                    TokenKind::Identifier(n) => n.clone(),
+                    _ => return Err(self.error("Expected method name.")),
+                };
+                self.advance();
+
+                self.consume(&TokenKind::LeftParen, "Expected '(' after method name.")?;
+                let mut params = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        let param_name = match &self.peek().kind {
+                            TokenKind::Identifier(n) => n.clone(),
+                            _ => return Err(self.error("Expected parameter name.")),
+                        };
+                        self.advance();
+                        let param_ty = self.parseTypeAnnotation()?;
+                        params.push(Parameter {
+                            name: param_name,
+                            ty: param_ty,
+                        });
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(&TokenKind::RightParen, "Expected ')' after parameters.")?;
+                let return_ty = self.parseTypeAnnotation()?;
+                self.consume(&TokenKind::LeftBrace, "Expected '{' before method body.")?;
+
+                let mut body = Vec::new();
+                while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
+                    if let Some(stmt) = self.parseStatement()? {
+                        body.push(stmt);
+                    }
+                }
+                self.consume(&TokenKind::RightBrace, "Expected '}' after method body.")?;
+
+                // Determine if static: methods with a return type that matches the struct name
+                // and have no implicit self are static
+                let is_static =
+                    is_pub && return_ty.as_ref().map(|t| t.name.as_str()) == Some(&name);
+
+                methods.push(MethodDecl {
+                    name: method_name,
+                    params,
+                    return_ty,
+                    body,
+                    is_pub,
+                    is_static,
+                });
+            } else {
+                // Parse field
+                let field_name = match &self.peek().kind {
+                    TokenKind::Identifier(n) => n.clone(),
+                    _ => return Err(self.error("Expected field name or 'func'.")),
+                };
+                self.advance();
+
+                self.consume(&TokenKind::Colon, "Expected ':' after field name.")?;
+                let ty_name = match &self.peek().kind {
+                    TokenKind::Identifier(n) => n.clone(),
+                    _ => return Err(self.error("Expected type name for field.")),
+                };
+                self.advance();
+                let ty = Type { name: ty_name };
+                self.matchToken(&TokenKind::Comma); // optional trailing comma
+
+                fields.push(FieldDecl {
+                    name: field_name,
+                    ty,
+                    is_pub,
+                });
+            }
+        }
+
+        self.consume(&TokenKind::RightBrace, "Expected '}' after struct body.")?;
+
+        Ok(Stmt::StructDecl {
+            name,
+            fields,
+            methods,
         })
     }
 
@@ -389,6 +492,22 @@ impl Parser {
                         &TokenKind::RightParen,
                         "Expected ')' after method arguments.",
                     )?;
+                    // If the receiver is a Variable with uppercase first char, it's a static call
+                    if let Expr::Variable(ref struct_name) = expr {
+                        if struct_name
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false)
+                        {
+                            expr = Expr::StaticCall {
+                                struct_name: struct_name.clone(),
+                                method: name,
+                                args,
+                            };
+                            continue;
+                        }
+                    }
                     expr = Expr::MethodCall {
                         receiver: Box::new(expr),
                         name,
@@ -441,7 +560,46 @@ impl Parser {
         match self.peek().kind.clone() {
             TokenKind::Identifier(name) => {
                 self.advance();
-                Ok(Expr::Variable(name))
+                // Check if this is a struct literal: Identifier { field: value, ... }
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                    && self.check(&TokenKind::LeftBrace)
+                {
+                    self.advance(); // consume '{'
+                    let mut fields = Vec::new();
+                    if !self.check(&TokenKind::RightBrace) {
+                        loop {
+                            let field_name = match self.peek().kind.clone() {
+                                TokenKind::Identifier(n) => {
+                                    self.advance();
+                                    n
+                                }
+                                _ => {
+                                    return Err(self.error("Expected field name in struct literal."))
+                                }
+                            };
+                            self.consume(
+                                &TokenKind::Colon,
+                                "Expected ':' after field name in struct literal.",
+                            )?;
+                            let value = self.parseExpression()?;
+                            fields.push((field_name, value));
+                            if !self.matchToken(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(
+                        &TokenKind::RightBrace,
+                        "Expected '}' after struct literal fields.",
+                    )?;
+                    Ok(Expr::StructLiteral { name, fields })
+                } else {
+                    Ok(Expr::Variable(name))
+                }
             }
             TokenKind::StringLiteral(value) => {
                 let span = self.peek().span;
