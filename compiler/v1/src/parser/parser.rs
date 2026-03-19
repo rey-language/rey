@@ -195,10 +195,10 @@ impl Parser {
                 }
                 self.consume(&TokenKind::RightBrace, "Expected '}' after method body.")?;
 
-                // Determine if static: methods with a return type that matches the struct name
-                // and have no implicit self are static
-                let is_static =
-                    is_pub && return_ty.as_ref().map(|t| t.name.as_str()) == Some(&name);
+                // Only factory methods like 'create' should be static
+                // Instance methods should never be static, even if they return the struct type
+                let is_static = is_pub && method_name == "create" && 
+                               return_ty.as_ref().map(|t| t.name.as_str()) == Some(&name);
 
                 methods.push(MethodDecl {
                     name: method_name,
@@ -217,12 +217,7 @@ impl Parser {
                 self.advance();
 
                 self.consume(&TokenKind::Colon, "Expected ':' after field name.")?;
-                let ty_name = match &self.peek().kind {
-                    TokenKind::Identifier(n) => n.clone(),
-                    _ => return Err(self.error("Expected type name for field.")),
-                };
-                self.advance();
-                let ty = Type { name: ty_name };
+                let ty = self.parseTypeOnly()?.ok_or_else(|| self.error("Expected type name for field."))?;
                 self.matchToken(&TokenKind::Comma); // optional trailing comma
 
                 fields.push(FieldDecl {
@@ -349,54 +344,58 @@ impl Parser {
 
     fn parseTypeAnnotation(&mut self) -> Result<Option<Type>, ParserError> {
         if self.matchToken(&TokenKind::Colon) {
-            if self.matchToken(&TokenKind::LeftBracket) {
-                let inner = match &self.peek().kind {
-                    TokenKind::Identifier(name) => name.clone(),
-                    _ => return Err(self.error("Expected type name inside '[]'.")),
-                };
-                self.advance();
-                self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
-                let mut name = format!("[{}]", inner);
-                if self.matchToken(&TokenKind::Question) {
-                    name.push('?');
-                }
-                Ok(Some(Type { name }))
-            } else if self.matchToken(&TokenKind::LeftBrace) {
-                let key = match &self.peek().kind {
-                    TokenKind::Identifier(name) => name.clone(),
-                    _ => return Err(self.error("Expected key type name inside '{}'.")),
-                };
-                self.advance();
-                self.consume(
-                    &TokenKind::Colon,
-                    "Expected ':' between dict key/value types.",
-                )?;
-                let value = match &self.peek().kind {
-                    TokenKind::Identifier(name) => name.clone(),
-                    _ => return Err(self.error("Expected value type name inside '{}'.")),
-                };
-                self.advance();
-                self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
-                let mut name = format!("{{{}:{}}}", key, value);
-                if self.matchToken(&TokenKind::Question) {
-                    name.push('?');
-                }
-                Ok(Some(Type { name }))
-            } else {
-                match &self.peek().kind {
-                    TokenKind::Identifier(name) => {
-                        let mut n = name.clone();
-                        self.advance();
-                        if self.matchToken(&TokenKind::Question) {
-                            n.push('?');
-                        }
-                        Ok(Some(Type { name: n }))
-                    }
-                    _ => Err(self.error("Expected type name after ':'")),
-                }
-            }
+            self.parseTypeOnly()
         } else {
             Ok(None)
+        }
+    }
+
+    fn parseTypeOnly(&mut self) -> Result<Option<Type>, ParserError> {
+        if self.matchToken(&TokenKind::LeftBracket) {
+            let inner = match &self.peek().kind {
+                TokenKind::Identifier(name) => name.clone(),
+                _ => return Err(self.error("Expected type name inside '[]'.")),
+            };
+            self.advance();
+            self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
+            let mut name = format!("[{}]", inner);
+            if self.matchToken(&TokenKind::Question) {
+                name.push('?');
+            }
+            Ok(Some(Type { name }))
+        } else if self.matchToken(&TokenKind::LeftBrace) {
+            let key = match &self.peek().kind {
+                TokenKind::Identifier(name) => name.clone(),
+                _ => return Err(self.error("Expected key type name inside '{}'.")),
+            };
+            self.advance();
+            self.consume(
+                &TokenKind::Colon,
+                "Expected ':' between dict key/value types.",
+            )?;
+            let value = match &self.peek().kind {
+                TokenKind::Identifier(name) => name.clone(),
+                _ => return Err(self.error("Expected value type name inside '{}'.")),
+            };
+            self.advance();
+            self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
+            let mut name = format!("{{{}:{}}}", key, value);
+            if self.matchToken(&TokenKind::Question) {
+                name.push('?');
+            }
+            Ok(Some(Type { name }))
+        } else {
+            match &self.peek().kind {
+                TokenKind::Identifier(name) => {
+                    let mut n = name.clone();
+                    self.advance();
+                    if self.matchToken(&TokenKind::Question) {
+                        n.push('?');
+                    }
+                    Ok(Some(Type { name: n }))
+                }
+                _ => Err(self.error("Expected type name")),
+            }
         }
     }
 

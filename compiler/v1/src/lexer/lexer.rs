@@ -237,13 +237,30 @@ impl<'a> Lexer<'a> {
         let mut value = String::new();
 
         while let Some(ch) = self.cursor.advance() {
-            if ch == '"' {
+            if ch == '\\' {
+                // Handle escaped characters
+                if let Some(escaped) = self.cursor.advance() {
+                    match escaped {
+                        '"' => value.push('"'),
+                        '\\' => value.push('\\'),
+                        'n' => value.push('\n'),
+                        'r' => value.push('\r'),
+                        't' => value.push('\t'),
+                        _ => value.push(escaped),
+                    }
+                } else {
+                    return Err(LexerError::UnterminatedString {
+                        span: Span::new(start, self.cursor.position()),
+                    });
+                }
+            } else if ch == '"' {
                 return Ok(Token {
                     kind: TokenKind::StringLiteral(value),
                     span: Span::new(start, self.cursor.position()),
                 });
+            } else {
+                value.push(ch);
             }
-            value.push(ch);
         }
 
         Err(LexerError::UnterminatedString {

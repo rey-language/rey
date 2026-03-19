@@ -1,9 +1,0 @@
-func main(): Void {
-    var untyped = 10;
-    println("Int: ", untyped);
-    untyped = "string now"; // Should work
-    println("String: ", untyped);
-
-    var typed: int = 10;
-    typed = "string later"; // Should fail
-}

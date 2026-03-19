@@ -1,0 +1,91 @@
+// Test file for advanced struct features
+// Tests all three bug fixes:
+// 1. Struct type as parameter type (Bug 1)
+// 2. String interpolation with nested quotes (Bug 2) 
+// 3. Array type as struct field type (Bug 3)
+
+println("=== Testing Bug 1: Struct type as parameter type ===");
+
+struct Vector {
+    x: float,
+    y: float,
+    
+    // Instance method with struct parameter type annotation
+    pub func add(other: Vector): Vector {
+        return Vector { x: x + other.x, y: y + other.y };
+    }
+    
+    // Instance method without type annotation (should also work)
+    pub func scale(factor): Vector {
+        return Vector { x: x * factor, y: y * factor };
+    }
+    
+    // Static factory method
+    pub func create(vx: float, vy: float): Vector {
+        return Vector { x: vx, y: vy };
+    }
+}
+
+// Test static method call
+var v1 = Vector.create(1.0, 2.0);
+var v2 = Vector.create(3.0, 4.0);
+
+// Test instance method with typed parameter
+var v3 = v1.add(v2);
+println("v1.add(v2) = Vector({v3.x}, {v3.y})");
+
+// Test instance method without typed parameter
+var v4 = v1.scale(2.0);
+println("v1.scale(2.0) = Vector({v4.x}, {v4.y})");
+
+println("=== Testing Bug 3: Array type as struct field type ===");
+
+struct Stack {
+    data: [int],  // Array field type - this was failing before
+    size: int,
+    
+    pub func create(): Stack {
+        return Stack { data: [], size: 0 };
+    }
+    
+    pub func push(val: int): Void {
+        push(data, val);
+        size++;
+    }
+    
+    pub func get(index: int): int {
+        return data[index];
+    }
+    
+    pub func get_size(): int {
+        return size;
+    }
+}
+
+var stack = Stack.create();
+stack.push(10);
+stack.push(20);
+stack.push(30);
+println("Stack size: {stack.get_size()}");
+println("Stack[0]: {stack.get(0)}");
+println("Stack[1]: {stack.get(1)}");
+println("Stack[2]: {stack.get(2)}");
+
+println("=== Testing Bug 2: String interpolation with nested quotes ===");
+
+var scores = { "alice": 95, "bob": 87, "charlie": 92 };
+var users = { "names": ["alice", "bob", "charlie"] };
+
+// Test dictionary access with string keys in interpolation (using escaped quotes)
+println("Alice's score: {scores[\"alice\"]}");
+println("Bob's score: {scores[\"bob\"]}");
+println("Charlie's score: {scores[\"charlie\"]}");
+
+// Test nested array access in interpolation
+println("First user: {users[\"names\"][0]}");
+println("Second user: {users[\"names\"][1]}");
+
+// Test complex interpolation with multiple expressions
+println("Summary: {users[\"names\"][0]} scored {scores[\"alice\"]} points");
+
+println("=== All tests completed successfully! ===");
