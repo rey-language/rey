@@ -563,7 +563,6 @@ The following keywords are reserved for future features:
 - `catch`
 
 Note: `enum` and `match` were previously reserved and are now fully implemented.
-
 ---
 
 ## Error Diagnostics
