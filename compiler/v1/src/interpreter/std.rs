@@ -100,6 +100,7 @@ impl StdLib {
     fn formatValue(value: &Value) -> String {
         match value {
             Value::String(s) => s.clone(),
+            Value::Char(c) => c.to_string(),
             Value::Number(n) => {
                 if n.fract() == 0.0 {
                     format!("{}", *n as i64)

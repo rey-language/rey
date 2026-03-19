@@ -41,6 +41,7 @@ impl<'a> Lexer<'a> {
         };
         match ch {
             '"' => self.lexString(start),
+            '\'' => self.lexChar(start),
 
             c if c.is_alphabetic() || c == '_' => Ok(self.lexIdentifier(start, c)),
 
@@ -239,6 +240,47 @@ impl<'a> Lexer<'a> {
         Err(LexerError::UnterminatedString {
             span: Span::new(start, self.cursor.position()),
         })
+    }
+
+    fn lexChar(&mut self, start: usize) -> Result<Token, LexerError> {
+        let ch = match self.cursor.advance() {
+            Some(c) => c,
+            None => {
+                return Err(LexerError::UnterminatedChar {
+                    span: Span::new(start, self.cursor.position()),
+                });
+            }
+        };
+
+        let value = if ch == '\\' {
+            let esc = self.cursor.advance().ok_or_else(|| LexerError::UnterminatedChar {
+                span: Span::new(start, self.cursor.position()),
+            })?;
+            match esc {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                '\\' => '\\',
+                '\'' => '\'',
+                other => other,
+            }
+        } else {
+            ch
+        };
+
+        match self.cursor.advance() {
+            Some('\'') => Ok(Token {
+                kind: TokenKind::CharLiteral(value),
+                span: Span::new(start, self.cursor.position()),
+            }),
+            Some(other) => Err(LexerError::UnexpectedCharacter {
+                found: other,
+                span: Span::new(start, self.cursor.position()),
+            }),
+            None => Err(LexerError::UnterminatedChar {
+                span: Span::new(start, self.cursor.position()),
+            }),
+        }
     }
     fn lexIdentifier(&mut self, start: usize, first: char) -> Token {
         let mut ident = String::new();

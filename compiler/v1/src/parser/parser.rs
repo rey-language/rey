@@ -424,6 +424,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Literal(Literal::String(value)))
             }
+            TokenKind::CharLiteral(value) => {
+                self.advance();
+                Ok(Expr::Literal(Literal::Char(value)))
+            }
             TokenKind::NumberLiteral(value) => {
                 self.advance();
                 Ok(Expr::Literal(Literal::Number(value)))

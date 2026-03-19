@@ -9,8 +9,12 @@ enum Ty {
     Null,
     Bool,
     String,
+    Char,
     Int,
+    UInt,
     Float,
+    Double,
+    Byte,
     Array(Box<Ty>),
     Dict(Box<Ty>, Box<Ty>),
     Function { params: Vec<Ty>, ret: Box<Ty> },
@@ -24,8 +28,12 @@ impl Ty {
             "null" => Ok(Ty::Null),
             "bool" => Ok(Ty::Bool),
             "String" => Ok(Ty::String),
+            "char" => Ok(Ty::Char),
             "int" => Ok(Ty::Int),
+            "uint" => Ok(Ty::UInt),
             "float" => Ok(Ty::Float),
+            "double" => Ok(Ty::Double),
+            "byte" => Ok(Ty::Byte),
             _ => {
                 if let Some(inner) = name.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
                     let inner = Ty::fromName(inner.trim())?;
@@ -50,12 +58,21 @@ impl Ty {
     }
 
     fn isAssignableTo(&self, target: &Ty) -> bool {
+        fn isIntLike(t: &Ty) -> bool {
+            matches!(t, Ty::Int | Ty::UInt | Ty::Byte)
+        }
+        fn isFloatLike(t: &Ty) -> bool {
+            matches!(t, Ty::Float | Ty::Double)
+        }
+
         match (self, target) {
             (_, Ty::Any) => true,
             (Ty::Any, _) => true,
             (Ty::Null, Ty::Null) => true,
             (Ty::Null, _) => false,
-            (Ty::Int, Ty::Float) => true,
+            (a, b) if isIntLike(a) && isIntLike(b) => true,
+            (a, b) if isFloatLike(a) && isFloatLike(b) => true,
+            (a, b) if isIntLike(a) && isFloatLike(b) => true,
             (a, b) => a == b,
         }
     }
@@ -312,7 +329,7 @@ impl TypeChecker {
             }
             Expr::Update { name, op: _, prefix: _ } => {
                 let cur = self.lookup(name)?;
-                if !cur.isAssignableTo(&Ty::Int) && !cur.isAssignableTo(&Ty::Float) {
+                if !matches!(cur, Ty::Int | Ty::UInt | Ty::Byte | Ty::Float | Ty::Double) {
                     return Err(format!(
                         "Type error: ++/-- requires numeric variable, got {:?}",
                         cur
@@ -547,27 +564,56 @@ impl TypeChecker {
 
     fn binaryTy(&self, left: &Ty, op: &TokenKind, right: &Ty) -> Result<Ty, String> {
         use TokenKind::*;
+
+        fn isIntLike(t: &Ty) -> bool {
+            matches!(t, Ty::Int | Ty::UInt | Ty::Byte)
+        }
+        fn isFloatLike(t: &Ty) -> bool {
+            matches!(t, Ty::Float | Ty::Double)
+        }
+        fn isNumeric(t: &Ty) -> bool {
+            isIntLike(t) || isFloatLike(t)
+        }
+        fn numericResult(a: &Ty, b: &Ty) -> Ty {
+            if matches!((a, b), (Ty::Double, _) | (_, Ty::Double)) {
+                return Ty::Double;
+            }
+            if isFloatLike(a) || isFloatLike(b) {
+                return Ty::Float;
+            }
+            if a == &Ty::UInt && b == &Ty::UInt {
+                return Ty::UInt;
+            }
+            if a == &Ty::Byte && b == &Ty::Byte {
+                return Ty::Byte;
+            }
+            Ty::Int
+        }
+
         match op {
             Plus => match (left, right) {
                 (Ty::String, Ty::String) => Ok(Ty::String),
-                (Ty::Int, Ty::Int) => Ok(Ty::Int),
-                (Ty::Float, Ty::Float) => Ok(Ty::Float),
-                (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ok(Ty::Float),
+                (l, r) if isNumeric(l) && isNumeric(r) => Ok(numericResult(l, r)),
                 _ => Err("Type error: invalid '+' operands".to_string()),
             },
-            Minus | Star | Percent => match (left, right) {
-                (Ty::Int, Ty::Int) => Ok(Ty::Int),
-                (Ty::Float, Ty::Float) => Ok(Ty::Float),
-                (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ok(Ty::Float),
-                _ => Err("Type error: invalid numeric operands".to_string()),
-            },
-            Slash => match (left, right) {
-                (Ty::Int, Ty::Int)
-                | (Ty::Float, Ty::Float)
-                | (Ty::Int, Ty::Float)
-                | (Ty::Float, Ty::Int) => Ok(Ty::Float),
-                _ => Err("Type error: invalid '/' operands".to_string()),
-            },
+            Minus | Star | Percent => {
+                if isNumeric(left) && isNumeric(right) {
+                    Ok(numericResult(left, right))
+                } else {
+                    Err("Type error: invalid numeric operands".to_string())
+                }
+            }
+            Slash => {
+                if isNumeric(left) && isNumeric(right) {
+                    Ok(if matches!((left, right), (Ty::Double, _) | (_, Ty::Double)) {
+                        Ty::Double
+                    } else {
+                        Ty::Float
+                    })
+                } else {
+                    Err("Type error: invalid '/' operands".to_string())
+                }
+            }
             EqualEqual | NotEqual | Less | LessEqual | Greater | GreaterEqual => Ok(Ty::Bool),
             AndAnd | OrOr => Ok(Ty::Bool),
             _ => Ok(Ty::Any),
@@ -577,7 +623,7 @@ impl TypeChecker {
     fn unaryTy(&self, op: &TokenKind, right: &Ty) -> Result<Ty, String> {
         match op {
             TokenKind::Minus => match right {
-                Ty::Int | Ty::Float => Ok(right.clone()),
+                Ty::Int | Ty::UInt | Ty::Byte | Ty::Float | Ty::Double => Ok(right.clone()),
                 _ => Err("Type error: unary '-' expects numeric".to_string()),
             },
             TokenKind::Not => Ok(Ty::Bool),
@@ -588,6 +634,7 @@ impl TypeChecker {
     fn literalTy(&self, lit: &Literal) -> Ty {
         match lit {
             Literal::String(_) => Ty::String,
+            Literal::Char(_) => Ty::Char,
             Literal::Bool(_) => Ty::Bool,
             Literal::Null => Ty::Null,
             Literal::Number(n) => {
@@ -612,6 +659,15 @@ impl TypeChecker {
         }
         match (a, b) {
             (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ty::Float,
+            (Ty::Int, Ty::Double) | (Ty::Double, Ty::Int) => Ty::Double,
+            (Ty::UInt, Ty::Float) | (Ty::Float, Ty::UInt) => Ty::Float,
+            (Ty::UInt, Ty::Double) | (Ty::Double, Ty::UInt) => Ty::Double,
+            (Ty::Byte, Ty::Float) | (Ty::Float, Ty::Byte) => Ty::Float,
+            (Ty::Byte, Ty::Double) | (Ty::Double, Ty::Byte) => Ty::Double,
+            (Ty::Float, Ty::Double) | (Ty::Double, Ty::Float) => Ty::Double,
+            (Ty::Int, Ty::UInt) | (Ty::UInt, Ty::Int) => Ty::Int,
+            (Ty::Int, Ty::Byte) | (Ty::Byte, Ty::Int) => Ty::Int,
+            (Ty::UInt, Ty::Byte) | (Ty::Byte, Ty::UInt) => Ty::UInt,
             _ => Ty::Any,
         }
     }
