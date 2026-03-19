@@ -53,9 +53,12 @@ Run any of them with cargo run -- src/tests/.rey
 - `cargo build --release` succeeds
 - release binaries + notes are staged in `releases/0.0.5-pre/`
 
-## For next session
-- Consider tightening the language spec (what is int vs float at runtime, truthiness rules, dictionary key restrictions).
-- Add negative tests for type errors once there's a harness for expected-failure cases.
-- Submit upstream PRs:
-  - `github-linguist/linguist` for Rey language recognition
-  - VSCode Marketplace publish for `rey-vscode/` (optional)
+## Next up (v0.0.5-pre batch)
+- Implement missing operators: `++`, `--`, `+=`, `-=`, `*=`, `/=`, `%=`, and `%` modulo.
+- Add additional variable types: `char`, `uint`, `double`, `byte`.
+- Add multiline strings using `""" ... """`.
+- Add null safety: nullable types (`int?`), `null` comparisons, and clean error on `null` access.
+- Implement struct system (fields + methods + construction + method calls + pub/private + overloading).
+- Add `try`/`catch` error handling.
+- Expand `src/tests/` with comprehensive coverage and ensure all tests pass.
+- Update `syntax.md`, `primer.md`, and `CHANGELOG.md`, then ship `releases/0.0.5-pre/`.
