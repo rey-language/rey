@@ -1,0 +1,96 @@
+func spawnEnemy(index: int): Void {
+    var names = ["Goblin", "Orc", "Troll", "Dragon", "Skeleton"];
+    var healths = [30, 50, 80, 150, 25];
+    var attacks = [8, 12, 18, 35, 6];
+
+    println("A wild " + names[index] + " appeared!");
+    println("Enemy HP: " + healths[index]);
+    println("Enemy ATK: " + attacks[index]);
+}
+
+func getEnemyHealth(index: int): int {
+    var healths = [30, 50, 80, 150, 25];
+    return healths[index];
+}
+
+func getEnemyAttack(index: int): int {
+    var attacks = [8, 12, 18, 35, 6];
+    return attacks[index];
+}
+
+func getEnemyName(index: int): String {
+    var names = ["Goblin", "Orc", "Troll", "Dragon", "Skeleton"];
+    return names[index];
+}
+
+func printStatus(playerHp: int, enemyHp: int, enemyName: String): Void {
+    println("--- STATUS ---");
+    println("Your HP: " + playerHp);
+    println(enemyName + " HP: " + enemyHp);
+    println("--------------");
+}
+
+func main(): Void {
+    println("Welcome to Rey Quest!");
+    var playerName = input("Enter your name: ");
+    println("Welcome, " + playerName + "!");
+
+    var playerHp: int = 100;
+    
+    var playerAtk: int = 15;
+    var playerGold: int = 0;
+    var enemyIndex: int = 0;
+    var playing: bool = true;
+
+    while (playing) {
+        spawnEnemy(enemyIndex);
+        var enemyHp = getEnemyHealth(enemyIndex);
+        var enemyAtk = getEnemyAttack(enemyIndex);
+        var enemyName = getEnemyName(enemyIndex);
+        var inCombat: bool = true;
+
+        while (inCombat) {
+            printStatus(playerHp, enemyHp, enemyName);
+            var choice = input("Fight or Run? (f/r): ");
+
+            if (choice == "f") {
+                enemyHp = enemyHp - playerAtk;
+                println("You deal " + playerAtk + " damage!");
+
+                if (enemyHp <= 0) {
+                    println(enemyName + " is dead!");
+                    playerGold = playerGold + 10;
+                    println("You earned 10 gold! Total: " + playerGold);
+                    inCombat = false;
+                } else {
+                    playerHp = playerHp - enemyAtk;
+                    println(enemyName + " deals " + enemyAtk + " damage!");
+
+                    if (playerHp <= 0) {
+                        println("You died. Game over!");
+                        println("Gold collected: " + playerGold);
+                        playing = false;
+                        inCombat = false;
+                    }
+                }
+            } else {
+                println("You ran away!");
+                inCombat = false;
+            }
+        }
+
+        if (playing) {
+            var next = input("Continue? (y/n): ");
+            if (next == "n") {
+                playing = false;
+                println("Thanks for playing, " + playerName + "!");
+                println("Final gold: " + playerGold);
+            } else {
+                enemyIndex = enemyIndex + 1;
+                if (enemyIndex > 4) {
+                    enemyIndex = 0;
+                }
+            }
+        }
+    }
+}

@@ -9,6 +9,7 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     VarDecl {
+        is_const: bool,
         name: String,
         ty: Option<Type>,
         initializer: Expr,

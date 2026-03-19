@@ -60,7 +60,9 @@ impl Ty {
     }
 
     fn fromName(name: &str) -> Result<Ty, String> {
-        let ty = Type { name: name.to_string() };
+        let ty = Type {
+            name: name.to_string(),
+        };
         Ty::fromAnnotation(&ty)
     }
 
@@ -91,7 +93,7 @@ impl Ty {
 
 #[derive(Default)]
 pub struct TypeChecker {
-    scopes: Vec<HashMap<String, Ty>>,
+    scopes: Vec<HashMap<String, (Ty, bool)>>,
     functions: HashMap<String, Ty>,
     currentReturn: Option<Ty>,
 }
@@ -107,6 +109,41 @@ impl TypeChecker {
             Ty::Function {
                 params: vec![],
                 ret: Box::new(Ty::Void),
+            },
+        );
+        c.functions.insert(
+            "print".to_string(),
+            Ty::Function {
+                params: vec![],
+                ret: Box::new(Ty::Void),
+            },
+        );
+        c.functions.insert(
+            "abs".to_string(),
+            Ty::Function {
+                params: vec![Ty::Any],
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "max".to_string(),
+            Ty::Function {
+                params: vec![Ty::Any, Ty::Any],
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "min".to_string(),
+            Ty::Function {
+                params: vec![Ty::Any, Ty::Any],
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "random".to_string(),
+            Ty::Function {
+                params: vec![],
+                ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
@@ -193,6 +230,7 @@ impl TypeChecker {
     fn checkStmt(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
             Stmt::VarDecl {
+                is_const,
                 name,
                 ty,
                 initializer,
@@ -212,10 +250,12 @@ impl TypeChecker {
                         ));
                     }
                     annTy
+                } else if !*is_const {
+                    Ty::Any
                 } else {
                     initTy
                 };
-                self.define(name, finalTy);
+                self.define(name, finalTy, *is_const);
                 Ok(())
             }
             Stmt::ExprStmt(expr) => {
@@ -235,7 +275,7 @@ impl TypeChecker {
                     } else {
                         Ty::Any
                     };
-                    self.define(&p.name, pty);
+                    self.define(&p.name, pty, false);
                 }
                 let prevReturn = self.currentReturn.clone();
                 self.currentReturn = if let Some(ty) = return_ty {
@@ -257,7 +297,10 @@ impl TypeChecker {
             } => {
                 let cty = self.exprTy(condition)?;
                 if !cty.isAssignableTo(&Ty::Bool) {
-                    return Err(format!("Type error: if condition must be bool, got {:?}", cty));
+                    return Err(format!(
+                        "Type error: if condition must be bool, got {:?}",
+                        cty
+                    ));
                 }
                 self.pushScope();
                 for s in then_branch {
@@ -276,7 +319,10 @@ impl TypeChecker {
             Stmt::While { condition, body } => {
                 let cty = self.exprTy(condition)?;
                 if !cty.isAssignableTo(&Ty::Bool) {
-                    return Err(format!("Type error: while condition must be bool, got {:?}", cty));
+                    return Err(format!(
+                        "Type error: while condition must be bool, got {:?}",
+                        cty
+                    ));
                 }
                 self.pushScope();
                 for s in body {
@@ -294,13 +340,19 @@ impl TypeChecker {
                 let sty = self.exprTy(start)?;
                 let ety = self.exprTy(end)?;
                 if !sty.isAssignableTo(&Ty::Int) && !sty.isAssignableTo(&Ty::Float) {
-                    return Err(format!("Type error: range start must be numeric, got {:?}", sty));
+                    return Err(format!(
+                        "Type error: range start must be numeric, got {:?}",
+                        sty
+                    ));
                 }
                 if !ety.isAssignableTo(&Ty::Int) && !ety.isAssignableTo(&Ty::Float) {
-                    return Err(format!("Type error: range end must be numeric, got {:?}", ety));
+                    return Err(format!(
+                        "Type error: range end must be numeric, got {:?}",
+                        ety
+                    ));
                 }
                 self.pushScope();
-                self.define(variable, Ty::Int);
+                self.define(variable, Ty::Int, false);
                 for s in body {
                     self.checkStmt(s)?;
                 }
@@ -326,11 +378,17 @@ impl TypeChecker {
     fn exprTy(&mut self, expr: &Expr) -> Result<Ty, String> {
         match expr {
             Expr::Literal(lit) => Ok(self.literalTy(lit)),
-            Expr::Variable(name) => self.lookup(name),
+            Expr::Variable(name) => self.lookup(name).map(|(t, _)| t),
             Expr::Assign { name, value } => {
                 let vty = self.exprTy(value)?;
-                let cur = self.lookup(name)?;
-                if !vty.isAssignableTo(&cur) {
+                let (cur, is_const) = self.lookup(name)?;
+                if is_const {
+                    return Err(format!(
+                        "Type error: cannot assign to constant variable '{}'",
+                        name
+                    ));
+                }
+                if cur != Ty::Any && !vty.isAssignableTo(&cur) {
                     return Err(format!(
                         "Type error: assignment to '{}' expected {:?} but got {:?}",
                         name, cur, vty
@@ -338,9 +396,22 @@ impl TypeChecker {
                 }
                 Ok(cur)
             }
-            Expr::Update { name, op: _, prefix: _ } => {
-                let cur = self.lookup(name)?;
-                if !matches!(cur, Ty::Int | Ty::UInt | Ty::Byte | Ty::Float | Ty::Double) {
+            Expr::Update {
+                name,
+                op: _,
+                prefix: _,
+            } => {
+                let (cur, is_const) = self.lookup(name)?;
+                if is_const {
+                    return Err(format!(
+                        "Type error: cannot assign to constant variable '{}'",
+                        name
+                    ));
+                }
+                if !matches!(
+                    cur,
+                    Ty::Int | Ty::UInt | Ty::Byte | Ty::Float | Ty::Double | Ty::Any
+                ) {
                     return Err(format!(
                         "Type error: ++/-- requires numeric variable, got {:?}",
                         cur
@@ -407,27 +478,44 @@ impl TypeChecker {
                 match tty {
                     Ty::Array(inner) => {
                         if !ity.isAssignableTo(&Ty::Int) {
-                            return Err(format!("Type error: array index must be int, got {:?}", ity));
+                            return Err(format!(
+                                "Type error: array index must be int, got {:?}",
+                                ity
+                            ));
                         }
                         Ok(*inner)
                     }
                     Ty::Dict(k, v) => {
                         if !ity.isAssignableTo(&k) {
-                            return Err(format!("Type error: dict index must be {:?}, got {:?}", k, ity));
+                            return Err(format!(
+                                "Type error: dict index must be {:?}, got {:?}",
+                                k, ity
+                            ));
                         }
                         Ok(*v)
                     }
-                    _ => Err("Type error: indexing only supported for arrays and dictionaries".to_string()),
+                    Ty::Any => Ok(Ty::Any),
+                    _ => Err(
+                        "Type error: indexing only supported for arrays and dictionaries"
+                            .to_string(),
+                    ),
                 }
             }
             Expr::Get { object, name: _ } => {
                 let tty = self.exprTy(object)?;
                 match tty {
                     Ty::Dict(_k, v) => Ok(*v),
-                    _ => Err("Type error: property access only supported for dictionaries".to_string()),
+                    Ty::Any => Ok(Ty::Any),
+                    _ => Err(
+                        "Type error: property access only supported for dictionaries".to_string(),
+                    ),
                 }
             }
-            Expr::MethodCall { receiver, name, args } => {
+            Expr::MethodCall {
+                receiver,
+                name,
+                args,
+            } => {
                 let rty = self.exprTy(receiver)?;
                 self.methodTy(&rty, name, args)
             }
@@ -435,6 +523,26 @@ impl TypeChecker {
     }
 
     fn methodTy(&mut self, receiver: &Ty, name: &str, args: &[Expr]) -> Result<Ty, String> {
+        match name {
+            "toString" => {
+                if !args.is_empty() {
+                    return Err("Type error: toString() expects 0 arguments".to_string());
+                }
+                return Ok(Ty::String);
+            }
+            "toInt" | "toFloat" => {
+                if !args.is_empty() {
+                    return Err(format!("Type error: {}() expects 0 arguments", name));
+                }
+                return Ok(if name == "toInt" { Ty::Int } else { Ty::Float });
+            }
+            _ => {}
+        }
+
+        if matches!(receiver, Ty::Any) {
+            return Ok(Ty::Any);
+        }
+
         match (receiver, name) {
             (Ty::Array(_), "length") => {
                 if !args.is_empty() {
@@ -484,12 +592,15 @@ impl TypeChecker {
                 }
                 Ok(Ty::Array(Box::new(Ty::String)))
             }
-            _ => Err(format!("Type error: method '{}' not supported on {:?}", name, receiver)),
+            _ => Err(format!(
+                "Type error: method '{}' not supported on {:?}",
+                name, receiver
+            )),
         }
     }
 
     fn checkCallByName(&mut self, name: &str, args: &[Expr]) -> Result<Ty, String> {
-        if name == "println" {
+        if name == "println" || name == "print" {
             for a in args {
                 self.exprTy(a)?;
             }
@@ -498,7 +609,10 @@ impl TypeChecker {
 
         if name == "len" {
             if args.len() != 1 {
-                return Err(format!("Type error: len expects 1 argument, got {}", args.len()));
+                return Err(format!(
+                    "Type error: len expects 1 argument, got {}",
+                    args.len()
+                ));
             }
             self.exprTy(&args[0])?;
             return Ok(Ty::Int);
@@ -506,7 +620,10 @@ impl TypeChecker {
 
         if name == "input" {
             if args.len() > 1 {
-                return Err(format!("Type error: input expects 0 or 1 arguments, got {}", args.len()));
+                return Err(format!(
+                    "Type error: input expects 0 or 1 arguments, got {}",
+                    args.len()
+                ));
             }
             if args.len() == 1 {
                 let t = self.exprTy(&args[0])?;
@@ -519,7 +636,10 @@ impl TypeChecker {
 
         if name == "push" {
             if args.len() != 2 {
-                return Err(format!("Type error: push expects 2 arguments, got {}", args.len()));
+                return Err(format!(
+                    "Type error: push expects 2 arguments, got {}",
+                    args.len()
+                ));
             }
             let arrTy = self.exprTy(&args[0])?;
             let elTy = self.exprTy(&args[1])?;
@@ -533,17 +653,22 @@ impl TypeChecker {
                     }
                     Ok(Ty::Void)
                 }
+                Ty::Any => Ok(Ty::Void),
                 _ => Err("Type error: push expects an array".to_string()),
             };
         }
 
         if name == "pop" {
             if args.len() != 1 {
-                return Err(format!("Type error: pop expects 1 argument, got {}", args.len()));
+                return Err(format!(
+                    "Type error: pop expects 1 argument, got {}",
+                    args.len()
+                ));
             }
             let arrTy = self.exprTy(&args[0])?;
             return match arrTy {
                 Ty::Array(inner) => Ok(*inner),
+                Ty::Any => Ok(Ty::Any),
                 _ => Err("Type error: pop expects an array".to_string()),
             };
         }
@@ -601,9 +726,28 @@ impl TypeChecker {
             Ty::Int
         }
 
+        if matches!(left, Ty::Any) || matches!(right, Ty::Any) {
+            if op == &TokenKind::EqualEqual
+                || op == &TokenKind::NotEqual
+                || op == &TokenKind::Less
+                || op == &TokenKind::LessEqual
+                || op == &TokenKind::Greater
+                || op == &TokenKind::GreaterEqual
+                || op == &TokenKind::AndAnd
+                || op == &TokenKind::OrOr
+            {
+                return Ok(Ty::Bool);
+            }
+            if op == &TokenKind::Plus && (matches!(left, Ty::String) || matches!(right, Ty::String))
+            {
+                return Ok(Ty::String);
+            }
+            return Ok(Ty::Any);
+        }
+
         match op {
             Plus => match (left, right) {
-                (Ty::String, Ty::String) => Ok(Ty::String),
+                (Ty::String, _) | (_, Ty::String) => Ok(Ty::String),
                 (l, r) if isNumeric(l) && isNumeric(r) => Ok(numericResult(l, r)),
                 _ => Err("Type error: invalid '+' operands".to_string()),
             },
@@ -616,11 +760,13 @@ impl TypeChecker {
             }
             Slash => {
                 if isNumeric(left) && isNumeric(right) {
-                    Ok(if matches!((left, right), (Ty::Double, _) | (_, Ty::Double)) {
-                        Ty::Double
-                    } else {
-                        Ty::Float
-                    })
+                    Ok(
+                        if matches!((left, right), (Ty::Double, _) | (_, Ty::Double)) {
+                            Ty::Double
+                        } else {
+                            Ty::Float
+                        },
+                    )
                 } else {
                     Err("Type error: invalid '/' operands".to_string())
                 }
@@ -632,6 +778,12 @@ impl TypeChecker {
     }
 
     fn unaryTy(&self, op: &TokenKind, right: &Ty) -> Result<Ty, String> {
+        if matches!(right, Ty::Any) {
+            if op == &TokenKind::Not {
+                return Ok(Ty::Bool);
+            }
+            return Ok(Ty::Any);
+        }
         match op {
             TokenKind::Minus => match right {
                 Ty::Int | Ty::UInt | Ty::Byte | Ty::Float | Ty::Double => Ok(right.clone()),
@@ -702,20 +854,20 @@ impl TypeChecker {
         }
     }
 
-    fn define(&mut self, name: &str, ty: Ty) {
+    fn define(&mut self, name: &str, ty: Ty, is_const: bool) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), ty);
+            scope.insert(name.to_string(), (ty, is_const));
         }
     }
 
-    fn lookup(&self, name: &str) -> Result<Ty, String> {
+    fn lookup(&self, name: &str) -> Result<(Ty, bool), String> {
         for scope in self.scopes.iter().rev() {
-            if let Some(t) = scope.get(name) {
-                return Ok(t.clone());
+            if let Some((t, c)) = scope.get(name) {
+                return Ok((t.clone(), *c));
             }
         }
         if let Some(t) = self.functions.get(name) {
-            return Ok(t.clone());
+            return Ok((t.clone(), true));
         }
         Err(format!("Type error: undefined variable '{}'", name))
     }

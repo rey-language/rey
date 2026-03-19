@@ -1,0 +1,7 @@
+func main () {
+    var name = "Misbah";
+    println("Hello, {name}");
+    name = 10;
+    println(name);
+    
+}

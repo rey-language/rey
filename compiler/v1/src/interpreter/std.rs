@@ -1,5 +1,5 @@
-use super::value::Value;
 use super::function::Function;
+use super::value::Value;
 use crate::lexer::span::Span;
 use std::io::{self, Write};
 
@@ -18,6 +18,31 @@ impl StdLib {
         );
         globals.insert("println".to_string(), Value::Function(println_func));
 
+        let print_func = Function::new(
+            "print".to_string(),
+            vec![],
+            vec![],
+            Span { start: 0, end: 0 },
+        );
+        globals.insert("print".to_string(), Value::Function(print_func));
+
+        let abs_func = Function::new("abs".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        globals.insert("abs".to_string(), Value::Function(abs_func));
+
+        let max_func = Function::new("max".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        globals.insert("max".to_string(), Value::Function(max_func));
+
+        let min_func = Function::new("min".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        globals.insert("min".to_string(), Value::Function(min_func));
+
+        let random_func = Function::new(
+            "random".to_string(),
+            vec![],
+            vec![],
+            Span { start: 0, end: 0 },
+        );
+        globals.insert("random".to_string(), Value::Function(random_func));
+
         globals
     }
 
@@ -32,6 +57,63 @@ impl StdLib {
                 }
                 println!();
                 Some(Ok(Value::Null))
+            }
+            "print" => {
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        print!(" ");
+                    }
+                    print!("{}", Self::formatValue(arg));
+                }
+                let _ = io::stdout().flush();
+                Some(Ok(Value::Null))
+            }
+            "abs" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("abs expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::Number(n) => Some(Ok(Value::Number(n.abs()))),
+                    _ => Some(Err("abs expects a number".to_string())),
+                }
+            }
+            "max" => {
+                if args.len() != 2 {
+                    return Some(Err(format!("max expects 2 arguments, got {}", args.len())));
+                }
+                match (&args[0], &args[1]) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Some(Ok(Value::Number(if a > b { *a } else { *b })))
+                    }
+                    _ => Some(Err("max expects two numbers".to_string())),
+                }
+            }
+            "min" => {
+                if args.len() != 2 {
+                    return Some(Err(format!("min expects 2 arguments, got {}", args.len())));
+                }
+                match (&args[0], &args[1]) {
+                    (Value::Number(a), Value::Number(b)) => {
+                        Some(Ok(Value::Number(if a < b { *a } else { *b })))
+                    }
+                    _ => Some(Err("min expects two numbers".to_string())),
+                }
+            }
+            "random" => {
+                if args.len() != 0 {
+                    return Some(Err(format!(
+                        "random expects 0 arguments, got {}",
+                        args.len()
+                    )));
+                }
+                let time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_micros();
+                // Simple pseudo-random using time and a bit of math to avoid contiguous values
+                let rand_val =
+                    ((time.wrapping_mul(1103515245).wrapping_add(12345)) % 10000) as f64 / 10000.0;
+                Some(Ok(Value::Number(rand_val)))
             }
             "len" => {
                 if args.len() != 1 {
@@ -70,7 +152,10 @@ impl StdLib {
             }
             "input" => {
                 if args.len() > 1 {
-                    return Some(Err(format!("input expects 0 or 1 arguments, got {}", args.len())));
+                    return Some(Err(format!(
+                        "input expects 0 or 1 arguments, got {}",
+                        args.len()
+                    )));
                 }
                 if args.len() == 1 {
                     match &args[0] {
@@ -97,7 +182,7 @@ impl StdLib {
         }
     }
 
-    fn formatValue(value: &Value) -> String {
+    pub fn formatValue(value: &Value) -> String {
         match value {
             Value::String(s) => s.clone(),
             Value::Char(c) => c.to_string(),

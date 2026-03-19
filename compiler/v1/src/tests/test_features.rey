@@ -1,0 +1,28 @@
+func main(): Void {
+    var playerHp = 100;
+    
+    // 1. String + mixed types
+    println("Mixed type: " + playerHp);
+    
+    // 2. String interpolation
+    println("Interpolation HP: {playerHp}");
+    println("Interpolation Math: {playerHp + 50}");
+
+    // 3. methods
+    println((5).toString());
+    println("10".toInt() + 5);
+    println("3.14".toFloat() + 1.0);
+
+    // 4. print without newline
+    print("No ");
+    print("newline. ");
+
+    // 5. println with multiple args
+    println("Multiple", "args", playerHp);
+
+    // 6. builtins
+    println("abs(-5):", abs(-5));
+    println("max(10, 20):", max(10, 20));
+    println("min(10, 20):", min(10, 20));
+    println("random():", random());
+}
