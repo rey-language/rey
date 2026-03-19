@@ -21,6 +21,7 @@ pub enum Value {
     Number(f64),
     Bool(bool),
     Function(Function),
+    Tuple(Rc<RefCell<Vec<Value>>>),
     Array(Rc<RefCell<Vec<Value>>>),
     Dict(Rc<RefCell<HashMap<String, Value>>>),
     StructInstance {
@@ -44,6 +45,11 @@ impl std::fmt::Display for Value {
             }
             Value::Bool(b) => write!(f, "{}", b),
             Value::Function(func) => write!(f, "<func {}>", func.name),
+            Value::Tuple(items) => {
+                let items = items.borrow();
+                let parts: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
+                write!(f, "({})", parts.join(", "))
+            }
             Value::Array(arr) => {
                 let arr = arr.borrow();
                 let items: Vec<String> = arr.iter().map(|v| format!("{}", v)).collect();
@@ -78,6 +84,11 @@ impl PartialEq for Value {
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Function(a), Value::Function(b)) => a == b,
+            (Value::Tuple(a), Value::Tuple(b)) => {
+                let a = a.borrow();
+                let b = b.borrow();
+                a.as_slice() == b.as_slice()
+            }
             (Value::Array(a), Value::Array(b)) => {
                 let a = a.borrow();
                 let b = b.borrow();

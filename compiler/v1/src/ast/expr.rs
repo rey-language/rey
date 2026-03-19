@@ -1,9 +1,14 @@
 use super::Literal;
+use crate::lexer::span::Span;
 use crate::lexer::TokenKind;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Literal),
+    TupleLiteral {
+        elements: Vec<Expr>,
+        span: Span,
+    },
     Binary {
         left: Box<Expr>,
         op: TokenKind,
@@ -69,4 +74,26 @@ pub enum Expr {
         prefix: bool,
         span: Span,
     },
+}
+
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Literal(_) => Span { start: 0, end: 0 },
+            Expr::TupleLiteral { span, .. } => *span,
+            Expr::Binary { span, .. } => *span,
+            Expr::Variable(_) => Span { start: 0, end: 0 },
+            Expr::Call { span, .. } => *span,
+            Expr::ArrayLiteral { span, .. } => *span,
+            Expr::DictLiteral { span, .. } => *span,
+            Expr::Index { span, .. } => *span,
+            Expr::Get { span, .. } => *span,
+            Expr::MethodCall { span, .. } => *span,
+            Expr::StructLiteral { span, .. } => *span,
+            Expr::StaticCall { span, .. } => *span,
+            Expr::Unary { span, .. } => *span,
+            Expr::Assign { span, .. } => *span,
+            Expr::Update { span, .. } => *span,
+        }
+    }
 }

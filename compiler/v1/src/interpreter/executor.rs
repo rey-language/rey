@@ -137,19 +137,26 @@ impl Executor {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
-            Expr::Binary { left, op, right } => {
+            Expr::Binary { left, op, right, .. } => {
                 let left_val = self.evaluate_expr(left, env)?;
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
             }
-            Expr::ArrayLiteral { elements } => {
+            Expr::ArrayLiteral { elements, .. } => {
                 let mut evaluated = Vec::new();
                 for el in elements {
                     evaluated.push(self.evaluate_expr(el, env)?);
                 }
                 Ok(Value::Array(Rc::new(RefCell::new(evaluated))))
             }
-            Expr::DictLiteral { entries } => {
+            Expr::TupleLiteral { elements, .. } => {
+                let mut evaluated = Vec::new();
+                for el in elements {
+                    evaluated.push(self.evaluate_expr(el, env)?);
+                }
+                Ok(Value::Tuple(Rc::new(RefCell::new(evaluated))))
+            }
+            Expr::DictLiteral { entries, .. } => {
                 let mut m = HashMap::new();
                 for (k, v) in entries {
                     let value = self.evaluate_expr(v, env)?;
@@ -157,7 +164,7 @@ impl Executor {
                 }
                 Ok(Value::Dict(Rc::new(RefCell::new(m))))
             }
-            Expr::Index { target, index } => {
+            Expr::Index { target, index, .. } => {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
                 match (target_val, index_val) {
@@ -183,7 +190,7 @@ impl Executor {
                     _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
-            Expr::Get { object, name } => {
+            Expr::Get { object, name, .. } => {
                 let obj = self.evaluate_expr(object, env)?;
                 match obj {
                     Value::Dict(d) => d
@@ -191,6 +198,16 @@ impl Executor {
                         .get(name)
                         .cloned()
                         .ok_or_else(|| "Dictionary key not found".to_string()),
+                    Value::Tuple(items) => {
+                        let idx: usize = name
+                            .parse()
+                            .map_err(|_| "Tuple access must be a numeric index".to_string())?;
+                        items
+                            .borrow()
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Tuple index out of bounds".to_string())
+                    }
                     Value::StructInstance {
                         struct_name,
                         fields,
@@ -220,6 +237,7 @@ impl Executor {
                 receiver,
                 name,
                 args,
+                ..
             } => {
                 let recv = self.evaluate_expr(receiver, env)?;
                 let mut evaluated_args = Vec::new();
@@ -245,6 +263,7 @@ impl Executor {
             Expr::StructLiteral {
                 name,
                 fields: field_exprs,
+                ..
             } => {
                 let def = env
                     .get_struct(name)
@@ -277,6 +296,7 @@ impl Executor {
                 struct_name,
                 method,
                 args,
+                ..
             } => {
                 let def = env
                     .get_struct(struct_name)
@@ -326,16 +346,16 @@ impl Executor {
                 // Execute the static method body
                 self.execute_block(&method_decl.body, &mut method_env)
             }
-            Expr::Unary { op, right } => {
+            Expr::Unary { op, right, .. } => {
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_unary(op, right_val)
             }
-            Expr::Assign { name, value } => {
+            Expr::Assign { name, value, .. } => {
                 let val = self.evaluate_expr(value, env)?;
                 env.assign(name, val.clone())?;
                 Ok(val)
             }
-            Expr::Update { name, op, prefix } => {
+            Expr::Update { name, op, prefix, .. } => {
                 let current = env
                     .get(name)
                     .cloned()
@@ -356,7 +376,7 @@ impl Executor {
                 env.assign(name, Value::Number(new_num))?;
                 Ok(Value::Number(if *prefix { new_num } else { current_num }))
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, .. } => {
                 // Check if it's a built-in function first
                 if let Expr::Variable(name) = callee.as_ref() {
                     let mut evaluated_args = Vec::new();

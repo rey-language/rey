@@ -18,6 +18,7 @@ enum Ty {
     Nullable(Box<Ty>),
     Array(Box<Ty>),
     Dict(Box<Ty>, Box<Ty>),
+    Tuple(Vec<Ty>),
     Function { params: Vec<Ty>, ret: Box<Ty> },
 }
 
@@ -240,7 +241,7 @@ impl TypeChecker {
                     let annTy = Ty::fromAnnotation(ann)?;
                     let allowEmptyTypedArray = matches!(
                         (initializer, &initTy, &annTy),
-                        (Expr::ArrayLiteral { elements }, Ty::Array(inner), Ty::Array(_))
+                        (Expr::ArrayLiteral { elements, .. }, Ty::Array(inner), Ty::Array(_))
                             if elements.is_empty() && matches!(inner.as_ref(), Ty::Any)
                     );
                     if !initTy.isAssignableTo(&annTy) && !allowEmptyTypedArray {
@@ -383,14 +384,40 @@ impl TypeChecker {
         }
     }
 
+    fn exprTy(&mut self, expr: &Expr) -> Result<Ty, String> {
+        match expr {
+            Expr::Literal(lit) => Ok(match lit {
+                Literal::String(_) => Ty::String,
+                Literal::Char(_) => Ty::Char,
+                Literal::Number(n) => {
+                    if n.fract() == 0.0 {
+                        Ty::Int
+                    } else {
+                        Ty::Float
+                    }
+                }
+                Literal::Bool(_) => Ty::Bool,
+                Literal::Null => Ty::Null,
+            }),
+            Expr::Variable(name) => Ok(self.lookup(name)?.0),
+            Expr::Assign { name, value, .. } => {
+                let (cur, is_const) = self.lookup(name)?;
+                if is_const {
+                    return Err(format!(
+                        "Type error: cannot assign to constant variable '{}'",
+                        name
+                    ));
+                }
+                let vty = self.exprTy(value)?;
+                if !vty.isAssignableTo(&cur) {
+                    return Err(format!(
+                        "Type error: variable '{}' expected {:?} but got {:?}",
+                        name, cur, vty
+                    ));
+                }
                 Ok(cur)
-            },
-            Expr::Update {
-                name,
-                op: _,
-                prefix: _,
-                span,
-            } => {
+            }
+            Expr::Update { name, .. } => {
                 let (cur, is_const) = self.lookup(name)?;
                 if is_const {
                     return Err(format!(
@@ -409,16 +436,16 @@ impl TypeChecker {
                 }
                 Ok(cur)
             }
-            Expr::Binary { left, op, right } => {
+            Expr::Binary { left, op, right, .. } => {
                 let l = self.exprTy(left)?;
                 let r = self.exprTy(right)?;
                 self.binaryTy(&l, op, &r)
             }
-            Expr::Unary { op, right } => {
+            Expr::Unary { op, right, .. } => {
                 let r = self.exprTy(right)?;
                 self.unaryTy(op, &r)
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, .. } => {
                 if let Expr::Variable(name) = callee.as_ref() {
                     return self.checkCallByName(name, args);
                 }
@@ -446,7 +473,7 @@ impl TypeChecker {
                     _ => Err("Type error: can only call functions".to_string()),
                 }
             }
-            Expr::ArrayLiteral { elements } => {
+            Expr::ArrayLiteral { elements, .. } => {
                 let mut inner = Ty::Any;
                 for e in elements {
                     let ety = self.exprTy(e)?;
@@ -454,7 +481,14 @@ impl TypeChecker {
                 }
                 Ok(Ty::Array(Box::new(inner)))
             }
-            Expr::DictLiteral { entries } => {
+            Expr::TupleLiteral { elements, .. } => {
+                let mut tys = Vec::new();
+                for el in elements {
+                    tys.push(self.exprTy(el)?);
+                }
+                Ok(Ty::Tuple(tys))
+            }
+            Expr::DictLiteral { entries, .. } => {
                 let mut valueTy = Ty::Any;
                 for (_k, v) in entries {
                     let vty = self.exprTy(v)?;
@@ -462,7 +496,7 @@ impl TypeChecker {
                 }
                 Ok(Ty::Dict(Box::new(Ty::String), Box::new(valueTy)))
             }
-            Expr::Index { target, index } => {
+            Expr::Index { target, index, .. } => {
                 let tty = self.exprTy(target)?;
                 let ity = self.exprTy(index)?;
                 match tty {
@@ -491,26 +525,36 @@ impl TypeChecker {
                     ),
                 }
             }
-            Expr::Get { object, name: _ } => {
+            Expr::Get { object, name, .. } => {
                 let tty = self.exprTy(object)?;
                 match tty {
                     Ty::Dict(_k, v) => Ok(*v),
+                    Ty::Tuple(items) => {
+                        let idx: usize = name.parse().map_err(|_| {
+                            "Type error: tuple access must be a numeric index".to_string()
+                        })?;
+                        items.get(idx).cloned().ok_or_else(|| {
+                            format!("Type error: tuple index {} out of bounds", idx)
+                        })
+                    }
                     Ty::Any => Ok(Ty::Any),
                     _ => Err(
-                        "Type error: property access only supported for dictionaries".to_string(),
+                        "Type error: property access only supported for dictionaries and tuples"
+                            .to_string(),
                     ),
                 }
             }
-            Expr::MethodCall { receiver, name, args } => {
+            Expr::MethodCall {
+                receiver,
+                name,
+                args,
+                ..
+            } => {
                 let rty = self.exprTy(receiver)?;
                 self.methodTy(&rty, name, args)
             }
-            Expr::StructLiteral { name, fields } => Ok(Ty::Any),
-            Expr::StaticCall {
-                struct_name,
-                method,
-                args,
-            } => Ok(Ty::Any),
+            Expr::StructLiteral { .. } => Ok(Ty::Any),
+            Expr::StaticCall { .. } => Ok(Ty::Any),
         }
     }
 
@@ -518,7 +562,7 @@ impl TypeChecker {
         match name {
             "toString" => {
                 if !args.is_empty() {
-                    return Err("Type error: toString() expects 0 arguments".to_string());
+                    return Err(format!("Type error: {}() expects 0 arguments", name));
                 }
                 return Ok(Ty::String);
             }

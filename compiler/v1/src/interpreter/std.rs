@@ -196,6 +196,15 @@ impl StdLib {
             Value::Bool(b) => format!("{}", b),
             Value::Null => "null".to_string(),
             Value::Function(_) => "<function>".to_string(),
+            Value::Tuple(items) => {
+                let items = items
+                    .borrow()
+                    .iter()
+                    .map(Self::formatValue)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({})", items)
+            }
             Value::Array(arr) => {
                 let items = arr
                     .borrow()

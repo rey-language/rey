@@ -34,6 +34,7 @@ impl Interpreter {
             let call = Expr::Call {
                 callee: Box::new(Expr::Variable("main".to_string())),
                 args: vec![],
+                span: crate::lexer::span::Span { start: 0, end: 0 },
             };
             self.executor.evaluate_expr(&call, &mut self.environment)?;
         }

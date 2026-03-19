@@ -17,21 +17,21 @@ impl Evaluator {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
-            Expr::Binary { left, op, right } => {
+            Expr::Binary { left, op, right, .. } => {
                 let left_val = self.evaluate(left, env)?;
                 let right_val = self.evaluate(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
             }
-            Expr::Unary { op, right } => {
+            Expr::Unary { op, right, .. } => {
                 let right_val = self.evaluate(right, env)?;
                 self.evaluate_unary(op, right_val)
             }
-            Expr::Assign { name, value } => {
+            Expr::Assign { value, .. } => {
                 let val = self.evaluate(value, env)?;
             
                 Err("Assignment should be handled by executor".to_string())
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee: _, args: _, .. } => {
                 Err("Function calls must be handled as statements".to_string())
             }
             Expr::Get { .. } => {

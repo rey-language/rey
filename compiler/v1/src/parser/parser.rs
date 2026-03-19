@@ -247,10 +247,17 @@ impl Parser {
         self.consume(&TokenKind::RightBrace, "Expected '}' after then branch.")?;
 
         let else_branch = if self.matchToken(&TokenKind::Else) {
-            self.consume(&TokenKind::LeftBrace, "Expected '{' after 'else'.")?;
-            let block = self.parseBlock()?;
-            self.consume(&TokenKind::RightBrace, "Expected '}' after else branch.")?;
-            Some(block)
+            if self.matchToken(&TokenKind::If) {
+                // else if chaining - put If back and parse as nested if
+                self.current -= 1;
+                let nested_if = self.parseIfStatement()?;
+                Some(vec![nested_if])
+            } else {
+                self.consume(&TokenKind::LeftBrace, "Expected '{' after 'else'.")?;
+                let block = self.parseBlock()?;
+                self.consume(&TokenKind::RightBrace, "Expected '}' after else branch.")?;
+                Some(block)
+            }
         } else {
             None
         };
@@ -403,6 +410,7 @@ impl Parser {
         match &self.peek().kind {
             TokenKind::PlusPlus | TokenKind::MinusMinus => {
                 let op = self.peek().kind.clone();
+                let span = self.peek().span;
                 self.advance();
                 let right = self.parseUnary()?;
                 match right {
@@ -410,6 +418,7 @@ impl Parser {
                         name,
                         op,
                         prefix: true,
+                        span,
                     }),
                     _ => Err(self.error("Invalid ++/-- target.")),
                 }
@@ -425,11 +434,13 @@ impl Parser {
                 })
             }
             TokenKind::Not => {
+                let span = self.peek().span;
                 self.advance();
                 let expr = self.parseUnary()?;
                 Ok(Expr::Unary {
                     op: TokenKind::Not,
                     right: Box::new(expr),
+                    span,
                 })
             }
             _ => self.parsePostfix(),
@@ -457,6 +468,7 @@ impl Parser {
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
+                    span: self.previous().span,
                 };
                 continue;
             }
@@ -467,6 +479,7 @@ impl Parser {
                 expr = Expr::Index {
                     target: Box::new(expr),
                     index: Box::new(index),
+                    span: self.previous().span,
                 };
                 continue;
             }
@@ -474,6 +487,12 @@ impl Parser {
             if self.matchToken(&TokenKind::Dot) {
                 let name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
+                    TokenKind::NumberLiteral(n) => {
+                        if n.fract() != 0.0 {
+                            return Err(self.error("Tuple index after '.' must be an integer."));
+                        }
+                        (*n as i64).to_string()
+                    }
                     _ => return Err(self.error("Expected identifier after '.'.")),
                 };
                 self.advance();
@@ -504,6 +523,7 @@ impl Parser {
                                 struct_name: struct_name.clone(),
                                 method: name,
                                 args,
+                                span: self.previous().span,
                             };
                             continue;
                         }
@@ -512,12 +532,14 @@ impl Parser {
                         receiver: Box::new(expr),
                         name,
                         args,
+                        span: self.previous().span,
                     };
                     continue;
                 }
                 expr = Expr::Get {
                     object: Box::new(expr),
                     name,
+                    span: self.previous().span,
                 };
                 continue;
             }
@@ -529,6 +551,7 @@ impl Parser {
                             name,
                             op: TokenKind::PlusPlus,
                             prefix: false,
+                            span: self.previous().span,
                         };
                         break;
                     }
@@ -543,6 +566,7 @@ impl Parser {
                             name,
                             op: TokenKind::MinusMinus,
                             prefix: false,
+                            span: self.previous().span,
                         };
                         break;
                     }
@@ -568,6 +592,7 @@ impl Parser {
                     .unwrap_or(false)
                     && self.check(&TokenKind::LeftBrace)
                 {
+                    let start = self.previous().span.start;
                     self.advance(); // consume '{'
                     let mut fields = Vec::new();
                     if !self.check(&TokenKind::RightBrace) {
@@ -596,7 +621,11 @@ impl Parser {
                         &TokenKind::RightBrace,
                         "Expected '}' after struct literal fields.",
                     )?;
-                    Ok(Expr::StructLiteral { name, fields })
+                    Ok(Expr::StructLiteral {
+                        name,
+                        fields,
+                        span: Span::new(start, self.previous().span.end),
+                    })
                 } else {
                     Ok(Expr::Variable(name))
                 }
@@ -634,11 +663,31 @@ impl Parser {
             }
             TokenKind::LeftParen => {
                 self.advance();
-                let expr = self.parseExpression()?;
-                self.consume(&TokenKind::RightParen, "Expected ')' after expression.")?;
-                Ok(expr)
+                if self.check(&TokenKind::RightParen) {
+                    return Err(self.error("Expected expression."));
+                }
+
+                let first = self.parseExpression()?;
+                if self.matchToken(&TokenKind::Comma) {
+                    let mut elements = vec![first];
+                    if !self.check(&TokenKind::RightParen) {
+                        loop {
+                            elements.push(self.parseExpression()?);
+                            if !self.matchToken(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(&TokenKind::RightParen, "Expected ')' after tuple literal.")?;
+                    let span = self.previous().span;
+                    Ok(Expr::TupleLiteral { elements, span })
+                } else {
+                    self.consume(&TokenKind::RightParen, "Expected ')' after expression.")?;
+                    Ok(first)
+                }
             }
             TokenKind::LeftBracket => {
+                let start = self.peek().span.start;
                 self.advance();
                 let mut elements = Vec::new();
                 if !self.check(&TokenKind::RightBracket) {
@@ -653,9 +702,13 @@ impl Parser {
                     &TokenKind::RightBracket,
                     "Expected ']' after array literal.",
                 )?;
-                Ok(Expr::ArrayLiteral { elements })
+                Ok(Expr::ArrayLiteral {
+                    elements,
+                    span: Span::new(start, self.previous().span.end),
+                })
             }
             TokenKind::LeftBrace => {
+                let start = self.peek().span.start;
                 self.advance();
                 let mut entries = Vec::new();
                 if !self.check(&TokenKind::RightBrace) {
@@ -687,7 +740,10 @@ impl Parser {
                     &TokenKind::RightBrace,
                     "Expected '}' after dictionary literal.",
                 )?;
-                Ok(Expr::DictLiteral { entries })
+                Ok(Expr::DictLiteral {
+                    entries,
+                    span: Span::new(start, self.previous().span.end),
+                })
             }
             _ => Err(self.error("Expected expression.")),
         }
@@ -763,12 +819,14 @@ impl Parser {
         let expr = self.parseLogicOr()?;
 
         if self.matchToken(&TokenKind::Equal) {
+            let span = self.previous().span;
             let value = self.parseAssignment()?;
 
             if let Expr::Variable(name) = expr {
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
+                    span,
                 });
             }
 
@@ -801,6 +859,7 @@ impl Parser {
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(bin),
+                    span: self.previous().span,
                 });
             }
             return Err(self.error("Invalid assignment target."));

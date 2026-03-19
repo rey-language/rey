@@ -1,0 +1,26 @@
+// Test else if chaining
+
+var x = 5;
+
+if (x > 10) {
+    print("x > 10");
+} else if (x > 3) {
+    print("x > 3");
+} else if (x > 0) {
+    print("x > 0");
+} else {
+    print("x <= 0");
+}
+
+var y = 15;
+if (y > 100) {
+    print("y > 100");
+} else if (y > 50) {
+    print("y > 50");
+} else if (y > 20) {
+    print("y > 20");
+} else {
+    print("y <= 20");
+}
+
+print("done");
