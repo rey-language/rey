@@ -51,9 +51,43 @@ impl<'a> Lexer<'a> {
             '[' => Ok(self.simpleToken(TokenKind::LeftBracket, start)),
             ']' => Ok(self.simpleToken(TokenKind::RightBracket, start)),
             ';' => Ok(self.simpleToken(TokenKind::Semicolon, start)),
-            '+' => Ok(self.simpleToken(TokenKind::Plus, start)),
-            '-' => Ok(self.simpleToken(TokenKind::Minus, start)),
-            '*' => Ok(self.simpleToken(TokenKind::Star, start)),
+            '+' => {
+                let kind = if self.matchNext('+') {
+                    TokenKind::PlusPlus
+                } else if self.matchNext('=') {
+                    TokenKind::PlusEqual
+                } else {
+                    TokenKind::Plus
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+            '-' => {
+                let kind = if self.matchNext('-') {
+                    TokenKind::MinusMinus
+                } else if self.matchNext('=') {
+                    TokenKind::MinusEqual
+                } else {
+                    TokenKind::Minus
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+            '*' => {
+                let kind = if self.matchNext('=') {
+                    TokenKind::StarEqual
+                } else {
+                    TokenKind::Star
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
             '/' => {
                 // check for comment
                 if let Some('/') = self.cursor.peek() {
@@ -69,12 +103,57 @@ impl<'a> Lexer<'a> {
                     // recurse to get next token
                     return self.nextToken();
                 }
-                Ok(self.simpleToken(TokenKind::Slash, start))
+                let kind = if self.matchNext('=') {
+                    TokenKind::SlashEqual
+                } else {
+                    TokenKind::Slash
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
             }
             ':' => Ok(self.simpleToken(TokenKind::Colon, start)),
             '.' => Ok(self.simpleToken(TokenKind::Dot, start)),
             ',' => Ok(self.simpleToken(TokenKind::Comma, start)),
-            '%' => Ok(self.simpleToken(TokenKind::Percent, start)),
+            '%' => {
+                let kind = if self.matchNext('=') {
+                    TokenKind::PercentEqual
+                } else {
+                    TokenKind::Percent
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+
+            '&' => {
+                if self.matchNext('&') {
+                    Ok(Token {
+                        kind: TokenKind::AndAnd,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                } else {
+                    Err(LexerError::UnexpectedCharacter {
+                        found: ch,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                }
+            }
+            '|' => {
+                if self.matchNext('|') {
+                    Ok(Token {
+                        kind: TokenKind::OrOr,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                } else {
+                    Err(LexerError::UnexpectedCharacter {
+                        found: ch,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                }
+            }
 
             '=' => {
                 let kind = if self.matchNext('=') {

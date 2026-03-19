@@ -30,6 +30,15 @@ pub enum TokenKind {
     AndAnd,
     OrOr,
 
+    //multi-char operators
+    PlusPlus,
+    MinusMinus,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
+
     //keywords
     Var,
     Func,

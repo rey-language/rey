@@ -310,6 +310,16 @@ impl TypeChecker {
                 }
                 Ok(cur)
             }
+            Expr::Update { name, op: _, prefix: _ } => {
+                let cur = self.lookup(name)?;
+                if !cur.isAssignableTo(&Ty::Int) && !cur.isAssignableTo(&Ty::Float) {
+                    return Err(format!(
+                        "Type error: ++/-- requires numeric variable, got {:?}",
+                        cur
+                    ));
+                }
+                Ok(cur)
+            }
             Expr::Binary { left, op, right } => {
                 let l = self.exprTy(left)?;
                 let r = self.exprTy(right)?;
@@ -545,7 +555,7 @@ impl TypeChecker {
                 (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ok(Ty::Float),
                 _ => Err("Type error: invalid '+' operands".to_string()),
             },
-            Minus | Star => match (left, right) {
+            Minus | Star | Percent => match (left, right) {
                 (Ty::Int, Ty::Int) => Ok(Ty::Int),
                 (Ty::Float, Ty::Float) => Ok(Ty::Float),
                 (Ty::Int, Ty::Float) | (Ty::Float, Ty::Int) => Ok(Ty::Float),
