@@ -1,0 +1,7 @@
+name: Rey
+type: programming
+color: "#eb4c3b"
+extensions:
+  - ".rey"
+tm_scope: source.rey
+ace_mode: text
