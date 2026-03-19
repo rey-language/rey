@@ -287,9 +287,12 @@ impl<'a> Lexer<'a> {
         };
 
         let value = if ch == '\\' {
-            let esc = self.cursor.advance().ok_or_else(|| LexerError::UnterminatedChar {
-                span: Span::new(start, self.cursor.position()),
-            })?;
+            let esc = self
+                .cursor
+                .advance()
+                .ok_or_else(|| LexerError::UnterminatedChar {
+                    span: Span::new(start, self.cursor.position()),
+                })?;
             match esc {
                 'n' => '\n',
                 't' => '\t',
@@ -331,6 +334,7 @@ impl<'a> Lexer<'a> {
 
         let kind = match ident.as_str() {
             "var" => TokenKind::Var,
+            "const" => TokenKind::Const,
             "func" => TokenKind::Func,
             "return" => TokenKind::Return,
             "if" => TokenKind::If,
@@ -338,6 +342,8 @@ impl<'a> Lexer<'a> {
             "while" => TokenKind::While,
             "for" => TokenKind::For,
             "in" => TokenKind::In,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "null" => TokenKind::Null,

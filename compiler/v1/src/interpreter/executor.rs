@@ -1,12 +1,12 @@
-use crate::ast::{Expr, Stmt};
-use crate::lexer::span::Span;
-use crate::lexer::TokenKind;
 use super::control_flow::ControlFlow;
 use super::environment::Environment;
 use super::function::Function;
 use super::value::Value;
-use std::collections::HashMap;
+use crate::ast::{Expr, Stmt};
+use crate::lexer::span::Span;
+use crate::lexer::TokenKind;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Executor;
@@ -18,7 +18,12 @@ impl Executor {
 
     pub fn execute(&self, stmt: &Stmt, env: &mut Environment) -> Result<ControlFlow, String> {
         match stmt {
-            Stmt::VarDecl { name, initializer, .. } => {
+            Stmt::VarDecl {
+                is_const: _,
+                name,
+                initializer,
+                ..
+            } => {
                 let value = self.evaluate_expr(initializer, env)?;
                 env.define(name.clone(), value);
                 Ok(ControlFlow::normal(Value::Null))
@@ -27,7 +32,9 @@ impl Executor {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::normal(value))
             }
-            Stmt::FuncDecl { name, params, body, .. } => {
+            Stmt::FuncDecl {
+                name, params, body, ..
+            } => {
                 let function = Function::new(
                     name.clone(),
                     params.clone(),
@@ -37,23 +44,25 @@ impl Executor {
                 env.define(name.clone(), Value::Function(function));
                 Ok(ControlFlow::normal(Value::Null))
             }
-            Stmt::If { condition, then_branch, else_branch } => {
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let condition_value = self.evaluate_expr(condition, env)?;
                 if self.isTruthy(&condition_value) {
                     match self.execute_block_with_control_flow(then_branch, env)? {
                         ControlFlow::Normal(_) => {}
                         ControlFlow::Return(value) => return Ok(ControlFlow::Return(value)),
-                        ControlFlow::Break | ControlFlow::Continue => {
-                            return Err("Break/continue not allowed in if statement".to_string());
-                        }
+                        ControlFlow::Break => return Ok(ControlFlow::Break),
+                        ControlFlow::Continue => return Ok(ControlFlow::Continue),
                     }
                 } else if let Some(else_branch) = else_branch {
                     match self.execute_block_with_control_flow(else_branch, env)? {
                         ControlFlow::Normal(_) => {}
                         ControlFlow::Return(value) => return Ok(ControlFlow::Return(value)),
-                        ControlFlow::Break | ControlFlow::Continue => {
-                            return Err("Break/continue not allowed in if statement".to_string());
-                        }
+                        ControlFlow::Break => return Ok(ControlFlow::Break),
+                        ControlFlow::Continue => return Ok(ControlFlow::Continue),
                     }
                 }
                 Ok(ControlFlow::normal(Value::Null))
@@ -69,7 +78,12 @@ impl Executor {
                 }
                 Ok(ControlFlow::normal(Value::Null))
             }
-            Stmt::For { variable, start, end, body } => {
+            Stmt::For {
+                variable,
+                start,
+                end,
+                body,
+            } => {
                 // Evaluate start and end expressions
                 let start_val = self.evaluate_expr(start, env)?;
                 let end_val = self.evaluate_expr(end, env)?;
@@ -99,12 +113,8 @@ impl Executor {
                 }
                 Ok(ControlFlow::normal(Value::Null))
             }
-            Stmt::Break => {
-                Ok(ControlFlow::Break)
-            }
-            Stmt::Continue => {
-                Ok(ControlFlow::Continue)
-            }
+            Stmt::Break => Ok(ControlFlow::Break),
+            Stmt::Continue => Ok(ControlFlow::Continue),
             Stmt::Return(expr) => {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::return_value(value))
@@ -176,7 +186,11 @@ impl Executor {
                     _ => Err("Property access is only supported for dictionaries".to_string()),
                 }
             }
-            Expr::MethodCall { receiver, name, args } => {
+            Expr::MethodCall {
+                receiver,
+                name,
+                args,
+            } => {
                 let recv = self.evaluate_expr(receiver, env)?;
                 let mut evaluated_args = Vec::new();
                 for a in args {
@@ -222,7 +236,9 @@ impl Executor {
                         evaluated_args.push(self.evaluate_expr(arg, env)?);
                     }
 
-                    if let Some(result) = super::std::StdLib::call_builtin_function(name, &evaluated_args) {
+                    if let Some(result) =
+                        super::std::StdLib::call_builtin_function(name, &evaluated_args)
+                    {
                         result
                     } else {
                         // Not a built-in, check if it's a user-defined function
@@ -290,42 +306,110 @@ impl Executor {
         }
     }
 
-    fn evaluate_method_call(&self, receiver: Value, name: &str, args: &[Value]) -> Result<Value, String> {
+    fn evaluate_method_call(
+        &self,
+        receiver: Value,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, String> {
         match (receiver, name) {
+            (val, "toString") => {
+                if !args.is_empty() {
+                    return Err(format!(
+                        "toString() expects 0 arguments, got {}",
+                        args.len()
+                    ));
+                }
+                Ok(Value::String(super::std::StdLib::formatValue(&val)))
+            }
+            (Value::String(s), "toInt") => {
+                if !args.is_empty() {
+                    return Err(format!("toInt() expects 0 arguments, got {}", args.len()));
+                }
+                match s.parse::<f64>() {
+                    Ok(n) => Ok(Value::Number(n.trunc())),
+                    Err(_) => Err(format!("Cannot convert string '{}' to int", s)),
+                }
+            }
+            (Value::String(s), "toFloat") => {
+                if !args.is_empty() {
+                    return Err(format!("toFloat() expects 0 arguments, got {}", args.len()));
+                }
+                match s.parse::<f64>() {
+                    Ok(n) => Ok(Value::Number(n)),
+                    Err(_) => Err(format!("Cannot convert string '{}' to float", s)),
+                }
+            }
+            (Value::Number(n), "toInt") => {
+                if !args.is_empty() {
+                    return Err(format!("toInt() expects 0 arguments, got {}", args.len()));
+                }
+                Ok(Value::Number(n.trunc()))
+            }
+            (Value::Number(n), "toFloat") => {
+                if !args.is_empty() {
+                    return Err(format!("toFloat() expects 0 arguments, got {}", args.len()));
+                }
+                Ok(Value::Number(n))
+            }
             (Value::Array(arr), "length") => {
                 if !args.is_empty() {
-                    return Err(format!("{}.length() expects 0 arguments, got {}", "Array", args.len()));
+                    return Err(format!(
+                        "{}.length() expects 0 arguments, got {}",
+                        "Array",
+                        args.len()
+                    ));
                 }
                 Ok(Value::Number(arr.borrow().len() as f64))
             }
             (Value::Array(arr), "push") => {
                 if args.len() != 1 {
-                    return Err(format!("{}.push() expects 1 argument, got {}", "Array", args.len()));
+                    return Err(format!(
+                        "{}.push() expects 1 argument, got {}",
+                        "Array",
+                        args.len()
+                    ));
                 }
                 arr.borrow_mut().push(args[0].clone());
                 Ok(Value::Null)
             }
             (Value::String(s), "length") => {
                 if !args.is_empty() {
-                    return Err(format!("{}.length() expects 0 arguments, got {}", "String", args.len()));
+                    return Err(format!(
+                        "{}.length() expects 0 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
                 }
                 Ok(Value::Number(s.chars().count() as f64))
             }
             (Value::String(s), "upper") => {
                 if !args.is_empty() {
-                    return Err(format!("{}.upper() expects 0 arguments, got {}", "String", args.len()));
+                    return Err(format!(
+                        "{}.upper() expects 0 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
                 }
                 Ok(Value::String(s.to_uppercase()))
             }
             (Value::String(s), "lower") => {
                 if !args.is_empty() {
-                    return Err(format!("{}.lower() expects 0 arguments, got {}", "String", args.len()));
+                    return Err(format!(
+                        "{}.lower() expects 0 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
                 }
                 Ok(Value::String(s.to_lowercase()))
             }
             (Value::String(s), "contains") => {
                 if args.len() != 1 {
-                    return Err(format!("{}.contains() expects 1 argument, got {}", "String", args.len()));
+                    return Err(format!(
+                        "{}.contains() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
                 }
                 match &args[0] {
                     Value::String(needle) => Ok(Value::Bool(s.contains(needle))),
@@ -334,7 +418,11 @@ impl Executor {
             }
             (Value::String(s), "split") => {
                 if args.len() != 1 {
-                    return Err(format!("{}.split() expects 1 argument, got {}", "String", args.len()));
+                    return Err(format!(
+                        "{}.split() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
                 }
                 let delim = match &args[0] {
                     Value::String(d) => d.clone(),
@@ -393,7 +481,12 @@ impl Executor {
             (Value::Number(l), Greater, Value::Number(r)) => Ok(Value::Bool(l > r)),
             (Value::Number(l), GreaterEqual, Value::Number(r)) => Ok(Value::Bool(l >= r)),
 
-            (Value::String(l), Plus, Value::String(r)) => Ok(Value::String(l + &r)),
+            (Value::String(l), Plus, r) => {
+                Ok(Value::String(l + &super::std::StdLib::formatValue(&r)))
+            }
+            (l, Plus, Value::String(r)) => {
+                Ok(Value::String(super::std::StdLib::formatValue(&l) + &r))
+            }
             (Value::String(l), EqualEqual, Value::String(r)) => Ok(Value::Bool(l == r)),
             (Value::String(l), NotEqual, Value::String(r)) => Ok(Value::Bool(l != r)),
 
@@ -416,14 +509,24 @@ impl Executor {
         }
     }
 
-    pub fn execute_block(&self, statements: &[Stmt], env: &mut Environment) -> Result<Value, String> {
+    pub fn execute_block(
+        &self,
+        statements: &[Stmt],
+        env: &mut Environment,
+    ) -> Result<Value, String> {
         match self.execute_block_with_control_flow(statements, env)? {
             ControlFlow::Normal(value) | ControlFlow::Return(value) => Ok(value),
-            ControlFlow::Break | ControlFlow::Continue => Err("Break/continue outside of loop".to_string()),
+            ControlFlow::Break | ControlFlow::Continue => {
+                Err("Break/continue outside of loop".to_string())
+            }
         }
     }
 
-    pub fn execute_block_with_control_flow(&self, statements: &[Stmt], env: &mut Environment) -> Result<ControlFlow, String> {
+    pub fn execute_block_with_control_flow(
+        &self,
+        statements: &[Stmt],
+        env: &mut Environment,
+    ) -> Result<ControlFlow, String> {
         for stmt in statements {
             let control_flow = self.execute(stmt, env)?;
             match control_flow {

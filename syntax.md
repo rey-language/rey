@@ -1,61 +1,28 @@
-# Rey Language Syntax — v0
+# Rey Language Syntax Reference
 
-Reference documentation for implemented syntax and features in the Rey v0 interpreter.
+Welcome to the comprehensive guide for the **Rey Language (v1)**.
 
 ---
 
 ## Table of Contents
 
-1. [Variables](#variables)
-2. [Data Types](#data-types)
+1. [Variables & Types](#variables--types)
+2. [Null Safety](#null-safety)
 3. [Operators](#operators)
 4. [Control Flow](#control-flow)
 5. [Functions](#functions)
-6. [Builtins](#builtins)
-7. [Program Structure](#program-structure)
+6. [Collections (Arrays & Dicts)](#collections-arrays--dicts)
+7. [Strings (Interpolation, Multiline, Methods)](#strings)
+8. [Built-in Functions](#built-in-functions)
+9. [Error Diagnostics](#error-diagnostics)
 
 ---
 
-## Variables
-
-### Declaration
-
-Variables are declared using the `var` keyword. All variables must be declared before use.
-
-```rey
-var x = 10;           // untyped (type inferred)
-var name = "Rey";     // untyped
-var flag = true;      // untyped
-```
-
-### Type Annotations
-
-Variables MAY declare a type using `: type`. Typed variables MUST receive compatible values on reassignment.
-
-```rey
-var i: int = 5;       // typed as int
-var f: float = 3.14;  // typed as float
-var s: String = "hello";  // typed as String
-var b: bool = false;  // typed as bool
-```
-
-### Reassignment
-
-Variables can be reassigned using `=`. The new value MUST match the declared type if one was specified.
-
-```rey
-var x = 10;
-x = 20;               // OK - same type
-
-var typed: int = 42;
-typed = 100;          // OK - int matches int
-```
-
----
-
-## Data Types
+## Variables & Types
 
 ### Core Types
+
+Rey heavily leverages implicit type inference but supports full explicit typing.
 
 | Type | Example | Description |
 |------|---------|-------------|
@@ -63,151 +30,147 @@ typed = 100;          // OK - int matches int
 | `float` | `3.14`, `-0.5` | Floating-point numbers |
 | `String` | `"hello"` | String literals |
 | `bool` | `true`, `false` | Boolean values |
-| `null` | `null` | Null value |
+| `null` | `null` | Nullable default |
 | `Void` | `Void` | Function return type (no value) |
+| `[T]` | `[1, 2]` | Array of type `T` |
+| `{K:V}` | `{"a": 1}` | Dictionary mapping keys to values |
 
-### Collection Types
+### Variable Declaration
 
-Arrays:
+Variables are defined using the `var` keyword. Unannotated `var` declarations are **Dynamically Typed** and can change their type later, while annotated ones are strictly typed to their annotation. You can also declare immutable constants using `const`.
 
 ```rey
-var xs = [1, 2, 3];
-var ys: [int] = [1, 2, 3];
-println(xs[0]);
+// Dynamically typed (can mutate types later)
+var x = 10;           
+x = "Now I'm a string!"; 
+
+// Explicitly strictly typed (cannot change type later)
+var id: int = 1234;
+// id = "string"; // ❌ Type error
+
+// Immutable Constants (cannot be reassigned)
+const MAX_LIVES = 3;
+// MAX_LIVES = 5; // ❌ Type error
+const GRAVITY: float = 9.81;
 ```
 
-Dictionaries (string-keyed):
+### Type Conversion Methods
+
+You can explicitly convert basic types using methods:
+- `.toString()`: Converts any value into a string.
+- `.toInt()`: Attempts to convert a numeric string or float into an integer.
+- `.toFloat()`: Attempts to convert a numeric string or int into a float.
 
 ```rey
-var d = {name: "Rey", id: 42};
-var typed: {String:int} = {"a": 1, "b": 2};
-println(d["name"]);
-println(d.name);
+var strAge = (25).toString();    // "25"
+var actualAge = "30".toInt();    // 30
+var piVal = "3.1415".toFloat();  // 3.1415
 ```
 
-### Type Inference
+---
 
-When no type annotation is provided, the type is inferred from the initializer:
+## Null Safety
+
+Rey incorporates native Null Safety by explicitly distinguishing between types that can hold `null` values versus those that cannot. Standard types (`String`, `int`) **cannot** be assigned `null`. 
+
+To allow a variable to be `null`, append a `?` to its type annotation:
 
 ```rey
-var x = 10;           // inferred as int
-var f = 3.14;         // inferred as float
-var s = "text";       // inferred as String
-var b = true;         // inferred as bool
+// Standard restricted types:
+// var msg: String = null; // ❌ Type error
+
+// Nullable Types:
+var name: String? = null;  // ✅ Valid
+name = "Rey";
+
+var count: int? = null;
+count = 50;
 ```
 
 ---
 
 ## Operators
 
-### Arithmetic Operators
+Rey comes full-featured with standard arithmetic, logic, comparison, and unary operations.
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `+` | Addition | `a + b` |
-| `-` | Subtraction | `a - b` |
-| `*` | Multiplication | `a * b` |
-| `/` | Division | `a / b` |
+### Arithmetic & Assignment
 
-### Comparison Operators
+| Operator | Description | Sub-types | Example |
+|----------|-------------|-----------|---------|
+| `+` | Addition / Concat | `+=` (compound) | `a + b` / `a += 5` |
+| `-` | Subtraction | `-=` (compound) | `a - b` / `a -= 5` |
+| `*` | Multiplication | `*=` (compound) | `a * b` / `a *= 2` |
+| `/` | Division | `/=` (compound) | `a / b` / `a /= 2` |
+| `%` | Modulo | `%=` (compound) | `a % 2` / `a %= 2` |
+| `++` / `--` | Increment / Decrement | — | `x++` / `--y` |
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `==` | Equal | `a == b` |
-| `!=` | Not equal | `a != b` |
-| `<` | Less than | `a < b` |
-| `<=` | Less than or equal | `a <= b` |
-| `>` | Greater than | `a > b` |
-| `>=` | Greater than or equal | `a >= b` |
+> *Note: Mixed-type String concatenation is fully supported! (`"HP: " + 100` compiles to `"HP: 100"`).*
 
-### Logical Operators
+### Comparisons & Logical Operations
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&&` | Logical AND | `a && b` |
-| `||` | Logical OR | `a || b` |
-
-### Unary Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `-` | Negation | `-x` |
-| `!` | Logical NOT | `!flag` |
-
-### Assignment Operator
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `=` | Simple assignment | `x = 5` |
+| Operator | Action | Example | Logic | Action | Example |
+|----------|--------|---------|-------|--------|---------|
+| `==` | Equality | `a == b` | `&&` | AND | `a && b` |
+| `!=` | Inequality | `a != b` | `\|\|` | OR | `a \|\| b` |
+| `<` | Less | `a < b` | `!` | NOT | `!a` |
+| `<=` | Less/Eq | `a <= b` | `-` | Negate | `-a` |
+| `>` | Greater | `a > b` |
+| `>=` | Greater/Eq | `a >= b` |
 
 ---
 
 ## Control Flow
 
-### If/Else
-
-Conditional execution using `if` and `else`. Parentheses are **required** around the condition.
+### If / Else
+Standard branching logic. Conditions **must** be wrapped in parentheses.
 
 ```rey
-if (condition) {
-    // executed if condition is true
+var score = 85;
+
+if (score >= 90) {
+    println("A");
+} else if (score >= 80) {
+    println("B");
 } else {
-    // executed if condition is false
+    println("C");
 }
 ```
 
-Example:
+### While Loop
 
-```rey
-if (x > 10) {
-    println("big");
-} else {
-    println("small");
-}
-```
-
-### While Loops
-
-While loops repeat while the condition is true. Parentheses are **required** around the condition.
-
-```rey
-while (condition) {
-    // loop body
-}
-```
-
-Example:
+Repeats execution as long as the condition evaluates to `true`:
 
 ```rey
 var i = 0;
-while (i < 10) {
-    println(i);
-    i = i + 1;
+while (i < 5) {
+    println("Current: ", i);
+    i++;
 }
 ```
 
-### For Loops
+### For Loop
 
-For loops iterate over a range:
+Iterates over a predefined sequence using the `range(inclusive, exclusive)` generator:
 
 ```rey
-for x in range(start, end) {
-    // loop body
+for index in range(0, 10) {
+    println(index); // Prints 0 through 9
 }
 ```
-
-The `range` function produces values from `start` (inclusive) to `end` (exclusive).
 
 ### Break and Continue
 
+Interrupt or skip loop iterations easily:
+
 ```rey
-while (true) {
-    if (done) {
-        break;      // exit loop
+for n in range(0, 100) {
+    if (n % 2 == 0) {
+        continue; // Skip even numbers
     }
-    if (skip) {
-        continue;   // next iteration
+    if (n > 50) {
+        break; // Stop completely after 50
     }
+    println(n);
 }
 ```
 
@@ -215,190 +178,143 @@ while (true) {
 
 ## Functions
 
-### Declaration
-
-Functions are declared using the `func` keyword.
+Functions are defined using the `func` keyword. Parameters and return types can be typed or left implicitly untyped (`Any`).
 
 ```rey
-func name(parameters) : returnType {
-    body
-}
-```
-
-### Parameters
-
-Parameters MAY be typed. Untyped parameters accept any value.
-
-```rey
-// untyped parameter
-func echo(x) {
-    return x;
+// Fully typed function
+func calculateDamage(base: int, multiplier: float): float {
+    return base * multiplier;
 }
 
-// typed parameters
-func add(a: int, b: int): int {
-    return a + b;
-}
-```
-
-### Return Types
-
-Functions MAY declare a return type. If declared, all return paths MUST return a compatible value.
-
-```rey
-func greet(name: String): String {
-    return name;
-}
-
-func compute(): Void {
-    return;     // or omit return entirely
-}
-```
-
-### Calling Functions
-
-```rey
-func main(): Void {
-    var result = add(2, 3);
-    println(result);
-}
-```
-
----
-
-## Builtins
-
-### `println`
-
-Print a value to stdout.
-
-```rey
-println("Hello, World!");
-println(42);
-println(true);
-```
-
-### `len`
-
-Get the length of a string, array, or dictionary.
-
-```rey
-println(len("abc"));
-println(len([1, 2, 3]));
-println(len({a: 1, b: 2}));
-```
-
-### `push` / `pop`
-
-Mutate arrays.
-
-```rey
-var xs: [int] = [1, 2];
-push(xs, 3);
-println(pop(xs));
-```
-
-### `input`
-
-Read a line from stdin (optionally with a prompt).
-
-```rey
-var name = input("Enter name: ");
-println(name);
-```
-
----
-
-## String Methods
-
-Supported methods on `String`:
-
-```rey
-var s: String = "Rey Language";
-println(s.length());
-println(s.upper());
-println(s.lower());
-println(s.contains("Lang"));
-println(s.split(" ")[0]);
-```
-
----
-
-## Program Structure
-
-### Entry Point
-
-Programs start executing from the `main` function:
-
-```rey
-func main(): Void {
-    // program entry point
-}
-```
-
-### Complete Example
-
-```rey
-// Variable and function example
-
-func add(a: int, b: int): int {
-    return a + b;
+// Implicit Void return type and 'Any' parameters
+func greet(name) {
+    println("Hello, " + name + "!");
 }
 
 func main(): Void {
-    var x = 10;
-    var y = 20;
-    var sum = add(x, y);
-    println(sum);     // prints 30
+    greet("Wizard");
+    var dmg = calculateDamage(15, 1.5);
 }
 ```
 
-### Fibonacci Example
+---
+
+## Collections (Arrays & Dicts)
+
+### Arrays
+
+Arrays are defined using square brackets `[]`.
 
 ```rey
-func fib(n: int): int {
-    if (n < 2) {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
-}
+var items = [10, 20, 30];               // Untyped inference
+var names: [String] = ["Goblin", "Orc"]; // Strictly typed Array
 
-func main(): Void {
-    var i: int = 0;
-    while (i < 10) {
-        println(fib(i));
-        i = i + 1;
-    }
-}
+println(items[0]);                      // Retrieval
+
+// Push and Pop builtin operations
+push(items, 40);                        // Appends 40
+var lastElement = pop(items);           // Stores 40 and removes it
+```
+
+### Dictionaries
+
+Dictionaries define string-keyed property objects. Elements can be retrieved via indices or dynamic property access.
+
+```rey
+var player = {"hp": 100, "name": "Hero"};
+var strictDict: {String:int} = {"gold": 50};
+
+println(player["hp"]);    // Index bracket notation
+println(player.name);     // Shorthand dot notation
 ```
 
 ---
 
-## Not Yet Implemented
+## Strings
 
-The following features are NOT implemented:
+### Multiline Strings
+Rey supports standard C-style strings via `""`, but also robust multiline strings wrapping content in `""" """`:
 
-| Feature | Status |
-|---------|--------|
-| Modulo operator (`%`) | Lexer token exists but parser doesn't use it |
-| Compound assignment (`+=`, `-=`, etc) | Not implemented |
-| Increment/decrement (`++`, `--`) | Not implemented |
+```rey
+var query = """
+SELECT * 
+FROM users 
+WHERE active = true;
+""";
+```
+
+### String Interpolation
+Rey natively resolves dynamically bound variables directly inside string text via brackets `{}`:
+
+```rey
+var playerName = "Mage";
+var hp = 100;
+
+// Variables injected automatically!
+println("Welcome {playerName}! Your HP is: {hp}");
+
+// Math expressions are also supported inline:
+println("HP buff: {hp + 50}");
+```
+
+### String Methods
+Strings come with comprehensive native methods (Note: `length()`, not `len()` for strings!).
+
+```rey
+var msg = " Rey Language ";
+
+println(msg.length());       // Returns character count
+println(msg.upper());        // -> " REY LANGUAGE "
+println(msg.lower());        // -> " rey language "
+println(msg.contains("ey")); // -> true
+println(msg.split(" ")[1]);  // -> "Rey"
+```
 
 ---
 
-## Running Programs
+## Built-in Functions
 
-Build and run using Cargo:
+In addition to collection modifications, Rey provides several global functions natively inside the interpreter context.
 
-```bash
-cd compiler/v1
-cargo build --release
-./target/release/rey-v0 <path-to-.rey-file>
+### Standard Evaluators
+- `print(args...)`: Prints multiple args natively without a trailing newline.
+- `println(args...)`: Prints multiple args terminating with a newline.
+- `input(prompt)`: Blocks terminal execution and reads string input from the user.
+- `len(target)`: General length evaluator that works for Arrays, Strings, and Dicts.
+
+```rey
+print("Connecting");
+println("...", "Done!");
+var entry = input("Confirm? (y/n): ");
+var size = len([1, 2, 3]);
 ```
 
-Or use `cargo run`:
+### Temporary Math Utilities
+Rey dynamically ships with math constants. 
+*Note: These will eventually be migrated to an isolated `std` package module.*
+- `abs(num)`: Returns absolute integer/float.
+- `max(a, b)`: Returns greater value.
+- `min(a, b)`: Returns smaller value.
+- `random()`: Automatically creates a highly precise randomized fraction between `0.00` and `0.99`.
 
-```bash
-cd compiler/v1
-cargo run -- ../src/tests/variables.rey
+---
+
+## Error Diagnostics
+
+Rey leverages visually stunning Rust/Miette-like compiler diagnostics! Gone are the days of parsing confusing log stacks!
+
+If you write malformed code (such as leaving a string literal unterminated or throwing syntactical bugs), the compiler will extract exactly what happened, and highlight the faulty column ranges actively in your console:
+
+```text
+error[lexer]: Unterminated string literal
+ --> line 3:19
+  |
+3 |     var message = "Hello, world
+  |                   ^^^^^^^^^^^^^
+
+error[syntax]: Expected ';' after expression.
+ --> line 39:24
+  |
+39 |     var playerAtk: int = 15;0
+   |                        ^
 ```

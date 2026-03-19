@@ -1,0 +1,4 @@
+func main(): Void {
+    const MAX_LIVES = 3;
+    MAX_LIVES = 5; // Should fail
+}

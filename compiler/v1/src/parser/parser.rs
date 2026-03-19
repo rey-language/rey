@@ -3,7 +3,6 @@
 //its fragile as hell
 //if u do atempt it, add aounts of hours spent = 0
 
-
 //all the best :)
 
 #![allow(non_snake_case)]
@@ -16,7 +15,7 @@ use crate::parser::error::ParserError;
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
-} 
+}
 impl Parser {
     pub fn new(mut tokens: Vec<Token>) -> Self {
         if tokens.is_empty() {
@@ -43,7 +42,9 @@ impl Parser {
             return Ok(None);
         }
         if self.matchToken(&TokenKind::Var) {
-            Ok(Some(self.parseVarDeclaration()?))
+            Ok(Some(self.parseVarDeclaration(false)?))
+        } else if self.matchToken(&TokenKind::Const) {
+            Ok(Some(self.parseVarDeclaration(true)?))
         } else if self.matchToken(&TokenKind::Func) {
             Ok(Some(self.parseFuncDeclaration()?))
         } else if self.matchToken(&TokenKind::If) {
@@ -62,7 +63,7 @@ impl Parser {
             Ok(Some(self.parseExpressionStatement()?))
         }
     }
-    fn parseVarDeclaration(&mut self) -> Result<Stmt, ParserError> {
+    fn parseVarDeclaration(&mut self, is_const: bool) -> Result<Stmt, ParserError> {
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => return Err(self.error("Expected variable name.")),
@@ -78,7 +79,12 @@ impl Parser {
             "Expected ';' after variable declaration.",
         )?;
 
-        Ok(Stmt::VarDecl { name, ty, initializer })
+        Ok(Stmt::VarDecl {
+            is_const,
+            name,
+            ty,
+            initializer,
+        })
     }
 
     fn parseFuncDeclaration(&mut self) -> Result<Stmt, ParserError> {
@@ -167,10 +173,7 @@ impl Parser {
         let body = self.parseBlock()?;
         self.consume(&TokenKind::RightBrace, "Expected '}' after while body.")?;
 
-        Ok(Stmt::While {
-            condition,
-            body,
-        })
+        Ok(Stmt::While { condition, body })
     }
 
     fn parseForStatement(&mut self) -> Result<Stmt, ParserError> {
@@ -261,7 +264,10 @@ impl Parser {
                     _ => return Err(self.error("Expected key type name inside '{}'.")),
                 };
                 self.advance();
-                self.consume(&TokenKind::Colon, "Expected ':' between dict key/value types.")?;
+                self.consume(
+                    &TokenKind::Colon,
+                    "Expected ':' between dict key/value types.",
+                )?;
                 let value = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(self.error("Expected value type name inside '{}'.")),
@@ -341,7 +347,10 @@ impl Parser {
                         }
                     }
                 }
-                self.consume(&TokenKind::RightParen, "Expected ')' after function arguments.")?;
+                self.consume(
+                    &TokenKind::RightParen,
+                    "Expected ')' after function arguments.",
+                )?;
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
@@ -376,7 +385,10 @@ impl Parser {
                             }
                         }
                     }
-                    self.consume(&TokenKind::RightParen, "Expected ')' after method arguments.")?;
+                    self.consume(
+                        &TokenKind::RightParen,
+                        "Expected ')' after method arguments.",
+                    )?;
                     expr = Expr::MethodCall {
                         receiver: Box::new(expr),
                         name,
@@ -432,7 +444,14 @@ impl Parser {
                 Ok(Expr::Variable(name))
             }
             TokenKind::StringLiteral(value) => {
+                let span = self.peek().span;
                 self.advance();
+                if value.contains('{') && value.contains('}') {
+                    match Self::parseStringInterpolation(value.clone(), span) {
+                        Ok(expr) => return Ok(expr),
+                        Err(_) => {} // Fallback to literal if interpolation fails
+                    }
+                }
                 Ok(Expr::Literal(Literal::String(value)))
             }
             TokenKind::CharLiteral(value) => {
@@ -472,7 +491,10 @@ impl Parser {
                         }
                     }
                 }
-                self.consume(&TokenKind::RightBracket, "Expected ']' after array literal.")?;
+                self.consume(
+                    &TokenKind::RightBracket,
+                    "Expected ']' after array literal.",
+                )?;
                 Ok(Expr::ArrayLiteral { elements })
             }
             TokenKind::LeftBrace => {
@@ -489,7 +511,11 @@ impl Parser {
                                 self.advance();
                                 s
                             }
-                            _ => return Err(self.error("Expected identifier or string as dictionary key.")),
+                            _ => {
+                                return Err(
+                                    self.error("Expected identifier or string as dictionary key.")
+                                )
+                            }
                         };
                         self.consume(&TokenKind::Colon, "Expected ':' after dictionary key.")?;
                         let value = self.parseExpression()?;
@@ -499,26 +525,94 @@ impl Parser {
                         }
                     }
                 }
-                self.consume(&TokenKind::RightBrace, "Expected '}' after dictionary literal.")?;
+                self.consume(
+                    &TokenKind::RightBrace,
+                    "Expected '}' after dictionary literal.",
+                )?;
                 Ok(Expr::DictLiteral { entries })
             }
             _ => Err(self.error("Expected expression.")),
         }
     }
 
+    fn parseStringInterpolation(value: String, _span: Span) -> Result<Expr, ParserError> {
+        let mut parts: Vec<Expr> = Vec::new();
+        let mut current_str = String::new();
+        let mut in_expr = false;
+        let mut expr_str = String::new();
+        let mut brace_depth = 0;
+
+        for c in value.chars() {
+            if !in_expr {
+                if c == '{' {
+                    in_expr = true;
+                    brace_depth = 1;
+                    if !current_str.is_empty() || parts.is_empty() {
+                        parts.push(Expr::Literal(Literal::String(current_str.clone())));
+                        current_str.clear();
+                    }
+                } else {
+                    current_str.push(c);
+                }
+            } else {
+                if c == '{' {
+                    brace_depth += 1;
+                    expr_str.push(c);
+                } else if c == '}' {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        in_expr = false;
+                        let mut lexer = crate::lexer::Lexer::new(&expr_str);
+                        let mut tokens = Vec::new();
+                        while let Ok(token) = lexer.nextToken() {
+                            if token.kind == TokenKind::Eof {
+                                break;
+                            }
+                            tokens.push(token);
+                        }
+                        let mut parser = Parser::new(tokens);
+                        let inner_expr = parser
+                            .parseExpression()
+                            .unwrap_or(Expr::Literal(Literal::Null));
+                        parts.push(inner_expr);
+                        expr_str.clear();
+                    } else {
+                        expr_str.push(c);
+                    }
+                } else {
+                    expr_str.push(c);
+                }
+            }
+        }
+        if !current_str.is_empty() || parts.is_empty() {
+            parts.push(Expr::Literal(Literal::String(current_str)));
+        }
+
+        let mut iter = parts.into_iter();
+        let mut res = iter.next().unwrap();
+        for part in iter {
+            res = Expr::Binary {
+                left: Box::new(res),
+                op: TokenKind::Plus,
+                right: Box::new(part),
+            };
+        }
+        Ok(res)
+    }
+
     fn parseAssignment(&mut self) -> Result<Expr, ParserError> {
         let expr = self.parseLogicOr()?;
-    
+
         if self.matchToken(&TokenKind::Equal) {
             let value = self.parseAssignment()?;
-    
+
             if let Expr::Variable(name) = expr {
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
                 });
             }
-    
+
             return Err(self.error("Invalid assignment target."));
         }
 
@@ -551,54 +645,72 @@ impl Parser {
             }
             return Err(self.error("Invalid assignment target."));
         }
-    
+
         Ok(expr)
     }
 
     fn parseLogicOr(&mut self) -> Result<Expr, ParserError> {
-    let mut expr = self.parseLogicAnd()?;
-    while self.matchToken(&TokenKind::OrOr) {
-        let op = self.previous().kind.clone();
-        let right = self.parseLogicAnd()?;
-        expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+        let mut expr = self.parseLogicAnd()?;
+        while self.matchToken(&TokenKind::OrOr) {
+            let op = self.previous().kind.clone();
+            let right = self.parseLogicAnd()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
     }
-    Ok(expr)
-}
 
-fn parseLogicAnd(&mut self) -> Result<Expr, ParserError> {
-    let mut expr = self.parseEquality()?;
-    while self.matchToken(&TokenKind::AndAnd) {
-        let op = self.previous().kind.clone();
-        let right = self.parseEquality()?;
-        expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+    fn parseLogicAnd(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parseEquality()?;
+        while self.matchToken(&TokenKind::AndAnd) {
+            let op = self.previous().kind.clone();
+            let right = self.parseEquality()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
     }
-    Ok(expr)
-}
-fn parseEquality(&mut self) -> Result<Expr, ParserError> {
-    let mut expr = self.parseComparison()?;
-    while matches!(self.peek().kind, TokenKind::EqualEqual | TokenKind::NotEqual) {
-        let op = self.peek().kind.clone();
-        self.advance();
-        let right = self.parseComparison()?;
-        expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+    fn parseEquality(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parseComparison()?;
+        while matches!(
+            self.peek().kind,
+            TokenKind::EqualEqual | TokenKind::NotEqual
+        ) {
+            let op = self.peek().kind.clone();
+            self.advance();
+            let right = self.parseComparison()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
     }
-    Ok(expr)
-}
 
-fn parseComparison(&mut self) -> Result<Expr, ParserError> {
-    let mut expr = self.parseTerm()?;
-    while matches!(
-        self.peek().kind,
-        TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
-    ) {
-        let op = self.peek().kind.clone();
-        self.advance();
-        let right = self.parseTerm()?;
-        expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+    fn parseComparison(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parseTerm()?;
+        while matches!(
+            self.peek().kind,
+            TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual
+        ) {
+            let op = self.peek().kind.clone();
+            self.advance();
+            let right = self.parseTerm()?;
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
     }
-    Ok(expr)
-}
-
 
     //expressions
     fn parseExpression(&mut self) -> Result<Expr, ParserError> {
@@ -638,9 +750,11 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
         matches!(self.peek().kind, TokenKind::Eof)
     }
     fn peek(&self) -> &Token {
-        self.tokens
-            .get(self.current)
-            .unwrap_or_else(|| self.tokens.last().expect("parser requires at least one token"))
+        self.tokens.get(self.current).unwrap_or_else(|| {
+            self.tokens
+                .last()
+                .expect("parser requires at least one token")
+        })
     }
     fn previous(&self) -> &Token {
         if self.current == 0 {
@@ -655,22 +769,32 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
             let op = self.peek().kind.clone();
             self.advance();
             let right = self.parseFactor()?;
-            expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
-    
+
     fn parseFactor(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.parseUnary()?;
-        while matches!(self.peek().kind, TokenKind::Star | TokenKind::Slash | TokenKind::Percent) {
+        while matches!(
+            self.peek().kind,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Percent
+        ) {
             let op = self.peek().kind.clone();
             self.advance();
             let right = self.parseUnary()?;
-            expr = Expr::Binary { left: Box::new(expr), op, right: Box::new(right) };
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
-    
 
     //error
     fn error(&self, message: &str) -> ParserError {
@@ -679,5 +803,4 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
             span: self.peek().span,
         }
     }
-    
 }

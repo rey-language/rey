@@ -42,6 +42,7 @@ pub enum TokenKind {
 
     //keywords
     Var,
+    Const,
     Func,
     Return,
     If,

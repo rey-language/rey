@@ -1,5 +1,14 @@
 # Changelog
 
+## [release] — 2026-03-19
+- Shipped `rey v0.0.5-pre`
+- Added string interpolation syntax `"{var}"` and mixed type string conversions (`"a" + 1`)
+- Built-in type conversions: `.toString()`, `.toInt()`, `.toFloat()`
+- Added multiple arguments to `println` and new `print()` equivalent
+- Built-in functions: `abs()`, `max()`, `min()`, `random()`
+- Added `const` values. Unannotated `var`s are now treated as dynamic types!
+- Comprehensive rewrite of Error diagnostics to a visual snippet pointing format.
+
 ## [tooling] — 2026-03-17
 - Added Linguist submission prep files: `languages/Rey.yaml`, `languages/samples/Rey.rey`, `LINGUIST.md`
 
