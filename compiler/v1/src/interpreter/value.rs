@@ -8,6 +8,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone)]
 pub enum Value {
     String(String),
+    Char(char),
     Number(f64),
     Bool(bool),
     Function(Function),
@@ -20,6 +21,7 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::String(a), Value::String(b)) => a == b,
+            (Value::Char(a), Value::Char(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Function(a), Value::Function(b)) => a == b,
@@ -52,6 +54,7 @@ impl From<Literal> for Value {
     fn from(lit: Literal) -> Self {
         match lit {
             Literal::String(s) => Value::String(s),
+            Literal::Char(c) => Value::Char(c),
             Literal::Number(n) => Value::Number(n),
             Literal::Bool(b) => Value::Bool(b),
             Literal::Null => Value::Null, }

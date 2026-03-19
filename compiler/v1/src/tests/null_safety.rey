@@ -1,0 +1,18 @@
+
+func main(): Void {
+    var x: int? = null;
+    if (x == null) {
+        println("was null");
+    }
+
+    x = 5;
+    if (x != null) {
+        println(x);
+    }
+
+    var s: String? = null;
+    if (s == null) {
+        println("s was null");
+    }
+}
+

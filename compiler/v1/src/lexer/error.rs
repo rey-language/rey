@@ -7,4 +7,5 @@ pub enum LexerError {
     UnexpectedCharacter { found: char, span: Span },
 
     UnterminatedString { span: Span },
+    UnterminatedChar { span: Span },
 }

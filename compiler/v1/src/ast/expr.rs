@@ -42,4 +42,10 @@ pub enum Expr {
         name: String,
         value: Box<Expr>,
     },
+
+    Update {
+        name: String,
+        op: TokenKind,
+        prefix: bool,
+    },
 }

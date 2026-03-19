@@ -40,7 +40,16 @@ impl<'a> Lexer<'a> {
             }
         };
         match ch {
-            '"' => self.lexString(start),
+            '"' => {
+                if self.cursor.peek() == Some('"') && self.cursor.peekN(1) == Some('"') {
+                    self.cursor.advance();
+                    self.cursor.advance();
+                    self.lexMultilineString(start)
+                } else {
+                    self.lexString(start)
+                }
+            }
+            '\'' => self.lexChar(start),
 
             c if c.is_alphabetic() || c == '_' => Ok(self.lexIdentifier(start, c)),
 
@@ -51,9 +60,43 @@ impl<'a> Lexer<'a> {
             '[' => Ok(self.simpleToken(TokenKind::LeftBracket, start)),
             ']' => Ok(self.simpleToken(TokenKind::RightBracket, start)),
             ';' => Ok(self.simpleToken(TokenKind::Semicolon, start)),
-            '+' => Ok(self.simpleToken(TokenKind::Plus, start)),
-            '-' => Ok(self.simpleToken(TokenKind::Minus, start)),
-            '*' => Ok(self.simpleToken(TokenKind::Star, start)),
+            '+' => {
+                let kind = if self.matchNext('+') {
+                    TokenKind::PlusPlus
+                } else if self.matchNext('=') {
+                    TokenKind::PlusEqual
+                } else {
+                    TokenKind::Plus
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+            '-' => {
+                let kind = if self.matchNext('-') {
+                    TokenKind::MinusMinus
+                } else if self.matchNext('=') {
+                    TokenKind::MinusEqual
+                } else {
+                    TokenKind::Minus
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+            '*' => {
+                let kind = if self.matchNext('=') {
+                    TokenKind::StarEqual
+                } else {
+                    TokenKind::Star
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
             '/' => {
                 // check for comment
                 if let Some('/') = self.cursor.peek() {
@@ -69,12 +112,58 @@ impl<'a> Lexer<'a> {
                     // recurse to get next token
                     return self.nextToken();
                 }
-                Ok(self.simpleToken(TokenKind::Slash, start))
+                let kind = if self.matchNext('=') {
+                    TokenKind::SlashEqual
+                } else {
+                    TokenKind::Slash
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
             }
             ':' => Ok(self.simpleToken(TokenKind::Colon, start)),
+            '?' => Ok(self.simpleToken(TokenKind::Question, start)),
             '.' => Ok(self.simpleToken(TokenKind::Dot, start)),
             ',' => Ok(self.simpleToken(TokenKind::Comma, start)),
-            '%' => Ok(self.simpleToken(TokenKind::Percent, start)),
+            '%' => {
+                let kind = if self.matchNext('=') {
+                    TokenKind::PercentEqual
+                } else {
+                    TokenKind::Percent
+                };
+                Ok(Token {
+                    kind,
+                    span: Span::new(start, self.cursor.position()),
+                })
+            }
+
+            '&' => {
+                if self.matchNext('&') {
+                    Ok(Token {
+                        kind: TokenKind::AndAnd,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                } else {
+                    Err(LexerError::UnexpectedCharacter {
+                        found: ch,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                }
+            }
+            '|' => {
+                if self.matchNext('|') {
+                    Ok(Token {
+                        kind: TokenKind::OrOr,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                } else {
+                    Err(LexerError::UnexpectedCharacter {
+                        found: ch,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                }
+            }
 
             '=' => {
                 let kind = if self.matchNext('=') {
@@ -160,6 +249,72 @@ impl<'a> Lexer<'a> {
         Err(LexerError::UnterminatedString {
             span: Span::new(start, self.cursor.position()),
         })
+    }
+
+    fn lexMultilineString(&mut self, start: usize) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while let Some(ch) = self.cursor.advance() {
+            if ch == '"' && self.cursor.peek() == Some('"') && self.cursor.peekN(1) == Some('"') {
+                self.cursor.advance();
+                self.cursor.advance();
+                if value.starts_with("\r\n") {
+                    value.drain(..2);
+                } else if value.starts_with('\n') {
+                    value.drain(..1);
+                }
+                return Ok(Token {
+                    kind: TokenKind::StringLiteral(value),
+                    span: Span::new(start, self.cursor.position()),
+                });
+            }
+            value.push(ch);
+        }
+
+        Err(LexerError::UnterminatedString {
+            span: Span::new(start, self.cursor.position()),
+        })
+    }
+
+    fn lexChar(&mut self, start: usize) -> Result<Token, LexerError> {
+        let ch = match self.cursor.advance() {
+            Some(c) => c,
+            None => {
+                return Err(LexerError::UnterminatedChar {
+                    span: Span::new(start, self.cursor.position()),
+                });
+            }
+        };
+
+        let value = if ch == '\\' {
+            let esc = self.cursor.advance().ok_or_else(|| LexerError::UnterminatedChar {
+                span: Span::new(start, self.cursor.position()),
+            })?;
+            match esc {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                '\\' => '\\',
+                '\'' => '\'',
+                other => other,
+            }
+        } else {
+            ch
+        };
+
+        match self.cursor.advance() {
+            Some('\'') => Ok(Token {
+                kind: TokenKind::CharLiteral(value),
+                span: Span::new(start, self.cursor.position()),
+            }),
+            Some(other) => Err(LexerError::UnexpectedCharacter {
+                found: other,
+                span: Span::new(start, self.cursor.position()),
+            }),
+            None => Err(LexerError::UnterminatedChar {
+                span: Span::new(start, self.cursor.position()),
+            }),
+        }
     }
     fn lexIdentifier(&mut self, start: usize, first: char) -> Token {
         let mut ident = String::new();

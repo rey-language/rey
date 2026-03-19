@@ -26,9 +26,19 @@ pub enum TokenKind {
     Star,
     Percent,
     Colon,
+    Question,
     Not,
     AndAnd,
     OrOr,
+
+    //multi-char operators
+    PlusPlus,
+    MinusMinus,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
 
     //keywords
     Var,
@@ -48,6 +58,7 @@ pub enum TokenKind {
     //literals
     Identifier(String),
     StringLiteral(String),
+    CharLiteral(char),
     NumberLiteral(f64),
 
     //operators

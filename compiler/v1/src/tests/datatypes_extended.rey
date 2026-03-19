@@ -1,0 +1,13 @@
+
+func main(): Void {
+    var c: char = 'a';
+    var u: uint = 42;
+    var d: double = 3.14159265358979;
+    var b: byte = 255;
+
+    println(c);
+    println(u);
+    println(d);
+    println(b);
+}
+

@@ -250,7 +250,11 @@ impl Parser {
                 };
                 self.advance();
                 self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
-                Ok(Some(Type { name: format!("[{}]", inner) }))
+                let mut name = format!("[{}]", inner);
+                if self.matchToken(&TokenKind::Question) {
+                    name.push('?');
+                }
+                Ok(Some(Type { name }))
             } else if self.matchToken(&TokenKind::LeftBrace) {
                 let key = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
@@ -264,13 +268,20 @@ impl Parser {
                 };
                 self.advance();
                 self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
-                Ok(Some(Type { name: format!("{{{}:{}}}", key, value) }))
+                let mut name = format!("{{{}:{}}}", key, value);
+                if self.matchToken(&TokenKind::Question) {
+                    name.push('?');
+                }
+                Ok(Some(Type { name }))
             } else {
                 match &self.peek().kind {
                     TokenKind::Identifier(name) => {
-                        let ty = Type { name: name.clone() };
+                        let mut n = name.clone();
                         self.advance();
-                        Ok(Some(ty))
+                        if self.matchToken(&TokenKind::Question) {
+                            n.push('?');
+                        }
+                        Ok(Some(Type { name: n }))
                     }
                     _ => Err(self.error("Expected type name after ':'")),
                 }
@@ -282,6 +293,19 @@ impl Parser {
 
     fn parseUnary(&mut self) -> Result<Expr, ParserError> {
         match &self.peek().kind {
+            TokenKind::PlusPlus | TokenKind::MinusMinus => {
+                let op = self.peek().kind.clone();
+                self.advance();
+                let right = self.parseUnary()?;
+                match right {
+                    Expr::Variable(name) => Ok(Expr::Update {
+                        name,
+                        op,
+                        prefix: true,
+                    }),
+                    _ => Err(self.error("Invalid ++/-- target.")),
+                }
+            }
             TokenKind::Minus => {
                 self.advance();
                 let expr = self.parseUnary()?;
@@ -367,6 +391,34 @@ impl Parser {
                 continue;
             }
 
+            if self.matchToken(&TokenKind::PlusPlus) {
+                match expr {
+                    Expr::Variable(name) => {
+                        expr = Expr::Update {
+                            name,
+                            op: TokenKind::PlusPlus,
+                            prefix: false,
+                        };
+                        break;
+                    }
+                    _ => return Err(self.error("Invalid ++ target.")),
+                }
+            }
+
+            if self.matchToken(&TokenKind::MinusMinus) {
+                match expr {
+                    Expr::Variable(name) => {
+                        expr = Expr::Update {
+                            name,
+                            op: TokenKind::MinusMinus,
+                            prefix: false,
+                        };
+                        break;
+                    }
+                    _ => return Err(self.error("Invalid -- target.")),
+                }
+            }
+
             break;
         }
 
@@ -382,6 +434,10 @@ impl Parser {
             TokenKind::StringLiteral(value) => {
                 self.advance();
                 Ok(Expr::Literal(Literal::String(value)))
+            }
+            TokenKind::CharLiteral(value) => {
+                self.advance();
+                Ok(Expr::Literal(Literal::Char(value)))
             }
             TokenKind::NumberLiteral(value) => {
                 self.advance();
@@ -463,6 +519,36 @@ impl Parser {
                 });
             }
     
+            return Err(self.error("Invalid assignment target."));
+        }
+
+        let compound = if self.matchToken(&TokenKind::PlusEqual) {
+            Some(TokenKind::Plus)
+        } else if self.matchToken(&TokenKind::MinusEqual) {
+            Some(TokenKind::Minus)
+        } else if self.matchToken(&TokenKind::StarEqual) {
+            Some(TokenKind::Star)
+        } else if self.matchToken(&TokenKind::SlashEqual) {
+            Some(TokenKind::Slash)
+        } else if self.matchToken(&TokenKind::PercentEqual) {
+            Some(TokenKind::Percent)
+        } else {
+            None
+        };
+
+        if let Some(op) = compound {
+            let value = self.parseAssignment()?;
+            if let Expr::Variable(name) = expr {
+                let bin = Expr::Binary {
+                    left: Box::new(Expr::Variable(name.clone())),
+                    op,
+                    right: Box::new(value),
+                };
+                return Ok(Expr::Assign {
+                    name,
+                    value: Box::new(bin),
+                });
+            }
             return Err(self.error("Invalid assignment target."));
         }
     
@@ -576,7 +662,7 @@ fn parseComparison(&mut self) -> Result<Expr, ParserError> {
     
     fn parseFactor(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.parseUnary()?;
-        while matches!(self.peek().kind, TokenKind::Star | TokenKind::Slash) {
+        while matches!(self.peek().kind, TokenKind::Star | TokenKind::Slash | TokenKind::Percent) {
             let op = self.peek().kind.clone();
             self.advance();
             let right = self.parseUnary()?;

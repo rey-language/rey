@@ -193,6 +193,27 @@ impl Executor {
                 env.assign(name, val.clone())?;
                 Ok(val)
             }
+            Expr::Update { name, op, prefix } => {
+                let current = env
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| format!("Undefined variable '{}'", name))?;
+
+                let delta = match op {
+                    TokenKind::PlusPlus => 1.0,
+                    TokenKind::MinusMinus => -1.0,
+                    _ => return Err("Invalid update operator".to_string()),
+                };
+
+                let current_num = match current {
+                    Value::Number(n) => n,
+                    _ => return Err("Can only apply ++/-- to numbers".to_string()),
+                };
+
+                let new_num = current_num + delta;
+                env.assign(name, Value::Number(new_num))?;
+                Ok(Value::Number(if *prefix { new_num } else { current_num }))
+            }
             Expr::Call { callee, args } => {
                 // Check if it's a built-in function first
                 if let Expr::Variable(name) = callee.as_ref() {
@@ -354,6 +375,17 @@ impl Executor {
                     Ok(Value::Number(l / r))
                 }
             }
+            (Value::Number(l), Percent, Value::Number(r)) => {
+                if r == 0.0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Number(l % r))
+                }
+            }
+            (Value::Null, EqualEqual, Value::Null) => Ok(Value::Bool(true)),
+            (Value::Null, NotEqual, Value::Null) => Ok(Value::Bool(false)),
+            (Value::Null, EqualEqual, _) | (_, EqualEqual, Value::Null) => Ok(Value::Bool(false)),
+            (Value::Null, NotEqual, _) | (_, NotEqual, Value::Null) => Ok(Value::Bool(true)),
             (Value::Number(l), EqualEqual, Value::Number(r)) => Ok(Value::Bool(l == r)),
             (Value::Number(l), NotEqual, Value::Number(r)) => Ok(Value::Bool(l != r)),
             (Value::Number(l), Less, Value::Number(r)) => Ok(Value::Bool(l < r)),

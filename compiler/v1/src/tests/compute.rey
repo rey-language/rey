@@ -3,10 +3,25 @@ func compute(): Void {
     var sum = 0;
     var i = 0;
     while (i < 100) {
-        sum = sum + i;
-        i = i + 1;
+        sum += i;
+        i++;
     }
     println(sum);
+
+    var x = 10;
+    x %= 4;
+    println(x);
+
+    var y = 1;
+    println(++y);
+    println(y++);
+    println(y);
+
+    var z = 10.5;
+    z -= 2;
+    z *= 3;
+    z /= 4;
+    println(z);
 }
 
 func main(): Void {

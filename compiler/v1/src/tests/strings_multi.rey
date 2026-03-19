@@ -1,0 +1,9 @@
+
+func main(): Void {
+    var s = """
+hello
+world
+""";
+    println(s);
+}
+
