@@ -55,6 +55,9 @@ pub enum TokenKind {
     True,
     False,
     Null,
+    Struct,
+    Pub,
+    SelfKw,
 
     //literals
     Identifier(String),
