@@ -1,6 +1,24 @@
 # Changelog
 
 ## [release] — 2026-03-19
+- Shipped `rey v0.0.7-pre`
+- Added `projects/fake-cli/cli.rey` - a full interactive TUI implementation in Rey.
+- Fixed struct field/method resolution bugs and optimized typechecking for complex expressions.
+- Enhanced property access and indexing consistency.
+
+## [release] — 2026-03-19
+- Shipped `rey v0.0.6-pre`
+- **Implemented full Struct System**: 
+  - Data structures with named fields.
+  - Instance methods with direct field scoping (no more `self.x` inside methods for fields!).
+  - Static-style methods for construction and utilities.
+  - Visibility control with `pub` (private by default).
+  - Method overloading support.
+  - Struct literals for easy instantiation.
+- Added `structs.rey` comprehensive test file.
+- Improved field access error messages with "did you mean?" suggestions using Levenshtein distance.
+
+## [release] — 2026-03-19
 - Shipped `rey v0.0.5-pre`
 - Added string interpolation syntax `"{var}"` and mixed type string conversions (`"a" + 1`)
 - Built-in type conversions: `.toString()`, `.toInt()`, `.toFloat()`

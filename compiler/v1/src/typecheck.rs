@@ -501,11 +501,7 @@ impl TypeChecker {
                     ),
                 }
             }
-            Expr::MethodCall {
-                receiver,
-                name,
-                args,
-            } => {
+            Expr::MethodCall { receiver, name, args } => {
                 let rty = self.exprTy(receiver)?;
                 self.methodTy(&rty, name, args)
             }

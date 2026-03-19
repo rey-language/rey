@@ -1,5 +1,5 @@
 # Primer — rey-lang
-Last updated: Mar 19, 2026 (session end)
+Last updated: Mar 19, 2026 (session start)
 
 ## What this project is
 Rey is a custom programming language built by Misbah. Currently on v0 — a tree-walking interpreter written in Rust. The language has C-like syntax with type inference, functions, control flow, and basic builtins. v0 is the working prototype; future versions will likely move toward compilation.
@@ -39,6 +39,7 @@ cargo run -- src/tests/variables.rey
 - String interpolation ("{var}"), mixed typings ("HP: " + 10)
 - String methods: length/upper/lower/contains/split/toString/toInt/toFloat
 - Property access: obj.prop (dictionary key lookup)
+- Structs: definitions, literals, static/instance methods, field scoping, and pub/private visibility.
 - Compile-time type enforcement for annotated vars/functions + common builtins
 - Entry point: calls main() if present
 - Rust/Miette-like visual Error Diagnostics.
@@ -48,17 +49,17 @@ compiler/v1/src/tests/ — .rey files for each feature
 Run any of them with cargo run -- src/tests/.rey
 
 ## Current status
-`rey v0.0.5-pre` is implemented and staged on `claude`:
-- all files in `compiler/v1/src/tests/` run successfully
-- `cargo build --release` succeeds
-- release binaries + notes are staged in `releases/0.0.5-pre/`
+`rey v0.0.7-pre` is in progress on `codex`:
+- `v0.0.6-pre` shipped with full struct implementation.
+- `fake-cli` project implemented in `projects/fake-cli/cli.rey`.
+- Conflict resolved in `typecheck.rs` following rebase onto `master`.
+- Preparing release artifacts for `v0.0.7-pre` (Mac & Windows).
 
-## Next up (v0.0.5-pre batch)
+## Next up (v0.0.7-pre batch)
+- Build and package binaries for macOS (arm64) and Windows (x86_64).
+- Finalize `v0.0.7-pre` release notes and changelog.
 - Implement missing operators: `++`, `--`, `+=`, `-=`, `*=`, `/=`, `%=`, and `%` modulo.
 - Add additional variable types: `char`, `uint`, `double`, `byte`.
-- Add multiline strings using `""" ... """`.
 - Add null safety: nullable types (`int?`), `null` comparisons, and clean error on `null` access.
-- Implement struct system (fields + methods + construction + method calls + pub/private + overloading).
 - Add `try`/`catch` error handling.
-- Expand `src/tests/` with comprehensive coverage and ensure all tests pass.
-- Update `syntax.md`, `primer.md`, and `CHANGELOG.md`, then ship `releases/0.0.5-pre/`.
+- Update `syntax.md` and ensure all tests pass.
