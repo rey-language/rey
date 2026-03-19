@@ -372,6 +372,13 @@ impl TypeChecker {
                 }
                 Ok(())
             }
+            Stmt::StructDecl {
+                name: _,
+                fields: _,
+            } => {
+                // Structs bypass type checking for now
+                Ok(())
+            }
         }
     }
 
@@ -511,14 +518,16 @@ impl TypeChecker {
                     ),
                 }
             }
-            Expr::MethodCall {
-                receiver,
-                name,
-                args,
-            } => {
+            Expr::MethodCall { receiver, name, args } => {
                 let rty = self.exprTy(receiver)?;
                 self.methodTy(&rty, name, args)
             }
+            Expr::StructLiteral { name: _, fields: _ } => Ok(Ty::Any),
+            Expr::StaticCall {
+                struct_name: _,
+                method: _,
+                args: _,
+            } => Ok(Ty::Any),
         }
     }
 

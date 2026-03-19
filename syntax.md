@@ -13,8 +13,9 @@ Welcome to the comprehensive guide for the **Rey Language (v1)**.
 5. [Functions](#functions)
 6. [Collections (Arrays & Dicts)](#collections-arrays--dicts)
 7. [Strings (Interpolation, Multiline, Methods)](#strings)
-8. [Built-in Functions](#built-in-functions)
-9. [Error Diagnostics](#error-diagnostics)
+8. [Structs](#structs)
+9. [Built-in Functions](#built-in-functions)
+10. [Error Diagnostics](#error-diagnostics)
 
 ---
 
@@ -296,6 +297,55 @@ Rey dynamically ships with math constants.
 - `max(a, b)`: Returns greater value.
 - `min(a, b)`: Returns smaller value.
 - `random()`: Automatically creates a highly precise randomized fraction between `0.00` and `0.99`.
+
+---
+
+## Structs
+
+Structs are the primary way to define custom data structures and behavior in Rey. They support fields, methods (instance and static), and a unique scoping model.
+
+### Declaration
+
+Structs are declared using the `struct` keyword. Fields are declared with `name: type`. Methods are declared with `func`. By default, fields and methods are **private**. Use the `pub` keyword to make them accessible from outside the struct.
+
+```rey
+struct Player {
+    health: int,
+    name: String,
+
+    // Static method (returns the struct type)
+    pub func create(n: String, h: int): Player {
+        return Player { name: n, health: h };
+    }
+
+    // Instance method
+    // Note: fields are accessed directly by name!
+    pub func takeDamage(amount: int): Void {
+        health -= amount;
+        println("{name} took {amount} damage. HP: {health}");
+    }
+}
+```
+
+### Construction
+
+Structs are instantiated using a literal syntax `StructName { field: value, ... }`.
+
+```rey
+var p = Player { name: "Hero", health: 100 };
+```
+
+### Methods & Scoping
+
+- **Instance Methods**: When a method is called on an instance (`p.takeDamage(10)`), the struct's fields are injected into the method's local scope. You access them directly by their name (e.g., `health`). Any mutations to these variables are written back to the instance after the method finishes.
+- **Static Methods**: Methods that return the struct type and are marked `pub` can be called directly on the struct name (e.g., `Player.create("Hero", 100)`).
+- **Visibility**: Only `pub` fields and methods can be accessed via dot notation from outside.
+
+```rey
+var p = Player.create("Hero", 100);
+p.takeDamage(20);
+println(p.health); // Accessing pub field
+```
 
 ---
 
