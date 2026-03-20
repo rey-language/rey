@@ -1,0 +1,11 @@
+func main() {
+  var factor = 3;
+  var mul = (x: int) => x * factor;
+  println(mul(4));
+
+  factor = 10;
+  println(mul(2));
+
+  var double = (x: int) => x * 2;
+  println(double(5));
+}

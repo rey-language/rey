@@ -1,0 +1,14 @@
+func main() {
+  var x: int | String = "hey";
+
+  if x instanceof String {
+    println("string");
+  } else {
+    println("not string");
+  }
+
+  x = 123;
+  if x instanceof int {
+    println("int");
+  }
+}

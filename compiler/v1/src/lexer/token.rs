@@ -19,6 +19,7 @@ pub enum TokenKind {
     RightBracket,
     Comma,
     Dot,
+    Ellipsis,
     Minus,
     Plus,
     Semicolon,
@@ -30,6 +31,7 @@ pub enum TokenKind {
     Not,
     AndAnd,
     OrOr,
+    Pipe,
 
     //multi-char operators
     PlusPlus,
@@ -52,6 +54,7 @@ pub enum TokenKind {
     Continue,
     For,
     In,
+    InstanceOf,
     True,
     False,
     Null,
@@ -68,6 +71,7 @@ pub enum TokenKind {
     //operators
     Equal,
     EqualEqual,
+    Arrow,
     Greater,
     GreaterEqual,
     NotEqual,

@@ -19,12 +19,26 @@ enum Ty {
     Array(Box<Ty>),
     Dict(Box<Ty>, Box<Ty>),
     Tuple(Vec<Ty>),
-    Function { params: Vec<Ty>, ret: Box<Ty> },
+    Union(Vec<Ty>),
+    Function {
+        params: Vec<Ty>,
+        minArgs: usize,
+        variadic: Option<Box<Ty>>,
+        ret: Box<Ty>,
+    },
 }
 
 impl Ty {
     fn fromAnnotation(ty: &Type) -> Result<Ty, String> {
         let name = ty.name.trim();
+        if name.contains('|') {
+            let mut items = Vec::new();
+            for part in name.split('|') {
+                let inner = Ty::fromName(part.trim())?;
+                items.push(inner);
+            }
+            return Ok(Ty::Union(items));
+        }
         if let Some(base) = name.strip_suffix('?') {
             let baseTy = Ty::fromAnnotation(&Type {
                 name: base.trim().to_string(),
@@ -78,6 +92,8 @@ impl Ty {
         match (self, target) {
             (_, Ty::Any) => true,
             (Ty::Any, _) => true,
+            (src, Ty::Union(items)) => items.iter().any(|t| src.isAssignableTo(t)),
+            (Ty::Union(items), dst) => items.iter().all(|t| t.isAssignableTo(dst)),
             (Ty::Null, Ty::Null) => true,
             (Ty::Null, Ty::Nullable(_)) => true,
             (Ty::Null, _) => false,
@@ -108,70 +124,90 @@ impl TypeChecker {
         c.functions.insert(
             "println".to_string(),
             Ty::Function {
+                minArgs: 0,
                 params: vec![],
+                variadic: None,
                 ret: Box::new(Ty::Void),
             },
         );
         c.functions.insert(
             "print".to_string(),
             Ty::Function {
+                minArgs: 0,
                 params: vec![],
+                variadic: None,
                 ret: Box::new(Ty::Void),
             },
         );
         c.functions.insert(
             "abs".to_string(),
             Ty::Function {
+                minArgs: 1,
                 params: vec![Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
             "max".to_string(),
             Ty::Function {
+                minArgs: 2,
                 params: vec![Ty::Any, Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
             "min".to_string(),
             Ty::Function {
+                minArgs: 2,
                 params: vec![Ty::Any, Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
             "random".to_string(),
             Ty::Function {
+                minArgs: 0,
                 params: vec![],
+                variadic: None,
                 ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
             "len".to_string(),
             Ty::Function {
+                minArgs: 1,
                 params: vec![Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Int),
             },
         );
         c.functions.insert(
             "push".to_string(),
             Ty::Function {
+                minArgs: 2,
                 params: vec![Ty::Any, Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Void),
             },
         );
         c.functions.insert(
             "pop".to_string(),
             Ty::Function {
+                minArgs: 1,
                 params: vec![Ty::Any],
+                variadic: None,
                 ret: Box::new(Ty::Any),
             },
         );
         c.functions.insert(
             "input".to_string(),
             Ty::Function {
+                minArgs: 0,
                 params: vec![],
+                variadic: None,
                 ret: Box::new(Ty::String),
             },
         );
@@ -206,11 +242,26 @@ impl TypeChecker {
         return_ty: &Option<Type>,
     ) -> Result<(), String> {
         let mut ptys = Vec::new();
+        let mut minArgs = 0usize;
+        let mut variadic: Option<Box<Ty>> = None;
         for p in params {
-            if let Some(ty) = &p.ty {
-                ptys.push(Ty::fromAnnotation(ty)?);
+            let pty = if let Some(ty) = &p.ty {
+                Ty::fromAnnotation(ty)?
             } else {
-                ptys.push(Ty::Any);
+                Ty::Any
+            };
+
+            if p.variadic {
+                match pty {
+                    Ty::Array(inner) => variadic = Some(inner),
+                    _ => return Err("Type error: variadic param must be an array type".to_string()),
+                }
+                continue;
+            }
+
+            ptys.push(pty);
+            if p.default.is_none() {
+                minArgs += 1;
             }
         }
         let ret = if let Some(r) = return_ty {
@@ -221,7 +272,9 @@ impl TypeChecker {
         self.functions.insert(
             name.to_string(),
             Ty::Function {
+                minArgs,
                 params: ptys,
+                variadic,
                 ret: Box::new(ret),
             },
         );
@@ -251,8 +304,6 @@ impl TypeChecker {
                         ));
                     }
                     annTy
-                } else if !*is_const {
-                    Ty::Any
                 } else {
                     initTy
                 };
@@ -276,6 +327,15 @@ impl TypeChecker {
                     } else {
                         Ty::Any
                     };
+                    if let Some(def) = &p.default {
+                        let dty = self.exprTy(def)?;
+                        if !dty.isAssignableTo(&pty) {
+                            return Err(format!(
+                                "Type error: default value for '{}' expected {:?} but got {:?}",
+                                p.name, pty, dty
+                            ));
+                        }
+                    }
                     self.define(&p.name, pty, false);
                 }
                 let prevReturn = self.currentReturn.clone();
@@ -304,6 +364,19 @@ impl TypeChecker {
                     ));
                 }
                 self.pushScope();
+                if let Expr::InstanceOf { value, ty, .. } = condition {
+                    if let Expr::Variable(varName) = value.as_ref() {
+                        if let Ok((curTy, is_const)) = self.lookup(varName) {
+                            if let Ty::Union(items) = curTy {
+                                if let Ok(target) = Ty::fromAnnotation(ty) {
+                                    if items.iter().any(|t| t.isAssignableTo(&target)) {
+                                        self.define(varName, target, is_const);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 for s in then_branch {
                     self.checkStmt(s)?;
                 }
@@ -445,21 +518,58 @@ impl TypeChecker {
                 let r = self.exprTy(right)?;
                 self.unaryTy(op, &r)
             }
+            Expr::InstanceOf { ty, .. } => {
+                Ty::fromAnnotation(ty)?;
+                Ok(Ty::Bool)
+            }
+            Expr::Lambda { params, body, .. } => {
+                let mut ptys = Vec::new();
+                for p in params {
+                    let pty = if let Some(ty) = &p.ty {
+                        Ty::fromAnnotation(ty)?
+                    } else {
+                        Ty::Any
+                    };
+                    ptys.push(pty);
+                }
+                self.pushScope();
+                for (p, pty) in params.iter().zip(ptys.iter()) {
+                    self.define(&p.name, pty.clone(), false);
+                }
+                let retTy = self.exprTy(body)?;
+                self.popScope();
+                Ok(Ty::Function {
+                    minArgs: ptys.len(),
+                    params: ptys,
+                    variadic: None,
+                    ret: Box::new(retTy),
+                })
+            }
             Expr::Call { callee, args, .. } => {
                 if let Expr::Variable(name) = callee.as_ref() {
-                    return self.checkCallByName(name, args);
+                    if self.functions.contains_key(name) {
+                        return self.checkCallByName(name, args);
+                    }
                 }
                 let cty = self.exprTy(callee)?;
                 match cty {
-                    Ty::Function { params, ret } => {
-                        if params.len() != args.len() {
+                    Ty::Function {
+                        params,
+                        minArgs,
+                        variadic,
+                        ret,
+                    } => {
+                        let fixedCount = params.len();
+                        let maxOk = variadic.is_some() || args.len() <= fixedCount;
+                        if args.len() < minArgs || !maxOk {
                             return Err(format!(
-                                "Type error: expected {} arguments but got {}",
-                                params.len(),
+                                "Type error: expected {}..={} arguments but got {}",
+                                minArgs,
+                                if variadic.is_some() { usize::MAX } else { fixedCount },
                                 args.len()
                             ));
                         }
-                        for (p, a) in params.iter().zip(args.iter()) {
+                        for (p, a) in params.iter().zip(args.iter().take(fixedCount)) {
                             let aty = self.exprTy(a)?;
                             if !aty.isAssignableTo(p) {
                                 return Err(format!(
@@ -468,9 +578,25 @@ impl TypeChecker {
                                 ));
                             }
                         }
+                        if let Some(vty) = variadic.as_ref() {
+                            for a in args.iter().skip(fixedCount) {
+                                let aty = self.exprTy(a)?;
+                                if !aty.isAssignableTo(vty.as_ref()) {
+                                    return Err(format!(
+                                        "Type error: variadic argument expected {:?} but got {:?} at line {}",
+                                        vty,
+                                        aty,
+                                        a.span().start
+                                    ));
+                                }
+                            }
+                        }
                         Ok(*ret)
                     }
-                    _ => Err("Type error: can only call functions".to_string()),
+                    other => Err(format!(
+                        "Type error: can only call functions, got {:?}",
+                        other
+                    )),
                 }
             }
             Expr::ArrayLiteral { elements, .. } => {
@@ -555,6 +681,12 @@ impl TypeChecker {
             }
             Expr::StructLiteral { .. } => Ok(Ty::Any),
             Expr::StaticCall { .. } => Ok(Ty::Any),
+            Expr::Set { value, .. } => {
+                self.exprTy(value)
+            }
+            Expr::IndexSet { value, .. } => {
+                self.exprTy(value)
+            }
         }
     }
 
@@ -710,22 +842,41 @@ impl TypeChecker {
         }
 
         match self.functions.get(name).cloned() {
-            Some(Ty::Function { params, ret }) => {
-                if params.len() != args.len() {
+            Some(Ty::Function {
+                params,
+                minArgs,
+                variadic,
+                ret,
+            }) => {
+                let fixedCount = params.len();
+                let maxOk = variadic.is_some() || args.len() <= fixedCount;
+                if args.len() < minArgs || !maxOk {
                     return Err(format!(
-                        "Type error: {} expects {} arguments but got {}",
+                        "Type error: {} expects {}..={} arguments but got {}",
                         name,
-                        params.len(),
+                        minArgs,
+                        if variadic.is_some() { usize::MAX } else { fixedCount },
                         args.len()
                     ));
                 }
-                for (p, a) in params.iter().zip(args.iter()) {
+                for (p, a) in params.iter().zip(args.iter().take(fixedCount)) {
                     let aty = self.exprTy(a)?;
                     if !aty.isAssignableTo(p) {
                         return Err(format!(
                             "Type error: {} argument expected {:?} but got {:?}",
                             name, p, aty
                         ));
+                    }
+                }
+                if let Some(vty) = variadic.as_ref() {
+                    for a in args.iter().skip(fixedCount) {
+                        let aty = self.exprTy(a)?;
+                        if !aty.isAssignableTo(vty.as_ref()) {
+                            return Err(format!(
+                                "Type error: {} variadic argument expected {:?} but got {:?}",
+                                name, vty, aty
+                            ));
+                        }
                     }
                 }
                 Ok(*ret)
@@ -855,6 +1006,43 @@ impl TypeChecker {
         }
         if a == b {
             return a.clone();
+        }
+
+        if let Ty::Union(items) = a {
+            if items.iter().any(|t| t == b) {
+                return a.clone();
+            }
+        }
+        if let Ty::Union(items) = b {
+            if items.iter().any(|t| t == a) {
+                return b.clone();
+            }
+        }
+
+        if matches!((a, b), (Ty::Union(_), _) | (_, Ty::Union(_))) {
+            let mut out = Vec::new();
+            let mut pushUnique = |t: Ty, out: &mut Vec<Ty>| {
+                if !out.iter().any(|x| x == &t) {
+                    out.push(t);
+                }
+            };
+            match a {
+                Ty::Union(items) => {
+                    for t in items {
+                        pushUnique(t.clone(), &mut out);
+                    }
+                }
+                other => pushUnique(other.clone(), &mut out),
+            }
+            match b {
+                Ty::Union(items) => {
+                    for t in items {
+                        pushUnique(t.clone(), &mut out);
+                    }
+                }
+                other => pushUnique(other.clone(), &mut out),
+            }
+            return Ty::Union(out);
         }
         match (a, b) {
             (Ty::Null, other) => {

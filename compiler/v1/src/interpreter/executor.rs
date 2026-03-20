@@ -40,6 +40,7 @@ impl Executor {
                     params.clone(),
                     body.clone(),
                     Span { start: 0, end: 0 },
+                    None,
                 );
                 env.define(name.clone(), Value::Function(function));
                 Ok(ControlFlow::normal(Value::Null))
@@ -350,10 +351,89 @@ impl Executor {
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_unary(op, right_val)
             }
+            Expr::InstanceOf { value, ty, .. } => {
+                let v = self.evaluate_expr(value, env)?;
+                let ok = match (v, ty.name.trim()) {
+                    (Value::String(_), "String") => true,
+                    (Value::Char(_), "char") => true,
+                    (Value::Bool(_), "bool") => true,
+                    (Value::Number(n), "int") => n.fract() == 0.0,
+                    (Value::Number(_), "float") => true,
+                    (Value::Number(_), "double") => true,
+                    (Value::Array(_), t) => t.starts_with('[') && t.ends_with(']'),
+                    (Value::Dict(_), t) => t.starts_with('{') && t.ends_with('}'),
+                    (Value::Tuple(_), "Tuple") => true,
+                    (Value::StructInstance { struct_name, .. }, t) => struct_name == t,
+                    (Value::Null, "null") => true,
+                    (Value::Null, _) => false,
+                    _ => false,
+                };
+                Ok(Value::Bool(ok))
+            }
+            Expr::Lambda { params, body, .. } => {
+                let func = Function::new(
+                    "<lambda>".to_string(),
+                    params.clone(),
+                    vec![Stmt::Return(*body.clone())],
+                    Span { start: 0, end: 0 },
+                    Some(env.clone()),
+                );
+                Ok(Value::Function(func))
+            }
             Expr::Assign { name, value, .. } => {
                 let val = self.evaluate_expr(value, env)?;
                 env.assign(name, val.clone())?;
                 Ok(val)
+            }
+            Expr::Set { object, name, value, .. } => {
+                let obj_val = self.evaluate_expr(object, env)?;
+                let val = self.evaluate_expr(value, env)?;
+                match obj_val {
+                    Value::Dict(d) => {
+                        d.borrow_mut().insert(name.clone(), val.clone());
+                        Ok(val)
+                    }
+                    Value::StructInstance { struct_name, fields } => {
+                        if fields.borrow().contains_key(name) {
+                            fields.borrow_mut().insert(name.clone(), val.clone());
+                            Ok(val)
+                        } else {
+                            Err(format!(
+                                "error[E004]: unknown field '{}' on struct '{}'",
+                                name, struct_name
+                            ))
+                        }
+                    }
+                    _ => Err("Field assignment is only supported for dictionaries and structs".to_string()),
+                }
+            }
+            Expr::IndexSet { target, index, value, .. } => {
+                let target_val = self.evaluate_expr(target, env)?;
+                let index_val = self.evaluate_expr(index, env)?;
+                let val = self.evaluate_expr(value, env)?;
+                match (target_val, index_val) {
+                    (Value::Array(arr), Value::Number(n)) => {
+                        if n.fract() != 0.0 {
+                            return Err("Array index must be an integer".to_string());
+                        }
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("Array index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        let mut arr_mut = arr.borrow_mut();
+                        if idx >= arr_mut.len() {
+                            return Err("Array index out of bounds".to_string());
+                        }
+                        arr_mut[idx] = val.clone();
+                        Ok(val)
+                    }
+                    (Value::Dict(d), Value::String(s)) => {
+                        d.borrow_mut().insert(s, val.clone());
+                        Ok(val)
+                    }
+                    _ => Err("Index assignment is only supported for arrays (number index) and dictionaries (string key)".to_string()),
+                }
             }
             Expr::Update { name, op, prefix, .. } => {
                 let current = env
@@ -377,68 +457,82 @@ impl Executor {
                 Ok(Value::Number(if *prefix { new_num } else { current_num }))
             }
             Expr::Call { callee, args, .. } => {
-                // Check if it's a built-in function first
-                if let Expr::Variable(name) = callee.as_ref() {
-                    let mut evaluated_args = Vec::new();
-                    for arg in args {
-                        evaluated_args.push(self.evaluate_expr(arg, env)?);
-                    }
+                let mut evaluated_args = Vec::new();
+                for arg in args {
+                    evaluated_args.push(self.evaluate_expr(arg, env)?);
+                }
 
+                if let Expr::Variable(name) = callee.as_ref() {
                     if let Some(result) =
                         super::std::StdLib::call_builtin_function(name, &evaluated_args)
                     {
-                        result
-                    } else {
-                        // Not a built-in, check if it's a user-defined function
-                        let function = self.evaluate_expr(callee, env)?;
-                        match function {
-                            Value::Function(func) => {
-                                if args.len() != func.arity() {
-                                    return Err(format!(
-                                        "Expected {} arguments but got {}",
-                                        func.arity(),
-                                        args.len()
-                                    ));
-                                }
-
-                                let mut function_env = Environment::with_parent(env.clone());
-
-                                for (param, arg_value) in func.params.iter().zip(evaluated_args) {
-                                    function_env.define(param.name.clone(), arg_value);
-                                }
-
-                                self.execute_block(&func.body, &mut function_env)
-                            }
-                            _ => Err(format!("Can only call functions, got {:?}", function)),
-                        }
+                        return result;
                     }
-                } else {
-                    let function = self.evaluate_expr(callee, env)?;
-                    match function {
-                        Value::Function(func) => {
-                            if args.len() != func.arity() {
-                                return Err(format!(
-                                    "Expected {} arguments but got {}",
-                                    func.arity(),
-                                    args.len()
-                                ));
-                            }
+                }
 
-                            let mut evaluated_args = Vec::new();
-                            for arg in args {
-                                evaluated_args.push(self.evaluate_expr(arg, env)?);
-                            }
-
-                            let mut function_env = Environment::with_parent(env.clone());
-
-                            for (param, arg_value) in func.params.iter().zip(evaluated_args) {
-                                function_env.define(param.name.clone(), arg_value);
-                            }
-
-                            self.execute_block(&func.body, &mut function_env)
+                let function = self.evaluate_expr(callee, env)?;
+                match function {
+                    Value::Function(func) => {
+                        let hasVariadic = func.params.last().map(|p| p.variadic).unwrap_or(false);
+                        let minArgs = func
+                            .params
+                            .iter()
+                            .filter(|p| p.default.is_none() && !p.variadic)
+                            .count();
+                        if evaluated_args.len() < minArgs
+                            || (!hasVariadic && evaluated_args.len() > func.arity())
+                        {
+                            return Err(format!(
+                                "Expected {}..={} arguments but got {}",
+                                minArgs,
+                                func.arity(),
+                                evaluated_args.len()
+                            ));
                         }
-                        _ => Err(format!("Can only call functions, got {:?}", function)),
+
+                        let mut function_env = if let Some(closure) = &func.closure {
+                            Environment::with_parent(closure.clone())
+                        } else {
+                            Environment::with_parent(env.clone())
+                        };
+
+                        let mut argIndex = 0usize;
+                        for param in func.params.iter() {
+                            if param.variadic {
+                                let mut rest = Vec::new();
+                                while argIndex < evaluated_args.len() {
+                                    rest.push(evaluated_args[argIndex].clone());
+                                    argIndex += 1;
+                                }
+                                function_env.define(
+                                    param.name.clone(),
+                                    Value::Array(Rc::new(RefCell::new(rest))),
+                                );
+                                continue;
+                            }
+
+                            if argIndex < evaluated_args.len() {
+                                function_env.define(
+                                    param.name.clone(),
+                                    evaluated_args[argIndex].clone(),
+                                );
+                                argIndex += 1;
+                                continue;
+                            }
+
+                            let def = param.default.as_ref().ok_or_else(|| {
+                                format!(
+                                    "Missing argument '{}' and no default provided",
+                                    param.name
+                                )
+                            })?;
+                            let val = self.evaluate_expr(def, &mut function_env)?;
+                            function_env.define(param.name.clone(), val);
+                        }
+
+                        self.execute_block(&func.body, &mut function_env)
                     }
+                    other => Err(format!("Can only call functions, got {}", other)),
                 }
             }
         }
@@ -674,7 +768,14 @@ impl Executor {
                 if r == 0.0 {
                     Err("Division by zero".to_string())
                 } else {
-                    Ok(Value::Number(l / r))
+                    // Integer division if both operands are whole numbers
+                    let l_is_int = l.fract() == 0.0;
+                    let r_is_int = r.fract() == 0.0;
+                    if l_is_int && r_is_int {
+                        Ok(Value::Number(((l / r) as i64) as f64))
+                    } else {
+                        Ok(Value::Number(l / r))
+                    }
                 }
             }
             (Value::Number(l), Percent, Value::Number(r)) => {

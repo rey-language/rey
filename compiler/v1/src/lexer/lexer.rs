@@ -124,7 +124,18 @@ impl<'a> Lexer<'a> {
             }
             ':' => Ok(self.simpleToken(TokenKind::Colon, start)),
             '?' => Ok(self.simpleToken(TokenKind::Question, start)),
-            '.' => Ok(self.simpleToken(TokenKind::Dot, start)),
+            '.' => {
+                if self.cursor.peek() == Some('.') && self.cursor.peekN(1) == Some('.') {
+                    self.cursor.advance();
+                    self.cursor.advance();
+                    Ok(Token {
+                        kind: TokenKind::Ellipsis,
+                        span: Span::new(start, self.cursor.position()),
+                    })
+                } else {
+                    Ok(self.simpleToken(TokenKind::Dot, start))
+                }
+            }
             ',' => Ok(self.simpleToken(TokenKind::Comma, start)),
             '%' => {
                 let kind = if self.matchNext('=') {
@@ -158,8 +169,8 @@ impl<'a> Lexer<'a> {
                         span: Span::new(start, self.cursor.position()),
                     })
                 } else {
-                    Err(LexerError::UnexpectedCharacter {
-                        found: ch,
+                    Ok(Token {
+                        kind: TokenKind::Pipe,
                         span: Span::new(start, self.cursor.position()),
                     })
                 }
@@ -168,6 +179,8 @@ impl<'a> Lexer<'a> {
             '=' => {
                 let kind = if self.matchNext('=') {
                     TokenKind::EqualEqual
+                } else if self.matchNext('>') {
+                    TokenKind::Arrow
                 } else {
                     TokenKind::Equal
                 };
@@ -359,6 +372,7 @@ impl<'a> Lexer<'a> {
             "while" => TokenKind::While,
             "for" => TokenKind::For,
             "in" => TokenKind::In,
+            "instanceof" => TokenKind::InstanceOf,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
             "struct" => TokenKind::Struct,

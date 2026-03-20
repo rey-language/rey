@@ -1,0 +1,8 @@
+func greet(name: String, greeting: String = "Hello") {
+  println(greeting + ", " + name);
+}
+
+func main() {
+  greet("Misbah");
+  greet("Misbah", "Yo");
+}

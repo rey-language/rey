@@ -15,6 +15,7 @@ impl StdLib {
             vec![], // No parameters - accepts any number of arguments
             vec![], // Empty body - handled specially
             Span { start: 0, end: 0 },
+            None,
         );
         globals.insert("println".to_string(), Value::Function(println_func));
 
@@ -23,16 +24,35 @@ impl StdLib {
             vec![],
             vec![],
             Span { start: 0, end: 0 },
+            None,
         );
         globals.insert("print".to_string(), Value::Function(print_func));
 
-        let abs_func = Function::new("abs".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        let abs_func = Function::new(
+            "abs".to_string(),
+            vec![],
+            vec![],
+            Span { start: 0, end: 0 },
+            None,
+        );
         globals.insert("abs".to_string(), Value::Function(abs_func));
 
-        let max_func = Function::new("max".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        let max_func = Function::new(
+            "max".to_string(),
+            vec![],
+            vec![],
+            Span { start: 0, end: 0 },
+            None,
+        );
         globals.insert("max".to_string(), Value::Function(max_func));
 
-        let min_func = Function::new("min".to_string(), vec![], vec![], Span { start: 0, end: 0 });
+        let min_func = Function::new(
+            "min".to_string(),
+            vec![],
+            vec![],
+            Span { start: 0, end: 0 },
+            None,
+        );
         globals.insert("min".to_string(), Value::Function(min_func));
 
         let random_func = Function::new(
@@ -40,6 +60,7 @@ impl StdLib {
             vec![],
             vec![],
             Span { start: 0, end: 0 },
+            None,
         );
         globals.insert("random".to_string(), Value::Function(random_func));
 

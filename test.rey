@@ -1,0 +1,190 @@
+struct Matrix {
+    a: int,
+    b: int,
+    c: int,
+    d: int,
+
+    pub func create(a: int, b: int, c: int, d: int): Matrix {
+        return Matrix { a: a, b: b, c: c, d: d };
+    }
+
+    pub func multiply(other: Matrix): Matrix {
+        return Matrix {
+            a: a * other.a + b * other.c,
+            b: a * other.b + b * other.d,
+            c: c * other.a + d * other.c,
+            d: c * other.b + d * other.d
+        };
+    }
+
+    pub func det(): int {
+        return a * d - b * c;
+    }
+
+    pub func print(): Void {
+        println("[{a}, {b}]");
+        println("[{c}, {d}]");
+    }
+}
+
+struct LinkedList {
+    values: [int],
+    size: int,
+
+    pub func create(): LinkedList {
+        return LinkedList { values: [], size: 0 };
+    }
+
+    pub func append(val: int): Void {
+        push(values, val);
+        size++;
+    }
+
+    pub func prepend(val: int): Void {
+        var newValues = [];
+        push(newValues, val);
+        var i: int = 0;
+        while (i < size) {
+            push(newValues, values[i]);
+            i++;
+        }
+        values = newValues;
+        size++;
+    }
+
+    pub func contains(val: int): bool {
+        var i: int = 0;
+        while (i < size) {
+            if (values[i] == val) {
+                return true;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    pub func reverse(): LinkedList {
+        var result = LinkedList.create();
+        var i: int = size - 1;
+        while (i >= 0) {
+            result.append(values[i]);
+            i--;
+        }
+        return result;
+    }
+
+    pub func print(): Void {
+        println("List({size}): {values}");
+    }
+}
+
+struct BubbleSorter {
+    data: [int],
+    size: int,
+    comparisons: int,
+    swaps: int,
+
+    pub func create(arr: [int]): BubbleSorter {
+        return BubbleSorter { data: arr, size: len(arr), comparisons: 0, swaps: 0 };
+    }
+
+    pub func sort(): Void {
+        var i: int = 0;
+        while (i < size - 1) {
+            var j: int = 0;
+            while (j < size - i - 1) {
+                comparisons++;
+                if (data[j] > data[j + 1]) {
+                    var temp = data[j];
+                    var k = data[j + 1];
+                    data[j] = k;
+                    data[j + 1] = temp;
+                    swaps++;
+                }
+                j++;
+            }
+            i++;
+        }
+    }
+
+    pub func print(): Void {
+        println("Sorted: {data}");
+        println("Comparisons: {comparisons}, Swaps: {swaps}");
+    }
+}
+
+func collatz(n): int {
+    var steps: int = 0;
+    while (n != 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+           n = n * 3 + 1;  
+        }
+        steps++;
+    }
+    return steps;
+    //println(n);
+}
+
+func gcd(a: int, b: int): int {
+    while (b != 0) {
+        var temp = b;
+        b = a % b;
+        a = temp;
+    }
+    return a;
+}
+
+func lcm(a: int, b: int): int {
+    var g = gcd(a, b);
+    var divided = a / g;
+    return divided * b;
+}
+
+func main(): Void {
+    println("=== Matrix Math ===");
+    var m1 = Matrix.create(1, 2, 3, 4);
+    var m2 = Matrix.create(5, 6, 7, 8);
+    println("M1:");
+    m1.print();
+    println("M2:");
+    m2.print();
+    var m3 = m1.multiply(m2);
+    println("M1 x M2:");
+    m3.print();
+    println("det(M1): {m1.det()}");
+
+    println("=== Linked List ===");
+    var list = LinkedList.create();
+    var i: int = 1;
+    while (i <= 5) {
+        list.append(i * 10);
+        i++;
+    }
+    list.prepend(99);
+    list.print();
+    println("contains 30: {list.contains(30)}");
+    println("contains 42: {list.contains(42)}");
+    var reversed = list.reverse();
+    reversed.print();
+
+    //println("=== Bubble Sort ===");
+    //var sorter = BubbleSorter.create([64, 34, 25, 12, 22, 11, 90]);
+    //sorter.sort();
+    //sorter.print();
+
+    println("=== Collatz Sequences ===");
+    var nums = [6, 11, 27, 97, 871];
+    var j: int = 0;
+    while (j < len(nums)) {
+        println("collatz({nums[j]}): {collatz(nums[j])} steps");
+        j++;
+    }
+
+    println("=== GCD and LCM ===");
+    println("gcd(48, 18): {gcd(48, 18)}");
+    println("lcm(12, 18): {lcm(12, 18)}");
+    println("gcd(100, 75): {gcd(100, 75)}");
+    println("lcm(7, 13): {lcm(7, 13)}");
+}

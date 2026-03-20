@@ -1,0 +1,14 @@
+func sum(nums: ...int): int {
+  var total = 0;
+  var i = 0;
+  while i < nums.length() {
+    total = total + nums[i];
+    i = i + 1;
+  }
+  return total;
+}
+
+func main() {
+  println(sum());
+  println(sum(1, 2, 3));
+}

@@ -4,6 +4,8 @@ use super::{Expr, Type};
 pub struct Parameter {
     pub name: String,
     pub ty: Option<Type>,
+    pub default: Option<Expr>,
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

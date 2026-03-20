@@ -1,0 +1,7 @@
+// Test array index assignment bug
+var arr = [1, 2, 3];
+
+// Try to assign to an index
+arr[0] = 10;
+
+print(arr[0]);

@@ -1,0 +1,7 @@
+func main() {
+  var a: int | String = "hey";
+  println(a);
+
+  var b: int | String = 123;
+  println(b);
+}

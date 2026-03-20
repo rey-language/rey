@@ -107,11 +107,34 @@ impl Parser {
                 };
                 self.advance();
 
-                let param_ty = self.parseTypeAnnotation()?;
+                let mut variadic = false;
+                let param_ty = if self.matchToken(&TokenKind::Colon) {
+                    if self.matchToken(&TokenKind::Ellipsis) {
+                        variadic = true;
+                        let inner = self
+                            .parseTypeAtom()?
+                            .ok_or_else(|| self.error("Expected type name after '...'."))?;
+                        Some(Type {
+                            name: format!("[{}]", inner.name),
+                        })
+                    } else {
+                        self.parseTypeOnly()?
+                    }
+                } else {
+                    None
+                };
+
+                let default = if self.matchToken(&TokenKind::Equal) {
+                    Some(self.parseExpression()?)
+                } else {
+                    None
+                };
 
                 params.push(Parameter {
                     name: param_name,
                     ty: param_ty,
+                    default,
+                    variadic,
                 });
 
                 if !self.matchToken(&TokenKind::Comma) {
@@ -173,10 +196,34 @@ impl Parser {
                             _ => return Err(self.error("Expected parameter name.")),
                         };
                         self.advance();
-                        let param_ty = self.parseTypeAnnotation()?;
+
+                        let mut variadic = false;
+                        let param_ty = if self.matchToken(&TokenKind::Colon) {
+                            if self.matchToken(&TokenKind::Ellipsis) {
+                                variadic = true;
+                                let inner = self
+                                    .parseTypeAtom()?
+                                    .ok_or_else(|| self.error("Expected type name after '...'."))?;
+                                Some(Type {
+                                    name: format!("[{}]", inner.name),
+                                })
+                            } else {
+                                self.parseTypeOnly()?
+                            }
+                        } else {
+                            None
+                        };
+
+                        let default = if self.matchToken(&TokenKind::Equal) {
+                            Some(self.parseExpression()?)
+                        } else {
+                            None
+                        };
                         params.push(Parameter {
                             name: param_name,
                             ty: param_ty,
+                            default,
+                            variadic,
                         });
                         if !self.matchToken(&TokenKind::Comma) {
                             break;
@@ -238,9 +285,13 @@ impl Parser {
     }
 
     fn parseIfStatement(&mut self) -> Result<Stmt, ParserError> {
-        self.consume(&TokenKind::LeftParen, "Expected '(' after 'if'.")?;
-        let condition = self.parseExpression()?;
-        self.consume(&TokenKind::RightParen, "Expected ')' after condition.")?;
+        let condition = if self.matchToken(&TokenKind::LeftParen) {
+            let condition = self.parseExpression()?;
+            self.consume(&TokenKind::RightParen, "Expected ')' after condition.")?;
+            condition
+        } else {
+            self.parseExpression()?
+        };
 
         self.consume(&TokenKind::LeftBrace, "Expected '{' after condition.")?;
         let then_branch = self.parseBlock()?;
@@ -248,8 +299,7 @@ impl Parser {
 
         let else_branch = if self.matchToken(&TokenKind::Else) {
             if self.matchToken(&TokenKind::If) {
-                // else if chaining - put If back and parse as nested if
-                self.current -= 1;
+                // else if chaining - consume If and parse nested if
                 let nested_if = self.parseIfStatement()?;
                 Some(vec![nested_if])
             } else {
@@ -270,9 +320,13 @@ impl Parser {
     }
 
     fn parseWhileStatement(&mut self) -> Result<Stmt, ParserError> {
-        self.consume(&TokenKind::LeftParen, "Expected '(' after 'while'.")?;
-        let condition = self.parseExpression()?;
-        self.consume(&TokenKind::RightParen, "Expected ')' after condition.")?;
+        let condition = if self.matchToken(&TokenKind::LeftParen) {
+            let condition = self.parseExpression()?;
+            self.consume(&TokenKind::RightParen, "Expected ')' after condition.")?;
+            condition
+        } else {
+            self.parseExpression()?
+        };
 
         self.consume(&TokenKind::LeftBrace, "Expected '{' after condition.")?;
         let body = self.parseBlock()?;
@@ -358,6 +412,22 @@ impl Parser {
     }
 
     fn parseTypeOnly(&mut self) -> Result<Option<Type>, ParserError> {
+        let first = self
+            .parseTypeAtom()?
+            .ok_or_else(|| self.error("Expected type name"))?;
+        let mut parts = vec![first.name];
+        while self.matchToken(&TokenKind::Pipe) {
+            let next = self
+                .parseTypeAtom()?
+                .ok_or_else(|| self.error("Expected type name after '|'."))?;
+            parts.push(next.name);
+        }
+        Ok(Some(Type {
+            name: parts.join(" | "),
+        }))
+    }
+
+    fn parseTypeAtom(&mut self) -> Result<Option<Type>, ParserError> {
         if self.matchToken(&TokenKind::LeftBracket) {
             let inner = match &self.peek().kind {
                 TokenKind::Identifier(name) => name.clone(),
@@ -662,7 +732,61 @@ impl Parser {
                 Ok(Expr::Literal(Literal::Null))
             }
             TokenKind::LeftParen => {
+                let start = self.peek().span.start;
                 self.advance();
+
+                // try parse lambda: (x: int, y: int) => expr
+                let saved = self.current;
+                let mut lambdaParams: Vec<Parameter> = Vec::new();
+                let mut lambdaOk = true;
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        let param_name = match &self.peek().kind {
+                            TokenKind::Identifier(name) => name.clone(),
+                            _ => {
+                                lambdaOk = false;
+                                break;
+                            }
+                        };
+                        self.advance();
+
+                        let param_ty = if self.matchToken(&TokenKind::Colon) {
+                            self.parseTypeOnly()?
+                        } else {
+                            lambdaOk = false;
+                            break;
+                        };
+
+                        lambdaParams.push(Parameter {
+                            name: param_name,
+                            ty: param_ty,
+                            default: None,
+                            variadic: false,
+                        });
+
+                        if !self.matchToken(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+
+                if lambdaOk {
+                    if self.consume(&TokenKind::RightParen, "Expected ')' after lambda parameters.").is_ok()
+                        && self.matchToken(&TokenKind::Arrow)
+                    {
+                        let body = self.parseExpression()?;
+                        let span = Span::new(start, body.span().end);
+                        return Ok(Expr::Lambda {
+                            params: lambdaParams,
+                            body: Box::new(body),
+                            span,
+                        });
+                    }
+                }
+
+                // backtrack and parse as grouping / tuple literal
+                self.current = saved;
+
                 if self.check(&TokenKind::RightParen) {
                     return Err(self.error("Expected expression."));
                 }
@@ -830,6 +954,24 @@ impl Parser {
                 });
             }
 
+            if let Expr::Get { object, name: field_name, .. } = expr {
+                return Ok(Expr::Set {
+                    object,
+                    name: field_name,
+                    value: Box::new(value),
+                    span,
+                });
+            }
+
+            if let Expr::Index { target, index, .. } = expr {
+                return Ok(Expr::IndexSet {
+                    target,
+                    index,
+                    value: Box::new(value),
+                    span,
+                });
+            }
+
             return Err(self.error("Invalid assignment target."));
         }
 
@@ -858,6 +1000,34 @@ impl Parser {
                 };
                 return Ok(Expr::Assign {
                     name,
+                    value: Box::new(bin),
+                    span: self.previous().span,
+                });
+            }
+            if let Expr::Get { object, name: field_name, span: get_span, .. } = expr {
+                let bin = Expr::Binary {
+                    left: Box::new(Expr::Get { object: object.clone(), name: field_name.clone(), span: get_span }),
+                    op,
+                    right: Box::new(value),
+                    span: self.previous().span,
+                };
+                return Ok(Expr::Set {
+                    object,
+                    name: field_name,
+                    value: Box::new(bin),
+                    span: self.previous().span,
+                });
+            }
+            if let Expr::Index { target, index, span: idx_span, .. } = expr {
+                let bin = Expr::Binary {
+                    left: Box::new(Expr::Index { target: target.clone(), index: index.clone(), span: idx_span }),
+                    op,
+                    right: Box::new(value),
+                    span: self.previous().span,
+                };
+                return Ok(Expr::IndexSet {
+                    target,
+                    index,
                     value: Box::new(bin),
                     span: self.previous().span,
                 });
@@ -930,6 +1100,17 @@ impl Parser {
                 op,
                 right: Box::new(right),
                 span: self.previous().span,
+            };
+        }
+        while self.matchToken(&TokenKind::InstanceOf) {
+            let start = expr.span().start;
+            let ty = self
+                .parseTypeAtom()?
+                .ok_or_else(|| self.error("Expected type name after 'instanceof'."))?;
+            expr = Expr::InstanceOf {
+                value: Box::new(expr),
+                ty,
+                span: Span::new(start, self.previous().span.end),
             };
         }
         Ok(expr)
