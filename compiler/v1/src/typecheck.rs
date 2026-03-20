@@ -415,30 +415,48 @@ impl TypeChecker {
             }
             Stmt::For {
                 variable,
-                start,
-                end,
+                iterator,
                 body,
             } => {
-                let sty = self.exprTy(start)?;
-                let ety = self.exprTy(end)?;
-                if !sty.isAssignableTo(&Ty::Int) && !sty.isAssignableTo(&Ty::Float) {
-                    return Err(format!(
-                        "Type error: range start must be numeric, got {:?}",
-                        sty
-                    ));
+                use crate::ast::stmt::ForIterator;
+                match iterator {
+                    ForIterator::Range { start, end } => {
+                        let sty = self.exprTy(start)?;
+                        let ety = self.exprTy(end)?;
+                        if !sty.isAssignableTo(&Ty::Int) && !sty.isAssignableTo(&Ty::Float) {
+                            return Err(format!(
+                                "Type error: range start must be numeric, got {:?}",
+                                sty
+                            ));
+                        }
+                        if !ety.isAssignableTo(&Ty::Int) && !ety.isAssignableTo(&Ty::Float) {
+                            return Err(format!(
+                                "Type error: range end must be numeric, got {:?}",
+                                ety
+                            ));
+                        }
+                        self.pushScope();
+                        self.define(variable, Ty::Int, false);
+                        for s in body {
+                            self.checkStmt(s)?;
+                        }
+                        self.popScope();
+                    }
+                    ForIterator::Array(expr) => {
+                        let arr_ty = self.exprTy(expr)?;
+                        let elem_ty = match arr_ty {
+                            Ty::Array(inner) => *inner,
+                            Ty::Any => Ty::Any,
+                            _ => return Err("Type error: for-in requires an array".to_string()),
+                        };
+                        self.pushScope();
+                        self.define(variable, elem_ty, false);
+                        for s in body {
+                            self.checkStmt(s)?;
+                        }
+                        self.popScope();
+                    }
                 }
-                if !ety.isAssignableTo(&Ty::Int) && !ety.isAssignableTo(&Ty::Float) {
-                    return Err(format!(
-                        "Type error: range end must be numeric, got {:?}",
-                        ety
-                    ));
-                }
-                self.pushScope();
-                self.define(variable, Ty::Int, false);
-                for s in body {
-                    self.checkStmt(s)?;
-                }
-                self.popScope();
                 Ok(())
             }
             Stmt::Break | Stmt::Continue => Ok(()),

@@ -346,6 +346,8 @@ impl Parser {
     }
 
     fn parseForStatement(&mut self) -> Result<Stmt, ParserError> {
+        use crate::ast::stmt::ForIterator;
+
         // Parse variable name
         let variable = match self.peek().kind {
             TokenKind::Identifier(ref name) => name.clone(),
@@ -354,29 +356,34 @@ impl Parser {
         self.advance();
 
         self.consume(&TokenKind::In, "Expected 'in' after variable name.")?;
-        match self.peek().kind {
+
+        // Check if it's range(start, end) or an array expression
+        let iterator = match self.peek().kind {
             TokenKind::Identifier(ref name) if name == "range" => {
                 self.advance();
+                self.consume(&TokenKind::LeftParen, "Expected '(' after 'range'.")?;
+
+                let start = self.parseExpression()?;
+                self.consume(&TokenKind::Comma, "Expected ',' after start value.")?;
+                let end = self.parseExpression()?;
+
+                self.consume(&TokenKind::RightParen, "Expected ')' after end value.")?;
+                ForIterator::Range { start, end }
             }
-            _ => return Err(self.error("Expected 'range' after 'in'.")),
-        }
-        self.consume(&TokenKind::LeftParen, "Expected '(' after 'range'.")?;
+            _ => {
+                // Parse any expression as array
+                let expr = self.parseExpression()?;
+                ForIterator::Array(expr)
+            }
+        };
 
-        let start = self.parseExpression()?;
-        self.consume(&TokenKind::Comma, "Expected ',' after start value.")?;
-        let end = self.parseExpression()?;
-
-        self.consume(&TokenKind::RightParen, "Expected ')' after end value.")?;
-        self.consume(&TokenKind::LeftBrace, "Expected '{' after range.")?;
-
+        self.consume(&TokenKind::LeftBrace, "Expected '{' after for iterator.")?;
         let body = self.parseBlock()?;
-
         self.consume(&TokenKind::RightBrace, "Expected '}' after for body.")?;
 
         Ok(Stmt::For {
             variable,
-            start,
-            end,
+            iterator,
             body,
         })
     }

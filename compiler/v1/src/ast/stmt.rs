@@ -58,12 +58,17 @@ pub enum Stmt {
     },
     For {
         variable: String,
-        start: Expr,
-        end: Expr,
+        iterator: ForIterator,
         body: Vec<Stmt>,
     },
     Break,
     Continue,
     Return(Expr),
     ExprStmt(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForIterator {
+    Range { start: Expr, end: Expr },
+    Array(Expr),
 }

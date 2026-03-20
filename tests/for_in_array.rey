@@ -1,0 +1,16 @@
+// Test for x in array syntax
+var arr = [10, 20, 30];
+var sum = 0;
+
+for x in arr {
+    sum = sum + x;
+}
+
+print("Sum: " + sum);
+
+// Also test that range still works
+var total = 0;
+for i in range(0, 5) {
+    total = total + i;
+}
+print("Total: " + total);

@@ -105,30 +105,52 @@ impl Executor {
             }
             Stmt::For {
                 variable,
-                start,
-                end,
+                iterator,
                 body,
             } => {
-                let start_val = self.evaluate_expr(start, env)?;
-                let end_val = self.evaluate_expr(end, env)?;
+                use crate::ast::stmt::ForIterator;
+                match iterator {
+                    ForIterator::Range { start, end } => {
+                        let start_val = self.evaluate_expr(start, env)?;
+                        let end_val = self.evaluate_expr(end, env)?;
 
-                let start_num = match start_val {
-                    Value::Number(n) => n as i64,
-                    _ => return Err("Range start must be a number".to_string()),
-                };
-                let end_num = match end_val {
-                    Value::Number(n) => n as i64,
-                    _ => return Err("Range end must be a number".to_string()),
-                };
+                        let start_num = match start_val {
+                            Value::Number(n) => n as i64,
+                            _ => return Err("Range start must be a number".to_string()),
+                        };
+                        let end_num = match end_val {
+                            Value::Number(n) => n as i64,
+                            _ => return Err("Range end must be a number".to_string()),
+                        };
 
-                for i in start_num..end_num {
-                    env.define(variable.clone(), Value::Number(i as f64));
+                        for i in start_num..end_num {
+                            env.define(variable.clone(), Value::Number(i as f64));
 
-                    match self.execute_block_with_control_flow(body, env)? {
-                        ControlFlow::Break => break,
-                        ControlFlow::Continue => continue,
-                        ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
-                        ControlFlow::Normal(_) => {}
+                            match self.execute_block_with_control_flow(body, env)? {
+                                ControlFlow::Break => break,
+                                ControlFlow::Continue => continue,
+                                ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                ControlFlow::Normal(_) => {}
+                            }
+                        }
+                    }
+                    ForIterator::Array(expr) => {
+                        let arr_val = self.evaluate_expr(expr, env)?;
+                        match arr_val {
+                            Value::Array(arr) => {
+                                for item in arr.borrow().iter() {
+                                    env.define(variable.clone(), item.clone());
+
+                                    match self.execute_block_with_control_flow(body, env)? {
+                                        ControlFlow::Break => break,
+                                        ControlFlow::Continue => continue,
+                                        ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                        ControlFlow::Normal(_) => {}
+                                    }
+                                }
+                            }
+                            _ => return Err("For-in requires an array".to_string()),
+                        }
                     }
                 }
                 Ok(ControlFlow::normal(Value::Null))
