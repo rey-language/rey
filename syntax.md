@@ -14,8 +14,10 @@ Welcome to the comprehensive guide for the **Rey Language (v1)**.
 6. [Collections (Arrays & Dicts)](#collections-arrays--dicts)
 7. [Strings (Interpolation, Multiline, Methods)](#strings)
 8. [Structs](#structs)
-9. [Built-in Functions](#built-in-functions)
-10. [Error Diagnostics](#error-diagnostics)
+9. [Enums](#enums)
+10. [Match Statements](#match-statements)
+11. [Built-in Functions](#built-in-functions)
+12. [Error Diagnostics](#error-diagnostics)
 
 ---
 
@@ -384,6 +386,101 @@ println(msg.split(" ")[1]);  // -> "Rey"
 
 ---
 
+## Enums
+
+Enums define a type with a fixed set of named variants. Each variant is automatically available as a constant value after the enum is declared.
+
+### Declaration
+
+```rey
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+enum Status {
+    Ok,
+    Error,
+    Loading
+}
+```
+
+### Using Enums
+
+Enum variants are accessed directly by name or qualified with the enum type:
+
+```rey
+var dir = North;              // Direct access
+var status = Status::Error;   // Qualified access
+
+// Enums can be printed
+println(dir);     // "Direction::North"
+println(status);  // "Status::Error"
+```
+
+---
+
+## Match Statements
+
+Match provides pattern matching for enums and primitive values.
+
+### Basic Syntax
+
+```rey
+match value {
+    Pattern1 => statement,
+    Pattern2 => statement,
+    _ => default_statement
+}
+```
+
+### Pattern Types
+
+- **Enum variants**: `Direction::North`, `Status::Ok`
+- **Literals**: `1`, `"hello"`, `true`
+- **Variables**: `x` (binds the matched value)
+- **Wildcard**: `_` (matches any value)
+
+### Examples
+
+Match on enum:
+```rey
+enum Direction { North, South, East, West }
+var dir = North;
+
+match dir {
+    Direction::North => println("Going north"),
+    Direction::South => println("Going south"),
+    Direction::East => println("Going east"),
+    Direction::West => println("Going west"),
+    _ => println("Unknown direction")
+}
+```
+
+Match on numbers:
+```rey
+var x = 5;
+match x {
+    1 => println("one"),
+    2 => println("two"),
+    5 => println("five"),
+    _ => println("other")
+}
+```
+
+Match with variable binding:
+```rey
+var value = 42;
+match value {
+    0 => println("zero"),
+    n => println("The value is: {n}")  // n is bound to 42
+}
+```
+
+---
+
 ## Built-in Functions
 
 In addition to collection modifications, Rey provides several global functions natively inside the interpreter context.
@@ -460,12 +557,12 @@ println(p.health); // Accessing pub field
 
 ### Reserved Keywords
 
-The following keywords are reserved:
+The following keywords are reserved for future features:
 
-- `enum`
-- `match`
+- `try`
+- `catch`
 
-Note: these are currently reserved but not yet implemented in the parser. Using them will produce a syntax error.
+Note: `enum` and `match` were previously reserved and are now fully implemented.
 
 ---
 
