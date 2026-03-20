@@ -1,4 +1,4 @@
-func sum(nums: ...int): int {
+func sum(nums:...int): int {
   var total = 0;
   var i = 0;
   while i < nums.length() {

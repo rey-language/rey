@@ -12,8 +12,8 @@ impl Evaluator {
 
     pub fn evaluate(&self, expr: &Expr, env:&mut Environment) -> Result<Value, String> {
         match expr {
-            Expr::Literal(lit) => Ok(Value::from(lit.clone())),
-            Expr::Variable(name) => env
+            Expr::Literal { value, .. } => Ok(Value::from(value.clone())),
+            Expr::Variable { name, .. } => env
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),

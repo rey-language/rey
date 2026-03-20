@@ -41,6 +41,7 @@ pub enum TokenKind {
     StarEqual,
     SlashEqual,
     PercentEqual,
+    ColonColon,
 
     //keywords
     Var,
@@ -55,6 +56,8 @@ pub enum TokenKind {
     Continue,
     For,
     In,
+    Enum,
+    Match,
     InstanceOf,
     True,
     False,

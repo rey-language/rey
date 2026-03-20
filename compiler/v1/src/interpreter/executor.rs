@@ -161,13 +161,60 @@ impl Executor {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::return_value(value))
             }
+            Stmt::EnumDecl { name, variants } => {
+                env.register_enum(name.clone(), variants.clone());
+                Ok(ControlFlow::normal(Value::Null))
+            }
+            Stmt::Match { expr, arms } => {
+                let value = self.evaluate_expr(expr, env)?;
+                use crate::ast::stmt::Pattern;
+
+                for arm in arms {
+                    let matched = match (&arm.pattern, &value) {
+                        (Pattern::Wildcard, _) => true,
+                        (Pattern::Variable(_), _) => true,
+                        (Pattern::Literal(lit), val) => {
+                            let pattern_val = Value::from(lit.clone());
+                            pattern_val == *val
+                        }
+                        (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
+                            enum_name == en && variant == v
+                        }
+                        _ => false,
+                    };
+
+                    if matched {
+                        // Bind variable if it's a variable pattern
+                        if let Pattern::Variable(name) = &arm.pattern {
+                            env.define(name.clone(), value.clone());
+                        }
+
+                        // Execute the arm body
+                        for stmt in &arm.body {
+                            let cf = self.execute(stmt, env)?;
+                            if !matches!(cf, ControlFlow::Normal(_)) {
+                                return Ok(cf);
+                            }
+                        }
+
+                        // Return the value of the last statement if it's a return
+                        if let Some(Stmt::Return(expr)) = arm.body.last() {
+                            return Ok(ControlFlow::return_value(self.evaluate_expr(expr, env)?));
+                        }
+
+                        return Ok(ControlFlow::normal(Value::Null));
+                    }
+                }
+
+                Err("No matching arm in match expression".to_string())
+            }
         }
     }
 
     pub fn evaluate_expr(&self, expr: &Expr, env: &mut Environment) -> Result<Value, String> {
         match expr {
-            Expr::Literal(lit) => Ok(Value::from(lit.clone())),
-            Expr::Variable(name) => env
+            Expr::Literal { value, .. } => Ok(Value::from(value.clone())),
+            Expr::Variable { name, .. } => env
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
@@ -495,7 +542,7 @@ impl Executor {
                     evaluated_args.push(self.evaluate_expr(arg, env)?);
                 }
 
-                if let Expr::Variable(name) = callee.as_ref() {
+                if let Expr::Variable { name, .. } = callee.as_ref() {
                     if let Some(result) =
                         super::std::StdLib::call_builtin_function(name, &evaluated_args)
                     {

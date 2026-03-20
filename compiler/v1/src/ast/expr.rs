@@ -5,7 +5,10 @@ use crate::lexer::TokenKind;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Literal(Literal),
+    Literal {
+        value: Literal,
+        span: Span,
+    },
     TupleLiteral {
         elements: Vec<Expr>,
         span: Span,
@@ -16,7 +19,10 @@ pub enum Expr {
         right: Box<Expr>,
         span: Span,
     },
-    Variable(String),
+    Variable {
+        name: String,
+        span: Span,
+    },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
@@ -106,10 +112,10 @@ pub enum Expr {
 impl Expr {
     pub fn span(&self) -> Span {
         match self {
-            Expr::Literal(_) => Span { start: 0, end: 0 },
+            Expr::Literal { span, .. } => *span,
             Expr::TupleLiteral { span, .. } => *span,
             Expr::Binary { span, .. } => *span,
-            Expr::Variable(_) => Span { start: 0, end: 0 },
+            Expr::Variable { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::ArrayLiteral { span, .. } => *span,
             Expr::DictLiteral { span, .. } => *span,

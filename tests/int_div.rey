@@ -4,11 +4,11 @@ var b = 3;
 var result = a / b;
 
 // Should be 3 for integer division, but might return float
-print(result);
+println(result);
 
 // Check if it's a float
 if (result == 3.3333333333333335) {
-    print("BUG: integer division returned float");
+    println("BUG: integer division returned float");
 } else {
-    print("OK: result is " + result);
+    println("OK: result is " + result);
 }

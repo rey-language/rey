@@ -53,6 +53,20 @@ fn report_error(source: &str, span: &crate::lexer::span::Span, title: &str, mess
     eprintln!();
 }
 
+fn report_error_in_file(
+    filename: &str,
+    source: &str,
+    span: &crate::lexer::span::Span,
+    title: &str,
+    message: &str,
+) {
+    let red = "\x1b[1;31m";
+    let reset = "\x1b[0m";
+    eprintln!("{}error[{}]{}: {}", red, title, reset, message);
+    eprintln!(" --> {}", filename);
+    report_error(source, span, title, message);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let filename = if args.len() > 1 {
@@ -103,7 +117,7 @@ fn main() {
             }
         }
         Err(err) => {
-            report_error(&source, err.span(), "syntax", &err.message());
+            report_error_in_file(&filename, &source, err.span(), "syntax", &err.message());
             std::process::exit(1);
         }
     }

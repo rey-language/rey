@@ -216,6 +216,7 @@ impl StdLib {
             }
             Value::Bool(b) => format!("{}", b),
             Value::Null => "null".to_string(),
+            Value::EnumVariant { enum_name, variant } => format!("{}::{}", enum_name, variant),
             Value::Function(_) => "<function>".to_string(),
             Value::Tuple(items) => {
                 let items = items

@@ -36,6 +36,27 @@ Rey heavily leverages implicit type inference but supports full explicit typing.
 | `[T]` | `[1, 2]` | Array of type `T` |
 | `{K:V}` | `{"a": 1}` | Dictionary mapping keys to values |
 
+### Tuple Types
+
+Tuples are fixed-size, positional collections.
+
+```rey
+var t = (1, "hello", true);
+println(t.0);
+println(t.1);
+println(t.2);
+```
+
+Tuple element access uses dot + integer index (`.0`, `.1`, ...).
+
+```rey
+var nested = ((1, 2), ("a", "b"));
+println((nested.0).1);
+println((nested.1).0);
+```
+
+Note: for nested tuple access, use parentheses around the intermediate access.
+
 ### Variable Declaration
 
 Variables are defined using the `var` keyword. Unannotated `var` declarations are **Dynamically Typed** and can change their type later, while annotated ones are strictly typed to their annotation. You can also declare immutable constants using `const`.
@@ -118,19 +139,32 @@ Rey comes full-featured with standard arithmetic, logic, comparison, and unary o
 | `>` | Greater | `a > b` |
 | `>=` | Greater/Eq | `a >= b` |
 
+### Type Operators
+
+`instanceof` checks runtime type.
+
+```rey
+var v: int | String = 123;
+if v instanceof int {
+    println(v + 1);
+} else {
+    println(v);
+}
+```
+
 ---
 
 ## Control Flow
 
 ### If / Else
-Standard branching logic. Conditions **must** be wrapped in parentheses.
+Standard branching logic. Parentheses are optional.
 
 ```rey
 var score = 85;
 
-if (score >= 90) {
+if score >= 90 {
     println("A");
-} else if (score >= 80) {
+} else if score >= 80 {
     println("B");
 } else {
     println("C");
@@ -143,20 +177,50 @@ Repeats execution as long as the condition evaluates to `true`:
 
 ```rey
 var i = 0;
-while (i < 5) {
+while i < 5 {
     println("Current: ", i);
     i++;
 }
 ```
 
+### Loop
+
+An infinite loop that can be controlled with `break` and `continue`.
+
+```rey
+var count = 0;
+loop {
+    count += 1;
+    if count >= 5 {
+        break;
+    }
+}
+println("Count: " + count);
+```
+
 ### For Loop
 
-Iterates over a predefined sequence using the `range(inclusive, exclusive)` generator:
+Iterates over either a numeric range or an array.
+
+Range iteration:
 
 ```rey
 for index in range(0, 10) {
     println(index); // Prints 0 through 9
 }
+```
+
+`range(start, end)` is currently a special form recognized by the parser inside `for ... in ...`.
+
+Array iteration:
+
+```rey
+var arr = [10, 20, 30];
+var sum = 0;
+for x in arr {
+    sum = sum + x;
+}
+println("Sum: " + sum);
 ```
 
 ### Break and Continue
@@ -198,6 +262,45 @@ func main(): Void {
 }
 ```
 
+### Default Parameters
+
+```rey
+func add(a: int, b: int = 10): int {
+    return a + b;
+}
+
+println(add(5));
+println(add(5, 2));
+```
+
+### Variadic Parameters
+
+Use `...` on the last parameter to accept extra arguments (available as an array).
+
+```rey
+func sum(nums:...int): int {
+    var total = 0;
+    for n in nums {
+        total += n;
+    }
+    return total;
+}
+
+println(sum(1, 2, 3));
+```
+
+### Lambdas / Closures
+
+Lambdas capture variables from their surrounding scope.
+
+```rey
+func main() {
+    var base = 3;
+    var mul = (x: int) => x * base;
+    println(mul(4));
+}
+```
+
 ---
 
 ## Collections (Arrays & Dicts)
@@ -211,6 +314,9 @@ var items = [10, 20, 30];               // Untyped inference
 var names: [String] = ["Goblin", "Orc"]; // Strictly typed Array
 
 println(items[0]);                      // Retrieval
+
+items[0] = 99;                          // Assignment
+items[0] += 1;                          // Compound assignment
 
 // Push and Pop builtin operations
 push(items, 40);                        // Appends 40
@@ -227,6 +333,11 @@ var strictDict: {String:int} = {"gold": 50};
 
 println(player["hp"]);    // Index bracket notation
 println(player.name);     // Shorthand dot notation
+
+player["hp"] = 120;
+player.name = "Hero";
+player["hp"] += 10;
+player.name += "!";
 ```
 
 ---
@@ -346,6 +457,15 @@ var p = Player.create("Hero", 100);
 p.takeDamage(20);
 println(p.health); // Accessing pub field
 ```
+
+### Reserved Keywords
+
+The following keywords are reserved:
+
+- `enum`
+- `match`
+
+Note: these are currently reserved but not yet implemented in the parser. Using them will produce a syntax error.
 
 ---
 

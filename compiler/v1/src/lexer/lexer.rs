@@ -122,7 +122,14 @@ impl<'a> Lexer<'a> {
                     span: Span::new(start, self.cursor.position()),
                 })
             }
-            ':' => Ok(self.simpleToken(TokenKind::Colon, start)),
+            ':' => {
+                let kind = if self.matchNext(':') {
+                    TokenKind::ColonColon
+                } else {
+                    TokenKind::Colon
+                };
+                Ok(self.simpleToken(kind, start))
+            }
             '?' => Ok(self.simpleToken(TokenKind::Question, start)),
             '.' => {
                 if self.cursor.peek() == Some('.') && self.cursor.peekN(1) == Some('.') {
@@ -373,6 +380,8 @@ impl<'a> Lexer<'a> {
             "loop" => TokenKind::Loop,
             "for" => TokenKind::For,
             "in" => TokenKind::In,
+            "enum" => TokenKind::Enum,
+            "match" => TokenKind::Match,
             "instanceof" => TokenKind::InstanceOf,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,

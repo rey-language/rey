@@ -20,6 +20,7 @@ pub enum Value {
     Char(char),
     Number(f64),
     Bool(bool),
+    EnumVariant { enum_name: String, variant: String },
     Function(Function),
     Tuple(Rc<RefCell<Vec<Value>>>),
     Array(Rc<RefCell<Vec<Value>>>),
@@ -44,6 +45,7 @@ impl std::fmt::Display for Value {
                 }
             }
             Value::Bool(b) => write!(f, "{}", b),
+            Value::EnumVariant { enum_name, variant } => write!(f, "{}::{}", enum_name, variant),
             Value::Function(func) => write!(f, "<func {}>", func.name),
             Value::Tuple(items) => {
                 let items = items.borrow();
@@ -83,6 +85,9 @@ impl PartialEq for Value {
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::EnumVariant { enum_name: en1, variant: v1 }, Value::EnumVariant { enum_name: en2, variant: v2 }) => {
+                en1 == en2 && v1 == v2
+            }
             (Value::Function(a), Value::Function(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => {
                 let a = a.borrow();

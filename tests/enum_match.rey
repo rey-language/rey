@@ -1,0 +1,22 @@
+enum Shape {
+    Circle(a: float),
+    Rect(b: float, c: float),
+    Triangle(d: float, e: float)
+}
+
+fn area(shape: Shape) -> float {
+    match shape {
+        Shape::Circle(a)      => 3.14159 * a * a,
+        Shape::Rect(b, c)     => b * c,
+        Shape::Triangle(d, e) => 0.5 * d * e,
+        _ => 0.0
+    }
+}
+
+var c = Circle(5.0);
+var r = Rect(4.0, 6.0);
+var t = Triangle(3.0, 8.0);
+
+print(area(c));
+print(area(r));
+print(area(t));

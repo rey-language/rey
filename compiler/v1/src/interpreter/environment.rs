@@ -6,6 +6,7 @@ pub struct Environment {
     values: HashMap<String, Value>,
     parent: Option<Rc<Environment>>,
     pub struct_defs: HashMap<String, StructDef>,
+    pub enum_defs: HashMap<String, Vec<String>>,
 }
 
 impl Clone for Environment {
@@ -14,6 +15,7 @@ impl Clone for Environment {
             values: self.values.clone(),
             parent: self.parent.clone(),
             struct_defs: self.struct_defs.clone(),
+            enum_defs: self.enum_defs.clone(),
         }
     }
 }
@@ -24,12 +26,14 @@ impl Environment {
             values: HashMap::new(),
             parent: None,
             struct_defs: HashMap::new(),
+            enum_defs: HashMap::new(),
         }
     }
     pub fn with_parent(parent: Environment) -> Self {
         Self {
             values: HashMap::new(),
             struct_defs: parent.struct_defs.clone(),
+            enum_defs: parent.enum_defs.clone(),
             parent: Some(Rc::new(parent)),
         }
     }
@@ -61,7 +65,23 @@ impl Environment {
         self.struct_defs.insert(def.name.clone(), def);
     }
 
+    pub fn register_enum(&mut self, name: String, variants: Vec<String>) {
+        self.enum_defs.insert(name.clone(), variants.clone());
+        // Also register each variant as a value
+        for variant in variants {
+            let val = Value::EnumVariant {
+                enum_name: name.clone(),
+                variant: variant.clone(),
+            };
+            self.values.insert(variant, val);
+        }
+    }
+
     pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
         self.struct_defs.get(name)
+    }
+
+    pub fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
+        self.enum_defs.get(name)
     }
 }

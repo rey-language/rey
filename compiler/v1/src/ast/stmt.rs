@@ -1,4 +1,4 @@
-use super::{Expr, Type};
+use super::{Expr, Literal, Type};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
@@ -61,10 +61,32 @@ pub enum Stmt {
         iterator: ForIterator,
         body: Vec<Stmt>,
     },
+    EnumDecl {
+        name: String,
+        variants: Vec<String>,
+    },
+    Match {
+        expr: Expr,
+        arms: Vec<MatchArm>,
+    },
     Break,
     Continue,
     Return(Expr),
     ExprStmt(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    EnumVariant(String, String), // enum_name, variant_name
+    Literal(Literal),
+    Variable(String),
+    Wildcard,
 }
 
 #[derive(Debug, Clone, PartialEq)]

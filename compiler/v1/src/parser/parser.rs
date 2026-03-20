@@ -7,7 +7,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::ast::{Expr, FieldDecl, Literal, MethodDecl, Parameter, Stmt, Type};
+use crate::ast::{Expr, FieldDecl, Literal, MatchArm, MethodDecl, Parameter, Pattern, Stmt, Type};
 use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
 
@@ -49,6 +49,10 @@ impl Parser {
             Ok(Some(self.parseFuncDeclaration()?))
         } else if self.matchToken(&TokenKind::Struct) {
             Ok(Some(self.parseStructDeclaration()?))
+        } else if self.matchToken(&TokenKind::Enum) {
+            Ok(Some(self.parseEnumDeclaration()?))
+        } else if self.matchToken(&TokenKind::Match) {
+            Ok(Some(self.parseMatchStatement()?))
         } else if self.matchToken(&TokenKind::If) {
             Ok(Some(self.parseIfStatement()?))
         } else if self.matchToken(&TokenKind::While) {
@@ -345,6 +349,117 @@ impl Parser {
         Ok(Stmt::Loop { body })
     }
 
+    fn parseEnumDeclaration(&mut self) -> Result<Stmt, ParserError> {
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => return Err(self.error("Expected enum name.")),
+        };
+        self.advance();
+
+        self.consume(&TokenKind::LeftBrace, "Expected '{' after enum name.")?;
+
+        let mut variants = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
+            let variant = match &self.peek().kind {
+                TokenKind::Identifier(name) => name.clone(),
+                _ => return Err(self.error("Expected variant name.")),
+            };
+            self.advance();
+            variants.push(variant);
+
+            if !self.matchToken(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        self.consume(&TokenKind::RightBrace, "Expected '}' after enum variants.")?;
+
+        Ok(Stmt::EnumDecl { name, variants })
+    }
+
+    fn parseMatchStatement(&mut self) -> Result<Stmt, ParserError> {
+        use crate::ast::stmt::{MatchArm, Pattern};
+
+        let expr = self.parseExpression()?;
+
+        self.consume(&TokenKind::LeftBrace, "Expected '{' after match expression.")?;
+
+        let mut arms = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
+            let pattern = self.parsePattern()?;
+            self.consume(&TokenKind::Arrow, "Expected '=>' after pattern.")?;
+
+            // Parse body - can be single expression or block
+            let body = if self.check(&TokenKind::LeftBrace) {
+                self.advance();
+                let block = self.parseBlock()?;
+                self.consume(&TokenKind::RightBrace, "Expected '}' after match arm body.")?;
+                block
+            } else {
+                let expr = self.parseExpression()?;
+                vec![Stmt::Return(expr)]
+            };
+
+            arms.push(MatchArm { pattern, body });
+
+            if !self.matchToken(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        self.consume(&TokenKind::RightBrace, "Expected '}' after match arms.")?;
+
+        Ok(Stmt::Match { expr, arms })
+    }
+
+    fn parsePattern(&mut self) -> Result<Pattern, ParserError> {
+        use crate::ast::stmt::Pattern;
+
+        match &self.peek().kind {
+            TokenKind::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+
+                // Check for Enum::Variant pattern
+                if self.matchToken(&TokenKind::ColonColon) {
+                    let variant = match &self.peek().kind {
+                        TokenKind::Identifier(v) => v.clone(),
+                        _ => return Err(self.error("Expected variant name after '::'.")),
+                    };
+                    self.advance();
+                    Ok(Pattern::EnumVariant(name, variant))
+                } else if name == "_" {
+                    Ok(Pattern::Wildcard)
+                } else {
+                    Ok(Pattern::Variable(name))
+                }
+            }
+            TokenKind::NumberLiteral(n) => {
+                let val = *n;
+                self.advance();
+                Ok(Pattern::Literal(crate::ast::Literal::Number(val)))
+            }
+            TokenKind::StringLiteral(s) => {
+                let val = s.clone();
+                self.advance();
+                Ok(Pattern::Literal(crate::ast::Literal::String(val)))
+            }
+            TokenKind::True => {
+                self.advance();
+                Ok(Pattern::Literal(crate::ast::Literal::Bool(true)))
+            }
+            TokenKind::False => {
+                self.advance();
+                Ok(Pattern::Literal(crate::ast::Literal::Bool(false)))
+            }
+            TokenKind::Null => {
+                self.advance();
+                Ok(Pattern::Literal(crate::ast::Literal::Null))
+            }
+            _ => Err(self.error("Expected pattern.")),
+        }
+    }
+
     fn parseForStatement(&mut self) -> Result<Stmt, ParserError> {
         use crate::ast::stmt::ForIterator;
 
@@ -501,7 +616,7 @@ impl Parser {
                 self.advance();
                 let right = self.parseUnary()?;
                 match right {
-                    Expr::Variable(name) => Ok(Expr::Update {
+                    Expr::Variable { name, .. } => Ok(Expr::Update {
                         name,
                         op,
                         prefix: true,
@@ -511,10 +626,14 @@ impl Parser {
                 }
             }
             TokenKind::Minus => {
+                let span = self.peek().span;
                 self.advance();
                 let expr = self.parseUnary()?;
                 Ok(Expr::Binary {
-                    left: Box::new(Expr::Literal(Literal::Number(0.0))),
+                    left: Box::new(Expr::Literal {
+                        value: Literal::Number(0.0),
+                        span,
+                    }),
                     op: TokenKind::Minus,
                     right: Box::new(expr),
                     span: self.previous().span,
@@ -599,7 +718,8 @@ impl Parser {
                         "Expected ')' after method arguments.",
                     )?;
                     // If the receiver is a Variable with uppercase first char, it's a static call
-                    if let Expr::Variable(ref struct_name) = expr {
+                    if let Expr::Variable { ref name, .. } = expr {
+                        let struct_name = name;
                         if struct_name
                             .chars()
                             .next()
@@ -608,7 +728,7 @@ impl Parser {
                         {
                             expr = Expr::StaticCall {
                                 struct_name: struct_name.clone(),
-                                method: name,
+                                method: name.clone(),
                                 args,
                                 span: self.previous().span,
                             };
@@ -633,7 +753,7 @@ impl Parser {
 
             if self.matchToken(&TokenKind::PlusPlus) {
                 match expr {
-                    Expr::Variable(name) => {
+                    Expr::Variable { name, .. } => {
                         expr = Expr::Update {
                             name,
                             op: TokenKind::PlusPlus,
@@ -648,7 +768,7 @@ impl Parser {
 
             if self.matchToken(&TokenKind::MinusMinus) {
                 match expr {
-                    Expr::Variable(name) => {
+                    Expr::Variable { name, .. } => {
                         expr = Expr::Update {
                             name,
                             op: TokenKind::MinusMinus,
@@ -714,7 +834,10 @@ impl Parser {
                         span: Span::new(start, self.previous().span.end),
                     })
                 } else {
-                    Ok(Expr::Variable(name))
+                    Ok(Expr::Variable {
+                        name,
+                        span: self.previous().span,
+                    })
                 }
             }
             TokenKind::StringLiteral(value) => {
@@ -726,27 +849,50 @@ impl Parser {
                         Err(_) => {} // Fallback to literal if interpolation fails
                     }
                 }
-                Ok(Expr::Literal(Literal::String(value)))
+                Ok(Expr::Literal {
+                    value: Literal::String(value),
+                    span,
+                })
             }
             TokenKind::CharLiteral(value) => {
+                let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal(Literal::Char(value)))
+                Ok(Expr::Literal {
+                    value: Literal::Char(value),
+                    span,
+                })
             }
             TokenKind::NumberLiteral(value) => {
+                let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal(Literal::Number(value)))
+                Ok(Expr::Literal {
+                    value: Literal::Number(value),
+                    span,
+                })
             }
             TokenKind::True => {
+                let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal(Literal::Bool(true)))
+                Ok(Expr::Literal {
+                    value: Literal::Bool(true),
+                    span,
+                })
             }
             TokenKind::False => {
+                let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal(Literal::Bool(false)))
+                Ok(Expr::Literal {
+                    value: Literal::Bool(false),
+                    span,
+                })
             }
             TokenKind::Null => {
+                let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal(Literal::Null))
+                Ok(Expr::Literal {
+                    value: Literal::Null,
+                    span,
+                })
             }
             TokenKind::LeftParen => {
                 let start = self.peek().span.start;
@@ -890,7 +1036,7 @@ impl Parser {
         }
     }
 
-    fn parseStringInterpolation(value: String, _span: Span) -> Result<Expr, ParserError> {
+    fn parseStringInterpolation(value: String, span: Span) -> Result<Expr, ParserError> {
         let mut parts: Vec<Expr> = Vec::new();
         let mut current_str = String::new();
         let mut in_expr = false;
@@ -903,7 +1049,10 @@ impl Parser {
                     in_expr = true;
                     brace_depth = 1;
                     if !current_str.is_empty() || parts.is_empty() {
-                        parts.push(Expr::Literal(Literal::String(current_str.clone())));
+                        parts.push(Expr::Literal {
+                            value: Literal::String(current_str.clone()),
+                            span,
+                        });
                         current_str.clear();
                     }
                 } else {
@@ -928,7 +1077,10 @@ impl Parser {
                         let mut parser = Parser::new(tokens);
                         let inner_expr = parser
                             .parseExpression()
-                            .unwrap_or(Expr::Literal(Literal::Null));
+                            .unwrap_or(Expr::Literal {
+                                value: Literal::Null,
+                                span,
+                            });
                         parts.push(inner_expr);
                         expr_str.clear();
                     } else {
@@ -940,7 +1092,10 @@ impl Parser {
             }
         }
         if !current_str.is_empty() || parts.is_empty() {
-            parts.push(Expr::Literal(Literal::String(current_str)));
+            parts.push(Expr::Literal {
+                value: Literal::String(current_str),
+                span,
+            });
         }
 
         let mut iter = parts.into_iter();
@@ -963,7 +1118,7 @@ impl Parser {
             let span = self.previous().span;
             let value = self.parseAssignment()?;
 
-            if let Expr::Variable(name) = expr {
+            if let Expr::Variable { name, .. } = expr {
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
@@ -1008,9 +1163,12 @@ impl Parser {
 
         if let Some(op) = compound {
             let value = self.parseAssignment()?;
-            if let Expr::Variable(name) = expr {
+            if let Expr::Variable { name, .. } = expr {
                 let bin = Expr::Binary {
-                    left: Box::new(Expr::Variable(name.clone())),
+                    left: Box::new(Expr::Variable {
+                        name: name.clone(),
+                        span: self.previous().span,
+                    }),
                     op,
                     right: Box::new(value),
                     span: self.previous().span,
