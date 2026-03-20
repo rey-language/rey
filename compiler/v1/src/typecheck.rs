@@ -405,6 +405,14 @@ impl TypeChecker {
                 self.popScope();
                 Ok(())
             }
+            Stmt::Loop { body } => {
+                self.pushScope();
+                for s in body {
+                    self.checkStmt(s)?;
+                }
+                self.popScope();
+                Ok(())
+            }
             Stmt::For {
                 variable,
                 start,

@@ -53,6 +53,9 @@ pub enum Stmt {
         condition: Expr,
         body: Vec<Stmt>,
     },
+    Loop {
+        body: Vec<Stmt>,
+    },
     For {
         variable: String,
         start: Expr,

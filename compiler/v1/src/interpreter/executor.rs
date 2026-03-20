@@ -92,6 +92,17 @@ impl Executor {
                 }
                 Ok(ControlFlow::normal(Value::Null))
             }
+            Stmt::Loop { body } => {
+                loop {
+                    match self.execute_block_with_control_flow(body, env)? {
+                        ControlFlow::Break => break,
+                        ControlFlow::Continue => continue,
+                        ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                        ControlFlow::Normal(_) => {}
+                    }
+                }
+                Ok(ControlFlow::normal(Value::Null))
+            }
             Stmt::For {
                 variable,
                 start,

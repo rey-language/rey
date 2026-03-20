@@ -370,6 +370,7 @@ impl<'a> Lexer<'a> {
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
+            "loop" => TokenKind::Loop,
             "for" => TokenKind::For,
             "in" => TokenKind::In,
             "instanceof" => TokenKind::InstanceOf,

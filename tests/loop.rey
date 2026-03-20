@@ -1,0 +1,11 @@
+// Test loop keyword - infinite loop with break
+var count = 0;
+
+loop {
+    count = count + 1;
+    if (count >= 5) {
+        break;
+    }
+}
+
+print("Count: " + count);

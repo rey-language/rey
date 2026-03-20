@@ -50,6 +50,7 @@ pub enum TokenKind {
     If,
     Else,
     While,
+    Loop,
     Break,
     Continue,
     For,

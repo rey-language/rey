@@ -53,6 +53,8 @@ impl Parser {
             Ok(Some(self.parseIfStatement()?))
         } else if self.matchToken(&TokenKind::While) {
             Ok(Some(self.parseWhileStatement()?))
+        } else if self.matchToken(&TokenKind::Loop) {
+            Ok(Some(self.parseLoopStatement()?))
         } else if self.matchToken(&TokenKind::For) {
             Ok(Some(self.parseForStatement()?))
         } else if self.matchToken(&TokenKind::Break) {
@@ -333,6 +335,14 @@ impl Parser {
         self.consume(&TokenKind::RightBrace, "Expected '}' after while body.")?;
 
         Ok(Stmt::While { condition, body })
+    }
+
+    fn parseLoopStatement(&mut self) -> Result<Stmt, ParserError> {
+        self.consume(&TokenKind::LeftBrace, "Expected '{' after 'loop'.")?;
+        let body = self.parseBlock()?;
+        self.consume(&TokenKind::RightBrace, "Expected '}' after loop body.")?;
+
+        Ok(Stmt::Loop { body })
     }
 
     fn parseForStatement(&mut self) -> Result<Stmt, ParserError> {
