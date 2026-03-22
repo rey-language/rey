@@ -1,0 +1,7 @@
+export pub func name() {
+    println("ok");
+}
+
+pub func onlyPub() {
+    println("pub-only");
+}
