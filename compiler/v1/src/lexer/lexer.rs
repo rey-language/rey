@@ -389,7 +389,6 @@ impl<'a> Lexer<'a> {
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
             "struct" => TokenKind::Struct,
-            "pub" => TokenKind::Pub,
             "self" => TokenKind::SelfKw,
             "true" => TokenKind::True,
             "false" => TokenKind::False,

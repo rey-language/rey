@@ -277,12 +277,18 @@ impl ResolverState {
                                     ),
                                 });
                             }
-                            namespaceEntries.push((name.clone(), Expr::Variable(name.clone())));
+                            namespaceEntries.push((
+                                name.clone(),
+                                Expr::Variable {
+                                    name: name.clone(),
+                                    span,
+                                },
+                            ));
                         }
                     }
                 }
 
-                resolved.push(self.namespaceStmt(&module, namespaceEntries));
+                resolved.push(self.namespaceStmt(&module, namespaceEntries, span));
                 Ok(())
             }
             ImportKind::ModuleItems { module, items } => {
@@ -317,10 +323,13 @@ impl ResolverState {
                     let mut namespaceEntries = Vec::new();
                     for (name, visibility) in imported.localFunctionVisibility {
                         if visibility == FunctionVisibility::ExportPub {
-                            namespaceEntries.push((name.clone(), Expr::Variable(name)));
+                            namespaceEntries.push((
+                                name.clone(),
+                                Expr::Variable { name, span },
+                            ));
                         }
                     }
-                    resolved.push(self.namespaceStmt(&item, namespaceEntries));
+                    resolved.push(self.namespaceStmt(&item, namespaceEntries, span));
                 }
                 Ok(())
             }
@@ -349,12 +358,12 @@ impl ResolverState {
         }
     }
 
-    fn namespaceStmt(&self, name: &str, entries: Vec<(String, Expr)>) -> Stmt {
+    fn namespaceStmt(&self, name: &str, entries: Vec<(String, Expr)>, span: Span) -> Stmt {
         Stmt::VarDecl {
             is_const: true,
             name: name.to_string(),
             ty: None,
-            initializer: Expr::DictLiteral { entries },
+            initializer: Expr::DictLiteral { entries, span },
         }
     }
 

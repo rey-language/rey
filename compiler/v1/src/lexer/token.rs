@@ -66,7 +66,6 @@ pub enum TokenKind {
     False,
     Null,
     Struct,
-    Pub,
     SelfKw,
 
     //literals
