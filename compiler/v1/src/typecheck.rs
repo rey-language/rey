@@ -183,6 +183,7 @@ impl TypeChecker {
         for stmt in statements {
             if let Stmt::FuncDecl {
                 name,
+                visibility: _,
                 params,
                 return_ty,
                 ..
@@ -264,6 +265,7 @@ impl TypeChecker {
             }
             Stmt::FuncDecl {
                 name: _,
+                visibility: _,
                 params,
                 return_ty,
                 body,
@@ -359,6 +361,7 @@ impl TypeChecker {
                 self.popScope();
                 Ok(())
             }
+            Stmt::Import { .. } => Ok(()),
             Stmt::Break | Stmt::Continue => Ok(()),
             Stmt::Return(expr) => {
                 let rty = self.exprTy(expr)?;
@@ -370,13 +373,6 @@ impl TypeChecker {
                         ));
                     }
                 }
-                Ok(())
-            }
-            Stmt::StructDecl {
-                name: _,
-                fields: _,
-            } => {
-                // Structs bypass type checking for now
                 Ok(())
             }
         }
@@ -522,12 +518,6 @@ impl TypeChecker {
                 let rty = self.exprTy(receiver)?;
                 self.methodTy(&rty, name, args)
             }
-            Expr::StructLiteral { name: _, fields: _ } => Ok(Ty::Any),
-            Expr::StaticCall {
-                struct_name: _,
-                method: _,
-                args: _,
-            } => Ok(Ty::Any),
         }
     }
 

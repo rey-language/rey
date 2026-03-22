@@ -7,7 +7,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::ast::{Expr, Literal, Parameter, Stmt, Type};
+use crate::ast::{Expr, FunctionVisibility, ImportKind, Literal, Parameter, Stmt, Type};
 use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
 
@@ -45,8 +45,20 @@ impl Parser {
             Ok(Some(self.parseVarDeclaration(false)?))
         } else if self.matchToken(&TokenKind::Const) {
             Ok(Some(self.parseVarDeclaration(true)?))
+        } else if self.matchToken(&TokenKind::Import) {
+            Ok(Some(self.parseImportStatement()?))
+        } else if self.matchToken(&TokenKind::Export) {
+            self.consume(&TokenKind::Pub, "Expected 'pub' after 'export'.")?;
+            self.consume(
+                &TokenKind::Func,
+                "Expected 'func' after 'export pub' modifier.",
+            )?;
+            Ok(Some(self.parseFuncDeclaration(FunctionVisibility::ExportPub)?))
+        } else if self.matchToken(&TokenKind::Pub) {
+            self.consume(&TokenKind::Func, "Expected 'func' after 'pub' modifier.")?;
+            Ok(Some(self.parseFuncDeclaration(FunctionVisibility::Pub)?))
         } else if self.matchToken(&TokenKind::Func) {
-            Ok(Some(self.parseFuncDeclaration()?))
+            Ok(Some(self.parseFuncDeclaration(FunctionVisibility::Private)?))
         } else if self.matchToken(&TokenKind::If) {
             Ok(Some(self.parseIfStatement()?))
         } else if self.matchToken(&TokenKind::While) {
@@ -87,7 +99,7 @@ impl Parser {
         })
     }
 
-    fn parseFuncDeclaration(&mut self) -> Result<Stmt, ParserError> {
+    fn parseFuncDeclaration(&mut self, visibility: FunctionVisibility) -> Result<Stmt, ParserError> {
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => return Err(self.error("Expected function name.")),
@@ -133,9 +145,88 @@ impl Parser {
 
         Ok(Stmt::FuncDecl {
             name,
+            visibility,
             params,
             return_ty,
             body,
+        })
+    }
+
+    fn parseImportStatement(&mut self) -> Result<Stmt, ParserError> {
+        let import_span = self.previous().span;
+        let module = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => return Err(self.error("Expected module or file name after 'import'.")),
+        };
+        self.advance();
+
+        let kind = if self.matchToken(&TokenKind::Dot) {
+            let symbols = if self.matchToken(&TokenKind::LeftBrace) {
+                let mut values = Vec::new();
+                loop {
+                    let name = match &self.peek().kind {
+                        TokenKind::Identifier(name) => name.clone(),
+                        _ => {
+                            return Err(
+                                self.error("Expected identifier in grouped file import list.")
+                            )
+                        }
+                    };
+                    self.advance();
+                    values.push(name);
+                    if !self.matchToken(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.consume(
+                    &TokenKind::RightBrace,
+                    "Expected '}' after grouped file import list.",
+                )?;
+                values
+            } else {
+                let symbol = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected symbol name after file import '.'.")),
+                };
+                self.advance();
+                vec![symbol]
+            };
+            ImportKind::FileSymbols { module, symbols }
+        } else if self.matchDoubleColon() {
+            let items = if self.matchToken(&TokenKind::LeftBrace) {
+                let mut values = Vec::new();
+                loop {
+                    let name = match &self.peek().kind {
+                        TokenKind::Identifier(name) => name.clone(),
+                        _ => return Err(self.error("Expected identifier in grouped module import list.")),
+                    };
+                    self.advance();
+                    values.push(name);
+                    if !self.matchToken(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.consume(
+                    &TokenKind::RightBrace,
+                    "Expected '}' after grouped module import list.",
+                )?;
+                values
+            } else {
+                let item = match &self.peek().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(self.error("Expected file name after '::' in module import.")),
+                };
+                self.advance();
+                vec![item]
+            };
+            ImportKind::ModuleItems { module, items }
+        } else {
+            ImportKind::ModuleNamespace { module }
+        };
+        self.consume(&TokenKind::Semicolon, "Expected ';' after import statement.")?;
+        Ok(Stmt::Import {
+            kind,
+            span: import_span,
         })
     }
 
@@ -720,6 +811,21 @@ impl Parser {
     //token utils
     fn matchToken(&mut self, kind: &TokenKind) -> bool {
         if self.check(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn matchDoubleColon(&mut self) -> bool {
+        if self.check(&TokenKind::Colon)
+            && self
+                .tokens
+                .get(self.current + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Colon))
+        {
+            self.advance();
             self.advance();
             true
         } else {

@@ -33,7 +33,11 @@ impl Executor {
                 Ok(ControlFlow::normal(value))
             }
             Stmt::FuncDecl {
-                name, params, body, ..
+                name,
+                visibility: _,
+                params,
+                body,
+                ..
             } => {
                 let function = Function::new(
                     name.clone(),
@@ -119,6 +123,7 @@ impl Executor {
                 let value = self.evaluate_expr(expr, env)?;
                 Ok(ControlFlow::return_value(value))
             }
+            Stmt::Import { .. } => Ok(ControlFlow::normal(Value::Null)),
         }
     }
 
