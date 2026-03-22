@@ -379,6 +379,9 @@ impl ResolverState {
         candidates.push(currentDir.join(format!("{}.rey", module)));
         candidates.push(self.projectRoot.join(format!("{}.rey", module)));
         if let Some(home) = homePath() {
+            candidates.push(home.join(".reyc/std/src").join(format!("{}.rey", module)));
+        }
+        if let Some(home) = homePath() {
             candidates.push(home.join(".reyc/packages").join(format!("{}.rey", module)));
         }
 
@@ -442,14 +445,23 @@ impl ResolverState {
         span: Span,
     ) -> Result<PathBuf, CompileError> {
         let mut candidates = Vec::new();
+        candidates.push(currentDir.join(module).join(item).join("main.rey"));
         candidates.push(currentDir.join(module).join(format!("{}.rey", item)));
+        candidates.push(self.projectRoot.join(module).join(item).join("main.rey"));
         candidates.push(self.projectRoot.join(module).join(format!("{}.rey", item)));
         if module == "std" {
             if let Some(home) = homePath() {
+                candidates.push(home.join(".reyc/std/src").join(item).join("main.rey"));
                 candidates.push(home.join(".reyc/std/src").join(format!("{}.rey", item)));
             }
         }
         if let Some(home) = homePath() {
+            candidates.push(
+                home.join(".reyc/packages")
+                    .join(module)
+                    .join(item)
+                    .join("main.rey"),
+            );
             candidates.push(
                 home.join(".reyc/packages")
                     .join(module)
