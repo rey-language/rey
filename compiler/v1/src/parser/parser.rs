@@ -8,8 +8,8 @@
 #![allow(non_snake_case)]
 
 use crate::ast::{
-    Expr, FieldDecl, FunctionVisibility, ImportKind, Literal, MatchArm, MethodDecl, Parameter,
-    Pattern, Stmt, Type,
+    Expr, FieldDecl, FunctionVisibility, ImportKind, Literal, MethodDecl, Parameter, Pattern,
+    Stmt, Type,
 };
 use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
@@ -346,7 +346,7 @@ impl Parser {
                 vec![symbol]
             };
             ImportKind::FileSymbols { module, symbols }
-        } else if self.matchDoubleColon() {
+        } else if self.matchToken(&TokenKind::ColonColon) {
             let items = if self.matchToken(&TokenKind::LeftBrace) {
                 let mut values = Vec::new();
                 loop {
@@ -472,7 +472,7 @@ impl Parser {
     }
 
     fn parseMatchStatement(&mut self) -> Result<Stmt, ParserError> {
-        use crate::ast::stmt::{MatchArm, Pattern};
+        use crate::ast::stmt::MatchArm;
 
         let expr = self.parseExpression()?;
 
@@ -785,7 +785,7 @@ impl Parser {
             }
 
             if self.matchToken(&TokenKind::Dot) {
-                let name = match &self.peek().kind {
+                let member_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     TokenKind::NumberLiteral(n) => {
                         if n.fract() != 0.0 {
@@ -822,7 +822,7 @@ impl Parser {
                         {
                             expr = Expr::StaticCall {
                                 struct_name: struct_name.clone(),
-                                method: name.clone(),
+                                method: member_name.clone(),
                                 args,
                                 span: self.previous().span,
                             };
@@ -831,7 +831,7 @@ impl Parser {
                     }
                     expr = Expr::MethodCall {
                         receiver: Box::new(expr),
-                        name,
+                        name: member_name,
                         args,
                         span: self.previous().span,
                     };
@@ -839,7 +839,7 @@ impl Parser {
                 }
                 expr = Expr::Get {
                     object: Box::new(expr),
-                    name,
+                    name: member_name,
                     span: self.previous().span,
                 };
                 continue;
@@ -1393,21 +1393,6 @@ impl Parser {
     //token utils
     fn matchToken(&mut self, kind: &TokenKind) -> bool {
         if self.check(kind) {
-            self.advance();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn matchDoubleColon(&mut self) -> bool {
-        if self.check(&TokenKind::Colon)
-            && self
-                .tokens
-                .get(self.current + 1)
-                .is_some_and(|token| matches!(token.kind, TokenKind::Colon))
-        {
-            self.advance();
             self.advance();
             true
         } else {

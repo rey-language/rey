@@ -1,5 +1,18 @@
 # Changelog
 
+## [release] — 2026-03-23
+- Prepared `v0.1.0` release candidate assets and docs.
+- Audited syntax documentation against current parser/runtime behavior.
+- Added root `RELEASE.md` covering `v0.0.1-pre` through `v0.1.0`.
+- Added packaged release folder:
+  - `releases/0.1.0/rey-v0-macos-arm64`
+  - `releases/0.1.0/RELEASE.md`
+- Bumped compiler crate version to `0.1.0` in `compiler/v1/Cargo.toml`.
+- Updated README current version and import-system feature status.
+- Cleaned compiler warnings (unused imports/variables/dead methods) and restored import parsing regression for `module::item`.
+- Fixed static call parser bug so `StructName.create(...)` resolves method names correctly.
+- Updated stale test fixture `compiler/v1/src/tests/test_rand.rey` to reflect current type checking behavior.
+
 ## [feature] — 2026-03-23
 - Implemented full import system for Rey with compile-time resolution.
 - Added `export pub` function modifier and import visibility enforcement:

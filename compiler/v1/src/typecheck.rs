@@ -534,9 +534,9 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::StructDecl {
-                name,
-                fields,
-                methods,
+                name: _,
+                fields: _,
+                methods: _,
             } => {
                 // Structs bypass type checking for now
                 Ok(())
@@ -1235,22 +1235,6 @@ impl TypeChecker {
         }
     }
 
-    fn literalTy(&self, lit: &Literal) -> Ty {
-        match lit {
-            Literal::String(_) => Ty::String,
-            Literal::Char(_) => Ty::Char,
-            Literal::Bool(_) => Ty::Bool,
-            Literal::Null => Ty::Null,
-            Literal::Number(n) => {
-                if n.fract() == 0.0 {
-                    Ty::Int
-                } else {
-                    Ty::Float
-                }
-            }
-        }
-    }
-
     fn join(&self, a: &Ty, b: &Ty) -> Ty {
         if a == &Ty::Any {
             return b.clone();
@@ -1275,7 +1259,7 @@ impl TypeChecker {
 
         if matches!((a, b), (Ty::Union(_), _) | (_, Ty::Union(_))) {
             let mut out = Vec::new();
-            let mut pushUnique = |t: Ty, out: &mut Vec<Ty>| {
+            let pushUnique = |t: Ty, out: &mut Vec<Ty>| {
                 if !out.iter().any(|x| x == &t) {
                     out.push(t);
                 }

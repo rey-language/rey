@@ -1,73 +1,48 @@
 # Primer — rey-lang
 Last updated: Mar 23, 2026 (session end)
 
-## What this project is
-Rey is a custom language by Misbah. Current runtime is a Rust tree-walking interpreter (`compiler/v1`) with compile-time parsing/typechecking and runtime execution.
+## Session objective
+v0.1.0 release prep from pre-release state.
 
-## Key architecture
-```
-compiler/v1/src/
-├── lexer/        # tokenizer + spans
-├── parser/       # recursive descent parser + parse errors
-├── ast/          # expressions/statements/types
-├── typecheck.rs  # static checks
-└── interpreter/  # executor/evaluator/environment
-```
-Pipeline: source -> lexer -> parser -> AST -> typecheck -> interpreter
+## What was done
+- Completed syntax audit against current parser/runtime behavior.
+- Read and audited all files under `compiler/v1/src/` and `languages/samples/Rey.rey`.
+- `examples/` directory is not present in this repo; example-style runtime checks were executed through `compiler/v1/src/tests/` and `languages/samples/Rey.rey`.
+- Rewrote `syntax.md` to match implemented behavior, including:
+  - function visibility (`func`, `pub func`, `export pub func`)
+  - file/module import syntax and resolver rules
+  - current struct/static-method behavior
+  - actual implemented operators/types/control-flow/forms
+  - removed outdated claims
+- Code cleanup:
+  - removed warning sources (unused imports/vars, dead method, unnecessary mut)
+  - fixed parser static-call bug (`StructName.create(...)`)
+  - fixed `module::item` parser regression in import parsing
+- Fixture updates:
+  - updated `compiler/v1/src/tests/test_rand.rey` to pass under current type checking
+- Verification:
+  - `cargo build` passes cleanly with zero warnings
+  - `cargo test` passes
+  - all `compiler/v1/src/tests/*.rey` run successfully (with scripted input for `io.rey`)
+  - `languages/samples/Rey.rey` runs successfully
+  - import fixtures validated (`tests/imports/success` and error cases)
+- Release prep assets:
+  - added root `RELEASE.md` (v0.0.1-pre -> v0.1.0)
+  - bumped `compiler/v1/Cargo.toml` version to `0.1.0`
+  - updated version references in `README.md`
+  - built release binary and packaged:
+    - `releases/0.1.0/rey-v0-macos-arm64`
+    - `releases/0.1.0/RELEASE.md`
+- Updated `CHANGELOG.md` and refreshed `CLAUDE.md` for current v0.1.0 context.
 
-## Session completed
-- Added new function visibility model in AST/parser/lexer:
-  - `export pub func` => importable
-  - `pub func` => local/module visibility but blocked from imports
-  - `func` => private
-- Added import AST and parser support:
-  - `import file.symbol`
-  - `import file.{a,b}`
-  - `import module`
-  - `import module::file`
-  - `import module::{fileA,fileB}`
-- Added compile-time import resolver (`compiler/v1/src/imports.rs`) and integrated it into `main.rs`.
-- Implemented resolver order:
-  1. current file directory
-  2. entry project root
-  3. `~/.reyc/std/src` for `std` module prefix
-  4. `~/.reyc/packages`
-- Implemented module rules:
-  - `import action` requires `action/main.rey`
-  - module namespace auto-collects `export pub` symbols from every `.rey` file in that folder
-  - `import action::walk` resolves `action/walk.rey`
-- Implemented scope injection:
-  - file-symbol imports inject names directly
-  - module imports inject namespace dicts (`action.func()`, `walk.func()`)
-- Implemented diagnostics for:
-  - file not found
-  - missing module `main.rey`
-  - function not found
-  - function exists but only `pub`
-  - circular imports (with cycle chain)
-  - duplicate imports
-- Added namespace method-call dispatch in executor/typechecker for imported namespace calls.
+## Current state
+- Working tree contains v0.1.0 release-prep changes ready to commit.
+- Compiler builds/tests cleanly.
+- Release notes and packaged binary for `0.1.0` are staged in repo paths.
 
-## Tests added
-- `tests/imports/success/` full passing integration case with file and module import forms.
-- `tests/imports/errors/` covers all required error categories:
-  - missing file
-  - missing module main
-  - missing function
-  - `pub` not `export pub`
-  - circular import
-  - duplicate import
-
-## Verification run this session
-- `cargo build` (pass)
-- `cargo test` (pass)
-- `cargo run -- ../../tests/imports/success/main.rey` (pass)
-- `cargo run -- ../../tests/imports/errors/*.rey` (expected compile-time failures, all correct category/messages)
-
-## Current project state
-- Import system is fully implemented for the requested spec.
-- Branch has five logical commits for parser/visibility, resolver, modules, scope dispatch, and tests.
-
-## Next up
-- Add automated Rust integration tests that execute the new import fixtures and assert expected stdout/stderr.
-- Add docs update in `syntax.md` describing import grammar and `export pub` rules.
+## Next steps after this session
+- Commit release prep changes.
+- Push contributor branch and open release PR.
+- Optional follow-up for v0.2.0 planning:
+  - generics design
+  - closure/runtime ergonomics improvements
