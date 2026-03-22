@@ -1,283 +1,116 @@
-# Rey Language Syntax Reference
+# Rey Language Syntax Reference (v0.1.0)
 
-Welcome to the comprehensive guide for the **Rey Language (v1)**.
-
----
+This document reflects the behavior currently implemented in `compiler/v1`.
 
 ## Table of Contents
+1. Variables and Types
+2. Operators
+3. Control Flow
+4. Functions
+5. Imports and Visibility
+6. Collections
+7. Strings
+8. Structs
+9. Enums and Match
+10. Built-ins
+11. Diagnostics
 
-1. [Variables & Types](#variables--types)
-2. [Null Safety](#null-safety)
-3. [Operators](#operators)
-4. [Control Flow](#control-flow)
-5. [Functions](#functions)
-6. [Collections (Arrays & Dicts)](#collections-arrays--dicts)
-7. [Strings (Interpolation, Multiline, Methods)](#strings)
-8. [Structs](#structs)
-9. [Enums](#enums)
-10. [Match Statements](#match-statements)
-11. [Built-in Functions](#built-in-functions)
-12. [Error Diagnostics](#error-diagnostics)
-
----
-
-## Variables & Types
-
-### Core Types
-
-Rey heavily leverages implicit type inference but supports full explicit typing.
-
-| Type | Example | Description |
-|------|---------|-------------|
-| `int` | `42`, `-10` | Integer numbers |
-| `float` | `3.14`, `-0.5` | Floating-point numbers |
-| `String` | `"hello"` | String literals |
-| `bool` | `true`, `false` | Boolean values |
-| `null` | `null` | Nullable default |
-| `Void` | `Void` | Function return type (no value) |
-| `[T]` | `[1, 2]` | Array of type `T` |
-| `{K:V}` | `{"a": 1}` | Dictionary mapping keys to values |
-
-### Tuple Types
-
-Tuples are fixed-size, positional collections.
+## Variables and Types
+Rey supports explicit and inferred typing.
 
 ```rey
-var t = (1, "hello", true);
+var x = 10;
+var y: int = 20;
+const pi: float = 3.14;
+```
+
+Implemented primitive type names:
+- `int`
+- `uint`
+- `byte`
+- `float`
+- `double`
+- `String`
+- `bool`
+- `char`
+- `null`
+- `Void`
+
+Implemented type forms:
+- Nullable: `int?`
+- Array: `[int]`
+- Dictionary: `{String:int}`
+- Union: `int | String`
+
+Tuples are supported as literals and index access:
+
+```rey
+var t = (1, "ok", true);
 println(t.0);
 println(t.1);
 println(t.2);
 ```
 
-Tuple element access uses dot + integer index (`.0`, `.1`, ...).
-
-```rey
-var nested = ((1, 2), ("a", "b"));
-println((nested.0).1);
-println((nested.1).0);
-```
-
-Note: for nested tuple access, use parentheses around the intermediate access.
-
-### Variable Declaration
-
-Variables are defined using the `var` keyword. Unannotated `var` declarations are **Dynamically Typed** and can change their type later, while annotated ones are strictly typed to their annotation. You can also declare immutable constants using `const`.
-
-```rey
-// Dynamically typed (can mutate types later)
-var x = 10;           
-x = "Now I'm a string!"; 
-
-// Explicitly strictly typed (cannot change type later)
-var id: int = 1234;
-// id = "string"; // ❌ Type error
-
-// Immutable Constants (cannot be reassigned)
-const MAX_LIVES = 3;
-// MAX_LIVES = 5; // ❌ Type error
-const GRAVITY: float = 9.81;
-```
-
-### Type Conversion Methods
-
-You can explicitly convert basic types using methods:
-- `.toString()`: Converts any value into a string.
-- `.toInt()`: Attempts to convert a numeric string or float into an integer.
-- `.toFloat()`: Attempts to convert a numeric string or int into a float.
-
-```rey
-var strAge = (25).toString();    // "25"
-var actualAge = "30".toInt();    // 30
-var piVal = "3.1415".toFloat();  // 3.1415
-```
-
----
-
-## Null Safety
-
-Rey incorporates native Null Safety by explicitly distinguishing between types that can hold `null` values versus those that cannot. Standard types (`String`, `int`) **cannot** be assigned `null`. 
-
-To allow a variable to be `null`, append a `?` to its type annotation:
-
-```rey
-// Standard restricted types:
-// var msg: String = null; // ❌ Type error
-
-// Nullable Types:
-var name: String? = null;  // ✅ Valid
-name = "Rey";
-
-var count: int? = null;
-count = 50;
-```
-
----
-
 ## Operators
+Arithmetic:
+- `+`, `-`, `*`, `/`, `%`
 
-Rey comes full-featured with standard arithmetic, logic, comparison, and unary operations.
+Comparison:
+- `==`, `!=`, `<`, `<=`, `>`, `>=`
 
-### Arithmetic & Assignment
+Logical:
+- `&&`, `||`, `!`
 
-| Operator | Description | Sub-types | Example |
-|----------|-------------|-----------|---------|
-| `+` | Addition / Concat | `+=` (compound) | `a + b` / `a += 5` |
-| `-` | Subtraction | `-=` (compound) | `a - b` / `a -= 5` |
-| `*` | Multiplication | `*=` (compound) | `a * b` / `a *= 2` |
-| `/` | Division | `/=` (compound) | `a / b` / `a /= 2` |
-| `%` | Modulo | `%=` (compound) | `a % 2` / `a %= 2` |
-| `++` / `--` | Increment / Decrement | — | `x++` / `--y` |
+Update / assignment:
+- `=`, `+=`, `-=`, `*=`, `/=`, `%=`
+- `++`, `--` (prefix and postfix on variables)
 
-> *Note: Mixed-type String concatenation is fully supported! (`"HP: " + 100` compiles to `"HP: 100"`).*
-
-### Comparisons & Logical Operations
-
-| Operator | Action | Example | Logic | Action | Example |
-|----------|--------|---------|-------|--------|---------|
-| `==` | Equality | `a == b` | `&&` | AND | `a && b` |
-| `!=` | Inequality | `a != b` | `\|\|` | OR | `a \|\| b` |
-| `<` | Less | `a < b` | `!` | NOT | `!a` |
-| `<=` | Less/Eq | `a <= b` | `-` | Negate | `-a` |
-| `>` | Greater | `a > b` |
-| `>=` | Greater/Eq | `a >= b` |
-
-### Type Operators
-
-`instanceof` checks runtime type.
-
-```rey
-var v: int | String = 123;
-if v instanceof int {
-    println(v + 1);
-} else {
-    println(v);
-}
-```
-
----
+Type check:
+- `instanceof`
 
 ## Control Flow
-
-### If / Else
-Standard branching logic. Parentheses are optional.
+Conditionals:
 
 ```rey
-var score = 85;
-
-if score >= 90 {
-    println("A");
-} else if score >= 80 {
-    println("B");
+if (x > 10) {
+    println("big");
+} else if (x > 5) {
+    println("mid");
 } else {
-    println("C");
+    println("small");
 }
 ```
 
-### While Loop
+Parentheses around `if`/`while` conditions are optional.
 
-Repeats execution as long as the condition evaluates to `true`:
+Loops:
+- `while`
+- `loop` (infinite loop)
+- `for i in range(start, end)`
+- `for item in arrayExpr`
 
-```rey
-var i = 0;
-while i < 5 {
-    println("Current: ", i);
-    i++;
-}
-```
-
-### Loop
-
-An infinite loop that can be controlled with `break` and `continue`.
-
-```rey
-var count = 0;
-loop {
-    count += 1;
-    if count >= 5 {
-        break;
-    }
-}
-println("Count: " + count);
-```
-
-### For Loop
-
-Iterates over either a numeric range or an array.
-
-Range iteration:
-
-```rey
-for index in range(0, 10) {
-    println(index); // Prints 0 through 9
-}
-```
-
-`range(start, end)` is currently a special form recognized by the parser inside `for ... in ...`.
-
-Array iteration:
-
-```rey
-var arr = [10, 20, 30];
-var sum = 0;
-for x in arr {
-    sum = sum + x;
-}
-println("Sum: " + sum);
-```
-
-### Break and Continue
-
-Interrupt or skip loop iterations easily:
-
-```rey
-for n in range(0, 100) {
-    if (n % 2 == 0) {
-        continue; // Skip even numbers
-    }
-    if (n > 50) {
-        break; // Stop completely after 50
-    }
-    println(n);
-}
-```
-
----
+Loop control:
+- `break`
+- `continue`
 
 ## Functions
-
-Functions are defined using the `func` keyword. Parameters and return types can be typed or left implicitly untyped (`Any`).
+Function declarations:
 
 ```rey
-// Fully typed function
-func calculateDamage(base: int, multiplier: float): float {
-    return base * multiplier;
-}
-
-// Implicit Void return type and 'Any' parameters
-func greet(name) {
-    println("Hello, " + name + "!");
-}
-
-func main(): Void {
-    greet("Wizard");
-    var dmg = calculateDamage(15, 1.5);
+func add(a: int, b: int): int {
+    return a + b;
 }
 ```
 
-### Default Parameters
+Default parameters:
 
 ```rey
 func add(a: int, b: int = 10): int {
     return a + b;
 }
-
-println(add(5));
-println(add(5, 2));
 ```
 
-### Variadic Parameters
-
-Use `...` on the last parameter to accept extra arguments (available as an array).
+Variadic parameter (must be last):
 
 ```rey
 func sum(nums:...int): int {
@@ -287,110 +120,138 @@ func sum(nums:...int): int {
     }
     return total;
 }
-
-println(sum(1, 2, 3));
 ```
 
-### Lambdas / Closures
-
-Lambdas capture variables from their surrounding scope.
+Lambda expressions:
 
 ```rey
-func main() {
-    var base = 3;
-    var mul = (x: int) => x * base;
-    println(mul(4));
-}
+var mul = (x: int, y: int) => x * y;
+println(mul(3, 4));
 ```
 
----
+## Imports and Visibility
+Function visibility modifiers:
+- `func name()` -> private
+- `pub func name()` -> public inside file/module, not importable
+- `export pub func name()` -> importable
 
-## Collections (Arrays & Dicts)
-
-### Arrays
-
-Arrays are defined using square brackets `[]`.
+File imports:
 
 ```rey
-var items = [10, 20, 30];               // Untyped inference
-var names: [String] = ["Goblin", "Orc"]; // Strictly typed Array
-
-println(items[0]);                      // Retrieval
-
-items[0] = 99;                          // Assignment
-items[0] += 1;                          // Compound assignment
-
-// Push and Pop builtin operations
-push(items, 40);                        // Appends 40
-var lastElement = pop(items);           // Stores 40 and removes it
+import actuator.name;
+import actuator.{name, other};
 ```
 
-### Dictionaries
-
-Dictionaries define string-keyed property objects. Elements can be retrieved via indices or dynamic property access.
+Module imports:
 
 ```rey
-var player = {"hp": 100, "name": "Hero"};
-var strictDict: {String:int} = {"gold": 50};
-
-println(player["hp"]);    // Index bracket notation
-println(player.name);     // Shorthand dot notation
-
-player["hp"] = 120;
-player.name = "Hero";
-player["hp"] += 10;
-player.name += "!";
+import action;
+import action::walk;
+import action::{walk, run};
 ```
 
----
+Resolver order:
+1. Current file directory
+2. Project root (entry file directory)
+3. `~/.reyc/std/src` (for `std` module resolution)
+4. `~/.reyc/packages`
+
+Module rules:
+- `import module` requires `module/main.rey`
+- `import module` injects a namespace object used as `module.func()`
+- `import module::item` injects `item` namespace used as `item.func()`
+- Only `export pub` functions are importable
+
+Compile-time import diagnostics include:
+- file not found
+- missing module `main.rey`
+- function not found
+- function is `pub` but not `export pub`
+- circular import
+- duplicate import
+
+## Collections
+Arrays:
+
+```rey
+var xs: [int] = [1, 2, 3];
+println(xs[0]);
+xs[0] = 9;
+push(xs, 4);
+println(pop(xs));
+println(xs.length());
+```
+
+Dictionaries (identifier or string keys in literals):
+
+```rey
+var user = {name: "Rey", id: 1};
+println(user.name);
+println(user["id"]);
+user.name = "ReyLang";
+```
 
 ## Strings
-
-### Multiline Strings
-Rey supports standard C-style strings via `""`, but also robust multiline strings wrapping content in `""" """`:
+Regular and multiline strings:
 
 ```rey
-var query = """
-SELECT * 
-FROM users 
-WHERE active = true;
+var a = "hello";
+var b = """
+line 1
+line 2
 """;
 ```
 
-### String Interpolation
-Rey natively resolves dynamically bound variables directly inside string text via brackets `{}`:
+Interpolation:
 
 ```rey
-var playerName = "Mage";
 var hp = 100;
-
-// Variables injected automatically!
-println("Welcome {playerName}! Your HP is: {hp}");
-
-// Math expressions are also supported inline:
-println("HP buff: {hp + 50}");
+println("HP: {hp}");
+println("Buffed: {hp + 50}");
 ```
 
-### String Methods
-Strings come with comprehensive native methods (Note: `length()`, not `len()` for strings!).
+String methods:
+- `length()`
+- `upper()`
+- `lower()`
+- `contains(str)`
+- `split(str)`
+- `toString()`
+- `toInt()`
+- `toFloat()`
+
+## Structs
+Struct declaration:
 
 ```rey
-var msg = " Rey Language ";
+struct Player {
+    health: int,
+    name: String,
 
-println(msg.length());       // Returns character count
-println(msg.upper());        // -> " REY LANGUAGE "
-println(msg.lower());        // -> " rey language "
-println(msg.contains("ey")); // -> true
-println(msg.split(" ")[1]);  // -> "Rey"
+    pub func create(n: String, h: int): Player {
+        return Player { name: n, health: h };
+    }
+
+    pub func takeDamage(amount: int): Void {
+        health -= amount;
+    }
+}
 ```
 
----
+Struct literal:
 
-## Enums
+```rey
+var p = Player { name: "Hero", health: 100 };
+```
 
-Enums define a type with a fixed set of named variants. Each variant is automatically available as a constant value after the enum is declared.
+Implemented method behavior:
+- Instance method calls inject fields into method scope by field name.
+- Mutated field names are written back to the instance.
+- Static calls are parsed as `StructName.method(...)`.
+- In current parser behavior, methods named `create` that are `pub` and return the struct type are treated as static.
 
-### Declaration
+## Enums and Match
+Enum declaration:
 
 ```rey
 enum Direction {
@@ -399,188 +260,42 @@ enum Direction {
     East,
     West
 }
-
-enum Status {
-    Ok,
-    Error,
-    Loading
-}
 ```
 
-### Using Enums
-
-Enum variants are accessed directly by name or qualified with the enum type:
+Match:
 
 ```rey
-var dir = North;              // Direct access
-var status = Status::Error;   // Qualified access
-
-// Enums can be printed
-println(dir);     // "Direction::North"
-println(status);  // "Status::Error"
-```
-
----
-
-## Match Statements
-
-Match provides pattern matching for enums and primitive values.
-
-### Basic Syntax
-
-```rey
-match value {
-    Pattern1 => statement,
-    Pattern2 => statement,
-    _ => default_statement
-}
-```
-
-### Pattern Types
-
-- **Enum variants**: `Direction::North`, `Status::Ok`
-- **Literals**: `1`, `"hello"`, `true`
-- **Variables**: `x` (binds the matched value)
-- **Wildcard**: `_` (matches any value)
-
-### Examples
-
-Match on enum:
-```rey
-enum Direction { North, South, East, West }
-var dir = North;
-
 match dir {
-    Direction::North => println("Going north"),
-    Direction::South => println("Going south"),
-    Direction::East => println("Going east"),
-    Direction::West => println("Going west"),
-    _ => println("Unknown direction")
+    Direction::North => { println("north"); },
+    Direction::South => { println("south"); },
+    _ => { println("other"); }
 }
 ```
 
-Match on numbers:
-```rey
-var x = 5;
-match x {
-    1 => println("one"),
-    2 => println("two"),
-    5 => println("five"),
-    _ => println("other")
-}
-```
+Pattern kinds:
+- enum variant (`Type::Variant`)
+- literal (`1`, `"x"`, `true`, `null`)
+- variable binding (`n`)
+- wildcard (`_`)
 
-Match with variable binding:
-```rey
-var value = 42;
-match value {
-    0 => println("zero"),
-    n => println("The value is: {n}")  // n is bound to 42
-}
-```
+## Built-ins
+Global built-ins:
+- `print(...)`
+- `println(...)`
+- `input()` / `input(promptString)`
+- `len(value)`
+- `push(array, value)`
+- `pop(array)`
+- `abs(number)`
+- `max(a, b)`
+- `min(a, b)`
+- `random()`
 
----
+## Diagnostics
+Compiler and runtime errors are printed with category labels such as:
+- `error[lexer]`
+- `error[syntax]`
+- `error[import]`
+- `error[runtime]`
 
-## Built-in Functions
-
-In addition to collection modifications, Rey provides several global functions natively inside the interpreter context.
-
-### Standard Evaluators
-- `print(args...)`: Prints multiple args natively without a trailing newline.
-- `println(args...)`: Prints multiple args terminating with a newline.
-- `input(prompt)`: Blocks terminal execution and reads string input from the user.
-- `len(target)`: General length evaluator that works for Arrays, Strings, and Dicts.
-
-```rey
-print("Connecting");
-println("...", "Done!");
-var entry = input("Confirm? (y/n): ");
-var size = len([1, 2, 3]);
-```
-
-### Temporary Math Utilities
-Rey dynamically ships with math constants. 
-*Note: These will eventually be migrated to an isolated `std` package module.*
-- `abs(num)`: Returns absolute integer/float.
-- `max(a, b)`: Returns greater value.
-- `min(a, b)`: Returns smaller value.
-- `random()`: Automatically creates a highly precise randomized fraction between `0.00` and `0.99`.
-
----
-
-## Structs
-
-Structs are the primary way to define custom data structures and behavior in Rey. They support fields, methods (instance and static), and a unique scoping model.
-
-### Declaration
-
-Structs are declared using the `struct` keyword. Fields are declared with `name: type`. Methods are declared with `func`. By default, fields and methods are **private**. Use the `pub` keyword to make them accessible from outside the struct.
-
-```rey
-struct Player {
-    health: int,
-    name: String,
-
-    // Static method (returns the struct type)
-    pub func create(n: String, h: int): Player {
-        return Player { name: n, health: h };
-    }
-
-    // Instance method
-    // Note: fields are accessed directly by name!
-    pub func takeDamage(amount: int): Void {
-        health -= amount;
-        println("{name} took {amount} damage. HP: {health}");
-    }
-}
-```
-
-### Construction
-
-Structs are instantiated using a literal syntax `StructName { field: value, ... }`.
-
-```rey
-var p = Player { name: "Hero", health: 100 };
-```
-
-### Methods & Scoping
-
-- **Instance Methods**: When a method is called on an instance (`p.takeDamage(10)`), the struct's fields are injected into the method's local scope. You access them directly by their name (e.g., `health`). Any mutations to these variables are written back to the instance after the method finishes.
-- **Static Methods**: Methods that return the struct type and are marked `pub` can be called directly on the struct name (e.g., `Player.create("Hero", 100)`).
-- **Visibility**: Only `pub` fields and methods can be accessed via dot notation from outside.
-
-```rey
-var p = Player.create("Hero", 100);
-p.takeDamage(20);
-println(p.health); // Accessing pub field
-```
-
-### Reserved Keywords
-
-The following keywords are reserved for future features:
-
-- `try`
-- `catch`
-
-Note: `enum` and `match` were previously reserved and are now fully implemented.
----
-
-## Error Diagnostics
-
-Rey leverages visually stunning Rust/Miette-like compiler diagnostics! Gone are the days of parsing confusing log stacks!
-
-If you write malformed code (such as leaving a string literal unterminated or throwing syntactical bugs), the compiler will extract exactly what happened, and highlight the faulty column ranges actively in your console:
-
-```text
-error[lexer]: Unterminated string literal
- --> line 3:19
-  |
-3 |     var message = "Hello, world
-  |                   ^^^^^^^^^^^^^
-
-error[syntax]: Expected ';' after expression.
- --> line 39:24
-  |
-39 |     var playerAtk: int = 15;0
-   |                        ^
-```
+Parser/lexer/import errors include file/line/column spans.

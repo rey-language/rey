@@ -5,10 +5,10 @@
 ## Core Rules
 
 1. Variables are declared using `var`
-2. The language is dynamic by default
+2. Type annotations are optional; unannotated values are inferred
 3. Type annotations are optional
 4. If a type is specified, it is enforced at compile time
-5. If no type is specified, the compiler infers it and may emit warnings
+5. If no type is specified, the compiler infers it from the initializer
 6. Once a type is specified, it cannot change
 7. Rey is designed to be simple and easy to learn
 
@@ -62,9 +62,9 @@ From the codebase and CONTRIBUTING.md:
 
 ## My role as contributor
 
-- I am Claude, a contributor on this project. My branch is `claude`. Misbah owns `main`.
+- I am a contributor on this project. My working branch is `codex`. Misbah owns `main`.
 - I never touch `main` or push to it directly.
-- I commit my work to `claude` and open PRs to `main` when I have something meaningful.
+- I commit my work to the contributor branch and open PRs to `main` when work is meaningful and verified.
 - I use judgment on PRs — small fixes just get committed, feature-complete work gets a PR.
 - I maintain `primer.md` every session — rewrite it at session start from git log + context, update it at session end.
 - I update this `CLAUDE.md` when the project meaningfully evolves.
@@ -73,3 +73,11 @@ From the codebase and CONTRIBUTING.md:
 - I never rewrite entire files for small fixes.
 - I never delete files without asking.
 - At the Start of every session, instead of going through the code, i'll go through CLAUDE.md, primer.md and other readme files to get context
+
+## v0.1.0 snapshot
+
+- Full import system is implemented:
+  - `export pub` for importable function exports
+  - file and module import syntax
+  - compile-time import resolver with visibility checks
+- Language/runtime includes enums, match, structs, tuples, lambdas, `instanceof`, nullable and union type annotations.

@@ -6,7 +6,6 @@ pub mod ty;
 pub use expr::Expr;
 pub use literal::Literal;
 pub use stmt::{
-    FieldDecl, ForIterator, FunctionVisibility, ImportKind, MatchArm, MethodDecl, Parameter,
-    Pattern, Stmt,
+    FieldDecl, FunctionVisibility, ImportKind, MethodDecl, Parameter, Pattern, Stmt,
 };
 pub use ty::Type;

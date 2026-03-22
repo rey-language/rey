@@ -1,7 +1,6 @@
 func main () {
     var name = "Misbah";
     println("Hello, {name}");
-    name = 10;
+    name = name + "!";
     println(name);
-    
 }

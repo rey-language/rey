@@ -81,7 +81,4 @@ impl Environment {
         self.struct_defs.get(name)
     }
 
-    pub fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
-        self.enum_defs.get(name)
-    }
 }

@@ -62,7 +62,7 @@ func main(): Void {
 
 ## Status
 
-Rey is under active development. Current version: **v0.0.7-pre**
+Rey is under active development. Current version: **v0.1.0**
 
 | Feature | Status |
 |---------|--------|
@@ -73,7 +73,7 @@ Rey is under active development. Current version: **v0.0.7-pre**
 | Structs | ✅ Done |
 | String interpolation | ✅ Done |
 | Error messages | ✅ Done |
-| Import system | 🔨 In progress |
+| Import system | ✅ Done |
 | Standard library | 🔨 In progress |
 | Package manager (reyc) | 📅 Planned |
 | LLVM backend | 📅 Planned |
