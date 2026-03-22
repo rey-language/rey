@@ -1,4 +1,5 @@
 use super::{Expr, Literal, Type};
+use crate::lexer::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
@@ -25,6 +26,20 @@ pub struct MethodDecl {
     pub is_static: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionVisibility {
+    Private,
+    Pub,
+    ExportPub,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    FileSymbols { module: String, symbols: Vec<String> },
+    ModuleNamespace { module: String },
+    ModuleItems { module: String, items: Vec<String> },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     VarDecl {
@@ -35,6 +50,7 @@ pub enum Stmt {
     },
     FuncDecl {
         name: String,
+        visibility: FunctionVisibility,
         params: Vec<Parameter>,
         return_ty: Option<Type>,
         body: Vec<Stmt>,
@@ -43,6 +59,10 @@ pub enum Stmt {
         name: String,
         fields: Vec<FieldDecl>,
         methods: Vec<MethodDecl>,
+    },
+    Import {
+        kind: ImportKind,
+        span: Span,
     },
     If {
         condition: Expr,

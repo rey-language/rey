@@ -33,7 +33,11 @@ impl Executor {
                 Ok(ControlFlow::normal(value))
             }
             Stmt::FuncDecl {
-                name, params, body, ..
+                name,
+                visibility: _,
+                params,
+                body,
+                ..
             } => {
                 let function = Function::new(
                     name.clone(),
@@ -208,6 +212,7 @@ impl Executor {
 
                 Err("No matching arm in match expression".to_string())
             }
+            Stmt::Import { .. } => Ok(ControlFlow::normal(Value::Null)),
         }
     }
 
