@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::ast::{FunctionVisibility, ImportKind, Stmt};
+use crate::ast::{Expr, FunctionVisibility, ImportKind, Stmt};
 use crate::lexer::{span::Span, Lexer, TokenKind};
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
@@ -63,81 +63,69 @@ impl ResolverState {
             return Ok(cached.clone());
         }
 
-        if self.stack.contains(&filePath) {
-            let mut chain = self
-                .stack
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>();
-            chain.push(filePath.display().to_string());
-            let source = fs::read_to_string(&filePath).unwrap_or_default();
-            return Err(CompileError {
+        // cycle checks are reported from import sites to preserve file/line context.
+        self.stack.push(filePath.clone());
+        let result = (|| -> Result<ResolvedFile, CompileError> {
+            let source = fs::read_to_string(&filePath).map_err(|_| CompileError {
                 title: "import".to_string(),
                 file: filePath.clone(),
-                source,
+                source: String::new(),
                 span: Span::new(0, 1),
-                message: format!("Circular import detected: {}", chain.join(" -> ")),
-            });
-        }
+                message: format!("File not found: '{}'", filePath.display()),
+            })?;
 
-        self.stack.push(filePath.clone());
-        let source = fs::read_to_string(&filePath).map_err(|_| CompileError {
-            title: "import".to_string(),
-            file: filePath.clone(),
-            source: String::new(),
-            span: Span::new(0, 1),
-            message: format!("File not found: '{}'", filePath.display()),
-        })?;
+            let statements = parseSource(&filePath, &source)?;
+            let currentDir = filePath
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
 
-        let statements = parseSource(&filePath, &source)?;
-        let currentDir = filePath
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-
-        let mut localFunctionVisibility = HashMap::new();
-        for stmt in &statements {
-            if let Stmt::FuncDecl {
-                name, visibility, ..
-            } = stmt
-            {
-                localFunctionVisibility.insert(name.clone(), *visibility);
-            }
-        }
-
-        let mut resolved = Vec::new();
-        let mut injectedNames = HashSet::new();
-        let mut includedFiles = HashSet::new();
-        for stmt in statements {
-            match stmt {
-                Stmt::Import { kind, span } => {
-                    self.resolveImport(
-                        &filePath,
-                        &source,
-                        &currentDir,
-                        kind,
-                        span,
-                        &mut resolved,
-                        &mut injectedNames,
-                        &mut includedFiles,
-                    )?;
+            let mut localFunctionVisibility = HashMap::new();
+            for stmt in &statements {
+                if let Stmt::FuncDecl {
+                    name, visibility, ..
+                } = stmt
+                {
+                    localFunctionVisibility.insert(name.clone(), *visibility);
                 }
-                other => resolved.push(other),
             }
-        }
 
-        let functionStatements = resolved
-            .iter()
-            .filter(|stmt| matches!(stmt, Stmt::FuncDecl { .. }))
-            .cloned()
-            .collect::<Vec<_>>();
+            let mut resolved = Vec::new();
+            let mut injectedNames = HashSet::new();
+            let mut includedFiles = HashSet::new();
+            for stmt in statements {
+                match stmt {
+                    Stmt::Import { kind, span } => {
+                        self.resolveImport(
+                            &filePath,
+                            &source,
+                            &currentDir,
+                            kind,
+                            span,
+                            &mut resolved,
+                            &mut injectedNames,
+                            &mut includedFiles,
+                        )?;
+                    }
+                    other => resolved.push(other),
+                }
+            }
+
+            let functionStatements = resolved
+                .iter()
+                .filter(|stmt| matches!(stmt, Stmt::FuncDecl { .. }))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            Ok(ResolvedFile {
+                statements: resolved,
+                functionStatements,
+                localFunctionVisibility,
+            })
+        })();
         self.stack.pop();
 
-        let file = ResolvedFile {
-            statements: resolved,
-            functionStatements,
-            localFunctionVisibility,
-        };
+        let file = result?;
         self.cache.insert(filePath, file.clone());
         Ok(file)
     }
@@ -157,7 +145,10 @@ impl ResolverState {
         match kind {
             ImportKind::FileSymbols { module, symbols } => {
                 let importFile =
-                    self.findFileWithOrder(currentDir, &module, Some(ownerFile), ownerSource, span)?;
+                    self.findFileImport(currentDir, &module, ownerFile, ownerSource, span)?;
+                if self.stack.contains(&importFile) {
+                    return Err(self.circularError(ownerFile, ownerSource, span, &importFile));
+                }
                 let imported = self.resolveFile(&importFile)?;
                 if !includedFiles.contains(&importFile) {
                     resolved.extend(imported.functionStatements.clone());
@@ -189,7 +180,20 @@ impl ResolverState {
                                 ),
                             });
                         }
-                        Some(FunctionVisibility::Private) | None => {
+                        Some(FunctionVisibility::Private) => {
+                            return Err(CompileError {
+                                title: "import".to_string(),
+                                file: ownerFile.to_path_buf(),
+                                source: ownerSource.to_string(),
+                                span,
+                                message: format!(
+                                    "Function '{}' exists in '{}' but is private",
+                                    symbol,
+                                    importFile.display()
+                                ),
+                            });
+                        }
+                        None => {
                             return Err(CompileError {
                                 title: "import".to_string(),
                                 file: ownerFile.to_path_buf(),
@@ -206,34 +210,159 @@ impl ResolverState {
                 }
                 Ok(())
             }
-            ImportKind::ModuleNamespace { module } => Err(CompileError {
-                title: "import".to_string(),
-                file: ownerFile.to_path_buf(),
-                source: ownerSource.to_string(),
-                span,
-                message: format!(
-                    "Module imports are not enabled yet for '{}'. Use file imports for now.",
-                    module
-                ),
-            }),
-            ImportKind::ModuleItems { module, .. } => Err(CompileError {
-                title: "import".to_string(),
-                file: ownerFile.to_path_buf(),
-                source: ownerSource.to_string(),
-                span,
-                message: format!(
-                    "Module imports are not enabled yet for '{}'. Use file imports for now.",
-                    module
-                ),
-            }),
+            ImportKind::ModuleNamespace { module } => {
+                if !injectedNames.insert(module.clone()) {
+                    return Err(CompileError {
+                        title: "import".to_string(),
+                        file: ownerFile.to_path_buf(),
+                        source: ownerSource.to_string(),
+                        span,
+                        message: format!("Duplicate import: '{}'", module),
+                    });
+                }
+                let moduleDir =
+                    self.findModuleDir(currentDir, &module, ownerFile, ownerSource, span)?;
+                let moduleMain = moduleDir.join("main.rey");
+                if !moduleMain.exists() {
+                    return Err(CompileError {
+                        title: "import".to_string(),
+                        file: ownerFile.to_path_buf(),
+                        source: ownerSource.to_string(),
+                        span,
+                        message: format!(
+                            "Folder '{}' is not a module: missing main.rey",
+                            moduleDir.display()
+                        ),
+                    });
+                }
+
+                let mut exportedSymbols = HashSet::new();
+                let mut namespaceEntries = Vec::new();
+                let mut moduleFiles = fs::read_dir(&moduleDir)
+                    .map_err(|_| CompileError {
+                        title: "import".to_string(),
+                        file: ownerFile.to_path_buf(),
+                        source: ownerSource.to_string(),
+                        span,
+                        message: format!("Could not read module folder '{}'", moduleDir.display()),
+                    })?
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "rey"))
+                    .collect::<Vec<_>>();
+                moduleFiles.sort();
+
+                for path in moduleFiles {
+                    let path = canonicalPath(&path);
+                    if self.stack.contains(&path) {
+                        return Err(self.circularError(ownerFile, ownerSource, span, &path));
+                    }
+                    let imported = self.resolveFile(&path)?;
+                    if !includedFiles.contains(&path) {
+                        resolved.extend(imported.functionStatements.clone());
+                        includedFiles.insert(path.clone());
+                    }
+
+                    for (name, visibility) in &imported.localFunctionVisibility {
+                        if *visibility == FunctionVisibility::ExportPub {
+                            if !exportedSymbols.insert(name.clone()) {
+                                return Err(CompileError {
+                                    title: "import".to_string(),
+                                    file: ownerFile.to_path_buf(),
+                                    source: ownerSource.to_string(),
+                                    span,
+                                    message: format!(
+                                        "Duplicate exported function '{}' in module '{}'",
+                                        name, module
+                                    ),
+                                });
+                            }
+                            namespaceEntries.push((name.clone(), Expr::Variable(name.clone())));
+                        }
+                    }
+                }
+
+                resolved.push(self.namespaceStmt(&module, namespaceEntries));
+                Ok(())
+            }
+            ImportKind::ModuleItems { module, items } => {
+                for item in items {
+                    if !injectedNames.insert(item.clone()) {
+                        return Err(CompileError {
+                            title: "import".to_string(),
+                            file: ownerFile.to_path_buf(),
+                            source: ownerSource.to_string(),
+                            span,
+                            message: format!("Duplicate import: '{}'", item),
+                        });
+                    }
+
+                    let importFile = self.findModuleItemFile(
+                        currentDir,
+                        &module,
+                        &item,
+                        ownerFile,
+                        ownerSource,
+                        span,
+                    )?;
+                    if self.stack.contains(&importFile) {
+                        return Err(self.circularError(ownerFile, ownerSource, span, &importFile));
+                    }
+                    let imported = self.resolveFile(&importFile)?;
+                    if !includedFiles.contains(&importFile) {
+                        resolved.extend(imported.functionStatements.clone());
+                        includedFiles.insert(importFile.clone());
+                    }
+
+                    let mut namespaceEntries = Vec::new();
+                    for (name, visibility) in imported.localFunctionVisibility {
+                        if visibility == FunctionVisibility::ExportPub {
+                            namespaceEntries.push((name.clone(), Expr::Variable(name)));
+                        }
+                    }
+                    resolved.push(self.namespaceStmt(&item, namespaceEntries));
+                }
+                Ok(())
+            }
         }
     }
 
-    fn findFileWithOrder(
+    fn circularError(
+        &self,
+        ownerFile: &Path,
+        ownerSource: &str,
+        span: Span,
+        target: &Path,
+    ) -> CompileError {
+        let mut chain = self
+            .stack
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>();
+        chain.push(target.display().to_string());
+        CompileError {
+            title: "import".to_string(),
+            file: ownerFile.to_path_buf(),
+            source: ownerSource.to_string(),
+            span,
+            message: format!("Circular import detected: {}", chain.join(" -> ")),
+        }
+    }
+
+    fn namespaceStmt(&self, name: &str, entries: Vec<(String, Expr)>) -> Stmt {
+        Stmt::VarDecl {
+            is_const: true,
+            name: name.to_string(),
+            ty: None,
+            initializer: Expr::DictLiteral { entries },
+        }
+    }
+
+    fn findFileImport(
         &self,
         currentDir: &Path,
         module: &str,
-        ownerFile: Option<&Path>,
+        ownerFile: &Path,
         ownerSource: &str,
         span: Span,
     ) -> Result<PathBuf, CompileError> {
@@ -252,12 +381,85 @@ impl ResolverState {
 
         Err(CompileError {
             title: "import".to_string(),
-            file: ownerFile
-                .map(|f| f.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(module)),
+            file: ownerFile.to_path_buf(),
             source: ownerSource.to_string(),
             span,
-            message: format!("File not found for import '{}.{}'", module, "<symbol>"),
+            message: format!("File not found for import '{}.rey'", module),
+        })
+    }
+
+    fn findModuleDir(
+        &self,
+        currentDir: &Path,
+        module: &str,
+        ownerFile: &Path,
+        ownerSource: &str,
+        span: Span,
+    ) -> Result<PathBuf, CompileError> {
+        let mut candidates = Vec::new();
+        candidates.push(currentDir.join(module));
+        candidates.push(self.projectRoot.join(module));
+        if module == "std" {
+            if let Some(home) = homePath() {
+                candidates.push(home.join(".reyc/std/src"));
+            }
+        }
+        if let Some(home) = homePath() {
+            candidates.push(home.join(".reyc/packages").join(module));
+        }
+
+        for candidate in candidates {
+            if candidate.is_dir() {
+                return Ok(canonicalPath(&candidate));
+            }
+        }
+
+        Err(CompileError {
+            title: "import".to_string(),
+            file: ownerFile.to_path_buf(),
+            source: ownerSource.to_string(),
+            span,
+            message: format!("Module folder not found: '{}'", module),
+        })
+    }
+
+    fn findModuleItemFile(
+        &self,
+        currentDir: &Path,
+        module: &str,
+        item: &str,
+        ownerFile: &Path,
+        ownerSource: &str,
+        span: Span,
+    ) -> Result<PathBuf, CompileError> {
+        let mut candidates = Vec::new();
+        candidates.push(currentDir.join(module).join(format!("{}.rey", item)));
+        candidates.push(self.projectRoot.join(module).join(format!("{}.rey", item)));
+        if module == "std" {
+            if let Some(home) = homePath() {
+                candidates.push(home.join(".reyc/std/src").join(format!("{}.rey", item)));
+            }
+        }
+        if let Some(home) = homePath() {
+            candidates.push(
+                home.join(".reyc/packages")
+                    .join(module)
+                    .join(format!("{}.rey", item)),
+            );
+        }
+
+        for candidate in candidates {
+            if candidate.exists() {
+                return Ok(canonicalPath(&candidate));
+            }
+        }
+
+        Err(CompileError {
+            title: "import".to_string(),
+            file: ownerFile.to_path_buf(),
+            source: ownerSource.to_string(),
+            span,
+            message: format!("File not found for module import '{}::{}'", module, item),
         })
     }
 }
