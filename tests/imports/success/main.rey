@@ -1,0 +1,11 @@
+import actuator.name;
+import actuator.{other};
+import action;
+import action::walk;
+import action::{run};
+
+name();
+other();
+println(action.entry());
+println(walk.step());
+println(run.go());
