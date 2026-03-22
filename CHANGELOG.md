@@ -1,5 +1,37 @@
 # Changelog
 
+## [feature] — 2026-03-23
+- Implemented full import system for Rey with compile-time resolution.
+- Added `export pub` function modifier and import visibility enforcement:
+  - `export pub func` => importable
+  - `pub func` => not importable
+  - `func` => private
+- Added parser/AST support for:
+  - `import file.symbol`
+  - `import file.{a,b}`
+  - `import module`
+  - `import module::file`
+  - `import module::{a,b}`
+- Added import resolver pipeline (`compiler/v1/src/imports.rs`) and integrated it into compiler entry flow.
+- Implemented resolver lookup order:
+  1. current file directory
+  2. project root (entry file directory)
+  3. `~/.reyc/std/src` for `std` prefix
+  4. `~/.reyc/packages`
+- Added module semantics:
+  - `module/main.rey` required for `import module`
+  - module namespace auto-collects all `export pub` functions from `.rey` files in folder
+  - `module::file` resolves direct file namespace
+- Added import diagnostics for:
+  - file not found
+  - missing module `main.rey`
+  - function not found
+  - function is `pub` but not `export pub`
+  - circular imports
+  - duplicate imports
+- Added runtime/typecheck namespace dispatch support for `namespace.func()`.
+- Added import fixtures under `tests/imports/` for success and all required error cases.
+
 ## [release] — 2026-03-19
 - Shipped `rey v0.0.7-pre`
 - Added `projects/fake-cli/cli.rey` - a full interactive TUI implementation in Rey.
