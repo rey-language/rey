@@ -1,64 +1,73 @@
 # Primer — rey-lang
-Last updated: Mar 19, 2026 (session end)
+Last updated: Mar 23, 2026 (session end)
 
 ## What this project is
-Rey is a custom programming language built by Misbah. Currently on v0 — a tree-walking interpreter written in Rust. The language has C-like syntax with type inference, functions, control flow, and basic builtins. v0 is the working prototype; future versions will likely move toward compilation.
+Rey is a custom language by Misbah. Current runtime is a Rust tree-walking interpreter (`compiler/v1`) with compile-time parsing/typechecking and runtime execution.
 
 ## Key architecture
 ```
 compiler/v1/src/
-├── lexer/        — tokenizer (cursor, token, span, error)
-├── parser/       — produces AST (parser.rs, error.rs)
-├── ast/          — AST node types (expr, stmt, literal, ty)
-└── interpreter/  — tree-walker (evaluator, executor, environment, value, function, std, control_flow)
+├── lexer/        # tokenizer + spans
+├── parser/       # recursive descent parser + parse errors
+├── ast/          # expressions/statements/types
+├── typecheck.rs  # static checks
+└── interpreter/  # executor/evaluator/environment
 ```
-Pipeline: source → lexer → tokens → parser → AST → interpreter → output
+Pipeline: source -> lexer -> parser -> AST -> typecheck -> interpreter
 
-## Build & run
-```bash
-cd compiler/v1
-cargo build --release
-./target/release/rey-v0 .rey
+## Session completed
+- Added new function visibility model in AST/parser/lexer:
+  - `export pub func` => importable
+  - `pub func` => local/module visibility but blocked from imports
+  - `func` => private
+- Added import AST and parser support:
+  - `import file.symbol`
+  - `import file.{a,b}`
+  - `import module`
+  - `import module::file`
+  - `import module::{fileA,fileB}`
+- Added compile-time import resolver (`compiler/v1/src/imports.rs`) and integrated it into `main.rs`.
+- Implemented resolver order:
+  1. current file directory
+  2. entry project root
+  3. `~/.reyc/std/src` for `std` module prefix
+  4. `~/.reyc/packages`
+- Implemented module rules:
+  - `import action` requires `action/main.rey`
+  - module namespace auto-collects `export pub` symbols from every `.rey` file in that folder
+  - `import action::walk` resolves `action/walk.rey`
+- Implemented scope injection:
+  - file-symbol imports inject names directly
+  - module imports inject namespace dicts (`action.func()`, `walk.func()`)
+- Implemented diagnostics for:
+  - file not found
+  - missing module `main.rey`
+  - function not found
+  - function exists but only `pub`
+  - circular imports (with cycle chain)
+  - duplicate imports
+- Added namespace method-call dispatch in executor/typechecker for imported namespace calls.
 
-cargo run -- src/tests/variables.rey
-```
+## Tests added
+- `tests/imports/success/` full passing integration case with file and module import forms.
+- `tests/imports/errors/` covers all required error categories:
+  - missing file
+  - missing module main
+  - missing function
+  - `pub` not `export pub`
+  - circular import
+  - duplicate import
 
-## What's implemented in v0
-- Variables with optional type annotations (var x = 10, var x: int = 10)
-- Immutable variables with const (const pi: float = 3.14)
-- Unannotated variables use dynamic typing (Ty::Any)
-- Types: int, float, String, bool, null, Void
-- Arithmetic, comparison, logical, assignment operators
-- if/else, while, for x in range(start, end)
-- break, continue
-- Functions with optional typed params and return types
-- Builtins: print(), println(), len(), push(), pop(), input(), abs(), max(), min(), random()
-- Arrays: literals, indexing, typed arrays ([int])
-- Array methods: length(), push()
-- Dictionaries: literals, indexing, typed dicts ({String:int})
-- String interpolation ("{var}"), mixed typings ("HP: " + 10)
-- String methods: length/upper/lower/contains/split/toString/toInt/toFloat
-- Property access: obj.prop (dictionary key lookup)
-- Structs: definitions, literals, static/instance methods, field scoping, and pub/private visibility.
-- Compile-time type enforcement for annotated vars/functions + common builtins
-- Entry point: calls main() if present
-- Rust/Miette-like visual Error Diagnostics.
+## Verification run this session
+- `cargo build` (pass)
+- `cargo test` (pass)
+- `cargo run -- ../../tests/imports/success/main.rey` (pass)
+- `cargo run -- ../../tests/imports/errors/*.rey` (expected compile-time failures, all correct category/messages)
 
-## Test files
-compiler/v1/src/tests/ — .rey files for each feature
-Run any of them with cargo run -- src/tests/.rey
+## Current project state
+- Import system is fully implemented for the requested spec.
+- Branch has five logical commits for parser/visibility, resolver, modules, scope dispatch, and tests.
 
-## Current status
-`rey v0.0.6-pre` is implemented and staged on `claude`:
-- all files in `compiler/v1/src/tests/` run successfully
-- `cargo build --release` succeeds
-- release binaries + notes are staged in `releases/0.0.6-pre/`
-
-## Next up (v0.0.6-pre batch)
-- Implement missing operators: `++`, `--`, `+=`, `-=`, `*=`, `/=`, `%=`, and `%` modulo.
-- Add additional variable types: `char`, `uint`, `double`, `byte`.
-- Add multiline strings using `""" ... """`.
-- Add null safety: nullable types (`int?`), `null` comparisons, and clean error on `null` access.
-- Add `try`/`catch` error handling.
-- Expand `src/tests/` with comprehensive coverage and ensure all tests pass.
-- Update `syntax.md`, `primer.md`, and `CHANGELOG.md`, then ship `releases/0.0.6-pre/`.
+## Next up
+- Add automated Rust integration tests that execute the new import fixtures and assert expected stdout/stderr.
+- Add docs update in `syntax.md` describing import grammar and `export pub` rules.
