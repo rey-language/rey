@@ -1,0 +1,15 @@
+export pub func name() {
+    println("name");
+}
+
+export pub func other() {
+    println("other");
+}
+
+pub func onlyPub() {
+    println("pub-only");
+}
+
+func privateHelper() {
+    println("private");
+}

@@ -47,6 +47,9 @@ pub enum TokenKind {
     Var,
     Const,
     Func,
+    Import,
+    Export,
+    Pub,
     Return,
     If,
     Else,
@@ -63,7 +66,6 @@ pub enum TokenKind {
     False,
     Null,
     Struct,
-    Pub,
     SelfKw,
 
     //literals

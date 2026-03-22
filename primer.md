@@ -1,129 +1,73 @@
 # Primer — rey-lang
-Last updated: Mar 19, 2026 (session end)
+Last updated: Mar 23, 2026 (session end)
 
 ## What this project is
-Rey is a custom programming language built by Misbah. Currently on v0 — a tree-walking interpreter written in Rust. The language has C-like syntax with type inference, functions, control flow, and basic builtins. v0 is the working prototype; future versions will likely move toward compilation.
+Rey is a custom language by Misbah. Current runtime is a Rust tree-walking interpreter (`compiler/v1`) with compile-time parsing/typechecking and runtime execution.
 
 ## Key architecture
 ```
 compiler/v1/src/
-├── lexer/        — tokenizer (cursor, token, span, error)
-├── parser/       — produces AST (parser.rs, error.rs)
-├── ast/          — AST node types (expr, stmt, literal, ty)
-└── interpreter/  — tree-walker (evaluator, executor, environment, value, function, std, control_flow)
+├── lexer/        # tokenizer + spans
+├── parser/       # recursive descent parser + parse errors
+├── ast/          # expressions/statements/types
+├── typecheck.rs  # static checks
+└── interpreter/  # executor/evaluator/environment
 ```
-Pipeline: source → lexer → tokens → parser → AST → interpreter → output
+Pipeline: source -> lexer -> parser -> AST -> typecheck -> interpreter
 
-## Build & run
-```bash
-cd compiler/v1
-cargo build --release
-./target/release/rey-v0 <file>.rey
+## Session completed
+- Added new function visibility model in AST/parser/lexer:
+  - `export pub func` => importable
+  - `pub func` => local/module visibility but blocked from imports
+  - `func` => private
+- Added import AST and parser support:
+  - `import file.symbol`
+  - `import file.{a,b}`
+  - `import module`
+  - `import module::file`
+  - `import module::{fileA,fileB}`
+- Added compile-time import resolver (`compiler/v1/src/imports.rs`) and integrated it into `main.rs`.
+- Implemented resolver order:
+  1. current file directory
+  2. entry project root
+  3. `~/.reyc/std/src` for `std` module prefix
+  4. `~/.reyc/packages`
+- Implemented module rules:
+  - `import action` requires `action/main.rey`
+  - module namespace auto-collects `export pub` symbols from every `.rey` file in that folder
+  - `import action::walk` resolves `action/walk.rey`
+- Implemented scope injection:
+  - file-symbol imports inject names directly
+  - module imports inject namespace dicts (`action.func()`, `walk.func()`)
+- Implemented diagnostics for:
+  - file not found
+  - missing module `main.rey`
+  - function not found
+  - function exists but only `pub`
+  - circular imports (with cycle chain)
+  - duplicate imports
+- Added namespace method-call dispatch in executor/typechecker for imported namespace calls.
 
-cargo run -- src/tests/variables.rey
-```
+## Tests added
+- `tests/imports/success/` full passing integration case with file and module import forms.
+- `tests/imports/errors/` covers all required error categories:
+  - missing file
+  - missing module main
+  - missing function
+  - `pub` not `export pub`
+  - circular import
+  - duplicate import
 
-## What's implemented in v0
+## Verification run this session
+- `cargo build` (pass)
+- `cargo test` (pass)
+- `cargo run -- ../../tests/imports/success/main.rey` (pass)
+- `cargo run -- ../../tests/imports/errors/*.rey` (expected compile-time failures, all correct category/messages)
 
-### Variables & Types
-- Variables with optional type annotations (`var x = 10`, `var x: int = 10`)
-- Immutable variables with const (`const pi: float = 3.14`)
-- Unannotated variables use dynamic typing (`Ty::Any`)
-- Types: `int`, `float`, `String`, `bool`, `char`, `null`, `Void`
-- Additional numeric types: `uint`, `double`, `byte`
-- Nullable types (`int?`) for null safety
+## Current project state
+- Import system is fully implemented for the requested spec.
+- Branch has five logical commits for parser/visibility, resolver, modules, scope dispatch, and tests.
 
-### Operators
-- Arithmetic: `+`, `-`, `*`, `/`, `%` (modulo)
-- Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`
-- Logical: `&&`, `||`, `!`
-- Assignment: `=`, `+=`, `-=`, `*=`, `/=`, `%=`
-- Increment/decrement: `++`, `--` (prefix and postfix)
-- `instanceof` for type checking
-
-### Control Flow
-- `if`/`else if`/`else` — conditional branching
-- `while` — standard while loop
-- `loop` — infinite loop with `break`
-- `for x in range(start, end)` — range iteration
-- `for x in array` — array element iteration
-- `break`, `continue` — loop control
-- `match` — pattern matching on enums and primitives
-
-### Functions
-- Function declarations with optional typed params and return types
-- Default parameter values
-- Variadic parameters
-- Lambda expressions: `(x: int, y: int) => x + y`
-- First-class functions (functions as values)
-
-### Data Structures
-- **Arrays**: literals `[1, 2, 3]`, indexing `arr[0]`, typed arrays `[int]`
-  - Methods: `length()`, `push()`, `pop()`
-- **Dictionaries**: literals `{"key": value}`, indexing `dict["key"]`
-  - Typed dicts: `{String:int}`
-- **Tuples**: literals `(1, "a", true)`, access via index `.0`, `.1`
-- **Structs**: definitions, literals, static/instance methods
-  - Field scoping (fields act as method's "global scope")
-  - `pub`/`private` visibility for methods
-
-### Enums
-```rey
-enum Direction {
-    North,
-    South,
-    East,
-    West
-}
-
-var dir = North;  // Enum variants are automatically defined
-match dir {
-    Direction::North => print("Going north"),
-    Direction::South => print("Going south"),
-    _ => print("Unknown")
-}
-```
-
-### Strings
-- String interpolation: `"Value: {var}"`
-- Mixed concatenation: `"HP: " + 10`
-- Methods: `length()`, `upper()`, `lower()`, `contains()`, `split()`, `toString()`, `toInt()`, `toFloat()`
-
-### Builtins
-- `print()`, `println()` — output
-- `len()` — length of arrays/strings
-- `push()`, `pop()` — array operations
-- `input()` — read user input
-- `abs()`, `max()`, `min()` — math functions
-- `random()` — random number generation
-
-### Error Handling
-- Compile-time type checking for annotated vars/functions
-- Rust/Miette-like visual error diagnostics
-- Runtime error messages with context
-
-### Entry Point
-- If `main()` function exists, it's called automatically
-
-## Test files
-`tests/` directory contains `.rey` files for each feature:
-- `field_assign.rey` — external field assignment
-- `array_index_assign.rey` — array index assignment
-- `int_div.rey` — integer division
-- `loop.rey` — infinite loop keyword
-- `for_in_array.rey` — for-in array iteration
-- `enum_match.rey` — enums and match statements
-
-Run any test: `cargo run -- ../../tests/<file>.rey`
-
-## Current status
-`rey v0.0.7-pre` complete on `codex` branch:
-- All v0.0.7 features implemented
-- Bugs fixed: else if chaining, field assignment, array index assignment, integer division
-- New features: `loop` keyword, `for x in array`, enums, match statements
-
-## Next up (future releases)
-- Build and package binaries for macOS (arm64) and Windows (x86_64)
-- Add null safety: `null` comparisons and clean error on `null` access
-- Add `try`/`catch` error handling
-- Update `syntax.md` documentation
+## Next up
+- Add automated Rust integration tests that execute the new import fixtures and assert expected stdout/stderr.
+- Add docs update in `syntax.md` describing import grammar and `export pub` rules.

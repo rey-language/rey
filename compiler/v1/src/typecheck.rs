@@ -247,6 +247,7 @@ impl TypeChecker {
         for stmt in statements {
             if let Stmt::FuncDecl {
                 name,
+                visibility: _,
                 params,
                 return_ty,
                 ..
@@ -357,6 +358,7 @@ impl TypeChecker {
             }
             Stmt::FuncDecl {
                 name: _,
+                visibility: _,
                 params,
                 return_ty,
                 body,
@@ -514,6 +516,7 @@ impl TypeChecker {
                 }
                 Ok(())
             }
+            Stmt::Import { .. } => Ok(()),
             Stmt::Break | Stmt::Continue => Ok(()),
             Stmt::Return(expr) => {
                 let rty = self.exprTy(expr)?;
@@ -959,6 +962,7 @@ impl TypeChecker {
                 }
                 Ok(Ty::Array(Box::new(Ty::String)))
             }
+            (Ty::Dict(_, _), _) => Ok(Ty::Any),
             _ => Err(TypeError {
                 message: format!(
                     "Type error: method '{}' not supported on {:?}",
