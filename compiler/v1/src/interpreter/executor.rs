@@ -344,7 +344,7 @@ impl Executor {
                         env,
                     );
                 }
-                self.evaluate_method_call(recv, name, &evaluated_args)
+                self.evaluate_method_call(recv, name, &evaluated_args, env)
             }
             Expr::StructLiteral {
                 name,
@@ -704,8 +704,36 @@ impl Executor {
         receiver: Value,
         name: &str,
         args: &[Value],
+        env: &mut Environment,
     ) -> Result<Value, String> {
         match (receiver, name) {
+            (Value::Dict(d), method_name) => {
+                let value = d
+                    .borrow()
+                    .get(method_name)
+                    .cloned()
+                    .ok_or_else(|| format!("Namespace function '{}' not found", method_name))?;
+                match value {
+                    Value::Function(func) => {
+                        if args.len() != func.arity() {
+                            return Err(format!(
+                                "Expected {} arguments but got {}",
+                                func.arity(),
+                                args.len()
+                            ));
+                        }
+                        let mut function_env = Environment::with_parent(env.clone());
+                        for (param, arg_value) in func.params.iter().zip(args.iter()) {
+                            function_env.define(param.name.clone(), arg_value.clone());
+                        }
+                        self.execute_block(&func.body, &mut function_env)
+                    }
+                    _ => Err(format!(
+                        "Namespace member '{}' is not callable",
+                        method_name
+                    )),
+                }
+            }
             (val, "toString") => {
                 if !args.is_empty() {
                     return Err(format!(

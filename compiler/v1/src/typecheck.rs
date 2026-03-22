@@ -962,6 +962,7 @@ impl TypeChecker {
                 }
                 Ok(Ty::Array(Box::new(Ty::String)))
             }
+            (Ty::Dict(_, _), _) => Ok(Ty::Any),
             _ => Err(TypeError {
                 message: format!(
                     "Type error: method '{}' not supported on {:?}",
