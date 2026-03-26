@@ -1,0 +1,27 @@
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+    Up,
+}
+
+func run(): Void {
+    var d = North;
+    var out = 0;
+
+    match d {
+        Direction::North => { out = 1; },
+        Direction::South => { out = 2; },
+        East => { out = 3; },
+        West => { out = 4; },
+        Up => { out = 5; },
+        _ => { out = 99; },
+    }
+
+    if (out != 1) {
+        var fail = 1 / 0;
+    }
+}
+
+run();

@@ -171,26 +171,11 @@ impl Executor {
             }
             Stmt::Match { expr, arms } => {
                 let value = self.evaluate_expr(expr, env)?;
-                use crate::ast::stmt::Pattern;
 
                 for arm in arms {
-                    let matched = match (&arm.pattern, &value) {
-                        (Pattern::Wildcard, _) => true,
-                        (Pattern::Variable(_), _) => true,
-                        (Pattern::Literal(lit), val) => {
-                            let pattern_val = Value::from(lit.clone());
-                            pattern_val == *val
-                        }
-                        (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
-                            enum_name == en && variant == v
-                        }
-                        _ => false,
-                    };
-
-                    if matched {
-                        // Bind variable if it's a variable pattern
-                        if let Pattern::Variable(name) = &arm.pattern {
-                            env.define(name.clone(), value.clone());
+                    if let Some(bindings) = self.patternMatch(&arm.pattern, &value, env) {
+                        for (name, val) in bindings {
+                            env.define(name, val);
                         }
 
                         // Execute the arm body
@@ -201,11 +186,6 @@ impl Executor {
                             }
                         }
 
-                        // Return the value of the last statement if it's a return
-                        if let Some(Stmt::Return(expr)) = arm.body.last() {
-                            return Ok(ControlFlow::return_value(self.evaluate_expr(expr, env)?));
-                        }
-
                         return Ok(ControlFlow::normal(Value::Null));
                     }
                 }
@@ -213,6 +193,60 @@ impl Executor {
                 Err("No matching arm in match expression".to_string())
             }
             Stmt::Import { .. } => Ok(ControlFlow::normal(Value::Null)),
+        }
+    }
+
+    fn patternMatch(
+        &self,
+        pattern: &crate::ast::stmt::Pattern,
+        value: &Value,
+        env: &Environment,
+    ) -> Option<Vec<(String, Value)>> {
+        use crate::ast::stmt::Pattern;
+        match (pattern, value) {
+            (Pattern::Wildcard, _) => Some(Vec::new()),
+            (Pattern::Literal(lit), val) => {
+                let pattern_val = Value::from(lit.clone());
+                if pattern_val == *val {
+                    Some(Vec::new())
+                } else {
+                    None
+                }
+            }
+            (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
+                if enum_name == en && variant == v {
+                    Some(Vec::new())
+                } else {
+                    None
+                }
+            }
+            (Pattern::Struct { struct_name, fields }, Value::StructInstance { struct_name: sn, fields: vals }) => {
+                if struct_name != sn {
+                    return None;
+                }
+                let mut bindings = Vec::new();
+                for (field_name, field_pat) in fields {
+                    let vals_ref = vals.borrow();
+                    let field_val = vals_ref.get(field_name)?;
+                    let mut b = self.patternMatch(field_pat, field_val, env)?;
+                    bindings.append(&mut b);
+                }
+                Some(bindings)
+            }
+            (Pattern::Variable(name), val) => {
+                // Disambiguate enum-variant constants from variable-binding patterns.
+                // If the identifier resolves to an enum variant value, treat it as a constant pattern.
+                if let (Some(Value::EnumVariant { enum_name: enp, variant: vp }), Value::EnumVariant { enum_name: envv, variant: vv }) =
+                    (env.get(name), val)
+                {
+                    if enp == envv && vp == vv {
+                        return Some(Vec::new());
+                    }
+                    return None;
+                }
+                Some(vec![(name.clone(), val.clone())])
+            }
+            _ => None,
         }
     }
 

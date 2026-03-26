@@ -555,6 +555,17 @@ impl TypeChecker {
                 // Typecheck each arm's pattern against the expression type
                 for arm in arms {
                     use crate::ast::stmt::Pattern;
+                    fn collectBindings(p: &Pattern, out: &mut Vec<String>) {
+                        match p {
+                            Pattern::Variable(name) => out.push(name.clone()),
+                            Pattern::Struct { fields, .. } => {
+                                for (_, fp) in fields {
+                                    collectBindings(fp, out);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     match &arm.pattern {
                         Pattern::Wildcard => {}
                         Pattern::Variable(_) => {}
@@ -576,11 +587,16 @@ impl TypeChecker {
                         Pattern::EnumVariant(_, _) => {
                             // Enum patterns are always valid for now
                         }
+                        Pattern::Struct { .. } => {
+                            // Struct patterns are accepted for now (field checks happen at runtime).
+                        }
                     }
                     // Typecheck the arm body
                     self.pushScope();
-                    if let Pattern::Variable(var_name) = &arm.pattern {
-                        self.define(var_name, expr_ty.clone(), false);
+                    let mut bindings = Vec::new();
+                    collectBindings(&arm.pattern, &mut bindings);
+                    for name in bindings {
+                        self.define(&name, Ty::Any, false);
                     }
                     for s in &arm.body {
                         self.checkStmt(s)?;

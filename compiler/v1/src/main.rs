@@ -94,3 +94,27 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn runRey(rel: &str) -> Result<(), String> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let program = resolveEntry(&path).map_err(|e| format!("{}: {}", e.title, e.message))?;
+        let mut interpreter = Interpreter::new();
+        interpreter
+            .interpret(&program.statements)
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn matchStructPatterns() {
+        runRey("src/tests/match_struct.rey").unwrap();
+    }
+
+    #[test]
+    fn matchEnumVariantsQualifiedAndUnqualified() {
+        runRey("src/tests/match_enum.rey").unwrap();
+    }
+}

@@ -514,6 +514,38 @@ impl Parser {
                 let name = name.clone();
                 self.advance();
 
+                // Struct pattern: StructName { field: <pattern>, ... }
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                    && self.check(&TokenKind::LeftBrace)
+                {
+                    self.advance(); // consume '{'
+                    let mut fields = Vec::new();
+                    if !self.check(&TokenKind::RightBrace) {
+                        loop {
+                            let field_name = match &self.peek().kind {
+                                TokenKind::Identifier(f) => f.clone(),
+                                _ => return Err(self.error("Expected field name in struct pattern.")),
+                            };
+                            self.advance();
+                            self.consume(&TokenKind::Colon, "Expected ':' after field name in struct pattern.")?;
+                            let field_pat = self.parsePattern()?;
+                            fields.push((field_name, field_pat));
+                            if !self.matchToken(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(&TokenKind::RightBrace, "Expected '}' after struct pattern fields.")?;
+                    return Ok(Pattern::Struct {
+                        struct_name: name,
+                        fields,
+                    });
+                }
+
                 // Check for Enum::Variant pattern
                 if self.matchToken(&TokenKind::ColonColon) {
                     let variant = match &self.peek().kind {

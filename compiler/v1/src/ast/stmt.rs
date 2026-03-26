@@ -104,6 +104,10 @@ pub struct MatchArm {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     EnumVariant(String, String), // enum_name, variant_name
+    Struct {
+        struct_name: String,
+        fields: Vec<(String, Pattern)>, // field_name -> field_pattern
+    },
     Literal(Literal),
     Variable(String),
     Wildcard,
