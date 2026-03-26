@@ -308,6 +308,7 @@ impl Parser {
 
     fn parseImportStatement(&mut self) -> Result<Stmt, ParserError> {
         let import_span = self.previous().span;
+        use crate::ast::stmt::ImportName;
         let module = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => return Err(self.error("Expected module or file name after 'import'.")),
@@ -318,6 +319,7 @@ impl Parser {
             let symbols = if self.matchToken(&TokenKind::LeftBrace) {
                 let mut values = Vec::new();
                 loop {
+                    let span = self.peek().span;
                     let name = match &self.peek().kind {
                         TokenKind::Identifier(name) => name.clone(),
                         _ => {
@@ -327,7 +329,7 @@ impl Parser {
                         }
                     };
                     self.advance();
-                    values.push(name);
+                    values.push(ImportName { name, span });
                     if !self.matchToken(&TokenKind::Comma) {
                         break;
                     }
@@ -338,24 +340,26 @@ impl Parser {
                 )?;
                 values
             } else {
+                let span = self.peek().span;
                 let symbol = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(self.error("Expected symbol name after file import '.'.")),
                 };
                 self.advance();
-                vec![symbol]
+                vec![ImportName { name: symbol, span }]
             };
             ImportKind::FileSymbols { module, symbols }
         } else if self.matchToken(&TokenKind::ColonColon) {
             let items = if self.matchToken(&TokenKind::LeftBrace) {
                 let mut values = Vec::new();
                 loop {
+                    let span = self.peek().span;
                     let name = match &self.peek().kind {
                         TokenKind::Identifier(name) => name.clone(),
                         _ => return Err(self.error("Expected identifier in grouped module import list.")),
                     };
                     self.advance();
-                    values.push(name);
+                    values.push(ImportName { name, span });
                     if !self.matchToken(&TokenKind::Comma) {
                         break;
                     }
@@ -366,12 +370,13 @@ impl Parser {
                 )?;
                 values
             } else {
+                let span = self.peek().span;
                 let item = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(self.error("Expected file name after '::' in module import.")),
                 };
                 self.advance();
-                vec![item]
+                vec![ImportName { name: item, span }]
             };
             ImportKind::ModuleItems { module, items }
         } else {

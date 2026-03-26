@@ -1,0 +1,3 @@
+import actuator.{name, nope};
+
+println("should-not-run");

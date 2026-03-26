@@ -117,4 +117,22 @@ mod tests {
     fn matchEnumVariantsQualifiedAndUnqualified() {
         runRey("src/tests/match_enum.rey").unwrap();
     }
+
+    #[test]
+    fn importGroupedMissingSymbolPointsAtMissingName() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/imports/errors/group_missing_symbol.rey");
+        let err = resolveEntry(&path).unwrap_err();
+        let got = err
+            .source
+            .get(err.span.start..err.span.end)
+            .unwrap_or("")
+            .to_string();
+        assert_eq!(got, "nope");
+    }
+
+    #[test]
+    fn importModuleMainCanImportLocalFile() {
+        runRey("../../tests/imports/success/nested_resolution.rey").unwrap();
+    }
 }
