@@ -242,6 +242,107 @@ impl TypeChecker {
             },
         );
 
+        // FS builtins - using Any for flexible return types
+        c.functions.insert(
+            "readFile".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "writeFile".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::String, Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "appendFile".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::String, Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "fileExists".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Bool),
+            },
+        );
+        c.functions.insert(
+            "deleteFile".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "mkdir".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "listDir".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "getEnv".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "args".to_string(),
+            Ty::Function {
+                minArgs: 0,
+                params: vec![],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "exit".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Int],
+                variadic: None,
+                ret: Box::new(Ty::Void),
+            },
+        );
+        c.functions.insert(
+            "exec".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+
         c
     }
 

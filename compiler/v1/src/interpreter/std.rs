@@ -1,7 +1,12 @@
 use super::function::Function;
 use super::value::Value;
 use crate::lexer::span::Span;
+use std::cell::RefCell;
+use std::env;
+use std::fs;
 use std::io::{self, Write};
+use std::process;
+use std::rc::Rc;
 
 pub struct StdLib;
 
@@ -141,6 +146,70 @@ impl StdLib {
             None,
         );
         globals.insert("Result::Err".to_string(), Value::Function(result_err));
+
+        // FS builtins
+        let readFile = Function::new(
+            "readFile".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("readFile".to_string(), Value::Function(readFile));
+
+        let writeFile = Function::new(
+            "writeFile".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("writeFile".to_string(), Value::Function(writeFile));
+
+        let appendFile = Function::new(
+            "appendFile".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("appendFile".to_string(), Value::Function(appendFile));
+
+        let fileExists = Function::new(
+            "fileExists".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("fileExists".to_string(), Value::Function(fileExists));
+
+        let deleteFile = Function::new(
+            "deleteFile".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("deleteFile".to_string(), Value::Function(deleteFile));
+
+        let mkdir = Function::new("mkdir".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("mkdir".to_string(), Value::Function(mkdir));
+
+        let listDir = Function::new("listDir".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("listDir".to_string(), Value::Function(listDir));
+
+        let getEnv = Function::new("getEnv".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("getEnv".to_string(), Value::Function(getEnv));
+
+        let args = Function::new("args".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("args".to_string(), Value::Function(args));
+
+        let exit = Function::new("exit".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("exit".to_string(), Value::Function(exit));
+
+        let exec = Function::new("exec".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("exec".to_string(), Value::Function(exec));
 
         globals
     }
@@ -310,6 +379,166 @@ impl StdLib {
                         Some(Ok(Value::String(line)))
                     }
                     Err(e) => Some(Err(format!("failed to read input: {}", e))),
+                }
+            }
+            // File system builtins
+            "readFile" => {
+                if args.len() != 1 {
+                    return Some(Err(format!(
+                        "readFile expects 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                match &args[0] {
+                    Value::String(path) => match fs::read_to_string(path) {
+                        Ok(content) => Some(Ok(Value::String(content))),
+                        Err(e) => Some(Err(format!("{}", e))),
+                    },
+                    _ => Some(Err("readFile expects a string path".to_string())),
+                }
+            }
+            "writeFile" => {
+                if args.len() != 2 {
+                    return Some(Err(format!(
+                        "writeFile expects 2 arguments, got {}",
+                        args.len()
+                    )));
+                }
+                match (&args[0], &args[1]) {
+                    (Value::String(path), Value::String(content)) => {
+                        match fs::write(path, content) {
+                            Ok(_) => Some(Ok(Value::Null)),
+                            Err(e) => Some(Err(format!("{}", e))),
+                        }
+                    }
+                    _ => Some(Err("writeFile expects (path, content)".to_string())),
+                }
+            }
+            "appendFile" => {
+                if args.len() != 2 {
+                    return Some(Err(format!(
+                        "appendFile expects 2 arguments, got {}",
+                        args.len()
+                    )));
+                }
+                match (&args[0], &args[1]) {
+                    (Value::String(path), Value::String(content)) => {
+                        match fs::write(path, content) {
+                            Ok(_) => Some(Ok(Value::Null)),
+                            Err(e) => Some(Err(format!("{}", e))),
+                        }
+                    }
+                    _ => Some(Err("appendFile expects (path, content)".to_string())),
+                }
+            }
+            "fileExists" => {
+                if args.len() != 1 {
+                    return Some(Err(format!(
+                        "fileExists expects 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                match &args[0] {
+                    Value::String(path) => Some(Ok(Value::Bool(fs::metadata(path).is_ok()))),
+                    _ => Some(Err("fileExists expects a string path".to_string())),
+                }
+            }
+            "deleteFile" => {
+                if args.len() != 1 {
+                    return Some(Err(format!(
+                        "deleteFile expects 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                match &args[0] {
+                    Value::String(path) => match fs::remove_file(path) {
+                        Ok(_) => Some(Ok(Value::Null)),
+                        Err(e) => Some(Err(format!("{}", e))),
+                    },
+                    _ => Some(Err("deleteFile expects a string path".to_string())),
+                }
+            }
+            "mkdir" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("mkdir expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::String(path) => match fs::create_dir(path) {
+                        Ok(_) => Some(Ok(Value::Null)),
+                        Err(e) => Some(Err(format!("{}", e))),
+                    },
+                    _ => Some(Err("mkdir expects a string path".to_string())),
+                }
+            }
+            "listDir" => {
+                if args.len() != 1 {
+                    return Some(Err(format!(
+                        "listDir expects 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                match &args[0] {
+                    Value::String(path) => match fs::read_dir(path) {
+                        Ok(entries) => {
+                            let mut names = Vec::new();
+                            for entry in entries.flatten() {
+                                if let Ok(name) = entry.file_name().into_string() {
+                                    names.push(Value::String(name));
+                                }
+                            }
+                            Some(Ok(Value::Array(Rc::new(RefCell::new(names)))))
+                        }
+                        Err(e) => Some(Err(format!("{}", e))),
+                    },
+                    _ => Some(Err("listDir expects a string path".to_string())),
+                }
+            }
+            "getEnv" => {
+                if args.len() != 1 {
+                    return Some(Err(format!(
+                        "getEnv expects 1 argument, got {}",
+                        args.len()
+                    )));
+                }
+                match &args[0] {
+                    Value::String(key) => match env::var(key) {
+                        Ok(val) => Some(Ok(Value::Option(Rc::new(RefCell::new(Some(
+                            Value::String(val),
+                        )))))),
+                        Err(_) => Some(Ok(Value::Option(Rc::new(RefCell::new(None))))),
+                    },
+                    _ => Some(Err("getEnv expects a string key".to_string())),
+                }
+            }
+            "args" => {
+                let args_vec: Vec<Value> = env::args().map(Value::String).collect();
+                Some(Ok(Value::Array(Rc::new(RefCell::new(args_vec)))))
+            }
+            "exit" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("exit expects 1 argument, got {}", args.len())));
+                }
+                match args[0] {
+                    Value::Int(code) => process::exit(code as i32),
+                    Value::Float(n) => process::exit(n as i32),
+                    _ => Some(Err("exit expects an integer code".to_string())),
+                }
+            }
+            "exec" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("exec expects 1 argument, got {}", args.len())));
+                }
+                match &args[0] {
+                    Value::String(cmd) => {
+                        match std::process::Command::new("sh").arg("-c").arg(cmd).output() {
+                            Ok(output) => {
+                                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                Some(Ok(Value::String(stdout)))
+                            }
+                            Err(e) => Some(Err(format!("{}", e))),
+                        }
+                    }
+                    _ => Some(Err("exec expects a string command".to_string())),
                 }
             }
             _ => None, // Not a built-in function

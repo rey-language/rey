@@ -1,0 +1,24 @@
+// Test file system builtins
+
+func main(): Void {
+    // Test writeFile and readFile
+    writeFile("test_output.txt", "Hello World");
+    var content = readFile("test_output.txt");
+    println("Written and read file:");
+    println(content);
+    
+    // Test fileExists
+    var exists = fileExists("test_output.txt");
+    println("File exists:");
+    println(exists);
+    
+    // Test getEnv
+    var home = getEnv("HOME");
+    println("HOME env:");
+    println(home);
+    
+    println("All fs builtins work!");
+    
+    // Cleanup
+    deleteFile("test_output.txt");
+}
