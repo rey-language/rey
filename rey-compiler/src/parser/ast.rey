@@ -1,0 +1,42 @@
+// A minimal tagged-struct AST representation (api only).
+
+enum NodeKind {
+    Program,
+    Stmt,
+    Expr,
+    Type,
+    Pattern,
+}
+
+struct Span {
+    pub start: int,
+    pub end: int,
+    pub line: int,
+    pub column: int,
+}
+
+struct Node {
+    pub kind: NodeKind,
+    pub tag: String,
+    pub span: Span,
+    pub data: {String: Any},
+}
+
+enum LiteralKind {
+    String,
+    Char,
+    Int,
+    Float,
+    Bool,
+    Null,
+}
+
+struct Literal {
+    pub kind: LiteralKind,
+    pub text: String,
+}
+
+struct Program {
+    pub statements: [Node],
+}
+

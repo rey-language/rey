@@ -1,0 +1,40 @@
+enum IrKind {
+    Module,
+    Function,
+    Block,
+    Instr,
+}
+
+struct IrNode {
+    pub kind: IrKind,
+    pub tag: String,
+    pub data: {String: Any},
+}
+
+enum Backend {
+    Bytecode,
+    C,
+    Llvm,
+    Js,
+}
+
+struct CodegenOptions {
+    pub backend: Backend,
+    pub optimize: bool,
+    pub debug: bool,
+}
+
+struct CodegenResult {
+    pub ok: bool,
+    pub ir: [IrNode],
+    pub diagnostics: [Any],
+}
+
+export pub func lowerToIr(typedProgram: Any): CodegenResult {
+    return null;
+}
+
+export pub func emit(typedProgram: Any, options: CodegenOptions): Any {
+    return null;
+}
+

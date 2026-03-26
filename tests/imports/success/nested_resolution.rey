@@ -1,0 +1,8 @@
+import nestedmod;
+
+func main(): Void {
+    var v = nestedmod.entry();
+    if (v != "ok") {
+        var fail = 1 / 0;
+    }
+}

@@ -94,7 +94,8 @@ impl StdLib {
                     return Some(Err(format!("abs expects 1 argument, got {}", args.len())));
                 }
                 match &args[0] {
-                    Value::Number(n) => Some(Ok(Value::Number(n.abs()))),
+                    Value::Int(n) => Some(Ok(Value::Int(n.abs()))),
+                    Value::Float(n) => Some(Ok(Value::Float(n.abs()))),
                     _ => Some(Err("abs expects a number".to_string())),
                 }
             }
@@ -103,9 +104,10 @@ impl StdLib {
                     return Some(Err(format!("max expects 2 arguments, got {}", args.len())));
                 }
                 match (&args[0], &args[1]) {
-                    (Value::Number(a), Value::Number(b)) => {
-                        Some(Ok(Value::Number(if a > b { *a } else { *b })))
-                    }
+                    (Value::Int(a), Value::Int(b)) => Some(Ok(Value::Int(if a > b { *a } else { *b }))),
+                    (Value::Float(a), Value::Float(b)) => Some(Ok(Value::Float(if a > b { *a } else { *b }))),
+                    (Value::Int(a), Value::Float(b)) => Some(Ok(Value::Float(if (*a as f64) > *b { *a as f64 } else { *b }))),
+                    (Value::Float(a), Value::Int(b)) => Some(Ok(Value::Float(if *a > (*b as f64) { *a } else { *b as f64 }))),
                     _ => Some(Err("max expects two numbers".to_string())),
                 }
             }
@@ -114,9 +116,10 @@ impl StdLib {
                     return Some(Err(format!("min expects 2 arguments, got {}", args.len())));
                 }
                 match (&args[0], &args[1]) {
-                    (Value::Number(a), Value::Number(b)) => {
-                        Some(Ok(Value::Number(if a < b { *a } else { *b })))
-                    }
+                    (Value::Int(a), Value::Int(b)) => Some(Ok(Value::Int(if a < b { *a } else { *b }))),
+                    (Value::Float(a), Value::Float(b)) => Some(Ok(Value::Float(if a < b { *a } else { *b }))),
+                    (Value::Int(a), Value::Float(b)) => Some(Ok(Value::Float(if (*a as f64) < *b { *a as f64 } else { *b }))),
+                    (Value::Float(a), Value::Int(b)) => Some(Ok(Value::Float(if *a < (*b as f64) { *a } else { *b as f64 }))),
                     _ => Some(Err("min expects two numbers".to_string())),
                 }
             }
@@ -134,16 +137,16 @@ impl StdLib {
                 // Simple pseudo-random using time and a bit of math to avoid contiguous values
                 let rand_val =
                     ((time.wrapping_mul(1103515245).wrapping_add(12345)) % 10000) as f64 / 10000.0;
-                Some(Ok(Value::Number(rand_val)))
+                Some(Ok(Value::Float(rand_val)))
             }
             "len" => {
                 if args.len() != 1 {
                     return Some(Err(format!("len expects 1 argument, got {}", args.len())));
                 }
                 match &args[0] {
-                    Value::String(s) => Some(Ok(Value::Number(s.chars().count() as f64))),
-                    Value::Array(arr) => Some(Ok(Value::Number(arr.borrow().len() as f64))),
-                    Value::Dict(d) => Some(Ok(Value::Number(d.borrow().len() as f64))),
+                    Value::String(s) => Some(Ok(Value::Int(s.chars().count() as i64))),
+                    Value::Array(arr) => Some(Ok(Value::Int(arr.borrow().len() as i64))),
+                    Value::Dict(d) => Some(Ok(Value::Int(d.borrow().len() as i64))),
                     _ => Some(Err("len expects a string, array, or dictionary".to_string())),
                 }
             }
@@ -207,7 +210,8 @@ impl StdLib {
         match value {
             Value::String(s) => s.clone(),
             Value::Char(c) => c.to_string(),
-            Value::Number(n) => {
+            Value::Int(n) => format!("{}", n),
+            Value::Float(n) => {
                 if n.fract() == 0.0 {
                     format!("{}", *n as i64)
                 } else {

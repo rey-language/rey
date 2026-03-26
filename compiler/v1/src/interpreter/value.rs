@@ -18,7 +18,8 @@ pub struct StructDef {
 pub enum Value {
     String(String),
     Char(char),
-    Number(f64),
+    Int(i64),
+    Float(f64),
     Bool(bool),
     EnumVariant { enum_name: String, variant: String },
     Function(Function),
@@ -37,7 +38,8 @@ impl std::fmt::Display for Value {
         match self {
             Value::String(s) => write!(f, "{}", s),
             Value::Char(c) => write!(f, "{}", c),
-            Value::Number(n) => {
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Float(n) => {
                 if n.fract() == 0.0 {
                     write!(f, "{}", *n as i64)
                 } else {
@@ -83,7 +85,9 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Char(a), Value::Char(b)) => a == b,
-            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => (*a as f64) == *b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::EnumVariant { enum_name: en1, variant: v1 }, Value::EnumVariant { enum_name: en2, variant: v2 }) => {
                 en1 == en2 && v1 == v2
@@ -124,7 +128,8 @@ impl From<Literal> for Value {
         match lit {
             Literal::String(s) => Value::String(s),
             Literal::Char(c) => Value::Char(c),
-            Literal::Number(n) => Value::Number(n),
+            Literal::Int(n) => Value::Int(n),
+            Literal::Float(n) => Value::Float(n),
             Literal::Bool(b) => Value::Bool(b),
             Literal::Null => Value::Null,
         }

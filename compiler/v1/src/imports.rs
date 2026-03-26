@@ -156,26 +156,26 @@ impl ResolverState {
                 }
 
                 for symbol in symbols {
-                    if !injectedNames.insert(symbol.clone()) {
+                    if !injectedNames.insert(symbol.name.clone()) {
                         return Err(CompileError {
                             title: "import".to_string(),
                             file: ownerFile.to_path_buf(),
                             source: ownerSource.to_string(),
-                            span,
-                            message: format!("Duplicate import: '{}'", symbol),
+                            span: symbol.span,
+                            message: format!("Duplicate import: '{}'", symbol.name),
                         });
                     }
-                    match imported.localFunctionVisibility.get(&symbol) {
+                    match imported.localFunctionVisibility.get(&symbol.name) {
                         Some(FunctionVisibility::ExportPub) => {}
                         Some(FunctionVisibility::Pub) => {
                             return Err(CompileError {
                                 title: "import".to_string(),
                                 file: ownerFile.to_path_buf(),
                                 source: ownerSource.to_string(),
-                                span,
+                                span: symbol.span,
                                 message: format!(
                                     "Function '{}' exists in '{}' but is 'pub', not 'export pub'",
-                                    symbol,
+                                    symbol.name,
                                     importFile.display()
                                 ),
                             });
@@ -185,10 +185,10 @@ impl ResolverState {
                                 title: "import".to_string(),
                                 file: ownerFile.to_path_buf(),
                                 source: ownerSource.to_string(),
-                                span,
+                                span: symbol.span,
                                 message: format!(
                                     "Function '{}' exists in '{}' but is private",
-                                    symbol,
+                                    symbol.name,
                                     importFile.display()
                                 ),
                             });
@@ -198,10 +198,10 @@ impl ResolverState {
                                 title: "import".to_string(),
                                 file: ownerFile.to_path_buf(),
                                 source: ownerSource.to_string(),
-                                span,
+                                span: symbol.span,
                                 message: format!(
                                     "Function '{}' not found in file '{}'",
-                                    symbol,
+                                    symbol.name,
                                     importFile.display()
                                 ),
                             });
@@ -293,26 +293,26 @@ impl ResolverState {
             }
             ImportKind::ModuleItems { module, items } => {
                 for item in items {
-                    if !injectedNames.insert(item.clone()) {
+                    if !injectedNames.insert(item.name.clone()) {
                         return Err(CompileError {
                             title: "import".to_string(),
                             file: ownerFile.to_path_buf(),
                             source: ownerSource.to_string(),
-                            span,
-                            message: format!("Duplicate import: '{}'", item),
+                            span: item.span,
+                            message: format!("Duplicate import: '{}'", item.name),
                         });
                     }
 
                     let importFile = self.findModuleItemFile(
                         currentDir,
                         &module,
-                        &item,
+                        &item.name,
                         ownerFile,
                         ownerSource,
-                        span,
+                        item.span,
                     )?;
                     if self.stack.contains(&importFile) {
-                        return Err(self.circularError(ownerFile, ownerSource, span, &importFile));
+                        return Err(self.circularError(ownerFile, ownerSource, item.span, &importFile));
                     }
                     let imported = self.resolveFile(&importFile)?;
                     if !includedFiles.contains(&importFile) {
@@ -325,11 +325,11 @@ impl ResolverState {
                         if visibility == FunctionVisibility::ExportPub {
                             namespaceEntries.push((
                                 name.clone(),
-                                Expr::Variable { name, span },
+                                Expr::Variable { name, span: item.span },
                             ));
                         }
                     }
-                    resolved.push(self.namespaceStmt(&item, namespaceEntries, span));
+                    resolved.push(self.namespaceStmt(&item.name, namespaceEntries, item.span));
                 }
                 Ok(())
             }

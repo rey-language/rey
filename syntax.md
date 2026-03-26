@@ -1,4 +1,4 @@
-# Rey Language Syntax Reference (v0.1.0)
+# Rey Language Syntax Reference (v0.1.1)
 
 This document reflects the behavior currently implemented in `compiler/v1`.
 
@@ -24,6 +24,9 @@ var y: int = 20;
 const pi: float = 3.14;
 ```
 
+- `var` declares a mutable variable
+- `const` declares an immutable variable (cannot be reassigned)
+
 Implemented primitive type names:
 - `int`
 - `uint`
@@ -42,6 +45,11 @@ Implemented type forms:
 - Dictionary: `{String:int}`
 - Union: `int | String`
 
+Comments:
+```rey
+// single-line comment
+```
+
 Tuples are supported as literals and index access:
 
 ```rey
@@ -54,6 +62,10 @@ println(t.2);
 ## Operators
 Arithmetic:
 - `+`, `-`, `*`, `/`, `%`
+
+Division rules:
+- `int / int` performs integer division (truncates)
+- any `float` operand produces a `float` result (`10.0 / 3.0`, `10 / 3.0`)
 
 Comparison:
 - `==`, `!=`, `<`, `<=`, `>`, `>=`
@@ -182,6 +194,9 @@ println(pop(xs));
 println(xs.length());
 ```
 
+Array methods:
+- `length()`
+
 Dictionaries (identifier or string keys in literals):
 
 ```rey
@@ -190,6 +205,9 @@ println(user.name);
 println(user["id"]);
 user.name = "ReyLang";
 ```
+
+Dictionary methods:
+- `length()`
 
 ## Strings
 Regular and multiline strings:
@@ -200,6 +218,11 @@ var b = """
 line 1
 line 2
 """;
+```
+
+Char literals:
+```rey
+var c: char = 'x';
 ```
 
 Interpolation:
@@ -244,6 +267,11 @@ Struct literal:
 var p = Player { name: "Hero", health: 100 };
 ```
 
+Field mutation:
+- `obj.field = value` works for `pub` struct fields
+- `obj.field += value` works for `pub` struct fields
+- nested field assignment like `obj.inner.field = value` is currently rejected
+
 Implemented method behavior:
 - Instance method calls inject fields into method scope by field name.
 - Mutated field names are written back to the instance.
@@ -273,7 +301,8 @@ match dir {
 ```
 
 Pattern kinds:
-- enum variant (`Type::Variant`)
+- enum variant (`Type::Variant` or unqualified `Variant`)
+- struct pattern (`StructName { field: pattern, ... }`)
 - literal (`1`, `"x"`, `true`, `null`)
 - variable binding (`n`)
 - wildcard (`_`)
@@ -283,13 +312,13 @@ Global built-ins:
 - `print(...)`
 - `println(...)`
 - `input()` / `input(promptString)`
-- `len(value)`
+- `len(value)` — works on strings, arrays, dictionaries
 - `push(array, value)`
 - `pop(array)`
 - `abs(number)`
-- `max(a, b)`
-- `min(a, b)`
-- `random()`
+- `max(a, b)` — two numbers
+- `min(a, b)` — two numbers
+- `random()` — returns float in [0, 1)
 
 ## Diagnostics
 Compiler and runtime errors are printed with category labels such as:

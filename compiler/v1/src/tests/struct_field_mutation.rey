@@ -1,0 +1,13 @@
+struct Counter {
+    pub value: int,
+}
+
+func main(): Void {
+    var c = Counter { value: 1 };
+    c.value = 2;
+    c.value += 3;
+
+    if (c.value != 5) {
+        var fail = 1 / 0;
+    }
+}

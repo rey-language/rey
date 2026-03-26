@@ -1,5 +1,18 @@
 # Changelog
 
+## [release] — 2026-03-26
+- Bumped compiler crate version to `0.1.1` in `compiler/v1/Cargo.toml`.
+- Fixed `match` on struct instances via struct field patterns.
+- Fixed enum variant matching for both qualified (`Enum::Variant`) and unqualified (`Variant`) patterns.
+- Improved grouped import diagnostics so missing items highlight the specific missing name.
+- Verified nested module resolution where `module/main.rey` imports other local files.
+- Fixed numeric semantics by distinguishing `int` and `float` values at runtime:
+  - `10 / 3` performs integer division.
+  - `10.0 / 3.0` and `10 / 3.0` perform float division.
+- Allowed external mutation of `pub` struct fields (`obj.field = ...`, `obj.field += ...`) and emit a clear error for nested field assignment (`obj.inner.field = ...`) for now.
+- Added `rey-compiler/` v5 bootstrap skeleton (API surface only).
+- Added `compiler/README.md` to document the v1 Rust interpreter vs bootstrap target.
+
 ## [release] — 2026-03-23
 - Prepared `v0.1.0` release candidate assets and docs.
 - Audited syntax documentation against current parser/runtime behavior.

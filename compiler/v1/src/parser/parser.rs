@@ -308,6 +308,7 @@ impl Parser {
 
     fn parseImportStatement(&mut self) -> Result<Stmt, ParserError> {
         let import_span = self.previous().span;
+        use crate::ast::stmt::ImportName;
         let module = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => return Err(self.error("Expected module or file name after 'import'.")),
@@ -318,6 +319,7 @@ impl Parser {
             let symbols = if self.matchToken(&TokenKind::LeftBrace) {
                 let mut values = Vec::new();
                 loop {
+                    let span = self.peek().span;
                     let name = match &self.peek().kind {
                         TokenKind::Identifier(name) => name.clone(),
                         _ => {
@@ -327,7 +329,7 @@ impl Parser {
                         }
                     };
                     self.advance();
-                    values.push(name);
+                    values.push(ImportName { name, span });
                     if !self.matchToken(&TokenKind::Comma) {
                         break;
                     }
@@ -338,24 +340,26 @@ impl Parser {
                 )?;
                 values
             } else {
+                let span = self.peek().span;
                 let symbol = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(self.error("Expected symbol name after file import '.'.")),
                 };
                 self.advance();
-                vec![symbol]
+                vec![ImportName { name: symbol, span }]
             };
             ImportKind::FileSymbols { module, symbols }
         } else if self.matchToken(&TokenKind::ColonColon) {
             let items = if self.matchToken(&TokenKind::LeftBrace) {
                 let mut values = Vec::new();
                 loop {
+                    let span = self.peek().span;
                     let name = match &self.peek().kind {
                         TokenKind::Identifier(name) => name.clone(),
                         _ => return Err(self.error("Expected identifier in grouped module import list.")),
                     };
                     self.advance();
-                    values.push(name);
+                    values.push(ImportName { name, span });
                     if !self.matchToken(&TokenKind::Comma) {
                         break;
                     }
@@ -366,12 +370,13 @@ impl Parser {
                 )?;
                 values
             } else {
+                let span = self.peek().span;
                 let item = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(self.error("Expected file name after '::' in module import.")),
                 };
                 self.advance();
-                vec![item]
+                vec![ImportName { name: item, span }]
             };
             ImportKind::ModuleItems { module, items }
         } else {
@@ -514,6 +519,38 @@ impl Parser {
                 let name = name.clone();
                 self.advance();
 
+                // Struct pattern: StructName { field: <pattern>, ... }
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                    && self.check(&TokenKind::LeftBrace)
+                {
+                    self.advance(); // consume '{'
+                    let mut fields = Vec::new();
+                    if !self.check(&TokenKind::RightBrace) {
+                        loop {
+                            let field_name = match &self.peek().kind {
+                                TokenKind::Identifier(f) => f.clone(),
+                                _ => return Err(self.error("Expected field name in struct pattern.")),
+                            };
+                            self.advance();
+                            self.consume(&TokenKind::Colon, "Expected ':' after field name in struct pattern.")?;
+                            let field_pat = self.parsePattern()?;
+                            fields.push((field_name, field_pat));
+                            if !self.matchToken(&TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(&TokenKind::RightBrace, "Expected '}' after struct pattern fields.")?;
+                    return Ok(Pattern::Struct {
+                        struct_name: name,
+                        fields,
+                    });
+                }
+
                 // Check for Enum::Variant pattern
                 if self.matchToken(&TokenKind::ColonColon) {
                     let variant = match &self.peek().kind {
@@ -529,9 +566,14 @@ impl Parser {
                 }
             }
             TokenKind::NumberLiteral(n) => {
-                let val = *n;
+                let val = n.clone();
                 self.advance();
-                Ok(Pattern::Literal(crate::ast::Literal::Number(val)))
+                let lit = if val.contains('.') {
+                    crate::ast::Literal::Float(val.parse().unwrap())
+                } else {
+                    crate::ast::Literal::Int(val.parse().unwrap())
+                };
+                Ok(Pattern::Literal(lit))
             }
             TokenKind::StringLiteral(s) => {
                 let val = s.clone();
@@ -725,7 +767,7 @@ impl Parser {
                 let expr = self.parseUnary()?;
                 Ok(Expr::Binary {
                     left: Box::new(Expr::Literal {
-                        value: Literal::Number(0.0),
+                        value: Literal::Int(0),
                         span,
                     }),
                     op: TokenKind::Minus,
@@ -787,11 +829,12 @@ impl Parser {
             if self.matchToken(&TokenKind::Dot) {
                 let member_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
-                    TokenKind::NumberLiteral(n) => {
+                    TokenKind::NumberLiteral(raw) => {
+                        let n: f64 = raw.parse().unwrap_or(0.0);
                         if n.fract() != 0.0 {
                             return Err(self.error("Tuple index after '.' must be an integer."));
                         }
-                        (*n as i64).to_string()
+                        (n as i64).to_string()
                     }
                     _ => return Err(self.error("Expected identifier after '.'.")),
                 };
@@ -959,10 +1002,18 @@ impl Parser {
             TokenKind::NumberLiteral(value) => {
                 let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal {
-                    value: Literal::Number(value),
-                    span,
-                })
+                let is_float = value.contains('.');
+                if is_float {
+                    Ok(Expr::Literal {
+                        value: Literal::Float(value.parse().unwrap()),
+                        span,
+                    })
+                } else {
+                    Ok(Expr::Literal {
+                        value: Literal::Int(value.parse().unwrap()),
+                        span,
+                    })
+                }
             }
             TokenKind::True => {
                 let span = self.peek().span;

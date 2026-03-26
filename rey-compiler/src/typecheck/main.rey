@@ -1,0 +1,56 @@
+enum TypeKind {
+    Any,
+    Void,
+    Bool,
+    Int,
+    Float,
+    String,
+    Char,
+    Array,
+    Dict,
+    Tuple,
+    Struct,
+    Enum,
+    Function,
+    Union,
+}
+
+struct Type {
+    pub kind: TypeKind,
+    pub name: String,
+    pub params: [Type],
+}
+
+struct Symbol {
+    pub name: String,
+    pub ty: Type,
+    pub isConst: bool,
+}
+
+struct TypeEnv {
+    pub symbols: {String: Symbol},
+}
+
+enum TypeErrorKind {
+    UndefinedName,
+    NotCallable,
+    NotAssignable,
+    Mismatch,
+}
+
+struct TypeError {
+    pub kind: TypeErrorKind,
+    pub message: String,
+    pub span: Any,
+}
+
+struct TypecheckResult {
+    pub ok: bool,
+    pub typedProgram: Any,
+    pub diagnostics: [Any],
+}
+
+export pub func typecheck(program: Any): TypecheckResult {
+    return null;
+}
+

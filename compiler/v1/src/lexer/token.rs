@@ -72,7 +72,7 @@ pub enum TokenKind {
     Identifier(String),
     StringLiteral(String),
     CharLiteral(char),
-    NumberLiteral(f64),
+    NumberLiteral(String),
 
     //operators
     Equal,

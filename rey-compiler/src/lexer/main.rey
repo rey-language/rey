@@ -1,0 +1,19 @@
+struct Lexer {
+    pub source: String,
+    pub pos: int,
+    pub line: int,
+    pub column: int,
+}
+
+export pub func newLexer(source: String): Lexer {
+    return null;
+}
+
+export pub func nextToken(lexer: Lexer): Any {
+    return null;
+}
+
+export pub func lexAll(source: String): [Any] {
+    return null;
+}
+

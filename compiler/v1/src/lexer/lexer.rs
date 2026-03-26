@@ -231,9 +231,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
 
-                let value: f64 = number.parse().unwrap();
                 Ok(Token {
-                    kind: TokenKind::NumberLiteral(value),
+                    kind: TokenKind::NumberLiteral(number),
                     span: Span::new(start, self.cursor.position()),
                 })
             }

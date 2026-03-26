@@ -35,9 +35,15 @@ pub enum FunctionVisibility {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportKind {
-    FileSymbols { module: String, symbols: Vec<String> },
+    FileSymbols { module: String, symbols: Vec<ImportName> },
     ModuleNamespace { module: String },
-    ModuleItems { module: String, items: Vec<String> },
+    ModuleItems { module: String, items: Vec<ImportName> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportName {
+    pub name: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +110,10 @@ pub struct MatchArm {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     EnumVariant(String, String), // enum_name, variant_name
+    Struct {
+        struct_name: String,
+        fields: Vec<(String, Pattern)>, // field_name -> field_pattern
+    },
     Literal(Literal),
     Variable(String),
     Wildcard,

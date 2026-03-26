@@ -94,3 +94,61 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn runRey(rel: &str) -> Result<(), String> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let program = resolveEntry(&path).map_err(|e| format!("{}: {}", e.title, e.message))?;
+        let mut interpreter = Interpreter::new();
+        interpreter
+            .interpret(&program.statements)
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn matchStructPatterns() {
+        runRey("src/tests/match_struct.rey").unwrap();
+    }
+
+    #[test]
+    fn matchEnumVariantsQualifiedAndUnqualified() {
+        runRey("src/tests/match_enum.rey").unwrap();
+    }
+
+    #[test]
+    fn importGroupedMissingSymbolPointsAtMissingName() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/imports/errors/group_missing_symbol.rey");
+        let err = resolveEntry(&path).unwrap_err();
+        let got = err
+            .source
+            .get(err.span.start..err.span.end)
+            .unwrap_or("")
+            .to_string();
+        assert_eq!(got, "nope");
+    }
+
+    #[test]
+    fn importModuleMainCanImportLocalFile() {
+        runRey("../../tests/imports/success/nested_resolution.rey").unwrap();
+    }
+
+    #[test]
+    fn integerDivisionSemantics() {
+        runRey("src/tests/integer_division.rey").unwrap();
+    }
+
+    #[test]
+    fn structFieldMutationPubWorks() {
+        runRey("src/tests/struct_field_mutation.rey").unwrap();
+    }
+
+    #[test]
+    fn structFieldMutationNestedErrorsClearly() {
+        let err = runRey("src/tests/struct_field_mutation_nested_error.rey").unwrap_err();
+        assert!(err.contains("nested field assignment"), "got: {}", err);
+    }
+}

@@ -119,16 +119,28 @@ impl Executor {
                         let end_val = self.evaluate_expr(end, env)?;
 
                         let start_num = match start_val {
-                            Value::Number(n) => n as i64,
+                            Value::Int(n) => n,
+                            Value::Float(n) => {
+                                if n.fract() != 0.0 {
+                                    return Err("Range start must be an integer".to_string());
+                                }
+                                n as i64
+                            }
                             _ => return Err("Range start must be a number".to_string()),
                         };
                         let end_num = match end_val {
-                            Value::Number(n) => n as i64,
+                            Value::Int(n) => n,
+                            Value::Float(n) => {
+                                if n.fract() != 0.0 {
+                                    return Err("Range end must be an integer".to_string());
+                                }
+                                n as i64
+                            }
                             _ => return Err("Range end must be a number".to_string()),
                         };
 
                         for i in start_num..end_num {
-                            env.define(variable.clone(), Value::Number(i as f64));
+                            env.define(variable.clone(), Value::Int(i));
 
                             match self.execute_block_with_control_flow(body, env)? {
                                 ControlFlow::Break => break,
@@ -171,26 +183,11 @@ impl Executor {
             }
             Stmt::Match { expr, arms } => {
                 let value = self.evaluate_expr(expr, env)?;
-                use crate::ast::stmt::Pattern;
 
                 for arm in arms {
-                    let matched = match (&arm.pattern, &value) {
-                        (Pattern::Wildcard, _) => true,
-                        (Pattern::Variable(_), _) => true,
-                        (Pattern::Literal(lit), val) => {
-                            let pattern_val = Value::from(lit.clone());
-                            pattern_val == *val
-                        }
-                        (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
-                            enum_name == en && variant == v
-                        }
-                        _ => false,
-                    };
-
-                    if matched {
-                        // Bind variable if it's a variable pattern
-                        if let Pattern::Variable(name) = &arm.pattern {
-                            env.define(name.clone(), value.clone());
+                    if let Some(bindings) = self.patternMatch(&arm.pattern, &value, env) {
+                        for (name, val) in bindings {
+                            env.define(name, val);
                         }
 
                         // Execute the arm body
@@ -201,11 +198,6 @@ impl Executor {
                             }
                         }
 
-                        // Return the value of the last statement if it's a return
-                        if let Some(Stmt::Return(expr)) = arm.body.last() {
-                            return Ok(ControlFlow::return_value(self.evaluate_expr(expr, env)?));
-                        }
-
                         return Ok(ControlFlow::normal(Value::Null));
                     }
                 }
@@ -213,6 +205,60 @@ impl Executor {
                 Err("No matching arm in match expression".to_string())
             }
             Stmt::Import { .. } => Ok(ControlFlow::normal(Value::Null)),
+        }
+    }
+
+    fn patternMatch(
+        &self,
+        pattern: &crate::ast::stmt::Pattern,
+        value: &Value,
+        env: &Environment,
+    ) -> Option<Vec<(String, Value)>> {
+        use crate::ast::stmt::Pattern;
+        match (pattern, value) {
+            (Pattern::Wildcard, _) => Some(Vec::new()),
+            (Pattern::Literal(lit), val) => {
+                let pattern_val = Value::from(lit.clone());
+                if pattern_val == *val {
+                    Some(Vec::new())
+                } else {
+                    None
+                }
+            }
+            (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
+                if enum_name == en && variant == v {
+                    Some(Vec::new())
+                } else {
+                    None
+                }
+            }
+            (Pattern::Struct { struct_name, fields }, Value::StructInstance { struct_name: sn, fields: vals }) => {
+                if struct_name != sn {
+                    return None;
+                }
+                let mut bindings = Vec::new();
+                for (field_name, field_pat) in fields {
+                    let vals_ref = vals.borrow();
+                    let field_val = vals_ref.get(field_name)?;
+                    let mut b = self.patternMatch(field_pat, field_val, env)?;
+                    bindings.append(&mut b);
+                }
+                Some(bindings)
+            }
+            (Pattern::Variable(name), val) => {
+                // Disambiguate enum-variant constants from variable-binding patterns.
+                // If the identifier resolves to an enum variant value, treat it as a constant pattern.
+                if let (Some(Value::EnumVariant { enum_name: enp, variant: vp }), Value::EnumVariant { enum_name: envv, variant: vv }) =
+                    (env.get(name), val)
+                {
+                    if enp == envv && vp == vv {
+                        return Some(Vec::new());
+                    }
+                    return None;
+                }
+                Some(vec![(name.clone(), val.clone())])
+            }
+            _ => None,
         }
     }
 
@@ -254,7 +300,18 @@ impl Executor {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
                 match (target_val, index_val) {
-                    (Value::Array(arr), Value::Number(n)) => {
+                    (Value::Array(arr), Value::Int(n)) => {
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("Array index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        arr.borrow()
+                            .get(idx)
+                            .cloned()
+                            .ok_or_else(|| "Array index out of bounds".to_string())
+                    }
+                    (Value::Array(arr), Value::Float(n)) => {
                         if n.fract() != 0.0 {
                             return Err("Array index must be an integer".to_string());
                         }
@@ -442,9 +499,12 @@ impl Executor {
                     (Value::String(_), "String") => true,
                     (Value::Char(_), "char") => true,
                     (Value::Bool(_), "bool") => true,
-                    (Value::Number(n), "int") => n.fract() == 0.0,
-                    (Value::Number(_), "float") => true,
-                    (Value::Number(_), "double") => true,
+                    (Value::Int(_), "int") => true,
+                    (Value::Float(_), "int") => false,
+                    (Value::Int(_), "float") => true,
+                    (Value::Float(_), "float") => true,
+                    (Value::Int(_), "double") => true,
+                    (Value::Float(_), "double") => true,
                     (Value::Array(_), t) => t.starts_with('[') && t.ends_with(']'),
                     (Value::Dict(_), t) => t.starts_with('{') && t.ends_with('}'),
                     (Value::Tuple(_), "Tuple") => true,
@@ -471,6 +531,12 @@ impl Executor {
                 Ok(val)
             }
             Expr::Set { object, name, value, .. } => {
+                if matches!(object.as_ref(), Expr::Get { .. }) {
+                    return Err(format!(
+                        "error[E010]: nested field assignment is not supported (got '.{} = ...')",
+                        name
+                    ));
+                }
                 let obj_val = self.evaluate_expr(object, env)?;
                 let val = self.evaluate_expr(value, env)?;
                 match obj_val {
@@ -479,6 +545,21 @@ impl Executor {
                         Ok(val)
                     }
                     Value::StructInstance { struct_name, fields } => {
+                        let def = env
+                            .get_struct(&struct_name)
+                            .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?;
+                        let field = def.fields.iter().find(|f| f.name == *name).ok_or_else(|| {
+                            format!(
+                                "error[E004]: unknown field '{}' on struct '{}'",
+                                name, struct_name
+                            )
+                        })?;
+                        if !field.is_pub {
+                            return Err(format!(
+                                "error[E011]: cannot mutate private field '{}' on struct '{}'",
+                                name, struct_name
+                            ));
+                        }
                         if fields.borrow().contains_key(name) {
                             fields.borrow_mut().insert(name.clone(), val.clone());
                             Ok(val)
@@ -497,7 +578,20 @@ impl Executor {
                 let index_val = self.evaluate_expr(index, env)?;
                 let val = self.evaluate_expr(value, env)?;
                 match (target_val, index_val) {
-                    (Value::Array(arr), Value::Number(n)) => {
+                    (Value::Array(arr), Value::Int(n)) => {
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("Array index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        let mut arr_mut = arr.borrow_mut();
+                        if idx >= arr_mut.len() {
+                            return Err("Array index out of bounds".to_string());
+                        }
+                        arr_mut[idx] = val.clone();
+                        Ok(val)
+                    }
+                    (Value::Array(arr), Value::Float(n)) => {
                         if n.fract() != 0.0 {
                             return Err("Array index must be an integer".to_string());
                         }
@@ -526,20 +620,29 @@ impl Executor {
                     .cloned()
                     .ok_or_else(|| format!("Undefined variable '{}'", name))?;
 
-                let delta = match op {
-                    TokenKind::PlusPlus => 1.0,
-                    TokenKind::MinusMinus => -1.0,
-                    _ => return Err("Invalid update operator".to_string()),
-                };
-
-                let current_num = match current {
-                    Value::Number(n) => n,
-                    _ => return Err("Can only apply ++/-- to numbers".to_string()),
-                };
-
-                let new_num = current_num + delta;
-                env.assign(name, Value::Number(new_num))?;
-                Ok(Value::Number(if *prefix { new_num } else { current_num }))
+                match current {
+                    Value::Int(n) => {
+                        let delta = match op {
+                            TokenKind::PlusPlus => 1,
+                            TokenKind::MinusMinus => -1,
+                            _ => return Err("Invalid update operator".to_string()),
+                        };
+                        let new_n = n + delta;
+                        env.assign(name, Value::Int(new_n))?;
+                        Ok(if *prefix { Value::Int(new_n) } else { Value::Int(n) })
+                    }
+                    Value::Float(n) => {
+                        let delta = match op {
+                            TokenKind::PlusPlus => 1.0,
+                            TokenKind::MinusMinus => -1.0,
+                            _ => return Err("Invalid update operator".to_string()),
+                        };
+                        let new_n = n + delta;
+                        env.assign(name, Value::Float(new_n))?;
+                        Ok(if *prefix { Value::Float(new_n) } else { Value::Float(n) })
+                    }
+                    _ => Err("Can only apply ++/-- to numbers".to_string()),
+                }
             }
             Expr::Call { callee, args, .. } => {
                 let mut evaluated_args = Vec::new();
@@ -748,7 +851,7 @@ impl Executor {
                     return Err(format!("toInt() expects 0 arguments, got {}", args.len()));
                 }
                 match s.parse::<f64>() {
-                    Ok(n) => Ok(Value::Number(n.trunc())),
+                    Ok(n) => Ok(Value::Int(n.trunc() as i64)),
                     Err(_) => Err(format!("Cannot convert string '{}' to int", s)),
                 }
             }
@@ -757,21 +860,33 @@ impl Executor {
                     return Err(format!("toFloat() expects 0 arguments, got {}", args.len()));
                 }
                 match s.parse::<f64>() {
-                    Ok(n) => Ok(Value::Number(n)),
+                    Ok(n) => Ok(Value::Float(n)),
                     Err(_) => Err(format!("Cannot convert string '{}' to float", s)),
                 }
             }
-            (Value::Number(n), "toInt") => {
+            (Value::Int(n), "toInt") => {
                 if !args.is_empty() {
                     return Err(format!("toInt() expects 0 arguments, got {}", args.len()));
                 }
-                Ok(Value::Number(n.trunc()))
+                Ok(Value::Int(n))
             }
-            (Value::Number(n), "toFloat") => {
+            (Value::Float(n), "toInt") => {
+                if !args.is_empty() {
+                    return Err(format!("toInt() expects 0 arguments, got {}", args.len()));
+                }
+                Ok(Value::Int(n.trunc() as i64))
+            }
+            (Value::Int(n), "toFloat") => {
                 if !args.is_empty() {
                     return Err(format!("toFloat() expects 0 arguments, got {}", args.len()));
                 }
-                Ok(Value::Number(n))
+                Ok(Value::Float(n as f64))
+            }
+            (Value::Float(n), "toFloat") => {
+                if !args.is_empty() {
+                    return Err(format!("toFloat() expects 0 arguments, got {}", args.len()));
+                }
+                Ok(Value::Float(n))
             }
             (Value::Array(arr), "length") => {
                 if !args.is_empty() {
@@ -781,7 +896,7 @@ impl Executor {
                         args.len()
                     ));
                 }
-                Ok(Value::Number(arr.borrow().len() as f64))
+                Ok(Value::Int(arr.borrow().len() as i64))
             }
             (Value::Array(arr), "push") => {
                 if args.len() != 1 {
@@ -802,7 +917,7 @@ impl Executor {
                         args.len()
                     ));
                 }
-                Ok(Value::Number(s.chars().count() as f64))
+                Ok(Value::Int(s.chars().count() as i64))
             }
             (Value::String(s), "upper") => {
                 if !args.is_empty() {
@@ -865,7 +980,8 @@ impl Executor {
         match value {
             Value::Bool(false) => false,
             Value::Null => false,
-            Value::Number(n) => *n != 0.0,
+            Value::Int(n) => *n != 0,
+            Value::Float(n) => *n != 0.0,
             _ => true,
         }
     }
@@ -874,40 +990,106 @@ impl Executor {
         use TokenKind::*;
 
         match (left, op, right) {
-            (Value::Number(l), Plus, Value::Number(r)) => Ok(Value::Number(l + r)),
-            (Value::Number(l), Minus, Value::Number(r)) => Ok(Value::Number(l - r)),
-            (Value::Number(l), Star, Value::Number(r)) => Ok(Value::Number(l * r)),
-            (Value::Number(l), Slash, Value::Number(r)) => {
-                if r == 0.0 {
+            (Value::Int(l), Plus, Value::Int(r)) => Ok(Value::Int(l + r)),
+            (Value::Int(l), Minus, Value::Int(r)) => Ok(Value::Int(l - r)),
+            (Value::Int(l), Star, Value::Int(r)) => Ok(Value::Int(l * r)),
+            (Value::Int(l), Slash, Value::Int(r)) => {
+                if r == 0 {
                     Err("Division by zero".to_string())
                 } else {
-                    // Integer division if both operands are whole numbers
-                    let l_is_int = l.fract() == 0.0;
-                    let r_is_int = r.fract() == 0.0;
-                    if l_is_int && r_is_int {
-                        Ok(Value::Number(((l / r) as i64) as f64))
-                    } else {
-                        Ok(Value::Number(l / r))
-                    }
+                    Ok(Value::Int(l / r))
                 }
             }
-            (Value::Number(l), Percent, Value::Number(r)) => {
+            (Value::Int(l), Percent, Value::Int(r)) => {
+                if r == 0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Int(l % r))
+                }
+            }
+
+            (Value::Float(l), Plus, Value::Float(r)) => Ok(Value::Float(l + r)),
+            (Value::Float(l), Minus, Value::Float(r)) => Ok(Value::Float(l - r)),
+            (Value::Float(l), Star, Value::Float(r)) => Ok(Value::Float(l * r)),
+            (Value::Float(l), Slash, Value::Float(r)) => {
                 if r == 0.0 {
                     Err("Division by zero".to_string())
                 } else {
-                    Ok(Value::Number(l % r))
+                    Ok(Value::Float(l / r))
+                }
+            }
+            (Value::Float(l), Percent, Value::Float(r)) => {
+                if r == 0.0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Float(l % r))
+                }
+            }
+
+            (Value::Int(l), Plus, Value::Float(r)) => Ok(Value::Float((l as f64) + r)),
+            (Value::Float(l), Plus, Value::Int(r)) => Ok(Value::Float(l + (r as f64))),
+            (Value::Int(l), Minus, Value::Float(r)) => Ok(Value::Float((l as f64) - r)),
+            (Value::Float(l), Minus, Value::Int(r)) => Ok(Value::Float(l - (r as f64))),
+            (Value::Int(l), Star, Value::Float(r)) => Ok(Value::Float((l as f64) * r)),
+            (Value::Float(l), Star, Value::Int(r)) => Ok(Value::Float(l * (r as f64))),
+            (Value::Int(l), Slash, Value::Float(r)) => {
+                if r == 0.0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Float((l as f64) / r))
+                }
+            }
+            (Value::Float(l), Slash, Value::Int(r)) => {
+                if r == 0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Float(l / (r as f64)))
+                }
+            }
+            (Value::Int(l), Percent, Value::Float(r)) => {
+                if r == 0.0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Float((l as f64) % r))
+                }
+            }
+            (Value::Float(l), Percent, Value::Int(r)) => {
+                if r == 0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::Float(l % (r as f64)))
                 }
             }
             (Value::Null, EqualEqual, Value::Null) => Ok(Value::Bool(true)),
             (Value::Null, NotEqual, Value::Null) => Ok(Value::Bool(false)),
             (Value::Null, EqualEqual, _) | (_, EqualEqual, Value::Null) => Ok(Value::Bool(false)),
             (Value::Null, NotEqual, _) | (_, NotEqual, Value::Null) => Ok(Value::Bool(true)),
-            (Value::Number(l), EqualEqual, Value::Number(r)) => Ok(Value::Bool(l == r)),
-            (Value::Number(l), NotEqual, Value::Number(r)) => Ok(Value::Bool(l != r)),
-            (Value::Number(l), Less, Value::Number(r)) => Ok(Value::Bool(l < r)),
-            (Value::Number(l), LessEqual, Value::Number(r)) => Ok(Value::Bool(l <= r)),
-            (Value::Number(l), Greater, Value::Number(r)) => Ok(Value::Bool(l > r)),
-            (Value::Number(l), GreaterEqual, Value::Number(r)) => Ok(Value::Bool(l >= r)),
+            (Value::Int(l), EqualEqual, Value::Int(r)) => Ok(Value::Bool(l == r)),
+            (Value::Int(l), NotEqual, Value::Int(r)) => Ok(Value::Bool(l != r)),
+            (Value::Int(l), Less, Value::Int(r)) => Ok(Value::Bool(l < r)),
+            (Value::Int(l), LessEqual, Value::Int(r)) => Ok(Value::Bool(l <= r)),
+            (Value::Int(l), Greater, Value::Int(r)) => Ok(Value::Bool(l > r)),
+            (Value::Int(l), GreaterEqual, Value::Int(r)) => Ok(Value::Bool(l >= r)),
+
+            (Value::Float(l), EqualEqual, Value::Float(r)) => Ok(Value::Bool(l == r)),
+            (Value::Float(l), NotEqual, Value::Float(r)) => Ok(Value::Bool(l != r)),
+            (Value::Float(l), Less, Value::Float(r)) => Ok(Value::Bool(l < r)),
+            (Value::Float(l), LessEqual, Value::Float(r)) => Ok(Value::Bool(l <= r)),
+            (Value::Float(l), Greater, Value::Float(r)) => Ok(Value::Bool(l > r)),
+            (Value::Float(l), GreaterEqual, Value::Float(r)) => Ok(Value::Bool(l >= r)),
+
+            (Value::Int(l), EqualEqual, Value::Float(r)) => Ok(Value::Bool((l as f64) == r)),
+            (Value::Float(l), EqualEqual, Value::Int(r)) => Ok(Value::Bool(l == (r as f64))),
+            (Value::Int(l), NotEqual, Value::Float(r)) => Ok(Value::Bool((l as f64) != r)),
+            (Value::Float(l), NotEqual, Value::Int(r)) => Ok(Value::Bool(l != (r as f64))),
+            (Value::Int(l), Less, Value::Float(r)) => Ok(Value::Bool((l as f64) < r)),
+            (Value::Float(l), Less, Value::Int(r)) => Ok(Value::Bool(l < (r as f64))),
+            (Value::Int(l), LessEqual, Value::Float(r)) => Ok(Value::Bool((l as f64) <= r)),
+            (Value::Float(l), LessEqual, Value::Int(r)) => Ok(Value::Bool(l <= (r as f64))),
+            (Value::Int(l), Greater, Value::Float(r)) => Ok(Value::Bool((l as f64) > r)),
+            (Value::Float(l), Greater, Value::Int(r)) => Ok(Value::Bool(l > (r as f64))),
+            (Value::Int(l), GreaterEqual, Value::Float(r)) => Ok(Value::Bool((l as f64) >= r)),
+            (Value::Float(l), GreaterEqual, Value::Int(r)) => Ok(Value::Bool(l >= (r as f64))),
 
             (Value::String(l), Plus, r) => {
                 Ok(Value::String(l + &super::std::StdLib::formatValue(&r)))
@@ -931,7 +1113,8 @@ impl Executor {
         use TokenKind::*;
 
         match (op, right) {
-            (Minus, Value::Number(n)) => Ok(Value::Number(-n)),
+            (Minus, Value::Int(n)) => Ok(Value::Int(-n)),
+            (Minus, Value::Float(n)) => Ok(Value::Float(-n)),
             (Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             _ => Err("Invalid unary operation".to_string()),
         }

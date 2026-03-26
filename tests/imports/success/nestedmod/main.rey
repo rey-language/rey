@@ -1,0 +1,5 @@
+import helper.foo;
+
+export pub func entry() {
+    return foo();
+}

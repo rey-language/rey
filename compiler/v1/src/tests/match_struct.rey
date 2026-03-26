@@ -1,0 +1,21 @@
+struct Point {
+    x: int,
+    y: int,
+}
+
+func run(): Void {
+    var p = Point { x: 1, y: 2 };
+    var ok = false;
+
+    match p {
+        Point { x: 1, y: 2 } => { ok = true; },
+        Point { x: 1, y: 3 } => { ok = false; },
+        _ => { ok = false; },
+    }
+
+    if (!ok) {
+        var fail = 1 / 0;
+    }
+}
+
+run();

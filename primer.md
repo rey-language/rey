@@ -1,48 +1,36 @@
 # Primer — rey-lang
-Last updated: Mar 23, 2026 (session end)
+Last updated: Mar 26, 2026 (session end)
 
 ## Session objective
-v0.1.0 release prep from pre-release state.
+Ship v0.1.1 patches (match/imports/eval) and add `rey-compiler/` bootstrap skeleton.
 
 ## What was done
-- Completed syntax audit against current parser/runtime behavior.
-- Read and audited all files under `compiler/v1/src/` and `languages/samples/Rey.rey`.
-- `examples/` directory is not present in this repo; example-style runtime checks were executed through `compiler/v1/src/tests/` and `languages/samples/Rey.rey`.
-- Rewrote `syntax.md` to match implemented behavior, including:
-  - function visibility (`func`, `pub func`, `export pub func`)
-  - file/module import syntax and resolver rules
-  - current struct/static-method behavior
-  - actual implemented operators/types/control-flow/forms
-  - removed outdated claims
-- Code cleanup:
-  - removed warning sources (unused imports/vars, dead method, unnecessary mut)
-  - fixed parser static-call bug (`StructName.create(...)`)
-  - fixed `module::item` parser regression in import parsing
-- Fixture updates:
-  - updated `compiler/v1/src/tests/test_rand.rey` to pass under current type checking
-- Verification:
-  - `cargo build` passes cleanly with zero warnings
-  - `cargo test` passes
-  - all `compiler/v1/src/tests/*.rey` run successfully (with scripted input for `io.rey`)
-  - `languages/samples/Rey.rey` runs successfully
-  - import fixtures validated (`tests/imports/success` and error cases)
-- Release prep assets:
-  - added root `RELEASE.md` (v0.0.1-pre -> v0.1.0)
-  - bumped `compiler/v1/Cargo.toml` version to `0.1.0`
-  - updated version references in `README.md`
-  - built release binary and packaged:
-    - `releases/0.1.0/rey-v0-macos-arm64`
-    - `releases/0.1.0/RELEASE.md`
-- Updated `CHANGELOG.md` and refreshed `CLAUDE.md` for current v0.1.0 context.
+- Match fixes:
+  - Added struct patterns (`StructName { field: pattern }`) and fixed matching on struct instances.
+  - Fixed enum matching for both qualified (`Enum::Variant`) and unqualified (`Variant`) patterns.
+  - Added `.rey` regression programs plus a small `cargo test` harness to execute them.
+- Import fixes:
+  - Grouped imports now track per-item spans so missing names highlight the specific item.
+  - Added fixtures and a `cargo test` check for grouped-missing-symbol.
+  - Added fixture and test for module `main.rey` importing a sibling file (nested resolution).
+- Evaluator/runtime fixes:
+  - Numbers now preserve `int` vs `float` at runtime (lexer -> AST literal -> `Value`), fixing integer division and mixed int/float division semantics.
+  - External mutation of `pub` struct fields works (`obj.field = ...`, `obj.field += ...`).
+  - Nested field assignment (e.g. `obj.inner.field = ...`) now errors clearly.
+  - Added `.rey` regression programs for division and field mutation.
+- `rey-compiler/`:
+  - Added API-only bootstrap skeleton with the requested file layout and public signatures.
+- Docs:
+  - Added `compiler/README.md` to document v1 vs bootstrap.
+  - Updated `syntax.md` for v0.1.1 behavior deltas.
+- Versioning:
+  - Bumped `compiler/v1/Cargo.toml` to `0.1.1`.
+  - Added a `CHANGELOG.md` entry for 2026-03-26.
 
 ## Current state
-- Working tree contains v0.1.0 release-prep changes ready to commit.
-- Compiler builds/tests cleanly.
-- Release notes and packaged binary for `0.1.0` are staged in repo paths.
+- v0.1.1 patch series is complete on `codex` and validated via `cargo test`.
+- `rey-compiler/` skeleton exists (API only).
 
 ## Next steps after this session
-- Commit release prep changes.
-- Push contributor branch and open release PR.
-- Optional follow-up for v0.2.0 planning:
-  - generics design
-  - closure/runtime ergonomics improvements
+- Merge PR for v0.1.1.
+- Decide next v0.2.0 compiler/runtime milestone list (match-as-expression, type system, better stdlib).
