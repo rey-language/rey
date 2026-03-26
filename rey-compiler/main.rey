@@ -1,46 +1,208 @@
-// v5 bootstrap entrypoints (api only)
+// Rey Compiler - Full Pipeline
+// Wire: source → lexer → parser → typecheck → codegen
 
-enum Target {
-    Vm,
-    Native,
-    Js,
-}
+import lexer;
+import parser;
+import typecheck;
+import codegen;
 
 struct CompileOptions {
-    pub target: Target,
+    pub target: String,
     pub optimize: bool,
+    pub debug: bool,
     pub emitTokens: bool,
     pub emitAst: bool,
-    pub emitTypedAst: bool,
     pub emitIr: bool,
-}
-
-enum ArtifactKind {
-    Tokens,
-    Ast,
-    TypedAst,
-    Ir,
-    Bytecode,
-    Text,
-}
-
-struct Artifact {
-    pub kind: ArtifactKind,
-    pub path: String,
-    pub text: String,
 }
 
 struct CompileResult {
     pub ok: bool,
-    pub diagnostics: [Any],
-    pub artifacts: [Artifact],
+    pub errors: Vec<String>,
+    pub ir: String,
+    pub outputPath: String,
 }
 
-export pub func compileFile(entryPath: String, options: CompileOptions): CompileResult {
-    return null;
+func printError(msg: String) {
+    println("\x1b[31merror:\x1b[0m " + msg);
 }
 
-export pub func compileSource(source: String, options: CompileOptions): CompileResult {
-    return null;
+func printErrors(errors: Vec<String>) {
+    var i = 0;
+    loop {
+        if i >= errors.len() {
+            break;
+        }
+        printError(errors[i]);
+        i = i + 1;
+    }
 }
 
+func compileSource(source: String, path: String, options: CompileOptions): CompileResult {
+    var errors = Vec.new();
+    
+    // Phase 1: Lexing
+    var lexResult = lexer.tokenize(source, path);
+    if lexResult.errors.len() > 0 {
+        var i = 0;
+        loop {
+            if i >= lexResult.errors.len() {
+                break;
+            }
+            var e = lexResult.errors[i];
+            errors.push("lexer: " + e.message);
+            i = i + 1;
+        }
+        return CompileResult { ok: false, errors: errors, ir: "", outputPath: "" };
+    }
+    
+    if options.emitTokens {
+        println("Tokens: " + lexResult.tokens.len());
+    }
+    
+    // Phase 2: Parsing
+    var parseResult = parser.parse(lexResult.tokens, path);
+    if parseResult.errors.len() > 0 {
+        var i = 0;
+        loop {
+            if i >= parseResult.errors.len() {
+                break;
+            }
+            var e = parseResult.errors[i];
+            errors.push("parser: " + e.message);
+            i = i + 1;
+        }
+        return CompileResult { ok: false, errors: errors, ir: "", outputPath: "" };
+    }
+    
+    if options.emitAst {
+        println("Parsed " + parseResult.program.statements.len() + " statements");
+    }
+    
+    // Phase 3: Type Checking
+    var typeResult = typecheck.typecheck(parseResult.program);
+    if !typeResult.ok {
+        var i = 0;
+        loop {
+            if i >= typeResult.errors.len() {
+                break;
+            }
+            var e = typeResult.errors[i];
+            errors.push("typecheck: " + e.message);
+            i = i + 1;
+        }
+        return CompileResult { ok: false, errors: errors, ir: "", outputPath: "" };
+    }
+    
+    // Phase 4: Code Generation
+    var ir = codegen.generateIR(parseResult.program);
+    
+    if options.emitIr {
+        println(ir);
+    }
+    
+    return CompileResult { ok: true, errors: Vec.new(), ir: ir, outputPath: "a.out" };
+}
+
+func compileFile(entryPath: String, options: CompileOptions): CompileResult {
+    var exists = fileExists(entryPath);
+    if !exists {
+        return CompileResult { ok: false, errors: Vec.new().concat(["file not found: " + entryPath]), ir: "", outputPath: "" };
+    }
+    
+    var content = readFile(entryPath);
+    return compileSource(content, entryPath, options);
+}
+
+func printUsage() {
+    println("reyc - Rey Compiler");
+    println("Usage: reyc <command> [options] <file>");
+    println("");
+    println("Commands:");
+    println("  run     - Compile and run");
+    println("  build   - Compile to binary");
+    println("  check   - Type check only");
+    println("  version - Print version");
+    println("");
+    println("Options:");
+    println("  --release   - Enable optimizations");
+    println("  --emit-ir   - Print LLVM IR");
+    println("  --emit-ast  - Print AST info");
+}
+
+func main(): Void {
+    var cliArgs = args();
+    
+    if cliArgs.len() < 2 {
+        printUsage();
+        return;
+    }
+    
+    var i = 0;
+    var cmd = "";
+    var filePath = "";
+    var options = CompileOptions {
+        target: "native",
+        optimize: false,
+        debug: true,
+        emitTokens: false,
+        emitAst: false,
+        emitIr: false,
+    };
+    
+    i = 1;
+    loop {
+        if i >= cliArgs.len() {
+            break;
+        }
+        var arg = cliArgs[i];
+        
+        if arg == "run" || arg == "build" || arg == "check" {
+            cmd = arg;
+        } else if arg == "--release" {
+            options.optimize = true;
+        } else if arg == "--emit-ir" {
+            options.emitIr = true;
+        } else if arg == "--emit-ast" {
+            options.emitAst = true;
+        } else if arg == "version" {
+            println("reyc v0.2.0 (bootstrap)");
+            return;
+        } else if arg == "help" || arg == "--help" {
+            printUsage();
+            return;
+        } else {
+            filePath = arg;
+        }
+        
+        i = i + 1;
+    }
+    
+    if filePath == "" {
+        printError("no input file");
+        return;
+    }
+    
+    if cmd == "build" || cmd == "run" || cmd == "check" {
+        var result = compileFile(filePath, options);
+        
+        if !result.ok {
+            printErrors(result.errors);
+            return;
+        }
+        
+        if cmd == "check" {
+            println("Type check passed");
+            return;
+        }
+        
+        if cmd == "build" || cmd == "run" {
+            println("Compiled to: " + result.outputPath);
+            if cmd == "run" {
+                // Would execute result.outputPath
+                println("(execution not implemented in bootstrap)");
+            }
+        }
+    } else {
+        printUsage();
+    }
+}
