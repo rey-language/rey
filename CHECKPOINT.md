@@ -1,38 +1,34 @@
 # Rey Language - Phase Checkpoint
 # Date: Mar 27, 2026
 
-## Current Phase: PHASE 1 COMPLETE - Compiler v0.2.0
+## Current Phase: PHASE 2 COMPLETE - New Data Types
 
-### What's Working (v0.2.0):
+### What's Working (v0.2.0+):
 - ✅ All 7 cargo tests pass
-- ✅ Integer division (10/3=3, 10.0/3.0=3.333, mixed=3.333)
-- ✅ Struct field mutation (obj.field=value, obj.field+=value)
-- ✅ Enum match with qualified (Direction::North) and unqualified (North)
-- ✅ Struct pattern matching in match statements
-- ✅ Import nested resolution (module/main.rey can import local siblings)
-- ✅ Import error specificity (import a.{b,c} where c missing errors on c)
-- ✅ Circular import shows full cycle path
-- ✅ Parameter reassignment inside functions works
-- ✅ Return from nested blocks (if inside while) exits function
-- ✅ String indexing: source[i] returns single character as String
-- ✅ Type errors include span information for diagnostics
-- ✅ Version bumped to 0.2.0
+- ✅ Phase 0 - Baseline audit complete
+- ✅ Phase 1 - Compiler v0.2.0 hardening complete  
+- ✅ Phase 2 - New data types implemented:
+  - Vec: push, pop, len, get, set, contains, indexOf
+  - HashMap: set, get, delete, has, len
+  - Stack: push, pop, peek, isEmpty, len
+  - Queue: enqueue, dequeue, peek, isEmpty, len
+  - Option: Some, None, unwrap, unwrapOr, isSome, isNone
+  - Result: Ok, Err, unwrap, unwrapOr, isOk, isErr
 
-### Phase 1 Complete - Ready for Phase 2
+### Phase 3 - File System Builtins - NOT YET STARTED
+Need to add: readFile, writeFile, appendFile, fileExists, deleteFile, mkdir, listDir, getEnv, args, exit, exec
 
-### Next Steps (Phase 2 - New Data Types):
-Add these as first-class types to the interpreter:
-1. Vec<T> — dynamic typed array with methods
-2. LinkedList<T>
-3. HashMap<K,V>
-4. Stack<T>
-5. Queue<T>
-6. Option<T>
-7. Result<T,E>
-8. Tuple enhancements (named tuples, destructuring)
+### Phase 4 - Std Library in Rey - NOT YET STARTED
+Need to create: std/src/fs/main.rey, std/src/process/main.rey, std/src/io/main.rey, std/src/string/main.rey, std/src/collections/main.rey
 
-### Rey-compiler Status:
-Bootstrap skeleton exists but not functional yet
+### Phases 5-10 - Rey Compiler Bootstrap - NOT YET STARTED
+Lexing/parsing/typechecking/codegen in Rey
 
-### Syntax.md Status:
-Up to date for v0.2.0 features
+### What Still Needs Work (Phase 2 continuation):
+- Vec: add map, filter, reduce, reverse, sort, slice
+- LinkedList: add head(), tail(), append(), toArray() 
+- HashMap: add keys(), values()
+- Named tuples / tuple destructuring
+
+### Syntax.md - Needs update
+New data types need to be documented
