@@ -1,0 +1,5 @@
+// hello world — the simplest rey program
+
+func main(): Void {
+    println("hello, rey!");
+}

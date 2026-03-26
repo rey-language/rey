@@ -1,0 +1,56 @@
+// Test all new data types
+
+func main(): Void {
+    // Vec test
+    var v = Vec.new();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    println("Vec len:");
+    println(v.len());
+    println("Vec pop:");
+    println(v.pop());
+    
+    // HashMap test  
+    var m = HashMap.new();
+    m.set("a", 1);
+    m.set("b", 2);
+    println("HashMap len:");
+    println(m.len());
+    println("HashMap get a:");
+    println(m.get("a"));
+    println("HashMap has a:");
+    println(m.has("a"));
+    
+    // Stack test
+    var s = Stack.new();
+    s.push(10);
+    s.push(20);
+    println("Stack len:");
+    println(s.len());
+    println("Stack pop:");
+    println(s.pop());
+    
+    // Queue test
+    var q = Queue.new();
+    q.enqueue(1);
+    q.enqueue(2);
+    println("Queue len:");
+    println(q.len());
+    println("Queue dequeue:");
+    println(q.dequeue());
+    
+    // Option test
+    var opt1 = Option.Some(42);
+    println("Option Some isSome:");
+    println(opt1.isSome());
+    println("Option Some unwrap:");
+    println(opt1.unwrap());
+    
+    // Result test 
+    var res1 = Result.Ok(100);
+    println("Result Ok isOk:");
+    println(res1.isOk());
+    println("Result Ok unwrap:");
+    println(res1.unwrap());
+}

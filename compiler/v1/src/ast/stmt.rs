@@ -35,9 +35,17 @@ pub enum FunctionVisibility {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportKind {
-    FileSymbols { module: String, symbols: Vec<ImportName> },
-    ModuleNamespace { module: String },
-    ModuleItems { module: String, items: Vec<ImportName> },
+    FileSymbols {
+        module: String,
+        symbols: Vec<ImportName>,
+    },
+    ModuleNamespace {
+        module: String,
+    },
+    ModuleItems {
+        module: String,
+        items: Vec<ImportName>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

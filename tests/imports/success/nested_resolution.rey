@@ -5,4 +5,5 @@ func main(): Void {
     if (v != "ok") {
         var fail = 1 / 0;
     }
+    print("Unexpected value: " + v);
 }

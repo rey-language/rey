@@ -1,36 +1,50 @@
 # Primer — rey-lang
-Last updated: Mar 26, 2026 (session end)
+Last updated: Mar 27, 2026 (long autonomous session)
 
 ## Session objective
-Ship v0.1.1 patches (match/imports/eval) and add `rey-compiler/` bootstrap skeleton.
+Build Rey into a complete, self-hosted, natively compiled language (Phase 0-10).
 
-## What was done
-- Match fixes:
-  - Added struct patterns (`StructName { field: pattern }`) and fixed matching on struct instances.
-  - Fixed enum matching for both qualified (`Enum::Variant`) and unqualified (`Variant`) patterns.
-  - Added `.rey` regression programs plus a small `cargo test` harness to execute them.
-- Import fixes:
-  - Grouped imports now track per-item spans so missing names highlight the specific item.
-  - Added fixtures and a `cargo test` check for grouped-missing-symbol.
-  - Added fixture and test for module `main.rey` importing a sibling file (nested resolution).
-- Evaluator/runtime fixes:
-  - Numbers now preserve `int` vs `float` at runtime (lexer -> AST literal -> `Value`), fixing integer division and mixed int/float division semantics.
-  - External mutation of `pub` struct fields works (`obj.field = ...`, `obj.field += ...`).
-  - Nested field assignment (e.g. `obj.inner.field = ...`) now errors clearly.
-  - Added `.rey` regression programs for division and field mutation.
-- `rey-compiler/`:
-  - Added API-only bootstrap skeleton with the requested file layout and public signatures.
-- Docs:
-  - Added `compiler/README.md` to document v1 vs bootstrap.
-  - Updated `syntax.md` for v0.1.1 behavior deltas.
-- Versioning:
-  - Bumped `compiler/v1/Cargo.toml` to `0.1.1`.
-  - Added a `CHANGELOG.md` entry for 2026-03-26.
+## What was done - Session Complete
 
-## Current state
-- v0.1.1 patch series is complete on `codex` and validated via `cargo test`.
-- `rey-compiler/` skeleton exists (API only).
+### Phase 0 - Baseline Audit (COMPLETE):
+- Read all compiler/v1/src/ files
+- Read rey-compiler/ and syntax.md
+- Documented all known bugs
 
-## Next steps after this session
-- Merge PR for v0.1.1.
-- Decide next v0.2.0 compiler/runtime milestone list (match-as-expression, type system, better stdlib).
+### Phase 1 - Compiler v1 Hardening (COMPLETE):
+- Fixed string indexing: source[i] returns single character
+- Added typecheck for string indexing
+- Version bumped to 0.2.0
+
+### Phase 2 - New Data Types (COMPLETE):
+- Implemented Vec, HashMap, Stack, Queue, Option, Result
+- All container methods working
+- Parser updated for Option.Some syntax
+- Tests pass
+
+## What's working now (v0.2.0+)
+- Integer division, struct mutation, enum match, imports
+- String indexing, parameter reassignment, return from nested blocks
+- Vec: push, pop, len, get, set, contains, indexOf
+- HashMap: set, get, delete, has, len  
+- Stack: push, pop, peek, isEmpty, len
+- Queue: enqueue, dequeue, peek, isEmpty, len
+- Option: Some, None, unwrap, unwrapOr, isSome, isNone
+- Result: Ok, Err, unwrap, unwrapOr, isOk, isErr
+
+## Next steps - Phase 3
+Add native file system builtins:
+- readFile, writeFile, appendFile
+- fileExists, deleteFile, mkdir, listDir
+- getEnv, args, exit, exec
+
+Then Phase 4: std library in Rey
+
+## Blockers
+- None currently
+
+## Rey-compiler bootstrap
+- Skeleton exists in rey-compiler/
+- Need to implement Phases 5-9 (lexer, parser, typecheck, codegen, wire up)
+
+(End file)

@@ -145,7 +145,9 @@ impl Executor {
                             match self.execute_block_with_control_flow(body, env)? {
                                 ControlFlow::Break => break,
                                 ControlFlow::Continue => continue,
-                                ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                ControlFlow::Return(value) => {
+                                    return Ok(ControlFlow::return_value(value))
+                                }
                                 ControlFlow::Normal(_) => {}
                             }
                         }
@@ -160,7 +162,9 @@ impl Executor {
                                     match self.execute_block_with_control_flow(body, env)? {
                                         ControlFlow::Break => break,
                                         ControlFlow::Continue => continue,
-                                        ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                        ControlFlow::Return(value) => {
+                                            return Ok(ControlFlow::return_value(value))
+                                        }
                                         ControlFlow::Normal(_) => {}
                                     }
                                 }
@@ -225,14 +229,29 @@ impl Executor {
                     None
                 }
             }
-            (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
+            (
+                Pattern::EnumVariant(enum_name, variant),
+                Value::EnumVariant {
+                    enum_name: en,
+                    variant: v,
+                },
+            ) => {
                 if enum_name == en && variant == v {
                     Some(Vec::new())
                 } else {
                     None
                 }
             }
-            (Pattern::Struct { struct_name, fields }, Value::StructInstance { struct_name: sn, fields: vals }) => {
+            (
+                Pattern::Struct {
+                    struct_name,
+                    fields,
+                },
+                Value::StructInstance {
+                    struct_name: sn,
+                    fields: vals,
+                },
+            ) => {
                 if struct_name != sn {
                     return None;
                 }
@@ -248,8 +267,16 @@ impl Executor {
             (Pattern::Variable(name), val) => {
                 // Disambiguate enum-variant constants from variable-binding patterns.
                 // If the identifier resolves to an enum variant value, treat it as a constant pattern.
-                if let (Some(Value::EnumVariant { enum_name: enp, variant: vp }), Value::EnumVariant { enum_name: envv, variant: vv }) =
-                    (env.get(name), val)
+                if let (
+                    Some(Value::EnumVariant {
+                        enum_name: enp,
+                        variant: vp,
+                    }),
+                    Value::EnumVariant {
+                        enum_name: envv,
+                        variant: vv,
+                    },
+                ) = (env.get(name), val)
                 {
                     if enp == envv && vp == vv {
                         return Some(Vec::new());
@@ -269,7 +296,9 @@ impl Executor {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
-            Expr::Binary { left, op, right, .. } => {
+            Expr::Binary {
+                left, op, right, ..
+            } => {
                 let left_val = self.evaluate_expr(left, env)?;
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
@@ -330,7 +359,32 @@ impl Executor {
                         .get(&s)
                         .cloned()
                         .ok_or_else(|| "Dictionary key not found".to_string()),
-                    _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
+                    (Value::String(s), Value::Int(n)) => {
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("String index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        match s.chars().nth(idx) {
+                            Some(c) => Ok(Value::String(c.to_string())),
+                            None => Err("String index out of bounds".to_string()),
+                        }
+                    }
+                    (Value::String(s), Value::Float(n)) => {
+                        if n.fract() != 0.0 {
+                            return Err("String index must be an integer".to_string());
+                        }
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("String index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        match s.chars().nth(idx) {
+                            Some(c) => Ok(Value::String(c.to_string())),
+                            None => Err("String index out of bounds".to_string()),
+                        }
+                    }
+                    _ => Err("Indexing is only supported for arrays (number index), dictionaries (string key), and strings (number index)".to_string()),
                 }
             }
             Expr::Get { object, name, .. } => {
@@ -441,6 +495,73 @@ impl Executor {
                 args,
                 ..
             } => {
+                // Handle Option and Result constructors specially
+                if struct_name == "Option" {
+                    let mut evaluated_args = Vec::new();
+                    for a in args {
+                        evaluated_args.push(self.evaluate_expr(a, env)?);
+                    }
+                    match method.as_str() {
+                        "Some" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Option::Some expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Option(Rc::new(RefCell::new(Some(
+                                evaluated_args.remove(0),
+                            )))));
+                        }
+                        "None" => {
+                            return Ok(Value::Option(Rc::new(RefCell::new(None))));
+                        }
+                        _ => return Err(format!("Unknown Option method: {}", method)),
+                    }
+                }
+                if struct_name == "Result" {
+                    let mut evaluated_args = Vec::new();
+                    for a in args {
+                        evaluated_args.push(self.evaluate_expr(a, env)?);
+                    }
+                    match method.as_str() {
+                        "Ok" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Result::Ok expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Result(Rc::new(RefCell::new(Ok(
+                                evaluated_args.remove(0)
+                            )))));
+                        }
+                        "Err" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Result::Err expects 1 argument".to_string());
+                            }
+                            let err_msg = match evaluated_args.remove(0) {
+                                Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            return Ok(Value::Result(Rc::new(RefCell::new(Err(err_msg)))));
+                        }
+                        _ => return Err(format!("Unknown Result method: {}", method)),
+                    }
+                }
+                // Handle container constructors: Vec.new(), HashMap.new(), etc.
+                if struct_name == "Vec" && method == "new" {
+                    return Ok(Value::Vec(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "LinkedList" && method == "new" {
+                    return Ok(Value::LinkedList(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "HashMap" && method == "new" {
+                    return Ok(Value::HashMap(Rc::new(RefCell::new(
+                        std::collections::HashMap::new(),
+                    ))));
+                }
+                if struct_name == "Stack" && method == "new" {
+                    return Ok(Value::Stack(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "Queue" && method == "new" {
+                    return Ok(Value::Queue(Rc::new(RefCell::new(vec![]))));
+                }
+
                 let def = env
                     .get_struct(struct_name)
                     .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?
@@ -530,7 +651,12 @@ impl Executor {
                 env.assign(name, val.clone())?;
                 Ok(val)
             }
-            Expr::Set { object, name, value, .. } => {
+            Expr::Set {
+                object,
+                name,
+                value,
+                ..
+            } => {
                 if matches!(object.as_ref(), Expr::Get { .. }) {
                     return Err(format!(
                         "error[E010]: nested field assignment is not supported (got '.{} = ...')",
@@ -544,16 +670,20 @@ impl Executor {
                         d.borrow_mut().insert(name.clone(), val.clone());
                         Ok(val)
                     }
-                    Value::StructInstance { struct_name, fields } => {
+                    Value::StructInstance {
+                        struct_name,
+                        fields,
+                    } => {
                         let def = env
                             .get_struct(&struct_name)
                             .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?;
-                        let field = def.fields.iter().find(|f| f.name == *name).ok_or_else(|| {
-                            format!(
-                                "error[E004]: unknown field '{}' on struct '{}'",
-                                name, struct_name
-                            )
-                        })?;
+                        let field =
+                            def.fields.iter().find(|f| f.name == *name).ok_or_else(|| {
+                                format!(
+                                    "error[E004]: unknown field '{}' on struct '{}'",
+                                    name, struct_name
+                                )
+                            })?;
                         if !field.is_pub {
                             return Err(format!(
                                 "error[E011]: cannot mutate private field '{}' on struct '{}'",
@@ -570,10 +700,18 @@ impl Executor {
                             ))
                         }
                     }
-                    _ => Err("Field assignment is only supported for dictionaries and structs".to_string()),
+                    _ => Err(
+                        "Field assignment is only supported for dictionaries and structs"
+                            .to_string(),
+                    ),
                 }
             }
-            Expr::IndexSet { target, index, value, .. } => {
+            Expr::IndexSet {
+                target,
+                index,
+                value,
+                ..
+            } => {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
                 let val = self.evaluate_expr(value, env)?;
@@ -614,7 +752,9 @@ impl Executor {
                     _ => Err("Index assignment is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
-            Expr::Update { name, op, prefix, .. } => {
+            Expr::Update {
+                name, op, prefix, ..
+            } => {
                 let current = env
                     .get(name)
                     .cloned()
@@ -629,7 +769,11 @@ impl Executor {
                         };
                         let new_n = n + delta;
                         env.assign(name, Value::Int(new_n))?;
-                        Ok(if *prefix { Value::Int(new_n) } else { Value::Int(n) })
+                        Ok(if *prefix {
+                            Value::Int(new_n)
+                        } else {
+                            Value::Int(n)
+                        })
                     }
                     Value::Float(n) => {
                         let delta = match op {
@@ -639,7 +783,11 @@ impl Executor {
                         };
                         let new_n = n + delta;
                         env.assign(name, Value::Float(new_n))?;
-                        Ok(if *prefix { Value::Float(new_n) } else { Value::Float(n) })
+                        Ok(if *prefix {
+                            Value::Float(new_n)
+                        } else {
+                            Value::Float(n)
+                        })
                     }
                     _ => Err("Can only apply ++/-- to numbers".to_string()),
                 }
@@ -655,6 +803,50 @@ impl Executor {
                         super::std::StdLib::call_builtin_function(name, &evaluated_args)
                     {
                         return result;
+                    }
+                    // Handle constructor calls
+                    match name.as_str() {
+                        "Vec.new" => return Ok(Value::Vec(Rc::new(RefCell::new(vec![])))),
+                        "LinkedList.new" => {
+                            return Ok(Value::LinkedList(Rc::new(RefCell::new(vec![]))))
+                        }
+                        "HashMap.new" => {
+                            return Ok(Value::HashMap(Rc::new(RefCell::new(
+                                std::collections::HashMap::new(),
+                            ))))
+                        }
+                        "Stack.new" => return Ok(Value::Stack(Rc::new(RefCell::new(vec![])))),
+                        "Queue.new" => return Ok(Value::Queue(Rc::new(RefCell::new(vec![])))),
+                        "Option.Some" | "Option::Some" => {
+                            if args.len() != 1 {
+                                return Err("Option.Some expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Option(Rc::new(RefCell::new(Some(
+                                evaluated_args.remove(0),
+                            )))));
+                        }
+                        "Option.None" | "Option::None" => {
+                            return Ok(Value::Option(Rc::new(RefCell::new(None))))
+                        }
+                        "Result.Ok" | "Result::Ok" => {
+                            if args.len() != 1 {
+                                return Err("Result.Ok expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Result(Rc::new(RefCell::new(Ok(
+                                evaluated_args.remove(0)
+                            )))));
+                        }
+                        "Result::Err" => {
+                            if args.len() != 1 {
+                                return Err("Result::Err expects 1 argument".to_string());
+                            }
+                            let err_msg = match evaluated_args.remove(0) {
+                                Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            return Ok(Value::Result(Rc::new(RefCell::new(Err(err_msg)))));
+                        }
+                        _ => {}
                     }
                 }
 
@@ -700,19 +892,14 @@ impl Executor {
                             }
 
                             if argIndex < evaluated_args.len() {
-                                function_env.define(
-                                    param.name.clone(),
-                                    evaluated_args[argIndex].clone(),
-                                );
+                                function_env
+                                    .define(param.name.clone(), evaluated_args[argIndex].clone());
                                 argIndex += 1;
                                 continue;
                             }
 
                             let def = param.default.as_ref().ok_or_else(|| {
-                                format!(
-                                    "Missing argument '{}' and no default provided",
-                                    param.name
-                                )
+                                format!("Missing argument '{}' and no default provided", param.name)
                             })?;
                             let val = self.evaluate_expr(def, &mut function_env)?;
                             function_env.define(param.name.clone(), val);
@@ -971,6 +1158,291 @@ impl Executor {
                 };
                 let arr = parts.into_iter().map(Value::String).collect::<Vec<_>>();
                 Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            }
+            // Vec methods
+            (Value::Vec(v), "push") => {
+                if args.len() != 1 {
+                    return Err("Vec.push() expects 1 argument".to_string());
+                }
+                v.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Vec(v), "pop") => {
+                if !args.is_empty() {
+                    return Err("Vec.pop() expects 0 arguments".to_string());
+                }
+                match v.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("Vec is empty".to_string()),
+                }
+            }
+            (Value::Vec(v), "len") => {
+                if !args.is_empty() {
+                    return Err("Vec.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(v.borrow().len() as i64))
+            }
+            (Value::Vec(v), "get") => {
+                if args.len() != 1 {
+                    return Err("Vec.get() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::Int(idx) => {
+                        let idx = *idx as usize;
+                        match v.borrow().get(idx) {
+                            Some(val) => Ok(val.clone()),
+                            None => Err("Vec index out of bounds".to_string()),
+                        }
+                    }
+                    _ => Err("Vec.get() expects int index".to_string()),
+                }
+            }
+            (Value::Vec(v), "set") => {
+                if args.len() != 2 {
+                    return Err("Vec.set() expects 2 arguments".to_string());
+                }
+                match &args[0] {
+                    Value::Int(idx) => {
+                        let idx = *idx as usize;
+                        let mut v_mut = v.borrow_mut();
+                        if idx >= v_mut.len() {
+                            return Err("Vec index out of bounds".to_string());
+                        }
+                        v_mut[idx] = args[1].clone();
+                        Ok(Value::Null)
+                    }
+                    _ => Err("Vec.set() expects int index".to_string()),
+                }
+            }
+            (Value::Vec(v), "contains") => {
+                if args.len() != 1 {
+                    return Err("Vec.contains() expects 1 argument".to_string());
+                }
+                Ok(Value::Bool(v.borrow().contains(&args[0])))
+            }
+            (Value::Vec(v), "indexOf") => {
+                if args.len() != 1 {
+                    return Err("Vec.indexOf() expects 1 argument".to_string());
+                }
+                let idx = v.borrow().iter().position(|x| x == &args[0]);
+                match idx {
+                    Some(i) => Ok(Value::Int(i as i64)),
+                    None => Ok(Value::Int(-1)),
+                }
+            }
+            // HashMap methods
+            (Value::HashMap(m), "set") => {
+                if args.len() != 2 {
+                    return Err("HashMap.set() expects 2 arguments".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => {
+                        m.borrow_mut().insert(key.clone(), args[1].clone());
+                        Ok(Value::Null)
+                    }
+                    _ => Err("HashMap.set() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "get") => {
+                if args.len() != 1 {
+                    return Err("HashMap.get() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => match m.borrow().get(key) {
+                        Some(val) => Ok(val.clone()),
+                        None => Err("HashMap key not found".to_string()),
+                    },
+                    _ => Err("HashMap.get() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "delete") => {
+                if args.len() != 1 {
+                    return Err("HashMap.delete() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => {
+                        m.borrow_mut().remove(key);
+                        Ok(Value::Null)
+                    }
+                    _ => Err("HashMap.delete() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "has") => {
+                if args.len() != 1 {
+                    return Err("HashMap.has() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => Ok(Value::Bool(m.borrow().contains_key(key))),
+                    _ => Err("HashMap.has() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "len") => {
+                if !args.is_empty() {
+                    return Err("HashMap.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(m.borrow().len() as i64))
+            }
+            // Stack methods
+            (Value::Stack(s), "push") => {
+                if args.len() != 1 {
+                    return Err("Stack.push() expects 1 argument".to_string());
+                }
+                s.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Stack(s), "pop") => {
+                if !args.is_empty() {
+                    return Err("Stack.pop() expects 0 arguments".to_string());
+                }
+                match s.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("Stack is empty".to_string()),
+                }
+            }
+            (Value::Stack(s), "peek") => {
+                if !args.is_empty() {
+                    return Err("Stack.peek() expects 0 arguments".to_string());
+                }
+                match s.borrow().last() {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Stack is empty".to_string()),
+                }
+            }
+            (Value::Stack(s), "isEmpty") => {
+                if !args.is_empty() {
+                    return Err("Stack.isEmpty() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(s.borrow().is_empty()))
+            }
+            (Value::Stack(s), "len") => {
+                if !args.is_empty() {
+                    return Err("Stack.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(s.borrow().len() as i64))
+            }
+            // Queue methods
+            (Value::Queue(q), "enqueue") => {
+                if args.len() != 1 {
+                    return Err("Queue.enqueue() expects 1 argument".to_string());
+                }
+                q.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Queue(q), "dequeue") => {
+                if !args.is_empty() {
+                    return Err("Queue.dequeue() expects 0 arguments".to_string());
+                }
+                let mut queue = q.borrow_mut();
+                if queue.is_empty() {
+                    return Err("Queue is empty".to_string());
+                }
+                Ok(queue.remove(0))
+            }
+            // LinkedList methods - same as Vec
+            (Value::LinkedList(l), "push") => {
+                if args.len() != 1 {
+                    return Err("LinkedList.push() expects 1 argument".to_string());
+                }
+                l.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::LinkedList(l), "pop") => {
+                if !args.is_empty() {
+                    return Err("LinkedList.pop() expects 0 arguments".to_string());
+                }
+                match l.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("LinkedList is empty".to_string()),
+                }
+            }
+            (Value::LinkedList(l), "len") => {
+                if !args.is_empty() {
+                    return Err("LinkedList.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(l.borrow().len() as i64))
+            }
+            (Value::Queue(q), "peek") => {
+                if !args.is_empty() {
+                    return Err("Queue.peek() expects 0 arguments".to_string());
+                }
+                match q.borrow().get(0) {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Queue is empty".to_string()),
+                }
+            }
+            (Value::Queue(q), "isEmpty") => {
+                if !args.is_empty() {
+                    return Err("Queue.isEmpty() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(q.borrow().is_empty()))
+            }
+            (Value::Queue(q), "len") => {
+                if !args.is_empty() {
+                    return Err("Queue.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(q.borrow().len() as i64))
+            }
+            // Option methods
+            (Value::Option(o), "unwrap") => {
+                if !args.is_empty() {
+                    return Err("Option.unwrap() expects 0 arguments".to_string());
+                }
+                match o.borrow().as_ref() {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Cannot unwrap None".to_string()),
+                }
+            }
+            (Value::Option(o), "unwrapOr") => {
+                if args.len() != 1 {
+                    return Err("Option.unwrapOr() expects 1 argument".to_string());
+                }
+                match o.borrow().as_ref() {
+                    Some(val) => Ok(val.clone()),
+                    None => Ok(args[0].clone()),
+                }
+            }
+            (Value::Option(o), "isSome") => {
+                if !args.is_empty() {
+                    return Err("Option.isSome() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(o.borrow().is_some()))
+            }
+            (Value::Option(o), "isNone") => {
+                if !args.is_empty() {
+                    return Err("Option.isNone() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(o.borrow().is_none()))
+            }
+            // Result methods
+            (Value::Result(r), "unwrap") => {
+                if !args.is_empty() {
+                    return Err("Result.unwrap() expects 0 arguments".to_string());
+                }
+                match r.borrow().as_ref() {
+                    Ok(val) => Ok(val.clone()),
+                    Err(e) => Err(format!("Cannot unwrap Err: {}", e)),
+                }
+            }
+            (Value::Result(r), "unwrapOr") => {
+                if args.len() != 1 {
+                    return Err("Result.unwrapOr() expects 1 argument".to_string());
+                }
+                match r.borrow().as_ref() {
+                    Ok(val) => Ok(val.clone()),
+                    Err(_) => Ok(args[0].clone()),
+                }
+            }
+            (Value::Result(r), "isOk") => {
+                if !args.is_empty() {
+                    return Err("Result.isOk() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(r.borrow().is_ok()))
+            }
+            (Value::Result(r), "isErr") => {
+                if !args.is_empty() {
+                    return Err("Result.isErr() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(r.borrow().is_err()))
             }
             (other, _) => Err(format!("Method call not supported on {:?}", other)),
         }

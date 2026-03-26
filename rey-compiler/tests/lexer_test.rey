@@ -1,0 +1,12 @@
+// Test lexer - direct call without import
+
+func main(): Void {
+    var source = "func hello(): int { return 10; }";
+    var lexerModule = import "./src/lexer/main.rey";
+    var result = lexerModule.tokenize(source, "test.rey");
+    println("Tokens count:");
+    println(result.tokens.len());
+    println("First token:");
+    println(result.tokens[0].lexeme);
+    println("Lexer test complete");
+}

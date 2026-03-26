@@ -1,19 +1,449 @@
 struct Lexer {
     pub source: String,
     pub pos: int,
+    pub start: int,
     pub line: int,
     pub column: int,
+    pub tokens: Vec<Token>,
+    pub errors: Vec<LexError>,
+}
+
+export struct LexerResult {
+    pub tokens: Vec<Token>,
+    pub errors: Vec<LexError>,
+}
+
+func isAlpha(c: String): bool {
+    return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
+}
+
+func isDigit(c: String): bool {
+    return c >= "0" && c <= "9";
+}
+
+func isAlphaNumeric(c: String): bool {
+    return isAlpha(c) || isDigit(c);
+}
+
+func isWhitespace(c: String): bool {
+    return c == " " || c == "\n" || c == "\t" || c == "\r";
+}
+
+func isPunctuation(c: String): bool {
+    return c == "(" || c == ")" || c == "{" || c == "}" || c == "[" || c == "]" || 
+           c == "," || c == "." || c == ";" || c == ":" || c == "+" || c == "-" ||
+           c == "*" || c == "/" || c == "%" || c == "^" || c == "&" || c == "|" ||
+           c == "!" || c == "=" || c == "<" || c == ">" || c == "?";
+}
+
+func newSpan(start: int, end: int, line: int, column: int): Span {
+    return Span { start: start, end: end, line: line, column: column };
+}
+
+func makeToken(kind: TokenKind, lexeme: String, span: Span): Token {
+    return Token { kind: kind, lexeme: lexeme, span: span };
+}
+
+func makeError(kind: LexErrorKind, message: String, span: Span): LexError {
+    return LexError { kind: kind, message: message, span: span };
+}
+
+func addToken(lexer: Lexer, kind: TokenKind, lexeme: String) {
+    var span = newSpan(lexer.start, lexer.pos, lexer.line, lexer.column);
+    var token = makeToken(kind, lexeme, span);
+    lexer.tokens.push(token);
+}
+
+func addError(lexer: Lexer, kind: LexErrorKind, message: String) {
+    var span = newSpan(lexer.pos, lexer.pos + 1, lexer.line, lexer.column);
+    var error = makeError(kind, message, span);
+    lexer.errors.push(error);
+}
+
+func advance(lexer: Lexer): String {
+    if lexer.pos >= lexer.source.len() {
+        return "";
+    }
+    var c = lexer.source[lexer.pos];
+    lexer.pos = lexer.pos + 1;
+    if c == "\n" {
+        lexer.line = lexer.line + 1;
+        lexer.column = 0;
+    } else {
+        lexer.column = lexer.column + 1;
+    }
+    return c;
+}
+
+func peek(lexer: Lexer): String {
+    if lexer.pos >= lexer.source.len() {
+        return "";
+    }
+    return lexer.source[lexer.pos];
+}
+
+func peekNext(lexer: Lexer): String {
+    if lexer.pos + 1 >= lexer.source.len() {
+        return "";
+    }
+    return lexer.source[lexer.pos + 1];
+}
+
+func match(lexer: Lexer, expected: String): bool {
+    if lexer.pos >= lexer.source.len() {
+        return false;
+    }
+    if lexer.source[lexer.pos] != expected {
+        return false;
+    }
+    lexer.pos = lexer.pos + 1;
+    lexer.column = lexer.column + 1;
+    return true;
+}
+
+func skipWhitespace(lexer: Lexer) {
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            break;
+        }
+        var c = peek(lexer);
+        if c == " " || c == "\t" || c == "\r" {
+            advance(lexer);
+        } else if c == "\n" {
+            advance(lexer);
+            lexer.line = lexer.line + 1;
+            lexer.column = 0;
+        } else if c == "/" {
+            var next = peekNext(lexer);
+            if next == "/" {
+                loop {
+                    if lexer.pos >= lexer.source.len() {
+                        break;
+                    }
+                    if peek(lexer) == "\n" {
+                        break;
+                    }
+                    advance(lexer);
+                }
+            } else if next == "*" {
+                advance(lexer);
+                advance(lexer);
+                loop {
+                    if lexer.pos >= lexer.source.len() {
+                        addError(lexer, UnexpectedCharacter, "Unterminated block comment");
+                        break;
+                    }
+                    if peek(lexer) == "*" && peekNext(lexer) == "/" {
+                        advance(lexer);
+                        advance(lexer);
+                        break;
+                    }
+                    advance(lexer);
+                }
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+func scanString(lexer: Lexer): String {
+    var result = "";
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            addError(lexer, UnterminatedString, "Unterminated string literal");
+            break;
+        }
+        var c = advance(lexer);
+        if c == "\"" {
+            break;
+        }
+        if c == "\\" {
+            var next = peek(lexer);
+            if next == "n" {
+                result = result + "\n";
+                advance(lexer);
+            } else if next == "t" {
+                result = result + "\t";
+                advance(lexer);
+            } else if next == "r" {
+                result = result + "\r";
+                advance(lexer);
+            } else if next == "\\" {
+                result = result + "\\";
+                advance(lexer);
+            } else if next == "\"" {
+                result = result + "\"";
+                advance(lexer);
+            } else {
+                result = result + next;
+                advance(lexer);
+            }
+        } else {
+            result = result + c;
+        }
+    }
+    return result;
+}
+
+func scanChar(lexer: Lexer): String {
+    var result = "";
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            addError(lexer, UnterminatedChar, "Unterminated char literal");
+            break;
+        }
+        var c = advance(lexer);
+        if c == "'" {
+            break;
+        }
+        if c == "\\" {
+            var next = peek(lexer);
+            if next == "n" {
+                result = result + "\n";
+                advance(lexer);
+            } else if next == "t" {
+                result = result + "\t";
+                advance(lexer);
+            } else if next == "\\" {
+                result = result + "\\";
+                advance(lexer);
+            } else if next == "'" {
+                result = result + "'";
+                advance(lexer);
+            }
+        } else {
+            result = result + c;
+        }
+    }
+    return result;
+}
+
+func scanNumber(lexer: Lexer): String {
+    var result = "";
+    var hasDot = false;
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            break;
+        }
+        var c = peek(lexer);
+        if c == "." {
+            var next = peekNext(lexer);
+            if isDigit(next) && !hasDot {
+                result = result + c;
+                advance(lexer);
+                hasDot = true;
+            } else {
+                break;
+            }
+        } else if isDigit(c) {
+            result = result + c;
+            advance(lexer);
+        } else if c == "e" || c == "E" {
+            result = result + c;
+            advance(lexer);
+            var next = peek(lexer);
+            if next == "+" || next == "-" {
+                result = result + next;
+                advance(lexer);
+            }
+        } else {
+            break;
+        }
+    }
+    return result;
+}
+
+func scanIdentifier(lexer: Lexer): String {
+    var result = "";
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            break;
+        }
+        var c = peek(lexer);
+        if isAlphaNumeric(c) {
+            result = result + c;
+            advance(lexer);
+        } else {
+            break;
+        }
+    }
+    return result;
+}
+
+func getKeyword(kind: String): TokenKind {
+    if kind == "var" { return TokenKind.Var; }
+    if kind == "const" { return TokenKind.Const; }
+    if kind == "func" { return TokenKind.Func; }
+    if kind == "struct" { return TokenKind.Struct; }
+    if kind == "enum" { return TokenKind.Enum; }
+    if kind == "import" { return TokenKind.Import; }
+    if kind == "export" { return TokenKind.Export; }
+    if kind == "pub" { return TokenKind.Pub; }
+    if kind == "return" { return TokenKind.Return; }
+    if kind == "if" { return TokenKind.If; }
+    if kind == "else" { return TokenKind.Else; }
+    if kind == "while" { return TokenKind.While; }
+    if kind == "for" { return TokenKind.For; }
+    if kind == "in" { return TokenKind.In; }
+    if kind == "break" { return TokenKind.Break; }
+    if kind == "continue" { return TokenKind.Continue; }
+    if kind == "match" { return TokenKind.Match; }
+    if kind == "instanceof" { return TokenKind.InstanceOf; }
+    if kind == "true" { return TokenKind.True; }
+    if kind == "false" { return TokenKind.False; }
+    if kind == "null" { return TokenKind.Null; }
+    return TokenKind.Identifier;
+}
+
+func scanToken(lexer: Lexer) {
+    lexer.start = lexer.pos;
+    var c = advance(lexer);
+    
+    if c == "" {
+        addToken(lexer, TokenKind.Eof, "");
+        return;
+    }
+    
+    if isWhitespace(c) {
+        return;
+    }
+    
+    if c == "(" { addToken(lexer, TokenKind.LeftParen, "("); return; }
+    if c == ")" { addToken(lexer, TokenKind.RightParen, ")"); return; }
+    if c == "{" { addToken(lexer, TokenKind.LeftBrace, "{"); return; }
+    if c == "}" { addToken(lexer, TokenKind.RightBrace, "}"); return; }
+    if c == "[" { addToken(lexer, TokenKind.LeftBracket, "["); return; }
+    if c == "]" { addToken(lexer, TokenKind.RightBracket, "]"); return; }
+    if c == "," { addToken(lexer, TokenKind.Comma, ","); return; }
+    if c == "." { addToken(lexer, TokenKind.Dot, "."); return; }
+    if c == ";" { addToken(lexer, TokenKind.Semicolon, ";"); return; }
+    if c == "+" { 
+        if match(lexer, "+") { addToken(lexer, TokenKind.PlusPlus, "++"); return; }
+        if match(lexer, "=") { addToken(lexer, TokenKind.PlusEqual, "+="); return; }
+        addToken(lexer, TokenKind.Plus, "+"); return; 
+    }
+    if c == "-" {
+        if match(lexer, "-") { addToken(lexer, TokenKind.MinusMinus, "--"); return; }
+        if match(lexer, "=") { addToken(lexer, TokenKind.MinusEqual, "-="); return; }
+        if match(lexer, ">") { addToken(lexer, TokenKind.Arrow, "->"); return; }
+        addToken(lexer, TokenKind.Minus, "-"); return;
+    }
+    if c == "*" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.StarEqual, "*="); return; }
+        addToken(lexer, TokenKind.Star, "*"); return;
+    }
+    if c == "/" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.SlashEqual, "/="); return; }
+        addToken(lexer, TokenKind.Slash, "/"); return;
+    }
+    if c == "%" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.PercentEqual, "%="); return; }
+        addToken(lexer, TokenKind.Percent, "%"); return;
+    }
+    if c == "=" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.EqualEqual, "=="); return; }
+        addToken(lexer, TokenKind.Equal, "="); return;
+    }
+    if c == "!" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.NotEqual, "!="); return; }
+        addToken(lexer, TokenKind.Not, "!"); return;
+    }
+    if c == "<" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.LessEqual, "<="); return; }
+        addToken(lexer, TokenKind.Less, "<"); return;
+    }
+    if c == ">" {
+        if match(lexer, "=") { addToken(lexer, TokenKind.GreaterEqual, ">="); return; }
+        addToken(lexer, TokenKind.Greater, ">"); return;
+    }
+    if c == ":" {
+        if match(lexer, ":") { addToken(lexer, TokenKind.ColonColon, "::"); return; }
+        addToken(lexer, TokenKind.Colon, ":"); return;
+    }
+    if c == "&" {
+        if match(lexer, "&") { addToken(lexer, TokenKind.AndAnd, "&&"); return; }
+        addToken(lexer, TokenKind.Identifier, "&"); return;
+    }
+    if c == "|" {
+        if match(lexer, "|") { addToken(lexer, TokenKind.OrOr, "||"); return; }
+        addToken(lexer, TokenKind.Identifier, "|"); return;
+    }
+    
+    if c == "\"" {
+        var str = scanString(lexer);
+        addToken(lexer, TokenKind.StringLiteral, str);
+        return;
+    }
+    
+    if c == "'" {
+        var ch = scanChar(lexer);
+        addToken(lexer, TokenKind.CharLiteral, ch);
+        return;
+    }
+    
+    if isDigit(c) {
+        lexer.pos = lexer.pos - 1;
+        lexer.column = lexer.column - 1;
+        var num = scanNumber(lexer);
+        addToken(lexer, TokenKind.NumberLiteral, num);
+        return;
+    }
+    
+    if isAlpha(c) {
+        lexer.pos = lexer.pos - 1;
+        lexer.column = lexer.column - 1;
+        var ident = scanIdentifier(lexer);
+        var kind = getKeyword(ident);
+        addToken(lexer, kind, ident);
+        return;
+    }
+    
+    addError(lexer, UnexpectedCharacter, "Unexpected character: " + c);
 }
 
 export pub func newLexer(source: String): Lexer {
-    return null;
+    return Lexer {
+        source: source,
+        pos: 0,
+        start: 0,
+        line: 1,
+        column: 0,
+        tokens: Vec.new(),
+        errors: Vec.new(),
+    };
 }
 
-export pub func nextToken(lexer: Lexer): Any {
-    return null;
+export pub func tokenize(source: String, path: String): LexerResult {
+    var lexer = newLexer(source);
+    
+    loop {
+        if lexer.pos >= lexer.source.len() {
+            break;
+        }
+        skipWhitespace(lexer);
+        if lexer.pos >= lexer.source.len() {
+            break;
+        }
+        var c = peek(lexer);
+        if c == "" {
+            break;
+        }
+        if c == "\n" {
+            advance(lexer);
+            lexer.line = lexer.line + 1;
+            lexer.column = 0;
+            continue;
+        }
+        scanToken(lexer);
+    }
+    
+    addToken(lexer, TokenKind.Eof, "");
+    
+    return LexerResult {
+        tokens: lexer.tokens,
+        errors: lexer.errors,
+    };
 }
-
-export pub func lexAll(source: String): [Any] {
-    return null;
-}
-

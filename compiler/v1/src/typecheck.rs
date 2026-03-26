@@ -1,6 +1,6 @@
 use crate::ast::{Expr, Literal, Parameter, Stmt, Type};
-use crate::lexer::TokenKind;
 use crate::lexer::span::Span;
+use crate::lexer::TokenKind;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,7 +49,10 @@ impl From<TypeError> for String {
 
 impl From<String> for TypeError {
     fn from(message: String) -> Self {
-        TypeError { message, span: Span::new(0, 0) }
+        TypeError {
+            message,
+            span: Span::new(0, 0),
+        }
     }
 }
 
@@ -239,6 +242,107 @@ impl TypeChecker {
             },
         );
 
+        // FS builtins - using Any for flexible return types
+        c.functions.insert(
+            "readFile".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "writeFile".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::String, Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "appendFile".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::String, Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "fileExists".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Bool),
+            },
+        );
+        c.functions.insert(
+            "deleteFile".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "mkdir".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "listDir".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "getEnv".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "args".to_string(),
+            Ty::Function {
+                minArgs: 0,
+                params: vec![],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+        c.functions.insert(
+            "exit".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Int],
+                variadic: None,
+                ret: Box::new(Ty::Void),
+            },
+        );
+        c.functions.insert(
+            "exec".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::String],
+                variadic: None,
+                ret: Box::new(Ty::Any),
+            },
+        );
+
         c
     }
 
@@ -257,7 +361,8 @@ impl TypeChecker {
             }
             if let Stmt::EnumDecl { name, variants } = stmt {
                 for variant in variants {
-                    self.enum_variants.insert(variant.clone(), (name.clone(), variant.clone()));
+                    self.enum_variants
+                        .insert(variant.clone(), (name.clone(), variant.clone()));
                     self.define(variant, Ty::Any, true);
                 }
             }
@@ -544,7 +649,8 @@ impl TypeChecker {
             Stmt::EnumDecl { name, variants } => {
                 // Register each variant as a valid variable
                 for variant in variants {
-                    self.enum_variants.insert(variant.clone(), (name.clone(), variant.clone()));
+                    self.enum_variants
+                        .insert(variant.clone(), (name.clone(), variant.clone()));
                     // Also define it in the current scope as a constant
                     self.define(variant, Ty::Any, true);
                 }
@@ -580,7 +686,8 @@ impl TypeChecker {
                             };
                             if !lit_ty.isAssignableTo(&expr_ty) && expr_ty != Ty::Any {
                                 return Err(TypeError {
-                                    message: "Type error: pattern doesn't match expression type".to_string(),
+                                    message: "Type error: pattern doesn't match expression type"
+                                        .to_string(),
                                     span: expr.span(),
                                 });
                             }
@@ -668,7 +775,12 @@ impl TypeChecker {
                 }
                 Ok(cur)
             }
-            Expr::Binary { left, op, right, span } => {
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => {
                 let l = self.exprTy(left)?;
                 let r = self.exprTy(right)?;
                 self.binaryTy(&l, op, &r, *span)
@@ -725,7 +837,11 @@ impl TypeChecker {
                                 message: format!(
                                     "Type error: expected {}..={} arguments but got {}",
                                     minArgs,
-                                    if variadic.is_some() { usize::MAX } else { fixedCount },
+                                    if variadic.is_some() {
+                                        usize::MAX
+                                    } else {
+                                        fixedCount
+                                    },
                                     args.len()
                                 ),
                                 span: expr.span(),
@@ -817,9 +933,21 @@ impl TypeChecker {
                         Ok(*v)
                     }
                     Ty::Any => Ok(Ty::Any),
+                    Ty::String => {
+                        if !ity.isAssignableTo(&Ty::Int) {
+                            return Err(TypeError {
+                                message: format!(
+                                    "Type error: string index must be int, got {:?}",
+                                    ity
+                                ),
+                                span: index.span(),
+                            });
+                        }
+                        Ok(Ty::String)
+                    }
                     _ => Err(TypeError {
                         message:
-                            "Type error: indexing only supported for arrays and dictionaries".to_string(),
+                            "Type error: indexing only supported for arrays, dictionaries, and strings".to_string(),
                         span: target.span(),
                     }),
                 }
@@ -833,17 +961,16 @@ impl TypeChecker {
                             message: "Type error: tuple access must be a numeric index".to_string(),
                             span: expr.span(),
                         })?;
-                        items.get(idx).cloned().ok_or_else(|| {
-                            TypeError {
-                                message: format!("Type error: tuple index {} out of bounds", idx),
-                                span: expr.span(),
-                            }
+                        items.get(idx).cloned().ok_or_else(|| TypeError {
+                            message: format!("Type error: tuple index {} out of bounds", idx),
+                            span: expr.span(),
                         })
                     }
                     Ty::Any => Ok(Ty::Any),
                     _ => Err(TypeError {
                         message:
-                            "Type error: property access only supported for dictionaries and tuples".to_string(),
+                            "Type error: property access only supported for dictionaries and tuples"
+                                .to_string(),
                         span: expr.span(),
                     }),
                 }
@@ -859,12 +986,8 @@ impl TypeChecker {
             }
             Expr::StructLiteral { .. } => Ok(Ty::Any),
             Expr::StaticCall { .. } => Ok(Ty::Any),
-            Expr::Set { value, .. } => {
-                self.exprTy(value)
-            }
-            Expr::IndexSet { value, .. } => {
-                self.exprTy(value)
-            }
+            Expr::Set { value, .. } => self.exprTy(value),
+            Expr::IndexSet { value, .. } => self.exprTy(value),
         }
     }
 
@@ -968,7 +1091,8 @@ impl TypeChecker {
                 let a0 = self.exprTy(&args[0])?;
                 if !a0.isAssignableTo(&Ty::String) {
                     return Err(TypeError {
-                        message: "Type error: String.split() expects a string delimiter".to_string(),
+                        message: "Type error: String.split() expects a string delimiter"
+                            .to_string(),
                         span: args[0].span(),
                     });
                 }
@@ -985,7 +1109,12 @@ impl TypeChecker {
         }
     }
 
-    fn checkCallByName(&mut self, name: &str, args: &[Expr], callSpan: Span) -> Result<Ty, TypeError> {
+    fn checkCallByName(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+        callSpan: Span,
+    ) -> Result<Ty, TypeError> {
         if name == "println" || name == "print" {
             for a in args {
                 self.exprTy(a)?;
@@ -996,10 +1125,7 @@ impl TypeChecker {
         if name == "len" {
             if args.len() != 1 {
                 return Err(TypeError {
-                    message: format!(
-                        "Type error: len expects 1 argument, got {}",
-                        args.len()
-                    ),
+                    message: format!("Type error: len expects 1 argument, got {}", args.len()),
                     span: callSpan,
                 });
             }
@@ -1032,10 +1158,7 @@ impl TypeChecker {
         if name == "push" {
             if args.len() != 2 {
                 return Err(TypeError {
-                    message: format!(
-                        "Type error: push expects 2 arguments, got {}",
-                        args.len()
-                    ),
+                    message: format!("Type error: push expects 2 arguments, got {}", args.len()),
                     span: callSpan,
                 });
             }
@@ -1065,10 +1188,7 @@ impl TypeChecker {
         if name == "pop" {
             if args.len() != 1 {
                 return Err(TypeError {
-                    message: format!(
-                        "Type error: pop expects 1 argument, got {}",
-                        args.len()
-                    ),
+                    message: format!("Type error: pop expects 1 argument, got {}", args.len()),
                     span: callSpan,
                 });
             }
@@ -1098,7 +1218,11 @@ impl TypeChecker {
                             "Type error: {} expects {}..={} arguments but got {}",
                             name,
                             minArgs,
-                            if variadic.is_some() { usize::MAX } else { fixedCount },
+                            if variadic.is_some() {
+                                usize::MAX
+                            } else {
+                                fixedCount
+                            },
                             args.len()
                         ),
                         span: callSpan,
@@ -1191,9 +1315,9 @@ impl TypeChecker {
                 (Ty::String, _) | (_, Ty::String) => Ok(Ty::String),
                 (l, r) if isNumeric(l) && isNumeric(r) => Ok(numericResult(l, r)),
                 _ => Err(TypeError {
-                        message: "Type error: invalid '+' operands".to_string(),
-                        span,
-                    }),
+                    message: "Type error: invalid '+' operands".to_string(),
+                    span,
+                }),
             },
             Minus | Star | Percent => {
                 if isNumeric(left) && isNumeric(right) {

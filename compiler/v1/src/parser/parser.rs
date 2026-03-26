@@ -8,8 +8,8 @@
 #![allow(non_snake_case)]
 
 use crate::ast::{
-    Expr, FieldDecl, FunctionVisibility, ImportKind, Literal, MethodDecl, Parameter, Pattern,
-    Stmt, Type,
+    Expr, FieldDecl, FunctionVisibility, ImportKind, Literal, MethodDecl, Parameter, Pattern, Stmt,
+    Type,
 };
 use crate::lexer::{span::Span, Token, TokenKind};
 use crate::parser::error::ParserError;
@@ -56,12 +56,16 @@ impl Parser {
                 &TokenKind::Func,
                 "Expected 'func' after 'export pub' modifier.",
             )?;
-            Ok(Some(self.parseFuncDeclaration(FunctionVisibility::ExportPub)?))
+            Ok(Some(
+                self.parseFuncDeclaration(FunctionVisibility::ExportPub)?,
+            ))
         } else if self.matchToken(&TokenKind::Pub) {
             self.consume(&TokenKind::Func, "Expected 'func' after 'pub' modifier.")?;
             Ok(Some(self.parseFuncDeclaration(FunctionVisibility::Pub)?))
         } else if self.matchToken(&TokenKind::Func) {
-            Ok(Some(self.parseFuncDeclaration(FunctionVisibility::Private)?))
+            Ok(Some(
+                self.parseFuncDeclaration(FunctionVisibility::Private)?,
+            ))
         } else if self.matchToken(&TokenKind::Struct) {
             Ok(Some(self.parseStructDeclaration()?))
         } else if self.matchToken(&TokenKind::Enum) {
@@ -110,7 +114,10 @@ impl Parser {
         })
     }
 
-    fn parseFuncDeclaration(&mut self, visibility: FunctionVisibility) -> Result<Stmt, ParserError> {
+    fn parseFuncDeclaration(
+        &mut self,
+        visibility: FunctionVisibility,
+    ) -> Result<Stmt, ParserError> {
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => return Err(self.error("Expected function name.")),
@@ -266,8 +273,9 @@ impl Parser {
 
                 // Only factory methods like 'create' should be static
                 // Instance methods should never be static, even if they return the struct type
-                let is_static = is_pub && method_name == "create" && 
-                               return_ty.as_ref().map(|t| t.name.as_str()) == Some(&name);
+                let is_static = is_pub
+                    && method_name == "create"
+                    && return_ty.as_ref().map(|t| t.name.as_str()) == Some(&name);
 
                 methods.push(MethodDecl {
                     name: method_name,
@@ -286,7 +294,9 @@ impl Parser {
                 self.advance();
 
                 self.consume(&TokenKind::Colon, "Expected ':' after field name.")?;
-                let ty = self.parseTypeOnly()?.ok_or_else(|| self.error("Expected type name for field."))?;
+                let ty = self
+                    .parseTypeOnly()?
+                    .ok_or_else(|| self.error("Expected type name for field."))?;
                 self.matchToken(&TokenKind::Comma); // optional trailing comma
 
                 fields.push(FieldDecl {
@@ -356,7 +366,11 @@ impl Parser {
                     let span = self.peek().span;
                     let name = match &self.peek().kind {
                         TokenKind::Identifier(name) => name.clone(),
-                        _ => return Err(self.error("Expected identifier in grouped module import list.")),
+                        _ => {
+                            return Err(
+                                self.error("Expected identifier in grouped module import list.")
+                            )
+                        }
                     };
                     self.advance();
                     values.push(ImportName { name, span });
@@ -382,7 +396,10 @@ impl Parser {
         } else {
             ImportKind::ModuleNamespace { module }
         };
-        self.consume(&TokenKind::Semicolon, "Expected ';' after import statement.")?;
+        self.consume(
+            &TokenKind::Semicolon,
+            "Expected ';' after import statement.",
+        )?;
         Ok(Stmt::Import {
             kind,
             span: import_span,
@@ -481,7 +498,10 @@ impl Parser {
 
         let expr = self.parseExpression()?;
 
-        self.consume(&TokenKind::LeftBrace, "Expected '{' after match expression.")?;
+        self.consume(
+            &TokenKind::LeftBrace,
+            "Expected '{' after match expression.",
+        )?;
 
         let mut arms = Vec::new();
         while !self.check(&TokenKind::RightBrace) && !self.isAtEnd() {
@@ -533,10 +553,15 @@ impl Parser {
                         loop {
                             let field_name = match &self.peek().kind {
                                 TokenKind::Identifier(f) => f.clone(),
-                                _ => return Err(self.error("Expected field name in struct pattern.")),
+                                _ => {
+                                    return Err(self.error("Expected field name in struct pattern."))
+                                }
                             };
                             self.advance();
-                            self.consume(&TokenKind::Colon, "Expected ':' after field name in struct pattern.")?;
+                            self.consume(
+                                &TokenKind::Colon,
+                                "Expected ':' after field name in struct pattern.",
+                            )?;
                             let field_pat = self.parsePattern()?;
                             fields.push((field_name, field_pat));
                             if !self.matchToken(&TokenKind::Comma) {
@@ -544,7 +569,10 @@ impl Parser {
                             }
                         }
                     }
-                    self.consume(&TokenKind::RightBrace, "Expected '}' after struct pattern fields.")?;
+                    self.consume(
+                        &TokenKind::RightBrace,
+                        "Expected '}' after struct pattern fields.",
+                    )?;
                     return Ok(Pattern::Struct {
                         struct_name: name,
                         fields,
@@ -826,7 +854,7 @@ impl Parser {
                 continue;
             }
 
-            if self.matchToken(&TokenKind::Dot) {
+            if self.matchToken(&TokenKind::Dot) || self.matchToken(&TokenKind::ColonColon) {
                 let member_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     TokenKind::NumberLiteral(raw) => {
@@ -836,7 +864,7 @@ impl Parser {
                         }
                         (n as i64).to_string()
                     }
-                    _ => return Err(self.error("Expected identifier after '.'.")),
+                    _ => return Err(self.error("Expected identifier after '.' or '::'.")),
                 };
                 self.advance();
 
@@ -1079,7 +1107,12 @@ impl Parser {
                 }
 
                 if lambdaOk {
-                    if self.consume(&TokenKind::RightParen, "Expected ')' after lambda parameters.").is_ok()
+                    if self
+                        .consume(
+                            &TokenKind::RightParen,
+                            "Expected ')' after lambda parameters.",
+                        )
+                        .is_ok()
                         && self.matchToken(&TokenKind::Arrow)
                     {
                         let body = self.parseExpression()?;
@@ -1220,12 +1253,10 @@ impl Parser {
                             tokens.push(token);
                         }
                         let mut parser = Parser::new(tokens);
-                        let inner_expr = parser
-                            .parseExpression()
-                            .unwrap_or(Expr::Literal {
-                                value: Literal::Null,
-                                span,
-                            });
+                        let inner_expr = parser.parseExpression().unwrap_or(Expr::Literal {
+                            value: Literal::Null,
+                            span,
+                        });
                         parts.push(inner_expr);
                         expr_str.clear();
                     } else {
@@ -1271,7 +1302,12 @@ impl Parser {
                 });
             }
 
-            if let Expr::Get { object, name: field_name, .. } = expr {
+            if let Expr::Get {
+                object,
+                name: field_name,
+                ..
+            } = expr
+            {
                 return Ok(Expr::Set {
                     object,
                     name: field_name,
@@ -1324,9 +1360,19 @@ impl Parser {
                     span: self.previous().span,
                 });
             }
-            if let Expr::Get { object, name: field_name, span: get_span, .. } = expr {
+            if let Expr::Get {
+                object,
+                name: field_name,
+                span: get_span,
+                ..
+            } = expr
+            {
                 let bin = Expr::Binary {
-                    left: Box::new(Expr::Get { object: object.clone(), name: field_name.clone(), span: get_span }),
+                    left: Box::new(Expr::Get {
+                        object: object.clone(),
+                        name: field_name.clone(),
+                        span: get_span,
+                    }),
                     op,
                     right: Box::new(value),
                     span: self.previous().span,
@@ -1338,9 +1384,19 @@ impl Parser {
                     span: self.previous().span,
                 });
             }
-            if let Expr::Index { target, index, span: idx_span, .. } = expr {
+            if let Expr::Index {
+                target,
+                index,
+                span: idx_span,
+                ..
+            } = expr
+            {
                 let bin = Expr::Binary {
-                    left: Box::new(Expr::Index { target: target.clone(), index: index.clone(), span: idx_span }),
+                    left: Box::new(Expr::Index {
+                        target: target.clone(),
+                        index: index.clone(),
+                        span: idx_span,
+                    }),
                     op,
                     right: Box::new(value),
                     span: self.previous().span,

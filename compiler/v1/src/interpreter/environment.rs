@@ -80,5 +80,4 @@ impl Environment {
     pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
         self.struct_defs.get(name)
     }
-
 }

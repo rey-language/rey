@@ -196,6 +196,9 @@ println(xs.length());
 
 Array methods:
 - `length()`
+- `push(value)`
+
+Arrays also support method-call syntax: `xs.push(4)`, `xs.length()`.
 
 Dictionaries (identifier or string keys in literals):
 
@@ -206,8 +209,8 @@ println(user["id"]);
 user.name = "ReyLang";
 ```
 
-Dictionary methods:
-- `length()`
+Dictionary access:
+- `len(dict)` works via the built-in function
 
 ## Strings
 Regular and multiline strings:
@@ -218,6 +221,13 @@ var b = """
 line 1
 line 2
 """;
+```
+
+String concatenation with `+`:
+
+```rey
+var greeting = "hello " + "world";
+var label = "count: " + 42;   // non-string values are auto-converted
 ```
 
 Char literals:
@@ -233,12 +243,12 @@ println("HP: {hp}");
 println("Buffed: {hp + 50}");
 ```
 
-String methods:
+String methods (called via dot notation):
 - `length()`
 - `upper()`
 - `lower()`
 - `contains(str)`
-- `split(str)`
+- `split(str)` — returns `[String]`
 - `toString()`
 - `toInt()`
 - `toFloat()`
@@ -248,8 +258,8 @@ Struct declaration:
 
 ```rey
 struct Player {
-    health: int,
-    name: String,
+    pub health: int,
+    pub name: String,
 
     pub func create(n: String, h: int): Player {
         return Player { name: n, health: h };
@@ -260,6 +270,8 @@ struct Player {
     }
 }
 ```
+
+Fields are private by default. Prefix a field with `pub` to allow external mutation.
 
 Struct literal:
 
@@ -273,10 +285,11 @@ Field mutation:
 - nested field assignment like `obj.inner.field = value` is currently rejected
 
 Implemented method behavior:
-- Instance method calls inject fields into method scope by field name.
+- Instance method calls inject fields into method scope by field name — use field names directly inside methods (no `self.` required).
 - Mutated field names are written back to the instance.
 - Static calls are parsed as `StructName.method(...)`.
 - In current parser behavior, methods named `create` that are `pub` and return the struct type are treated as static.
+- `self` is a reserved keyword but is not required for field access within struct methods.
 
 ## Enums and Match
 Enum declaration:
@@ -319,6 +332,7 @@ Global built-ins:
 - `max(a, b)` — two numbers
 - `min(a, b)` — two numbers
 - `random()` — returns float in [0, 1)
+- `range(start, end)` — used inside `for` loops (see Control Flow)
 
 ## Diagnostics
 Compiler and runtime errors are printed with category labels such as:
