@@ -1,5 +1,11 @@
 # Changelog
 
+## [release] — 2026-03-27
+- Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
+- Fixed string indexing: `source[i]` now returns single character as String.
+- Added type check support for string index type validation.
+- Type errors now include span information for better diagnostics.
+
 ## [release] — 2026-03-26
 - Bumped compiler crate version to `0.1.1` in `compiler/v1/Cargo.toml`.
 - Fixed `match` on struct instances via struct field patterns.

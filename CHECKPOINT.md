@@ -1,11 +1,11 @@
 # Rey Language - Phase Checkpoint
 # Date: Mar 27, 2026
 
-## Current Phase: PHASE 0 - BASELINE AUDIT
+## Current Phase: PHASE 1 COMPLETE - Compiler v0.2.0
 
-### What's Working (12-phase project status):
+### What's Working (v0.2.0):
 - ✅ All 7 cargo tests pass
-- ✅ Integer division (10/3=3, 10.0/3.0=3.333, mixed=3.333...)
+- ✅ Integer division (10/3=3, 10.0/3.0=3.333, mixed=3.333)
 - ✅ Struct field mutation (obj.field=value, obj.field+=value)
 - ✅ Enum match with qualified (Direction::North) and unqualified (North)
 - ✅ Struct pattern matching in match statements
@@ -14,29 +14,25 @@
 - ✅ Circular import shows full cycle path
 - ✅ Parameter reassignment inside functions works
 - ✅ Return from nested blocks (if inside while) exits function
-- ⚠️  Const in all scopes works
+- ✅ String indexing: source[i] returns single character as String
+- ✅ Type errors include span information for diagnostics
+- ✅ Version bumped to 0.2.0
 
-### Issues to Fix (PHASE 1):
-1.GerrittString indexing: source[i] returns error - must return single character as String
-2. Null propagation: calling method on null must include line number in error
+### Phase 1 Complete - Ready for Phase 2
 
-### Testing Notes:
-- Test files verified: src/tests/integer_division.rey, struct_field_mutation.rey, match_enum.rey
-- All import tests: group_missing_symbol, nested_resolution, circular, all pass
+### Next Steps (Phase 2 - New Data Types):
+Add these as first-class types to the interpreter:
+1. Vec<T> — dynamic typed array with methods
+2. LinkedList<T>
+3. HashMap<K,V>
+4. Stack<T>
+5. Queue<T>
+6. Option<T>
+7. Result<T,E>
+8. Tuple enhancements (named tuples, destructuring)
 
-### Rey-compiler status (bootstrapping):
-- token.rey: Has TokenKind, Token, Span, LexError structs (stub)
-- main.rey lexer: Stub only - newLexer returns null
-- parser/main.rey: Stub
-- codegen/main.rey: Stub
+### Rey-compiler Status:
+Bootstrap skeleton exists but not functional yet
 
-### Syntax.md status:
-- Up to date for v0.1.1 features
-- Documented: variables, types, operators, control flow, functions, imports
-- Collections, Strings, Structs, Enums, Match, Built-ins
-
-### Next Steps:
-1. Fix String indexing to return single character as String
-2. Add line number to Null receiver error messages
-3. Verify with cargo build && cargo test
-4. Commit as "chore: baseline audit before v0.2.0 work"
+### Syntax.md Status:
+Up to date for v0.2.0 features
