@@ -1,27 +1,6 @@
-// A minimal tagged-struct AST representation (api only).
+// AST Definitions for Rey Parser
 
-enum NodeKind {
-    Program,
-    Stmt,
-    Expr,
-    Type,
-    Pattern,
-}
-
-struct Span {
-    pub start: int,
-    pub end: int,
-    pub line: int,
-    pub column: int,
-}
-
-struct Node {
-    pub kind: NodeKind,
-    pub tag: String,
-    pub span: Span,
-    pub data: {String: Any},
-}
-
+// Literals
 enum LiteralKind {
     String,
     Char,
@@ -36,7 +15,326 @@ struct Literal {
     pub text: String,
 }
 
-struct Program {
-    pub statements: [Node],
+// Expression Kinds
+enum ExprKind {
+    Literal,
+    Identifier,
+    Binary,
+    Unary,
+    Call,
+    Index,
+    FieldAccess,
+    Lambda,
+    Match,
+    If,
+    Tuple,
+    Array,
+    Dict,
 }
 
+// Expressions
+struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+// Literal expression
+struct LiteralExpr {
+    pub kind: LiteralKind,
+    pub text: String,
+    pub span: Span,
+}
+
+// Identifier expression  
+struct IdentExpr {
+    pub name: String,
+    pub span: Span,
+}
+
+// Binary expression
+struct BinaryExpr {
+    pub left: Expr,
+    pub op: TokenKind,
+    pub right: Expr,
+    pub span: Span,
+}
+
+// Unary expression
+struct UnaryExpr {
+    pub op: TokenKind,
+    pub right: Expr,
+    pub span: Span,
+}
+
+// Call expression
+struct CallExpr {
+    pub callee: Expr,
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
+// Index expression
+struct IndexExpr {
+    pub target: Expr,
+    pub index: Expr,
+    pub span: Span,
+}
+
+// Field access expression
+struct FieldAccessExpr {
+    pub object: Expr,
+    pub name: String,
+    pub span: Span,
+}
+
+// Lambda expression
+struct LambdaExpr {
+    pub params: Vec<String>,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+// Match expression
+struct MatchExpr {
+    pub expr: Expr,
+    pub arms: Vec<MatchArm>,
+    pub span: Span,
+}
+
+struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Expr,
+    pub body: Expr,
+    pub span: Span,
+}
+
+// If expression
+struct IfExpr {
+    pub condition: Expr,
+    pub thenBranch: Expr,
+    pub elseBranch: Expr,
+    pub span: Span,
+}
+
+// Tuple expression
+struct TupleExpr {
+    pub elements: Vec<Expr>,
+    pub span: Span,
+}
+
+// Array expression
+struct ArrayExpr {
+    pub elements: Vec<Expr>,
+    pub span: Span,
+}
+
+// Dict expression
+struct DictExpr {
+    pub entries: Vec<DictEntry>,
+    pub span: Span,
+}
+
+struct DictEntry {
+    pub key: Expr,
+    pub value: Expr,
+    pub span: Span,
+}
+
+// Statement Kinds
+enum StmtKind {
+    VarDecl,
+    ConstDecl,
+    FuncDecl,
+    StructDecl,
+    EnumDecl,
+    Import,
+    Return,
+    Break,
+    Continue,
+    While,
+    For,
+    Loop,
+    Block,
+    ExprStmt,
+}
+
+// Statements
+struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+// Variable declaration
+struct VarDeclStmt {
+    pub name: String,
+    pub typeTag: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
+// Constant declaration
+struct ConstDeclStmt {
+    pub name: String,
+    pub typeTag: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
+// Function declaration
+struct FuncDeclStmt {
+    pub name: String,
+    pub params: Vec<FuncParam>,
+    pub returnType: String,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+struct FuncParam {
+    pub name: String,
+    pub typeTag: String,
+    pub default: Expr,
+}
+
+// Struct declaration
+struct StructDeclStmt {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub methods: Vec<FuncDeclStmt>,
+    pub span: Span,
+}
+
+struct StructField {
+    pub name: String,
+    pub typeTag: String,
+    pub isPub: bool,
+}
+
+// Enum declaration
+struct EnumDeclStmt {
+    pub name: String,
+    pub variants: Vec<String>,
+    pub span: Span,
+}
+
+// Import statement
+struct ImportStmt {
+    pub path: String,
+    pub items: Vec<String>,
+    pub span: Span,
+}
+
+// Return statement
+struct ReturnStmt {
+    pub value: Expr,
+    pub span: Span,
+}
+
+// Break statement
+struct BreakStmt {
+    pub label: String,
+    pub span: Span,
+}
+
+// Continue statement
+struct ContinueStmt {
+    pub label: String, 
+    pub span: Span,
+}
+
+// While statement
+struct WhileStmt {
+    pub condition: Expr,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+// For statement
+struct ForStmt {
+    pub variable: String,
+    pub iterable: Expr,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+// Loop statement
+struct LoopStmt {
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+// Block statement
+struct BlockStmt {
+    pub statements: Vec<Stmt>,
+    pub span: Span,
+}
+
+// Expression statement
+struct ExprStmt {
+    pub expr: Expr,
+    pub span: Span,
+}
+
+// Pattern kinds for match
+enum PatternKind {
+    Wildcard,
+    Literal,
+    Variable,
+    EnumVariant,
+    Struct,
+    Or,
+}
+
+struct Pattern {
+    pub kind: PatternKind,
+    pub span: Span,
+}
+
+struct WildcardPattern {
+    pub span: Span,
+}
+
+struct LiteralPattern {
+    pub literal: Literal,
+    pub span: Span,
+}
+
+struct VariablePattern {
+    pub name: String,
+    pub span: Span,
+}
+
+struct EnumVariantPattern {
+    pub enumName: String,
+    pub variant: String,
+    pub span: Span,
+}
+
+struct StructPattern {
+    pub structName: String,
+    pub fields: Vec<PatternField>,
+    pub span: Span,
+}
+
+struct PatternField {
+    pub name: String,
+    pub pattern: Pattern,
+    pub span: Span,
+}
+
+struct OrPattern {
+    pub left: Pattern,
+    pub right: Pattern,
+    pub span: Span,
+}
+
+// Program root
+struct Program {
+    pub statements: Vec<Stmt>,
+    pub span: Span,
+}
+
+// Parser error
+struct ParseError {
+    pub message: String,
+    pub span: Span,
+}
