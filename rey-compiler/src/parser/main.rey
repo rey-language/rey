@@ -1,31 +1,640 @@
-struct ParserOptions {
-    pub allowTrailingCommas: bool,
-    pub allowImplicitSemicolons: bool,
-}
+// Parser Implementation for Rey
+
+import lexer;
 
 struct Parser {
-    pub tokens: [Any],
+    pub tokens: Vec<Token>,
     pub current: int,
-    pub options: ParserOptions,
+    pub errors: Vec<ParseError>,
 }
 
-enum ParseErrorKind {
-    UnexpectedToken,
-    ExpectedToken,
-    UnexpectedEof,
+struct ParserResult {
+    pub program: Program,
+    pub errors: Vec<ParseError>,
 }
 
-struct ParseError {
-    pub kind: ParseErrorKind,
-    pub message: String,
-    pub span: Any,
+func isAtEnd(p: Parser): bool {
+    if p.current >= p.tokens.len() {
+        return true;
+    }
+    return p.tokens[p.current].kind == lexer.TokenKind.Eof;
 }
 
-export pub func newParser(tokens: [Any], options: ParserOptions): Parser {
-    return null;
+func peek(p: Parser): Token {
+    if isAtEnd(p) {
+        return p.tokens[p.tokens.len() - 1];
+    }
+    return p.tokens[p.current];
 }
 
-export pub func parseProgram(p: Parser): Any {
-    return null;
+func peekNext(p: Parser): Token {
+    if p.current + 1 >= p.tokens.len() {
+        return p.tokens[p.tokens.len() - 1];
+    }
+    return p.tokens[p.current + 1];
 }
 
+func advance(p: Parser): Token {
+    if isAtEnd(p) {
+        return p.tokens[p.tokens.len() - 1];
+    }
+    var token = p.tokens[p.current];
+    p.current = p.current + 1;
+    return token;
+}
+
+func check(p: Parser, kind: lexer.TokenKind): bool {
+    if isAtEnd(p) {
+        return false;
+    }
+    return peek(p).kind == kind;
+}
+
+func checkNext(p: Parser, kind: lexer.TokenKind): bool {
+    if p.current + 1 >= p.tokens.len() {
+        return false;
+    }
+    return peekNext(p).kind == kind;
+}
+
+func match(p: Parser, kinds: [lexer.TokenKind]): bool {
+    var i = 0;
+    loop {
+        if i >= kinds.len() {
+            break;
+        }
+        if check(p, kinds[i]) {
+            advance(p);
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+func consume(p: Parser, kind: lexer.TokenKind, message: String): Token {
+    if check(p, kind) {
+        return advance(p);
+    }
+    var span = peek(p).span;
+    p.errors.push(ParseError { message: message, span: span });
+    return p.tokens[0];
+}
+
+func error(p: Parser, message: String) {
+    var token = peek(p);
+    p.errors.push(ParseError { message: message, span: token.span });
+}
+
+func previous(p: Parser): Token {
+    if p.current == 0 {
+        return p.tokens[0];
+    }
+    return p.tokens[p.current - 1];
+}
+
+func makeSpan(p: Parser, start: int, end: int): Span {
+    var line = 1;
+    var column = 0;
+    if start < p.tokens.len() {
+        line = p.tokens[start].span.line;
+        column = p.tokens[start].span.column;
+    }
+    return Span { start: start, end: end, line: line, column: column };
+}
+
+func parseProgram(p: Parser): Program {
+    var statements = Vec.new();
+    loop {
+        if isAtEnd(p) {
+            break;
+        }
+        var stmt = parseStatement(p);
+        statements.push(stmt);
+    }
+    var span = makeSpan(p, 0, p.tokens.len() - 1);
+    return Program { statements: statements, span: span };
+}
+
+func parseStatement(p: Parser): Stmt {
+    var token = peek(p);
+    
+    if token.kind == lexer.TokenKind.Var {
+        return parseVarDecl(p);
+    }
+    if token.kind == lexer.TokenKind.Const {
+        return parseConstDecl(p);
+    }
+    if token.kind == lexer.TokenKind.Func {
+        return parseFuncDecl(p);
+    }
+    if token.kind == lexer.TokenKind.Struct {
+        return parseStructDecl(p);
+    }
+    if token.kind == lexer.TokenKind.Enum {
+        return parseEnumDecl(p);
+    }
+    if token.kind == lexer.TokenKind.Import {
+        return parseImport(p);
+    }
+    if token.kind == lexer.TokenKind.Return {
+        return parseReturn(p);
+    }
+    if token.kind == lexer.TokenKind.While {
+        return parseWhile(p);
+    }
+    if token.kind == lexer.TokenKind.For {
+        return parseFor(p);
+    }
+    if token.kind == lexer.TokenKind.Loop {
+        return parseLoop(p);
+    }
+    if token.kind == lexer.TokenKind.Break {
+        return parseBreak(p);
+    }
+    if token.kind == lexer.TokenKind.Continue {
+        return parseContinue(p);
+    }
+    if token.kind == lexer.TokenKind.LeftBrace {
+        return parseBlock(p);
+    }
+    
+    return parseExprStmt(p);
+}
+
+func parseVarDecl(p: Parser): Stmt {
+    var startToken = advance(p);
+    var nameToken = consume(p, lexer.TokenKind.Identifier, "var name expected");
+    var name = nameToken.lexeme;
+    var typeTag = "";
+    if match(p, [lexer.TokenKind.Colon]) {
+        var tt = consume(p, lexer.TokenKind.Identifier, "type expected");
+        typeTag = tt.lexeme;
+    }
+    var value = parseExpression(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return VarDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
+}
+
+func parseConstDecl(p: Parser): Stmt {
+    var startToken = advance(p);
+    var nameToken = consume(p, lexer.TokenKind.Identifier, "const name expected");
+    var name = nameToken.lexeme;
+    var typeTag = "";
+    if match(p, [lexer.TokenKind.Colon]) {
+        var tt = consume(p, lexer.TokenKind.Identifier, "type expected");
+        typeTag = tt.lexeme;
+    }
+    var value = parseExpression(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return ConstDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
+}
+
+func parseFuncDecl(p: Parser): Stmt {
+    var startToken = advance(p);
+    var nameToken = consume(p, lexer.TokenKind.Identifier, "func name expected");
+    var name = nameToken.lexeme;
+    consume(p, lexer.TokenKind.LeftParen, "( expected");
+    var params = parseFuncParams(p);
+    consume(p, lexer.TokenKind.RightParen, ") expected");
+    var returnType = "";
+    if match(p, [lexer.TokenKind.Colon]) {
+        var rt = consume(p, lexer.TokenKind.Identifier, "return type expected");
+        returnType = rt.lexeme;
+    }
+    var body = parseBlock(p);
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return FuncDeclStmt { name: name, params: params, returnType: returnType, body: body, span: span };
+}
+
+func parseFuncParams(p: Parser): Vec<FuncParam> {
+    var params = Vec.new();
+    if check(p, lexer.TokenKind.RightParen) {
+        return params;
+    }
+    loop {
+        var nameTok = consume(p, lexer.TokenKind.Identifier, "param expected");
+        var paramName = nameTok.lexeme;
+        var typeTag = "";
+        if match(p, [lexer.TokenKind.Colon]) {
+            var tt = consume(p, lexer.TokenKind.Identifier, "param type expected");
+            typeTag = tt.lexeme;
+        }
+        params.push(FuncParam { name: paramName, typeTag: typeTag, default: LiteralExpr { kind: LiteralKind.Null, text: "null", span: nameTok.span } });
+        if check(p, lexer.TokenKind.Comma) {
+            advance(p);
+        } else {
+            break;
+        }
+    }
+    return params;
+}
+
+func parseStructDecl(p: Parser): Stmt {
+    var startToken = advance(p);
+    var nameToken = consume(p, lexer.TokenKind.Identifier, "struct name expected");
+    var name = nameToken.lexeme;
+    consume(p, lexer.TokenKind.LeftBrace, "{ expected");
+    var fields = Vec.new();
+    var methods = Vec.new();
+    loop {
+        if check(p, lexer.TokenKind.RightBrace) {
+            advance(p);
+            break;
+        }
+        if match(p, [lexer.TokenKind.Func]) {
+            var method = parseFuncDecl(p);
+            methods.push(method);
+        } else {
+            var isPub = match(p, [lexer.TokenKind.Pub]);
+            var fieldNameTok = consume(p, lexer.TokenKind.Identifier, "field name expected");
+            var fieldName = fieldNameTok.lexeme;
+            var fieldType = "";
+            if match(p, [lexer.TokenKind.Colon]) {
+                var ft = consume(p, lexer.TokenKind.Identifier, "field type expected");
+                fieldType = ft.lexeme;
+            }
+            consume(p, lexer.TokenKind.Semicolon, "; expected");
+            fields.push(StructField { name: fieldName, typeTag: fieldType, isPub: isPub });
+        }
+    }
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return StructDeclStmt { name: name, fields: fields, methods: methods, span: span };
+}
+
+func parseEnumDecl(p: Parser): Stmt {
+    var startToken = advance(p);
+    var nameToken = consume(p, lexer.TokenKind.Identifier, "enum name expected");
+    var name = nameToken.lexeme;
+    consume(p, lexer.TokenKind.LeftBrace, "{ expected");
+    var variants = Vec.new();
+    loop {
+        if check(p, lexer.TokenKind.RightBrace) {
+            advance(p);
+            break;
+        }
+        var vt = consume(p, lexer.TokenKind.Identifier, "variant expected");
+        variants.push(vt.lexeme);
+        if check(p, lexer.TokenKind.Comma) {
+            advance(p);
+        }
+    }
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return EnumDeclStmt { name: name, variants: variants, span: span };
+}
+
+func parseImport(p: Parser): Stmt {
+    var startToken = advance(p);
+    var pathTok = consume(p, lexer.TokenKind.Identifier, "path expected");
+    var path = pathTok.lexeme;
+    var items = Vec.new();
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return ImportStmt { path: path, items: items, span: span };
+}
+
+func parseReturn(p: Parser): Stmt {
+    var startToken = advance(p);
+    var value = parseExpression(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return ReturnStmt { value: value, span: span };
+}
+
+func parseWhile(p: Parser): Stmt {
+    var startToken = advance(p);
+    consume(p, lexer.TokenKind.LeftParen, "( expected");
+    var cond = parseExpression(p);
+    consume(p, lexer.TokenKind.RightParen, ") expected");
+    var body = parseBlock(p);
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return WhileStmt { condition: cond, body: body, span: span };
+}
+
+func parseFor(p: Parser): Stmt {
+    var startToken = advance(p);
+    consume(p, lexer.TokenKind.LeftParen, "( expected");
+    var varTok = consume(p, lexer.TokenKind.Identifier, "var expected");
+    var varName = varTok.lexeme;
+    consume(p, lexer.TokenKind.In, "in expected");
+    var iter = parseExpression(p);
+    consume(p, lexer.TokenKind.RightParen, ") expected");
+    var body = parseBlock(p);
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return ForStmt { variable: varName, iterable: iter, body: body, span: span };
+}
+
+func parseLoop(p: Parser): Stmt {
+    var startToken = advance(p);
+    var body = parseBlock(p);
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return LoopStmt { body: body, span: span };
+}
+
+func parseBreak(p: Parser): Stmt {
+    var startToken = advance(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return BreakStmt { label: "", span: span };
+}
+
+func parseContinue(p: Parser): Stmt {
+    var startToken = advance(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return ContinueStmt { label: "", span: span };
+}
+
+func parseBlock(p: Parser): BlockStmt {
+    var startTok = consume(p, lexer.TokenKind.LeftBrace, "{ expected");
+    var stmts = Vec.new();
+    loop {
+        if check(p, lexer.TokenKind.RightBrace) || isAtEnd(p) {
+            break;
+        }
+        var stmt = parseStatement(p);
+        stmts.push(stmt);
+    }
+    consume(p, lexer.TokenKind.RightBrace, "} expected");
+    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+    return BlockStmt { statements: stmts, span: span };
+}
+
+func parseExprStmt(p: Parser): Stmt {
+    var expr = parseExpression(p);
+    consume(p, lexer.TokenKind.Semicolon, "; expected");
+    var span = expr.span;
+    return ExprStmt { expr: expr, span: span };
+}
+
+func parseExpression(p: Parser): Expr {
+    return parseOr(p);
+}
+
+func parseOr(p: Parser): Expr {
+    var left = parseAnd(p);
+    loop {
+        if match(p, [lexer.TokenKind.OrOr]) {
+            var right = parseAnd(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: lexer.TokenKind.OrOr, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseAnd(p: Parser): Expr {
+    var left = parseEquality(p);
+    loop {
+        if match(p, [lexer.TokenKind.AndAnd]) {
+            var right = parseEquality(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: lexer.TokenKind.AndAnd, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseEquality(p: Parser): Expr {
+    var left = parseComparison(p);
+    loop {
+        if match(p, [lexer.TokenKind.EqualEqual, lexer.TokenKind.NotEqual]) {
+            var op = previous(p).kind;
+            var right = parseComparison(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: op, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseComparison(p: Parser): Expr {
+    var left = parseTerm(p);
+    loop {
+        if match(p, [lexer.TokenKind.Less, lexer.TokenKind.Greater, lexer.TokenKind.LessEqual, lexer.TokenKind.GreaterEqual]) {
+            var op = previous(p).kind;
+            var right = parseTerm(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: op, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseTerm(p: Parser): Expr {
+    var left = parseFactor(p);
+    loop {
+        if match(p, [lexer.TokenKind.Plus, lexer.TokenKind.Minus]) {
+            var op = previous(p).kind;
+            var right = parseFactor(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: op, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseFactor(p: Parser): Expr {
+    var left = parseUnary(p);
+    loop {
+        if match(p, [lexer.TokenKind.Star, lexer.TokenKind.Slash, lexer.TokenKind.Percent]) {
+            var op = previous(p).kind;
+            var right = parseUnary(p);
+            var span = makeSpan(p, left.span.start, right.span.end);
+            left = BinaryExpr { left: left, op: op, right: right, span: span };
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+func parseUnary(p: Parser): Expr {
+    if match(p, [lexer.TokenKind.Not, lexer.TokenKind.Minus]) {
+        var op = previous(p).kind;
+        var right = parseUnary(p);
+        var span = makeSpan(p, right.span.start, right.span.end);
+        return UnaryExpr { op: op, right: right, span: span };
+    }
+    return parseCall(p);
+}
+
+func parseCall(p: Parser): Expr {
+    var expr = parsePrimary(p);
+    loop {
+        if check(p, lexer.TokenKind.LeftParen) {
+            advance(p);
+            var args = parseArgs(p);
+            consume(p, lexer.TokenKind.RightParen, ") expected");
+            var span = makeSpan(p, expr.span.start, previous(p).span.end);
+            expr = CallExpr { callee: expr, args: args, span: span };
+        } else if check(p, lexer.TokenKind.Dot) {
+            advance(p);
+            var nameTok = consume(p, lexer.TokenKind.Identifier, "prop expected");
+            var span = makeSpan(p, expr.span.start, nameTok.span.end);
+            expr = FieldAccessExpr { object: expr, name: nameTok.lexeme, span: span };
+        } else if check(p, lexer.TokenKind.LeftBracket) {
+            advance(p);
+            var idx = parseExpression(p);
+            consume(p, lexer.TokenKind.RightBracket, "] expected");
+            var span = makeSpan(p, expr.span.start, previous(p).span.end);
+            expr = IndexExpr { target: expr, index: idx, span: span };
+        } else {
+            break;
+        }
+    }
+    return expr;
+}
+
+func parseArgs(p: Parser): Vec<Expr> {
+    var args = Vec.new();
+    if check(p, lexer.TokenKind.RightParen) {
+        return args;
+    }
+    loop {
+        var arg = parseExpression(p);
+        args.push(arg);
+        if check(p, lexer.TokenKind.Comma) {
+            advance(p);
+        } else {
+            break;
+        }
+    }
+    return args;
+}
+
+func parsePrimary(p: Parser): Expr {
+    var tok = peek(p);
+    if tok.kind == lexer.TokenKind.True {
+        advance(p);
+        return LiteralExpr { kind: LiteralKind.Bool, text: "true", span: tok.span };
+    }
+    if tok.kind == lexer.TokenKind.False {
+        advance(p);
+        return LiteralExpr { kind: LiteralKind.Bool, text: "false", span: tok.span };
+    }
+    if tok.kind == lexer.TokenKind.Null {
+        advance(p);
+        return LiteralExpr { kind: LiteralKind.Null, text: "null", span: tok.span };
+    }
+    if tok.kind == lexer.TokenKind.NumberLiteral {
+        var nt = advance(p);
+        if nt.lexeme.contains(".") {
+            return LiteralExpr { kind: LiteralKind.Float, text: nt.lexeme, span: nt.span };
+        }
+        return LiteralExpr { kind: LiteralKind.Int, text: nt.lexeme, span: nt.span };
+    }
+    if tok.kind == lexer.TokenKind.StringLiteral {
+        var st = advance(p);
+        return LiteralExpr { kind: LiteralKind.String, text: st.lexeme, span: st.span };
+    }
+    if tok.kind == lexer.TokenKind.Identifier {
+        var it = advance(p);
+        return IdentExpr { name: it.lexeme, span: it.span };
+    }
+    if tok.kind == lexer.TokenKind.LeftParen {
+        return parseGrouping(p);
+    }
+    if tok.kind == lexer.TokenKind.LeftBracket {
+        return parseArray(p);
+    }
+    if tok.kind == lexer.TokenKind.LeftBrace {
+        return parseDict(p);
+    }
+    if tok.kind == lexer.TokenKind.Func {
+        return parseLambda(p);
+    }
+    error(p, "expression expected");
+    advance(p);
+    return IdentExpr { name: "", span: tok.span };
+}
+
+func parseGrouping(p: Parser): Expr {
+    var startTok = advance(p);
+    var expr = parseExpression(p);
+    consume(p, lexer.TokenKind.RightParen, ") expected");
+    return expr;
+}
+
+func parseArray(p: Parser): Expr {
+    var startTok = consume(p, lexer.TokenKind.LeftBracket, "[ expected");
+    var elems = Vec.new();
+    if !check(p, lexer.TokenKind.RightBracket) {
+        loop {
+            var e = parseExpression(p);
+            elems.push(e);
+            if check(p, lexer.TokenKind.Comma) {
+                advance(p);
+            } else {
+                break;
+            }
+        }
+    }
+    consume(p, lexer.TokenKind.RightBracket, "] expected");
+    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+    return ArrayExpr { elements: elems, span: span };
+}
+
+func parseDict(p: Parser): Expr {
+    var startTok = consume(p, lexer.TokenKind.LeftBrace, "{ expected");
+    var entries = Vec.new();
+    if !check(p, lexer.TokenKind.RightBrace) {
+        loop {
+            var k = parseExpression(p);
+            consume(p, lexer.TokenKind.Colon, ": expected");
+            var v = parseExpression(p);
+            entries.push(DictEntry { key: k, value: v, span: k.span });
+            if check(p, lexer.TokenKind.Comma) {
+                advance(p);
+            } else {
+                break;
+            }
+        }
+    }
+    consume(p, lexer.TokenKind.RightBrace, "} expected");
+    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+    return DictExpr { entries: entries, span: span };
+}
+
+func parseLambda(p: Parser): Expr {
+    var startTok = advance(p);
+    consume(p, lexer.TokenKind.LeftParen, "( expected");
+    var params = Vec.new();
+    if !check(p, lexer.TokenKind.RightParen) {
+        loop {
+            var pt = consume(p, lexer.TokenKind.Identifier, "param expected");
+            params.push(pt.lexeme);
+            if check(p, lexer.TokenKind.Comma) {
+                advance(p);
+            } else {
+                break;
+            }
+        }
+    }
+    consume(p, lexer.TokenKind.RightParen, ") expected");
+    var body = parseBlock(p);
+    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+    return LambdaExpr { params: params, body: body, span: span };
+}
+
+export pub func newParser(tokens: Vec<Token>): Parser {
+    return Parser { tokens: tokens, current: 0, errors: Vec.new() };
+}
+
+export pub func parse(tokens: Vec<Token>, path: String): ParserResult {
+    var parser = newParser(tokens);
+    var program = parseProgram(parser);
+    return ParserResult { program: program, errors: parser.errors };
+}

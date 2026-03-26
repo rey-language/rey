@@ -1,40 +1,247 @@
-enum IrKind {
-    Module,
-    Function,
-    Block,
-    Instr,
+// LLVM Codegen for Rey
+
+struct CodegenContext {
+    pub moduleName: String,
+    pub functions: Vec<String>,
+    pub strings: Vec<String>,
+    pub currentFunc: String,
+    pub blockId: int,
 }
 
-struct IrNode {
-    pub kind: IrKind,
-    pub tag: String,
-    pub data: {String: Any},
+func ctxNew(name: String): CodegenContext {
+    return CodegenContext {
+        moduleName: name,
+        functions: Vec.new(),
+        strings: Vec.new(),
+        currentFunc: "",
+        blockId: 0,
+    };
 }
 
-enum Backend {
-    Bytecode,
-    C,
-    Llvm,
-    Js,
+func llvmType(ty: Type): String {
+    if ty.kind == TypeKind.Int {
+        return "i64";
+    }
+    if ty.kind == TypeKind.Float {
+        return "double";
+    }
+    if ty.kind == TypeKind.Bool {
+        return "i1";
+    }
+    if ty.kind == TypeKind.String {
+        return "i8*";
+    }
+    if ty.kind == TypeKind.Void {
+        return "void";
+    }
+    if ty.kind == TypeKind.Array {
+        return "i8*";
+    }
+    return "i8*";
 }
 
-struct CodegenOptions {
-    pub backend: Backend,
-    pub optimize: bool,
-    pub debug: bool,
+func genLit(lit: LiteralExpr): String {
+    if lit.kind == LiteralKind.Int {
+        return lit.text;
+    }
+    if lit.kind == LiteralKind.Float {
+        return lit.text;
+    }
+    if lit.kind == LiteralKind.Bool {
+        if lit.text == "true" {
+            return "1";
+        }
+        return "0";
+    }
+    if lit.kind == LiteralKind.String {
+        return "\"" + lit.text + "\"";
+    }
+    if lit.kind == LiteralKind.Null {
+        return "null";
+    }
+    return "undef";
 }
 
-struct CodegenResult {
-    pub ok: bool,
-    pub ir: [IrNode],
-    pub diagnostics: [Any],
+func genExpr(ctx: CodegenContext, expr: Expr, env: TypeEnv): String {
+    if expr.kind == ExprKind.Literal {
+        var le = expr;
+        return genLit(le);
+    }
+    if expr.kind == ExprKind.Identifier {
+        var ie = expr;
+        return "%" + ie.name;
+    }
+    if expr.kind == ExprKind.Binary {
+        var be = expr;
+        var left = genExpr(ctx, be.left, env);
+        var right = genExpr(ctx, be.right, env);
+        var op = "+";
+        if be.op == lexer.TokenKind.Minus { op = "-"; }
+        if be.op == lexer.TokenKind.Star { op = "*"; }
+        if be.op == lexer.TokenKind.Slash { op = "sitofp"; }
+        if be.op == lexer.TokenKind.EqualEqual { op = "icmp eq"; }
+        if be.op == lexer.TokenKind.NotEqual { op = "icmp ne"; }
+        if be.op == lexer.TokenKind.Less { op = "icmp slt"; }
+        if be.op == lexer.TokenKind.Greater { op = "icmp sgt"; }
+        if be.op == lexer.TokenKind.LessEqual { op = "icmp sle"; }
+        if be.op == lexer.TokenKind.GreaterEqual { op = "icmp sge"; }
+        return left + " " + op + " " + right;
+    }
+    if expr.kind == ExprKind.Call {
+        var ce = expr;
+        var callee = genExpr(ctx, ce.callee, env);
+        var args = "";
+        var i = 0;
+        loop {
+            if i >= ce.args.len() {
+                break;
+            }
+            if i > 0 { args = args + ", "; }
+            args = args + genExpr(ctx, ce.args[i], env);
+            i = i + 1;
+        }
+        return callee + "(" + args + ")";
+    }
+    if expr.kind == ExprKind.FieldAccess {
+        var fae = expr;
+        var obj = genExpr(ctx, fae.object, env);
+        return obj + "." + fae.name;
+    }
+    if expr.kind == ExprKind.Index {
+        var iexpr = expr;
+        var target = genExpr(ctx, iexpr.target, env);
+        var index = genExpr(ctx, iexpr.index, env);
+        return target + "[" + index + "]";
+    }
+    if expr.kind == ExprKind.Lambda {
+        return "lambda";
+    }
+    return "undef";
 }
 
-export pub func lowerToIr(typedProgram: Any): CodegenResult {
-    return null;
+func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
+    var code = "";
+    
+    if stmt.kind == StmtKind.VarDecl {
+        var vds = stmt;
+        var value = genExpr(ctx, vds.value, env);
+        code = "%" + vds.name + " = alloca i64, align 8\n";
+        code = code + "store i64 " + value + ", i64* %" + vds.name + "\n";
+    }
+    
+    if stmt.kind == StmtKind.ConstDecl {
+        var cds = stmt;
+        var value = genExpr(ctx, cds.value, env);
+        code = "%" + cds.name + " = alloca i64, align 8\n";
+        code = code + "store i64 " + value + ", i64* %" + cds.name + "\n";
+    }
+    
+    if stmt.kind == StmtKind.FuncDecl {
+        var fds = stmt;
+        ctx.currentFunc = fds.name;
+        ctx.blockId = 0;
+        
+        var retTy = "i64";
+        var params = "";
+        var i = 0;
+        loop {
+            if i >= fds.params.len() {
+                break;
+            }
+            if i > 0 { params = params + ", "; }
+            params = params + "i64 %" + fds.params[i].name;
+            i = i + 1;
+        }
+        
+        code = "define " + retTy + " @" + fds.name + "(" + params + ") {\n";
+        code = code + "entry:\n";
+        
+        i = 0;
+        loop {
+            if i >= fds.params.len() {
+                break;
+            }
+            var pname = fds.params[i].name;
+            code = code + "%" + pname + "_addr = alloca i64, align 8\n";
+            code = code + "store i64 %" + pname + ", i64* %" + pname + "_addr\n";
+            i = i + 1;
+        }
+        
+        var j = 0;
+        loop {
+            if j >= fds.body.len() {
+                break;
+            }
+            code = code + genStmt(ctx, fds.body[j], env);
+            j = j + 1;
+        }
+        
+        code = code + "ret i64 0\n";
+        code = code + "}\n";
+    }
+    
+    if stmt.kind == StmtKind.Return {
+        var rs = stmt;
+        var value = genExpr(ctx, rs.value, env);
+        code = "ret i64 " + value + "\n";
+    }
+    
+    if stmt.kind == StmtKind.ExprStmt {
+        var es = stmt;
+        code = genExpr(ctx, es.expr, env) + "\n";
+    }
+    
+    return code;
 }
 
-export pub func emit(typedProgram: Any, options: CodegenOptions): Any {
-    return null;
+func codegenProgram(ctx: CodegenContext, program: Program): String {
+    var code = "; Module: " + ctx.moduleName + "\n";
+    code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
+    code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
+    
+    code = code + "define void @println(i8*) {\n";
+    code = code + "  %call = call i32 (i8*, ...) @printf(i8* %0)\n";
+    code = code + "  ret void\n";
+    code = code + "}\n\n";
+    
+    code = code + "declare i32 @printf(i8*, ...)\n\n";
+    
+    var i = 0;
+    loop {
+        if i >= program.statements.len() {
+            break;
+        }
+        code = code + genStmt(ctx, program.statements[i], envNew());
+        i = i + 1;
+    }
+    
+    return code;
 }
 
+export pub func generateIR(program: Program): String {
+    var ctx = ctxNew("rey_module");
+    return codegenProgram(ctx, program);
+}
+
+export pub func compileLLVM(ir: String, outputPath: String, release: bool): Any {
+    writeFile("/tmp/rey_out.ll", ir);
+    
+    var opt = "-O2";
+    if release { opt = "-O3"; }
+    
+    var llcCmd = "llc " + opt + " /tmp/rey_out.ll -o /tmp/rey_out.o";
+    var llcResult = exec(llcCmd);
+    if llcResult.kind == Result.Err {
+        var errMsg = "llc failed";
+        return Result.Err(errMsg);
+    }
+    
+    var clangCmd = "clang /tmp/rey_out.o -o " + outputPath;
+    var clangResult = exec(clangCmd);
+    if clangResult.kind == Result.Err {
+        var errMsg = "clang failed";
+        return Result.Err(errMsg);
+    }
+    
+    return Result.Ok(outputPath);
+}

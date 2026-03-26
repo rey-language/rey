@@ -1,9 +1,9 @@
 // Rey Compiler - Full Pipeline
 
-import lexer.main;
-import parser.main;
-import typecheck.main;
-import codegen.main;
+import lexer;
+import parser;
+import typecheck;
+import codegen;
 
 struct CompileResult {
     pub ok: bool,
