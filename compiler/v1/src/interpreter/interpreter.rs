@@ -1,9 +1,9 @@
-use crate::ast::{Expr, Stmt};
-use crate::typecheck::TypeChecker;
-use crate::typecheck::TypeError;
 use super::environment::Environment;
 use super::executor::Executor;
 use super::std::StdLib;
+use crate::ast::{Expr, Stmt};
+use crate::typecheck::TypeChecker;
+use crate::typecheck::TypeError;
 
 pub enum InterpretError {
     Type(TypeError),
@@ -55,7 +55,8 @@ impl Interpreter {
         let mut checker = TypeChecker::new();
         checker.checkProgram(statements)?;
 
-        self.executor.execute_block(statements, &mut self.environment)?;
+        self.executor
+            .execute_block(statements, &mut self.environment)?;
 
         if self.environment.get("main").is_some() {
             let call = Expr::Call {

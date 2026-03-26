@@ -312,7 +312,12 @@ impl ResolverState {
                         item.span,
                     )?;
                     if self.stack.contains(&importFile) {
-                        return Err(self.circularError(ownerFile, ownerSource, item.span, &importFile));
+                        return Err(self.circularError(
+                            ownerFile,
+                            ownerSource,
+                            item.span,
+                            &importFile,
+                        ));
                     }
                     let imported = self.resolveFile(&importFile)?;
                     if !includedFiles.contains(&importFile) {
@@ -325,7 +330,10 @@ impl ResolverState {
                         if visibility == FunctionVisibility::ExportPub {
                             namespaceEntries.push((
                                 name.clone(),
-                                Expr::Variable { name, span: item.span },
+                                Expr::Variable {
+                                    name,
+                                    span: item.span,
+                                },
                             ));
                         }
                     }

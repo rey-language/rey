@@ -104,10 +104,26 @@ impl StdLib {
                     return Some(Err(format!("max expects 2 arguments, got {}", args.len())));
                 }
                 match (&args[0], &args[1]) {
-                    (Value::Int(a), Value::Int(b)) => Some(Ok(Value::Int(if a > b { *a } else { *b }))),
-                    (Value::Float(a), Value::Float(b)) => Some(Ok(Value::Float(if a > b { *a } else { *b }))),
-                    (Value::Int(a), Value::Float(b)) => Some(Ok(Value::Float(if (*a as f64) > *b { *a as f64 } else { *b }))),
-                    (Value::Float(a), Value::Int(b)) => Some(Ok(Value::Float(if *a > (*b as f64) { *a } else { *b as f64 }))),
+                    (Value::Int(a), Value::Int(b)) => {
+                        Some(Ok(Value::Int(if a > b { *a } else { *b })))
+                    }
+                    (Value::Float(a), Value::Float(b)) => {
+                        Some(Ok(Value::Float(if a > b { *a } else { *b })))
+                    }
+                    (Value::Int(a), Value::Float(b)) => {
+                        Some(Ok(Value::Float(if (*a as f64) > *b {
+                            *a as f64
+                        } else {
+                            *b
+                        })))
+                    }
+                    (Value::Float(a), Value::Int(b)) => {
+                        Some(Ok(Value::Float(if *a > (*b as f64) {
+                            *a
+                        } else {
+                            *b as f64
+                        })))
+                    }
                     _ => Some(Err("max expects two numbers".to_string())),
                 }
             }
@@ -116,10 +132,26 @@ impl StdLib {
                     return Some(Err(format!("min expects 2 arguments, got {}", args.len())));
                 }
                 match (&args[0], &args[1]) {
-                    (Value::Int(a), Value::Int(b)) => Some(Ok(Value::Int(if a < b { *a } else { *b }))),
-                    (Value::Float(a), Value::Float(b)) => Some(Ok(Value::Float(if a < b { *a } else { *b }))),
-                    (Value::Int(a), Value::Float(b)) => Some(Ok(Value::Float(if (*a as f64) < *b { *a as f64 } else { *b }))),
-                    (Value::Float(a), Value::Int(b)) => Some(Ok(Value::Float(if *a < (*b as f64) { *a } else { *b as f64 }))),
+                    (Value::Int(a), Value::Int(b)) => {
+                        Some(Ok(Value::Int(if a < b { *a } else { *b })))
+                    }
+                    (Value::Float(a), Value::Float(b)) => {
+                        Some(Ok(Value::Float(if a < b { *a } else { *b })))
+                    }
+                    (Value::Int(a), Value::Float(b)) => {
+                        Some(Ok(Value::Float(if (*a as f64) < *b {
+                            *a as f64
+                        } else {
+                            *b
+                        })))
+                    }
+                    (Value::Float(a), Value::Int(b)) => {
+                        Some(Ok(Value::Float(if *a < (*b as f64) {
+                            *a
+                        } else {
+                            *b as f64
+                        })))
+                    }
                     _ => Some(Err("min expects two numbers".to_string())),
                 }
             }

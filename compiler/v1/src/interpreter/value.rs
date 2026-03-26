@@ -21,7 +21,10 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
-    EnumVariant { enum_name: String, variant: String },
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+    },
     Function(Function),
     Tuple(Rc<RefCell<Vec<Value>>>),
     Array(Rc<RefCell<Vec<Value>>>),
@@ -87,11 +90,20 @@ impl PartialEq for Value {
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::Int(a), Value::Int(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
-            (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => (*a as f64) == *b,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::EnumVariant { enum_name: en1, variant: v1 }, Value::EnumVariant { enum_name: en2, variant: v2 }) => {
-                en1 == en2 && v1 == v2
+            (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => {
+                (*a as f64) == *b
             }
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (
+                Value::EnumVariant {
+                    enum_name: en1,
+                    variant: v1,
+                },
+                Value::EnumVariant {
+                    enum_name: en2,
+                    variant: v2,
+                },
+            ) => en1 == en2 && v1 == v2,
             (Value::Function(a), Value::Function(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => {
                 let a = a.borrow();

@@ -145,7 +145,9 @@ impl Executor {
                             match self.execute_block_with_control_flow(body, env)? {
                                 ControlFlow::Break => break,
                                 ControlFlow::Continue => continue,
-                                ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                ControlFlow::Return(value) => {
+                                    return Ok(ControlFlow::return_value(value))
+                                }
                                 ControlFlow::Normal(_) => {}
                             }
                         }
@@ -160,7 +162,9 @@ impl Executor {
                                     match self.execute_block_with_control_flow(body, env)? {
                                         ControlFlow::Break => break,
                                         ControlFlow::Continue => continue,
-                                        ControlFlow::Return(value) => return Ok(ControlFlow::return_value(value)),
+                                        ControlFlow::Return(value) => {
+                                            return Ok(ControlFlow::return_value(value))
+                                        }
                                         ControlFlow::Normal(_) => {}
                                     }
                                 }
@@ -225,14 +229,29 @@ impl Executor {
                     None
                 }
             }
-            (Pattern::EnumVariant(enum_name, variant), Value::EnumVariant { enum_name: en, variant: v }) => {
+            (
+                Pattern::EnumVariant(enum_name, variant),
+                Value::EnumVariant {
+                    enum_name: en,
+                    variant: v,
+                },
+            ) => {
                 if enum_name == en && variant == v {
                     Some(Vec::new())
                 } else {
                     None
                 }
             }
-            (Pattern::Struct { struct_name, fields }, Value::StructInstance { struct_name: sn, fields: vals }) => {
+            (
+                Pattern::Struct {
+                    struct_name,
+                    fields,
+                },
+                Value::StructInstance {
+                    struct_name: sn,
+                    fields: vals,
+                },
+            ) => {
                 if struct_name != sn {
                     return None;
                 }
@@ -248,8 +267,16 @@ impl Executor {
             (Pattern::Variable(name), val) => {
                 // Disambiguate enum-variant constants from variable-binding patterns.
                 // If the identifier resolves to an enum variant value, treat it as a constant pattern.
-                if let (Some(Value::EnumVariant { enum_name: enp, variant: vp }), Value::EnumVariant { enum_name: envv, variant: vv }) =
-                    (env.get(name), val)
+                if let (
+                    Some(Value::EnumVariant {
+                        enum_name: enp,
+                        variant: vp,
+                    }),
+                    Value::EnumVariant {
+                        enum_name: envv,
+                        variant: vv,
+                    },
+                ) = (env.get(name), val)
                 {
                     if enp == envv && vp == vv {
                         return Some(Vec::new());
@@ -269,7 +296,9 @@ impl Executor {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
-            Expr::Binary { left, op, right, .. } => {
+            Expr::Binary {
+                left, op, right, ..
+            } => {
                 let left_val = self.evaluate_expr(left, env)?;
                 let right_val = self.evaluate_expr(right, env)?;
                 self.evaluate_binary(left_val, op, right_val)
@@ -330,7 +359,32 @@ impl Executor {
                         .get(&s)
                         .cloned()
                         .ok_or_else(|| "Dictionary key not found".to_string()),
-                    _ => Err("Indexing is only supported for arrays (number index) and dictionaries (string key)".to_string()),
+                    (Value::String(s), Value::Int(n)) => {
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("String index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        match s.chars().nth(idx) {
+                            Some(c) => Ok(Value::String(c.to_string())),
+                            None => Err("String index out of bounds".to_string()),
+                        }
+                    }
+                    (Value::String(s), Value::Float(n)) => {
+                        if n.fract() != 0.0 {
+                            return Err("String index must be an integer".to_string());
+                        }
+                        let idx = n as isize;
+                        if idx < 0 {
+                            return Err("String index must be non-negative".to_string());
+                        }
+                        let idx = idx as usize;
+                        match s.chars().nth(idx) {
+                            Some(c) => Ok(Value::String(c.to_string())),
+                            None => Err("String index out of bounds".to_string()),
+                        }
+                    }
+                    _ => Err("Indexing is only supported for arrays (number index), dictionaries (string key), and strings (number index)".to_string()),
                 }
             }
             Expr::Get { object, name, .. } => {
@@ -530,7 +584,12 @@ impl Executor {
                 env.assign(name, val.clone())?;
                 Ok(val)
             }
-            Expr::Set { object, name, value, .. } => {
+            Expr::Set {
+                object,
+                name,
+                value,
+                ..
+            } => {
                 if matches!(object.as_ref(), Expr::Get { .. }) {
                     return Err(format!(
                         "error[E010]: nested field assignment is not supported (got '.{} = ...')",
@@ -544,16 +603,20 @@ impl Executor {
                         d.borrow_mut().insert(name.clone(), val.clone());
                         Ok(val)
                     }
-                    Value::StructInstance { struct_name, fields } => {
+                    Value::StructInstance {
+                        struct_name,
+                        fields,
+                    } => {
                         let def = env
                             .get_struct(&struct_name)
                             .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?;
-                        let field = def.fields.iter().find(|f| f.name == *name).ok_or_else(|| {
-                            format!(
-                                "error[E004]: unknown field '{}' on struct '{}'",
-                                name, struct_name
-                            )
-                        })?;
+                        let field =
+                            def.fields.iter().find(|f| f.name == *name).ok_or_else(|| {
+                                format!(
+                                    "error[E004]: unknown field '{}' on struct '{}'",
+                                    name, struct_name
+                                )
+                            })?;
                         if !field.is_pub {
                             return Err(format!(
                                 "error[E011]: cannot mutate private field '{}' on struct '{}'",
@@ -570,10 +633,18 @@ impl Executor {
                             ))
                         }
                     }
-                    _ => Err("Field assignment is only supported for dictionaries and structs".to_string()),
+                    _ => Err(
+                        "Field assignment is only supported for dictionaries and structs"
+                            .to_string(),
+                    ),
                 }
             }
-            Expr::IndexSet { target, index, value, .. } => {
+            Expr::IndexSet {
+                target,
+                index,
+                value,
+                ..
+            } => {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
                 let val = self.evaluate_expr(value, env)?;
@@ -614,7 +685,9 @@ impl Executor {
                     _ => Err("Index assignment is only supported for arrays (number index) and dictionaries (string key)".to_string()),
                 }
             }
-            Expr::Update { name, op, prefix, .. } => {
+            Expr::Update {
+                name, op, prefix, ..
+            } => {
                 let current = env
                     .get(name)
                     .cloned()
@@ -629,7 +702,11 @@ impl Executor {
                         };
                         let new_n = n + delta;
                         env.assign(name, Value::Int(new_n))?;
-                        Ok(if *prefix { Value::Int(new_n) } else { Value::Int(n) })
+                        Ok(if *prefix {
+                            Value::Int(new_n)
+                        } else {
+                            Value::Int(n)
+                        })
                     }
                     Value::Float(n) => {
                         let delta = match op {
@@ -639,7 +716,11 @@ impl Executor {
                         };
                         let new_n = n + delta;
                         env.assign(name, Value::Float(new_n))?;
-                        Ok(if *prefix { Value::Float(new_n) } else { Value::Float(n) })
+                        Ok(if *prefix {
+                            Value::Float(new_n)
+                        } else {
+                            Value::Float(n)
+                        })
                     }
                     _ => Err("Can only apply ++/-- to numbers".to_string()),
                 }
@@ -700,19 +781,14 @@ impl Executor {
                             }
 
                             if argIndex < evaluated_args.len() {
-                                function_env.define(
-                                    param.name.clone(),
-                                    evaluated_args[argIndex].clone(),
-                                );
+                                function_env
+                                    .define(param.name.clone(), evaluated_args[argIndex].clone());
                                 argIndex += 1;
                                 continue;
                             }
 
                             let def = param.default.as_ref().ok_or_else(|| {
-                                format!(
-                                    "Missing argument '{}' and no default provided",
-                                    param.name
-                                )
+                                format!("Missing argument '{}' and no default provided", param.name)
                             })?;
                             let val = self.evaluate_expr(def, &mut function_env)?;
                             function_env.define(param.name.clone(), val);

@@ -1,6 +1,6 @@
+use super::environment::Environment;
 use crate::ast::{Parameter, Stmt};
 use crate::lexer::span::Span;
-use super::environment::Environment;
 
 #[derive(Clone)]
 pub struct Function {
