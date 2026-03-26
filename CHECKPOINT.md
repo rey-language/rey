@@ -1,34 +1,30 @@
 # Rey Language - Phase Checkpoint
 # Date: Mar 27, 2026
 
-## Current Phase: PHASE 2 COMPLETE - New Data Types
+## Current Phase: PHASE 3 COMPLETE - Native File System Builtins
 
 ### What's Working (v0.2.0+):
-- ✅ All 7 cargo tests pass
 - ✅ Phase 0 - Baseline audit complete
-- ✅ Phase 1 - Compiler v0.2.0 hardening complete  
-- ✅ Phase 2 - New data types implemented:
-  - Vec: push, pop, len, get, set, contains, indexOf
-  - HashMap: set, get, delete, has, len
-  - Stack: push, pop, peek, isEmpty, len
-  - Queue: enqueue, dequeue, peek, isEmpty, len
-  - Option: Some, None, unwrap, unwrapOr, isSome, isNone
-  - Result: Ok, Err, unwrap, unwrapOr, isOk, isErr
+- ✅ Phase 1 - Compiler v0.2.0 hardening
+- ✅ Phase 2 - New data types (Vec, HashMap, Stack, Queue, Option, Result)
+- ✅ Phase 3 - Native fs/process builtins:
+  - readFile, writeFile, appendFile
+  - fileExists, deleteFile, mkdir, listDir
+  - getEnv, args, exit, exec
+- ✅ All 7 tests pass
 
-### Phase 3 - File System Builtins - NOT YET STARTED
-Need to add: readFile, writeFile, appendFile, fileExists, deleteFile, mkdir, listDir, getEnv, args, exit, exec
+### Phase 4 - Std Library in Rey - NOT STARTED
+Need to create modules using the new builtins:
+- std/src/fs/main.rey
+- std/src/process/main.rey
+- std/src/io/main.rey
+- std/src/string/main.rey
+- std/src/collections/main.rey
 
-### Phase 4 - Std Library in Rey - NOT YET STARTED
-Need to create: std/src/fs/main.rey, std/src/process/main.rey, std/src/io/main.rey, std/src/string/main.rey, std/src/collections/main.rey
+### Phase 5-10 - Rey Compiler Bootstrap - NOT STARTED
+Lexer, parser, typechecker, codegen in Rey
 
-### Phases 5-10 - Rey Compiler Bootstrap - NOT YET STARTED
-Lexing/parsing/typechecking/codegen in Rey
-
-### What Still Needs Work (Phase 2 continuation):
-- Vec: add map, filter, reduce, reverse, sort, slice
-- LinkedList: add head(), tail(), append(), toArray() 
-- HashMap: add keys(), values()
-- Named tuples / tuple destructuring
-
-### Syntax.md - Needs update
-New data types need to be documented
+### Continuation
+- Push current work
+- Update primer and CHANGELOG
+- Resume with Phase 4 or Phases 5-10
