@@ -854,7 +854,7 @@ impl Parser {
                 continue;
             }
 
-            if self.matchToken(&TokenKind::Dot) {
+            if self.matchToken(&TokenKind::Dot) || self.matchToken(&TokenKind::ColonColon) {
                 let member_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     TokenKind::NumberLiteral(raw) => {
@@ -864,7 +864,7 @@ impl Parser {
                         }
                         (n as i64).to_string()
                     }
-                    _ => return Err(self.error("Expected identifier after '.'.")),
+                    _ => return Err(self.error("Expected identifier after '.' or '::'.")),
                 };
                 self.advance();
 

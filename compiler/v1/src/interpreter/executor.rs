@@ -495,6 +495,73 @@ impl Executor {
                 args,
                 ..
             } => {
+                // Handle Option and Result constructors specially
+                if struct_name == "Option" {
+                    let mut evaluated_args = Vec::new();
+                    for a in args {
+                        evaluated_args.push(self.evaluate_expr(a, env)?);
+                    }
+                    match method.as_str() {
+                        "Some" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Option::Some expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Option(Rc::new(RefCell::new(Some(
+                                evaluated_args.remove(0),
+                            )))));
+                        }
+                        "None" => {
+                            return Ok(Value::Option(Rc::new(RefCell::new(None))));
+                        }
+                        _ => return Err(format!("Unknown Option method: {}", method)),
+                    }
+                }
+                if struct_name == "Result" {
+                    let mut evaluated_args = Vec::new();
+                    for a in args {
+                        evaluated_args.push(self.evaluate_expr(a, env)?);
+                    }
+                    match method.as_str() {
+                        "Ok" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Result::Ok expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Result(Rc::new(RefCell::new(Ok(
+                                evaluated_args.remove(0)
+                            )))));
+                        }
+                        "Err" => {
+                            if evaluated_args.len() != 1 {
+                                return Err("Result::Err expects 1 argument".to_string());
+                            }
+                            let err_msg = match evaluated_args.remove(0) {
+                                Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            return Ok(Value::Result(Rc::new(RefCell::new(Err(err_msg)))));
+                        }
+                        _ => return Err(format!("Unknown Result method: {}", method)),
+                    }
+                }
+                // Handle container constructors: Vec.new(), HashMap.new(), etc.
+                if struct_name == "Vec" && method == "new" {
+                    return Ok(Value::Vec(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "LinkedList" && method == "new" {
+                    return Ok(Value::LinkedList(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "HashMap" && method == "new" {
+                    return Ok(Value::HashMap(Rc::new(RefCell::new(
+                        std::collections::HashMap::new(),
+                    ))));
+                }
+                if struct_name == "Stack" && method == "new" {
+                    return Ok(Value::Stack(Rc::new(RefCell::new(vec![]))));
+                }
+                if struct_name == "Queue" && method == "new" {
+                    return Ok(Value::Queue(Rc::new(RefCell::new(vec![]))));
+                }
+
                 let def = env
                     .get_struct(struct_name)
                     .ok_or_else(|| format!("Undefined struct '{}'", struct_name))?
@@ -736,6 +803,50 @@ impl Executor {
                         super::std::StdLib::call_builtin_function(name, &evaluated_args)
                     {
                         return result;
+                    }
+                    // Handle constructor calls
+                    match name.as_str() {
+                        "Vec.new" => return Ok(Value::Vec(Rc::new(RefCell::new(vec![])))),
+                        "LinkedList.new" => {
+                            return Ok(Value::LinkedList(Rc::new(RefCell::new(vec![]))))
+                        }
+                        "HashMap.new" => {
+                            return Ok(Value::HashMap(Rc::new(RefCell::new(
+                                std::collections::HashMap::new(),
+                            ))))
+                        }
+                        "Stack.new" => return Ok(Value::Stack(Rc::new(RefCell::new(vec![])))),
+                        "Queue.new" => return Ok(Value::Queue(Rc::new(RefCell::new(vec![])))),
+                        "Option.Some" | "Option::Some" => {
+                            if args.len() != 1 {
+                                return Err("Option.Some expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Option(Rc::new(RefCell::new(Some(
+                                evaluated_args.remove(0),
+                            )))));
+                        }
+                        "Option.None" | "Option::None" => {
+                            return Ok(Value::Option(Rc::new(RefCell::new(None))))
+                        }
+                        "Result.Ok" | "Result::Ok" => {
+                            if args.len() != 1 {
+                                return Err("Result.Ok expects 1 argument".to_string());
+                            }
+                            return Ok(Value::Result(Rc::new(RefCell::new(Ok(
+                                evaluated_args.remove(0)
+                            )))));
+                        }
+                        "Result::Err" => {
+                            if args.len() != 1 {
+                                return Err("Result::Err expects 1 argument".to_string());
+                            }
+                            let err_msg = match evaluated_args.remove(0) {
+                                Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            return Ok(Value::Result(Rc::new(RefCell::new(Err(err_msg)))));
+                        }
+                        _ => {}
                     }
                 }
 
@@ -1047,6 +1158,291 @@ impl Executor {
                 };
                 let arr = parts.into_iter().map(Value::String).collect::<Vec<_>>();
                 Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            }
+            // Vec methods
+            (Value::Vec(v), "push") => {
+                if args.len() != 1 {
+                    return Err("Vec.push() expects 1 argument".to_string());
+                }
+                v.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Vec(v), "pop") => {
+                if !args.is_empty() {
+                    return Err("Vec.pop() expects 0 arguments".to_string());
+                }
+                match v.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("Vec is empty".to_string()),
+                }
+            }
+            (Value::Vec(v), "len") => {
+                if !args.is_empty() {
+                    return Err("Vec.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(v.borrow().len() as i64))
+            }
+            (Value::Vec(v), "get") => {
+                if args.len() != 1 {
+                    return Err("Vec.get() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::Int(idx) => {
+                        let idx = *idx as usize;
+                        match v.borrow().get(idx) {
+                            Some(val) => Ok(val.clone()),
+                            None => Err("Vec index out of bounds".to_string()),
+                        }
+                    }
+                    _ => Err("Vec.get() expects int index".to_string()),
+                }
+            }
+            (Value::Vec(v), "set") => {
+                if args.len() != 2 {
+                    return Err("Vec.set() expects 2 arguments".to_string());
+                }
+                match &args[0] {
+                    Value::Int(idx) => {
+                        let idx = *idx as usize;
+                        let mut v_mut = v.borrow_mut();
+                        if idx >= v_mut.len() {
+                            return Err("Vec index out of bounds".to_string());
+                        }
+                        v_mut[idx] = args[1].clone();
+                        Ok(Value::Null)
+                    }
+                    _ => Err("Vec.set() expects int index".to_string()),
+                }
+            }
+            (Value::Vec(v), "contains") => {
+                if args.len() != 1 {
+                    return Err("Vec.contains() expects 1 argument".to_string());
+                }
+                Ok(Value::Bool(v.borrow().contains(&args[0])))
+            }
+            (Value::Vec(v), "indexOf") => {
+                if args.len() != 1 {
+                    return Err("Vec.indexOf() expects 1 argument".to_string());
+                }
+                let idx = v.borrow().iter().position(|x| x == &args[0]);
+                match idx {
+                    Some(i) => Ok(Value::Int(i as i64)),
+                    None => Ok(Value::Int(-1)),
+                }
+            }
+            // HashMap methods
+            (Value::HashMap(m), "set") => {
+                if args.len() != 2 {
+                    return Err("HashMap.set() expects 2 arguments".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => {
+                        m.borrow_mut().insert(key.clone(), args[1].clone());
+                        Ok(Value::Null)
+                    }
+                    _ => Err("HashMap.set() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "get") => {
+                if args.len() != 1 {
+                    return Err("HashMap.get() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => match m.borrow().get(key) {
+                        Some(val) => Ok(val.clone()),
+                        None => Err("HashMap key not found".to_string()),
+                    },
+                    _ => Err("HashMap.get() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "delete") => {
+                if args.len() != 1 {
+                    return Err("HashMap.delete() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => {
+                        m.borrow_mut().remove(key);
+                        Ok(Value::Null)
+                    }
+                    _ => Err("HashMap.delete() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "has") => {
+                if args.len() != 1 {
+                    return Err("HashMap.has() expects 1 argument".to_string());
+                }
+                match &args[0] {
+                    Value::String(key) => Ok(Value::Bool(m.borrow().contains_key(key))),
+                    _ => Err("HashMap.has() expects string key".to_string()),
+                }
+            }
+            (Value::HashMap(m), "len") => {
+                if !args.is_empty() {
+                    return Err("HashMap.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(m.borrow().len() as i64))
+            }
+            // Stack methods
+            (Value::Stack(s), "push") => {
+                if args.len() != 1 {
+                    return Err("Stack.push() expects 1 argument".to_string());
+                }
+                s.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Stack(s), "pop") => {
+                if !args.is_empty() {
+                    return Err("Stack.pop() expects 0 arguments".to_string());
+                }
+                match s.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("Stack is empty".to_string()),
+                }
+            }
+            (Value::Stack(s), "peek") => {
+                if !args.is_empty() {
+                    return Err("Stack.peek() expects 0 arguments".to_string());
+                }
+                match s.borrow().last() {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Stack is empty".to_string()),
+                }
+            }
+            (Value::Stack(s), "isEmpty") => {
+                if !args.is_empty() {
+                    return Err("Stack.isEmpty() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(s.borrow().is_empty()))
+            }
+            (Value::Stack(s), "len") => {
+                if !args.is_empty() {
+                    return Err("Stack.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(s.borrow().len() as i64))
+            }
+            // Queue methods
+            (Value::Queue(q), "enqueue") => {
+                if args.len() != 1 {
+                    return Err("Queue.enqueue() expects 1 argument".to_string());
+                }
+                q.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::Queue(q), "dequeue") => {
+                if !args.is_empty() {
+                    return Err("Queue.dequeue() expects 0 arguments".to_string());
+                }
+                let mut queue = q.borrow_mut();
+                if queue.is_empty() {
+                    return Err("Queue is empty".to_string());
+                }
+                Ok(queue.remove(0))
+            }
+            // LinkedList methods - same as Vec
+            (Value::LinkedList(l), "push") => {
+                if args.len() != 1 {
+                    return Err("LinkedList.push() expects 1 argument".to_string());
+                }
+                l.borrow_mut().push(args[0].clone());
+                Ok(Value::Null)
+            }
+            (Value::LinkedList(l), "pop") => {
+                if !args.is_empty() {
+                    return Err("LinkedList.pop() expects 0 arguments".to_string());
+                }
+                match l.borrow_mut().pop() {
+                    Some(val) => Ok(val),
+                    None => Err("LinkedList is empty".to_string()),
+                }
+            }
+            (Value::LinkedList(l), "len") => {
+                if !args.is_empty() {
+                    return Err("LinkedList.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(l.borrow().len() as i64))
+            }
+            (Value::Queue(q), "peek") => {
+                if !args.is_empty() {
+                    return Err("Queue.peek() expects 0 arguments".to_string());
+                }
+                match q.borrow().get(0) {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Queue is empty".to_string()),
+                }
+            }
+            (Value::Queue(q), "isEmpty") => {
+                if !args.is_empty() {
+                    return Err("Queue.isEmpty() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(q.borrow().is_empty()))
+            }
+            (Value::Queue(q), "len") => {
+                if !args.is_empty() {
+                    return Err("Queue.len() expects 0 arguments".to_string());
+                }
+                Ok(Value::Int(q.borrow().len() as i64))
+            }
+            // Option methods
+            (Value::Option(o), "unwrap") => {
+                if !args.is_empty() {
+                    return Err("Option.unwrap() expects 0 arguments".to_string());
+                }
+                match o.borrow().as_ref() {
+                    Some(val) => Ok(val.clone()),
+                    None => Err("Cannot unwrap None".to_string()),
+                }
+            }
+            (Value::Option(o), "unwrapOr") => {
+                if args.len() != 1 {
+                    return Err("Option.unwrapOr() expects 1 argument".to_string());
+                }
+                match o.borrow().as_ref() {
+                    Some(val) => Ok(val.clone()),
+                    None => Ok(args[0].clone()),
+                }
+            }
+            (Value::Option(o), "isSome") => {
+                if !args.is_empty() {
+                    return Err("Option.isSome() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(o.borrow().is_some()))
+            }
+            (Value::Option(o), "isNone") => {
+                if !args.is_empty() {
+                    return Err("Option.isNone() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(o.borrow().is_none()))
+            }
+            // Result methods
+            (Value::Result(r), "unwrap") => {
+                if !args.is_empty() {
+                    return Err("Result.unwrap() expects 0 arguments".to_string());
+                }
+                match r.borrow().as_ref() {
+                    Ok(val) => Ok(val.clone()),
+                    Err(e) => Err(format!("Cannot unwrap Err: {}", e)),
+                }
+            }
+            (Value::Result(r), "unwrapOr") => {
+                if args.len() != 1 {
+                    return Err("Result.unwrapOr() expects 1 argument".to_string());
+                }
+                match r.borrow().as_ref() {
+                    Ok(val) => Ok(val.clone()),
+                    Err(_) => Ok(args[0].clone()),
+                }
+            }
+            (Value::Result(r), "isOk") => {
+                if !args.is_empty() {
+                    return Err("Result.isOk() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(r.borrow().is_ok()))
+            }
+            (Value::Result(r), "isErr") => {
+                if !args.is_empty() {
+                    return Err("Result.isErr() expects 0 arguments".to_string());
+                }
+                Ok(Value::Bool(r.borrow().is_err()))
             }
             (other, _) => Err(format!("Method call not supported on {:?}", other)),
         }

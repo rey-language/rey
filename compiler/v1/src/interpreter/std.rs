@@ -64,6 +64,84 @@ impl StdLib {
         );
         globals.insert("random".to_string(), Value::Function(random_func));
 
+        let vec_new = Function::new("Vec.new".to_string(), vec![], vec![], Span::new(0, 0), None);
+        globals.insert("Vec.new".to_string(), Value::Function(vec_new));
+
+        let linkedlist_new = Function::new(
+            "LinkedList.new".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert(
+            "LinkedList.new".to_string(),
+            Value::Function(linkedlist_new),
+        );
+
+        let hashmap_new = Function::new(
+            "HashMap.new".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("HashMap.new".to_string(), Value::Function(hashmap_new));
+
+        let stack_new = Function::new(
+            "Stack.new".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Stack.new".to_string(), Value::Function(stack_new));
+
+        let queue_new = Function::new(
+            "Queue.new".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Queue.new".to_string(), Value::Function(queue_new));
+
+        let option_some = Function::new(
+            "Option::Some".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Option::Some".to_string(), Value::Function(option_some));
+
+        let option_none = Function::new(
+            "Option::None".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Option::None".to_string(), Value::Function(option_none));
+
+        let result_ok = Function::new(
+            "Result::Ok".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Result::Ok".to_string(), Value::Function(result_ok));
+
+        let result_err = Function::new(
+            "Result::Err".to_string(),
+            vec![],
+            vec![],
+            Span::new(0, 0),
+            None,
+        );
+        globals.insert("Result::Err".to_string(), Value::Function(result_err));
+
         globals
     }
 
@@ -297,6 +375,49 @@ impl StdLib {
                     .collect();
                 format!("{} {{ {} }}", struct_name, items.join(", "))
             }
+            Value::Vec(v) => {
+                let items = v
+                    .borrow()
+                    .iter()
+                    .map(Self::formatValue)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", items)
+            }
+            Value::LinkedList(l) => {
+                let items = l
+                    .borrow()
+                    .iter()
+                    .map(Self::formatValue)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("LinkedList([{}])", items)
+            }
+            Value::HashMap(m) => {
+                let m = m.borrow();
+                let mut keys = m.keys().cloned().collect::<Vec<_>>();
+                keys.sort();
+                let items = keys
+                    .into_iter()
+                    .map(|k| format!("{}: {}", k, Self::formatValue(m.get(&k).unwrap())))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{}}}", items)
+            }
+            Value::Stack(s) => {
+                format!("Stack(len: {})", s.borrow().len())
+            }
+            Value::Queue(q) => {
+                format!("Queue(len: {})", q.borrow().len())
+            }
+            Value::Option(o) => match o.borrow().as_ref() {
+                Some(v) => format!("Some({})", Self::formatValue(v)),
+                None => "None".to_string(),
+            },
+            Value::Result(r) => match r.borrow().as_ref() {
+                Ok(v) => format!("Ok({})", Self::formatValue(v)),
+                Err(e) => format!("Err({})", e),
+            },
         }
     }
 }
