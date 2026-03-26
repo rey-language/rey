@@ -1,0 +1,45 @@
+// self_cure_stub.rey — struct + enum + match
+// demonstrates the core features working together
+
+enum Severity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+struct Diagnostic {
+    code: String,
+    message: String,
+
+    pub func create(c: String, m: String): Diagnostic {
+        return Diagnostic { code: c, message: m };
+    }
+
+    pub func display(): Void {
+        println(code + ": " + message);
+    }
+}
+
+func main(): Void {
+    // enum + match
+    var level = High;
+    match level {
+        Severity::Critical => { println("halt!"); },
+        Severity::High => { println("fix soon"); },
+        _ => { println("ok for now"); }
+    }
+
+    // struct literal + method call
+    var d = Diagnostic.create("E001", "undefined variable");
+    d.display();
+
+    // struct in a loop
+    var items = [
+        Diagnostic.create("W001", "unused import"),
+        Diagnostic.create("E002", "type mismatch")
+    ];
+    for item in items {
+        item.display();
+    }
+}

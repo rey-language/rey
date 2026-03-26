@@ -1,0 +1,24 @@
+// functions: defaults, variadic, lambdas
+
+func greet(name: String, punctuation: String = "!"): Void {
+    println("hello, " + name + punctuation);
+}
+
+func sum(nums:...int): int {
+    var total = 0;
+    for n in nums {
+        total += n;
+    }
+    return total;
+}
+
+func main(): Void {
+    greet("world");       // hello, world!
+    greet("rey", "...");  // hello, rey...
+
+    println(sum(1, 2, 3, 4)); // 10
+
+    // lambda
+    var double = (x: int) => x * 2;
+    println(double(5)); // 10
+}

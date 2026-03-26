@@ -1,0 +1,26 @@
+// variables, types, and basic operations
+
+func main(): Void {
+    // inferred types
+    var x = 10;
+    var name = "rey";
+
+    // explicit types
+    var pi: float = 3.14;
+    var flag: bool = true;
+
+    // const cannot be reassigned
+    const maxHp: int = 100;
+
+    // nullable type
+    var maybe: int? = null;
+
+    // string interpolation
+    println("{name} version 0.1.1");
+    println("pi = {pi}");
+    println("max hp = {maxHp}");
+
+    // arithmetic + division semantics
+    println(10 / 3);     // 3  (integer division)
+    println(10.0 / 3.0); // 3.3333... (float division)
+}
