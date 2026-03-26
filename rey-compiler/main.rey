@@ -1,0 +1,46 @@
+// v5 bootstrap entrypoints (api only)
+
+enum Target {
+    Vm,
+    Native,
+    Js,
+}
+
+struct CompileOptions {
+    pub target: Target,
+    pub optimize: bool,
+    pub emitTokens: bool,
+    pub emitAst: bool,
+    pub emitTypedAst: bool,
+    pub emitIr: bool,
+}
+
+enum ArtifactKind {
+    Tokens,
+    Ast,
+    TypedAst,
+    Ir,
+    Bytecode,
+    Text,
+}
+
+struct Artifact {
+    pub kind: ArtifactKind,
+    pub path: String,
+    pub text: String,
+}
+
+struct CompileResult {
+    pub ok: bool,
+    pub diagnostics: [Any],
+    pub artifacts: [Artifact],
+}
+
+export pub func compileFile(entryPath: String, options: CompileOptions): CompileResult {
+    return null;
+}
+
+export pub func compileSource(source: String, options: CompileOptions): CompileResult {
+    return null;
+}
+

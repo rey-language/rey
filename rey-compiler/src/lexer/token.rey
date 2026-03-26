@@ -1,0 +1,87 @@
+enum TokenKind {
+    Identifier,
+    StringLiteral,
+    CharLiteral,
+    NumberLiteral,
+
+    // keywords
+    Var,
+    Const,
+    Func,
+    Struct,
+    Enum,
+    Import,
+    Export,
+    Pub,
+    Return,
+    If,
+    Else,
+    While,
+    For,
+    In,
+    Break,
+    Continue,
+    Match,
+    InstanceOf,
+    True,
+    False,
+    Null,
+
+    // punctuation/operators
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    LeftBracket,
+    RightBracket,
+    Comma,
+    Dot,
+    Semicolon,
+    Colon,
+    ColonColon,
+    Arrow,
+    Equal,
+    EqualEqual,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    AndAnd,
+    OrOr,
+    Not,
+
+    Eof,
+}
+
+struct Span {
+    pub start: int,
+    pub end: int,
+    pub line: int,
+    pub column: int,
+}
+
+struct Token {
+    pub kind: TokenKind,
+    pub lexeme: String,
+    pub span: Span,
+}
+
+enum LexErrorKind {
+    UnexpectedCharacter,
+    UnterminatedString,
+    UnterminatedChar,
+    InvalidNumber,
+}
+
+struct LexError {
+    pub kind: LexErrorKind,
+    pub message: String,
+    pub span: Span,
+}
+

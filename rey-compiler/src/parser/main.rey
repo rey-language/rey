@@ -1,0 +1,31 @@
+struct ParserOptions {
+    pub allowTrailingCommas: bool,
+    pub allowImplicitSemicolons: bool,
+}
+
+struct Parser {
+    pub tokens: [Any],
+    pub current: int,
+    pub options: ParserOptions,
+}
+
+enum ParseErrorKind {
+    UnexpectedToken,
+    ExpectedToken,
+    UnexpectedEof,
+}
+
+struct ParseError {
+    pub kind: ParseErrorKind,
+    pub message: String,
+    pub span: Any,
+}
+
+export pub func newParser(tokens: [Any], options: ParserOptions): Parser {
+    return null;
+}
+
+export pub func parseProgram(p: Parser): Any {
+    return null;
+}
+

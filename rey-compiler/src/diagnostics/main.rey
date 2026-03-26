@@ -1,0 +1,40 @@
+enum Severity {
+    Error,
+    Warning,
+    Note,
+}
+
+struct Span {
+    pub start: int,
+    pub end: int,
+    pub line: int,
+    pub column: int,
+}
+
+struct Diagnostic {
+    pub severity: Severity,
+    pub code: String,
+    pub message: String,
+    pub filePath: String,
+    pub span: Span,
+}
+
+struct DiagnosticBag {
+    pub items: [Diagnostic],
+}
+
+export pub func newBag(): DiagnosticBag {
+    return null;
+}
+
+export pub func push(bag: DiagnosticBag, diag: Diagnostic): Void {
+}
+
+export pub func hasErrors(bag: DiagnosticBag): bool {
+    return null;
+}
+
+export pub func formatDiagnostic(diag: Diagnostic): String {
+    return null;
+}
+
