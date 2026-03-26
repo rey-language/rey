@@ -135,4 +135,20 @@ mod tests {
     fn importModuleMainCanImportLocalFile() {
         runRey("../../tests/imports/success/nested_resolution.rey").unwrap();
     }
+
+    #[test]
+    fn integerDivisionSemantics() {
+        runRey("src/tests/integer_division.rey").unwrap();
+    }
+
+    #[test]
+    fn structFieldMutationPubWorks() {
+        runRey("src/tests/struct_field_mutation.rey").unwrap();
+    }
+
+    #[test]
+    fn structFieldMutationNestedErrorsClearly() {
+        let err = runRey("src/tests/struct_field_mutation_nested_error.rey").unwrap_err();
+        assert!(err.contains("nested field assignment"), "got: {}", err);
+    }
 }

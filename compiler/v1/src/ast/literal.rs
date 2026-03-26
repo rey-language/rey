@@ -2,7 +2,8 @@
 pub enum Literal {
     String(String),
     Char(char),
-    Number(f64),
+    Int(i64),
+    Float(f64),
     Bool(bool),
     Null,
 }

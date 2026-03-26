@@ -1,0 +1,16 @@
+func main(): Void {
+    var a = 10 / 3;
+    if (a != 3) {
+        var fail = 1 / 0;
+    }
+
+    var b = 10.0 / 3.0;
+    if (b <= 3) {
+        var fail = 1 / 0;
+    }
+
+    var c = 10 / 3.0;
+    if (c <= 3) {
+        var fail = 1 / 0;
+    }
+}

@@ -566,9 +566,14 @@ impl Parser {
                 }
             }
             TokenKind::NumberLiteral(n) => {
-                let val = *n;
+                let val = n.clone();
                 self.advance();
-                Ok(Pattern::Literal(crate::ast::Literal::Number(val)))
+                let lit = if val.contains('.') {
+                    crate::ast::Literal::Float(val.parse().unwrap())
+                } else {
+                    crate::ast::Literal::Int(val.parse().unwrap())
+                };
+                Ok(Pattern::Literal(lit))
             }
             TokenKind::StringLiteral(s) => {
                 let val = s.clone();
@@ -762,7 +767,7 @@ impl Parser {
                 let expr = self.parseUnary()?;
                 Ok(Expr::Binary {
                     left: Box::new(Expr::Literal {
-                        value: Literal::Number(0.0),
+                        value: Literal::Int(0),
                         span,
                     }),
                     op: TokenKind::Minus,
@@ -824,11 +829,12 @@ impl Parser {
             if self.matchToken(&TokenKind::Dot) {
                 let member_name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
-                    TokenKind::NumberLiteral(n) => {
+                    TokenKind::NumberLiteral(raw) => {
+                        let n: f64 = raw.parse().unwrap_or(0.0);
                         if n.fract() != 0.0 {
                             return Err(self.error("Tuple index after '.' must be an integer."));
                         }
-                        (*n as i64).to_string()
+                        (n as i64).to_string()
                     }
                     _ => return Err(self.error("Expected identifier after '.'.")),
                 };
@@ -996,10 +1002,18 @@ impl Parser {
             TokenKind::NumberLiteral(value) => {
                 let span = self.peek().span;
                 self.advance();
-                Ok(Expr::Literal {
-                    value: Literal::Number(value),
-                    span,
-                })
+                let is_float = value.contains('.');
+                if is_float {
+                    Ok(Expr::Literal {
+                        value: Literal::Float(value.parse().unwrap()),
+                        span,
+                    })
+                } else {
+                    Ok(Expr::Literal {
+                        value: Literal::Int(value.parse().unwrap()),
+                        span,
+                    })
+                }
             }
             TokenKind::True => {
                 let span = self.peek().span;

@@ -573,7 +573,8 @@ impl TypeChecker {
                             let lit_ty = match lit {
                                 Literal::String(_) => Ty::String,
                                 Literal::Char(_) => Ty::Char,
-                                Literal::Number(n) => if n.fract() == 0.0 { Ty::Int } else { Ty::Float },
+                                Literal::Int(_) => Ty::Int,
+                                Literal::Float(_) => Ty::Float,
                                 Literal::Bool(_) => Ty::Bool,
                                 Literal::Null => Ty::Null,
                             };
@@ -613,13 +614,8 @@ impl TypeChecker {
             Expr::Literal { value: lit, .. } => Ok(match lit {
                 Literal::String(_) => Ty::String,
                 Literal::Char(_) => Ty::Char,
-                Literal::Number(n) => {
-                    if n.fract() == 0.0 {
-                        Ty::Int
-                    } else {
-                        Ty::Float
-                    }
-                }
+                Literal::Int(_) => Ty::Int,
+                Literal::Float(_) => Ty::Float,
                 Literal::Bool(_) => Ty::Bool,
                 Literal::Null => Ty::Null,
             }),

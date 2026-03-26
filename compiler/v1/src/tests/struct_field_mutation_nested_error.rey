@@ -1,0 +1,12 @@
+struct Inner {
+    pub value: int,
+}
+
+struct Outer {
+    pub inner: Inner,
+}
+
+func main(): Void {
+    var o = Outer { inner: Inner { value: 1 } };
+    o.inner.value = 2;
+}
