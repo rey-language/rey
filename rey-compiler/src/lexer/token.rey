@@ -48,10 +48,17 @@ enum TokenKind {
     Greater,
     GreaterEqual,
     Plus,
+    PlusPlus,
+    PlusEqual,
     Minus,
+    MinusMinus,
+    MinusEqual,
     Star,
+    StarEqual,
     Slash,
+    SlashEqual,
     Percent,
+    PercentEqual,
     AndAnd,
     OrOr,
     Not,
@@ -84,4 +91,3 @@ struct LexError {
     pub message: String,
     pub span: Span,
 }
-

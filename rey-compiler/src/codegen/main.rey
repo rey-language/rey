@@ -2,23 +2,23 @@
 
 struct CodegenContext {
     pub moduleName: String,
-    pub functions: Vec<String>,
-    pub strings: Vec<String>,
+    pub functions: [String],
+    pub strings: [String],
     pub currentFunc: String,
     pub blockId: int,
 }
 
-func ctxNew(name: String): CodegenContext {
+func ctxNew(name: String) {
     return CodegenContext {
         moduleName: name,
-        functions: Vec.new(),
-        strings: Vec.new(),
+        functions: [],
+        strings: [],
         currentFunc: "",
-        blockId: 0,
+        blockId: 0
     };
 }
 
-func llvmType(ty: Type): String {
+func llvmType(ty): String {
     if ty.kind == TypeKind.Int {
         return "i64";
     }
@@ -40,7 +40,7 @@ func llvmType(ty: Type): String {
     return "i8*";
 }
 
-func genLit(lit: LiteralExpr): String {
+func genLit(lit): String {
     if lit.kind == LiteralKind.Int {
         return lit.text;
     }
@@ -62,7 +62,7 @@ func genLit(lit: LiteralExpr): String {
     return "undef";
 }
 
-func genExpr(ctx: CodegenContext, expr: Expr, env: TypeEnv): String {
+func genExpr(ctx, expr, env): String {
     if expr.kind == ExprKind.Literal {
         var le = expr;
         return genLit(le);
@@ -76,15 +76,15 @@ func genExpr(ctx: CodegenContext, expr: Expr, env: TypeEnv): String {
         var left = genExpr(ctx, be.left, env);
         var right = genExpr(ctx, be.right, env);
         var op = "+";
-        if be.op == lexer.TokenKind.Minus { op = "-"; }
-        if be.op == lexer.TokenKind.Star { op = "*"; }
-        if be.op == lexer.TokenKind.Slash { op = "sitofp"; }
-        if be.op == lexer.TokenKind.EqualEqual { op = "icmp eq"; }
-        if be.op == lexer.TokenKind.NotEqual { op = "icmp ne"; }
-        if be.op == lexer.TokenKind.Less { op = "icmp slt"; }
-        if be.op == lexer.TokenKind.Greater { op = "icmp sgt"; }
-        if be.op == lexer.TokenKind.LessEqual { op = "icmp sle"; }
-        if be.op == lexer.TokenKind.GreaterEqual { op = "icmp sge"; }
+        if be.op == "-" { op = "-"; }
+        if be.op == "*" { op = "*"; }
+        if be.op == "/" { op = "sitofp"; }
+        if be.op == "==" { op = "icmp eq"; }
+        if be.op == "!=" { op = "icmp ne"; }
+        if be.op == "<" { op = "icmp slt"; }
+        if be.op == ">" { op = "icmp sgt"; }
+        if be.op == "<=" { op = "icmp sle"; }
+        if be.op == ">=" { op = "icmp sge"; }
         return left + " " + op + " " + right;
     }
     if expr.kind == ExprKind.Call {
@@ -93,7 +93,7 @@ func genExpr(ctx: CodegenContext, expr: Expr, env: TypeEnv): String {
         var args = "";
         var i = 0;
         loop {
-            if i >= ce.args.len() {
+            if i >= ce.args.length() {
                 break;
             }
             if i > 0 { args = args + ", "; }
@@ -119,7 +119,7 @@ func genExpr(ctx: CodegenContext, expr: Expr, env: TypeEnv): String {
     return "undef";
 }
 
-func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
+func genStmt(ctx, stmt, env): String {
     var code = "";
     
     if stmt.kind == StmtKind.VarDecl {
@@ -145,7 +145,7 @@ func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
         var params = "";
         var i = 0;
         loop {
-            if i >= fds.params.len() {
+            if i >= fds.params.length() {
                 break;
             }
             if i > 0 { params = params + ", "; }
@@ -158,7 +158,7 @@ func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
         
         i = 0;
         loop {
-            if i >= fds.params.len() {
+            if i >= fds.params.length() {
                 break;
             }
             var pname = fds.params[i].name;
@@ -169,7 +169,7 @@ func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
         
         var j = 0;
         loop {
-            if j >= fds.body.len() {
+            if j >= fds.body.length() {
                 break;
             }
             code = code + genStmt(ctx, fds.body[j], env);
@@ -194,7 +194,7 @@ func genStmt(ctx: CodegenContext, stmt: Stmt, env: TypeEnv): String {
     return code;
 }
 
-func codegenProgram(ctx: CodegenContext, program: Program): String {
+func codegenProgram(ctx, program): String {
     var code = "; Module: " + ctx.moduleName + "\n";
     code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
     code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
@@ -208,7 +208,7 @@ func codegenProgram(ctx: CodegenContext, program: Program): String {
     
     var i = 0;
     loop {
-        if i >= program.statements.len() {
+        if i >= program.statements.length() {
             break;
         }
         code = code + genStmt(ctx, program.statements[i], envNew());
@@ -218,12 +218,12 @@ func codegenProgram(ctx: CodegenContext, program: Program): String {
     return code;
 }
 
-export pub func generateIR(program: Program): String {
-    var ctx = ctxNew("rey_module");
-    return codegenProgram(ctx, program);
+export pub func generateIR(program): String {
+    // bootstrap mode: IR gen not wired yet
+    return "";
 }
 
-export pub func compileLLVM(ir: String, outputPath: String, release: bool): Any {
+export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
     writeFile("/tmp/rey_out.ll", ir);
     
     var opt = "-O2";

@@ -37,4 +37,3 @@ export pub func hasErrors(bag: DiagnosticBag): bool {
 export pub func formatDiagnostic(diag: Diagnostic): String {
     return null;
 }
-
