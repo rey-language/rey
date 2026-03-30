@@ -1,8 +1,8 @@
 # Primer — rey-lang
-Last updated: Mar 27, 2026 (long autonomous session)
+Last updated: Mar 30, 2026 (bootstrap unblock)
 
 ## Session objective
-Build Rey into a complete, self-hosted, natively compiled language (Phase 0-10).
+Unblock bootstrap: remove generic type params (`Vec<T>`, `HashMap<K,V>`) from `rey-compiler/` so it can compile without generics support.
 
 ## What was done - Session Complete
 
@@ -41,10 +41,11 @@ Add native file system builtins:
 Then Phase 4: std library in Rey
 
 ## Blockers
-- None currently
+- Generics in `rey-compiler/` are removed (no more `Vec<T>` / `HashMap<K,V>` in token/AST).
+- Bootstrap pipeline is still incomplete (typecheck/codegen are stubbed; CLI arg indexing is probably off).
 
 ## Rey-compiler bootstrap
-- Skeleton exists in rey-compiler/
-- Need to implement Phases 5-9 (lexer, parser, typecheck, codegen, wire up)
+- `rey-compiler/src` now avoids generics and uses concrete-ish shapes (arrays + string token kinds) to keep parsing simple.
+- Next: wire `typecheck` + `codegen` back in once module/value scoping for enums/types is sorted.
 
 (End file)

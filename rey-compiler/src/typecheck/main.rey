@@ -22,13 +22,13 @@ enum TypeKind {
 }
 
 struct Type {
-    pub kind: TypeKind,
+    pub kind: String,
     pub name: String,
-    pub inner: Type,
-    pub key: Type,
-    pub value: Type,
-    pub params: Vec<Type>,
-    pub ret: Type,
+    pub inner: Type?,
+    pub key: Type?,
+    pub value: Type?,
+    pub params: [Type],
+    pub ret: Type?,
 }
 
 struct Symbol {
@@ -38,192 +38,96 @@ struct Symbol {
 }
 
 struct TypeEnv {
-    pub symbols: HashMap<String, Symbol>,
-    pub parent: TypeEnv,
+    pub symbols: HashMap,
+    pub parent: TypeEnv?,
 }
 
 struct TypeError {
     pub message: String,
-    pub span: Span,
+    pub span: int,
 }
 
 struct TypecheckResult {
     pub ok: bool,
-    pub errors: Vec<TypeError>,
+    pub errors: [TypeError],
 }
 
-func newType(kind: TypeKind): Type {
-    return Type { kind: kind, name: "", inner: Null, key: Null, value: Null, params: Vec.new(), ret: Null };
+func newType(kind) {
+    return Type { kind: kind, name: "", inner: null, key: null, value: null, params: [], ret: null };
 }
 
-func newTypeNamed(kind: TypeKind, name: String): Type {
-    return Type { kind: kind, name: name, inner: Null, key: Null, value: Null, params: Vec.new(), ret: Null };
+func newTypeNamed(kind, name: String) {
+    return Type { kind: kind, name: name, inner: null, key: null, value: null, params: [], ret: null };
 }
 
-func newFunctionType(params: Vec<Type>, ret: Type): Type {
-    return Type { kind: TypeKind.Function, name: "", inner: Null, key: Null, value: Null, params: params, ret: ret };
+func newFunctionType(params, ret) {
+    return Type { kind: "Function", name: "", inner: null, key: null, value: null, params: params, ret: ret };
 }
 
-func newArrayType(inner: Type): Type {
-    var t = newType(TypeKind.Array);
+func newArrayType(inner) {
+    var t = newType("Array");
     t.inner = inner;
     return t;
 }
 
-func newOptionType(inner: Type): Type {
-    var t = newType(TypeKind.Option);
+func newOptionType(inner) {
+    var t = newType("Option");
     t.inner = inner;
     return t;
 }
 
-func newResultType(ok: Type, err: Type): Type {
-    var t = newType(TypeKind.Result);
+func newResultType(ok, err) {
+    var t = newType("Result");
     t.inner = ok;
     t.key = err;
     return t;
 }
 
-func typeEqual(a: Type, b: Type): bool {
-    if a.kind == TypeKind.Any || b.kind == TypeKind.Any {
+func typeEqual(a, b): bool {
+    if a.kind == "Any" || b.kind == "Any" {
         return true;
     }
     if a.kind != b.kind {
         return false;
     }
-    if a.kind == TypeKind.Struct || a.kind == TypeKind.Enum {
+    if a.kind == "Struct" || a.kind == "Enum" {
         return a.name == b.name;
     }
     return true;
 }
 
-func envNew(): TypeEnv {
-    return TypeEnv { symbols: HashMap.new(), parent: Null };
+func envNew() {
+    return TypeEnv { symbols: HashMap.new(), parent: null };
 }
 
-func envDefine(env: TypeEnv, name: String, ty: Type, isConst: bool) {
+func envDefine(env, name: String, ty, isConst: bool) {
     env.symbols.set(name, Symbol { name: name, ty: ty, isConst: isConst });
 }
 
-func envResolve(env: TypeEnv, name: String): Symbol {
+func envResolve(env, name: String) {
     if env.symbols.has(name) {
         return env.symbols.get(name);
     }
-    if env.parent != Null {
+    if env.parent != null {
         return envResolve(env.parent, name);
     }
-    return Symbol { name: "", ty: newType(TypeKind.Unknown), isConst: false };
+    return Symbol { name: "", ty: newType("Unknown"), isConst: false };
 }
 
-func inferExpr(env: TypeEnv, expr: Expr): Type {
+func inferExpr(env, expr) {
     // Implementation would infer types based on expression kind
-    return newType(TypeKind.Any);
+    return newType("Any");
 }
 
-func inferStmt(env: TypeEnv, stmt: Stmt): Vec<TypeError> {
-    var errors = Vec.new();
-    
-    if stmt.kind == StmtKind.VarDecl {
-        var vds = stmt;
-        var ty = vds.typeTag;
-        var valueTy = inferExpr(env, vds.value);
-        envDefine(env, vds.name, valueTy, false);
-    }
-    
-    if stmt.kind == StmtKind.ConstDecl {
-        var cds = stmt;
-        var valueTy = inferExpr(env, cds.value);
-        envDefine(env, cds.name, valueTy, true);
-    }
-    
-    if stmt.kind == StmtKind.FuncDecl {
-        var fds = stmt;
-        var paramTypes = Vec.new();
-        var i = 0;
-        loop {
-            if i >= fds.params.len() {
-                break;
-            }
-            paramTypes.push(newType(TypeKind.Any));
-            i = i + 1;
-        }
-        var retTy = newType(TypeKind.Any);
-        if fds.returnType != "" {
-            retTy = newTypeNamed(TypeKind.Struct, fds.returnType);
-        }
-        var funcTy = newFunctionType(paramTypes, retTy);
-        envDefine(env, fds.name, funcTy, true);
-    }
-    
-    if stmt.kind == StmtKind.StructDecl {
-        var sds = stmt;
-        var structTy = newTypeNamed(TypeKind.Struct, sds.name);
-        envDefine(env, sds.name, structTy, true);
-    }
-    
-    if stmt.kind == StmtKind.EnumDecl {
-        var eds = stmt;
-        var enumTy = newTypeNamed(TypeKind.Enum, eds.name);
-        envDefine(env, eds.name, enumTy, true);
-    }
-    
-    if stmt.kind == StmtKind.Return {
-        var rs = stmt;
-        var retTy = inferExpr(env, rs.value);
-        return errors;
-    }
-    
-    if stmt.kind == StmtKind.While {
-        var ws = stmt;
-        inferExpr(env, ws.condition);
-        inferStmt(env, ws.body[0]);
-    }
-    
-    if stmt.kind == StmtKind.For {
-        var fs = stmt;
-        var iterTy = inferExpr(env, fs.iterable);
-        envDefine(env, fs.variable, iterTy, false);
-        inferStmt(env, fs.body[0]);
-    }
-    
-    return errors;
+func inferStmt(env, stmt) {
+    return [];
 }
 
-func typecheckProgram(program: Program): TypecheckResult {
-    var env = envNew();
-    envDefine(env, "println", newFunctionType(Vec.new(), newType(TypeKind.Void)), true);
-    envDefine(env, "print", newFunctionType(Vec.new(), newType(TypeKind.Void)), true);
-    envDefine(env, "len", newFunctionType(Vec.new(), newType(TypeKind.Int)), true);
-    envDefine(env, "input", newFunctionType(Vec.new(), newType(TypeKind.String)), true);
-    envDefine(env, "random", newFunctionType(Vec.new(), newType(TypeKind.Float)), true);
-    envDefine(env, "abs", newFunctionType(Vec.new(), newType(TypeKind.Float)), true);
-    envDefine(env, "max", newFunctionType(Vec.new(), newType(TypeKind.Float)), true);
-    envDefine(env, "min", newFunctionType(Vec.new(), newType(TypeKind.Float)), true);
-    
-    var errors = Vec.new();
-    var i = 0;
-    loop {
-        if i >= program.statements.len() {
-            break;
-        }
-        var stmtErrors = inferStmt(env, program.statements[i]);
-        var j = 0;
-        loop {
-            if j >= stmtErrors.len() {
-                break;
-            }
-            errors.push(stmtErrors[j]);
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    
-    if errors.len() > 0 {
-        return TypecheckResult { ok: false, errors: errors };
-    }
-    
-    return TypecheckResult { ok: true, errors: Vec.new() };
+func typecheckProgram(program) {
+    // bootstrap mode: don't typecheck yet
+    return TypecheckResult { ok: true, errors: [] };
 }
 
-export pub func typecheck(program: Program): TypecheckResult {
+export pub func typecheck(program) {
     return typecheckProgram(program);
 }

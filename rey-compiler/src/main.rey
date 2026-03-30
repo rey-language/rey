@@ -2,48 +2,30 @@
 
 import lexer;
 import parser;
-import typecheck;
-import codegen;
 
 struct CompileResult {
     pub ok: bool,
-    pub errors: Any,
+    pub errors: String,
     pub ir: String,
     pub outputPath: String,
 }
 
-func compileSource(source: String, path: String, cmd: String): CompileResult {
-    var errors = Vec.new();
-    
+func compileSource(source: String, path: String, cmd: String) {
     var lexResult = lexer.tokenize(source, path);
-    if lexResult.errors.len() > 0 {
+    if lexResult.errors.length() > 0 {
         return CompileResult { ok: false, errors: "lexer error", ir: "", outputPath: "" };
     }
     
     var parseResult = parser.parse(lexResult.tokens, path);
-    if parseResult.errors.len() > 0 {
+    if parseResult.errors.length() > 0 {
         return CompileResult { ok: false, errors: "parse error", ir: "", outputPath: "" };
     }
-    
-    var typeResult = typecheck.typecheck(parseResult.program);
-    if !typeResult.ok {
-        return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
-    }
-    
-    var ir = codegen.generateIR(parseResult.program);
-    
-    if cmd == "build" || cmd == "run" {
-        var outputPath = "/tmp/rey_out";
-        var compileRes = codegen.compileLLVM(ir, outputPath, false);
-        
-        println("Compiled: " + path);
-        return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
-    }
-    
-    return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: "a.out" };
+
+    // bootstrap mode: lexer+parser only for now
+    return CompileResult { ok: true, errors: "ok", ir: "", outputPath: "" };
 }
 
-func compileFile(entryPath: String, cmd: String): CompileResult {
+func compileFile(entryPath: String, cmd: String) {
     var exists = fileExists(entryPath);
     if !exists {
         return CompileResult { ok: false, errors: "file not found", ir: "", outputPath: "" };
@@ -55,7 +37,7 @@ func compileFile(entryPath: String, cmd: String): CompileResult {
 
 func main() {
     var cliArgs = args();
-    if cliArgs.len() < 2 {
+    if cliArgs.length() < 2 {
         println("Usage: reyc <build|run|check> <file>");
     } else {
         var cmd = cliArgs[1];

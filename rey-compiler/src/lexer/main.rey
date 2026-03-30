@@ -1,16 +1,113 @@
+// NOTE: this is duplicated from `lexer/token.rey` so `import lexer;` works without generics/extra imports.
+// bootstrap compiler is intentionally messy right now.
+
+enum TokenKind {
+    Identifier,
+    StringLiteral,
+    CharLiteral,
+    NumberLiteral,
+
+    // keywords
+    Var,
+    Const,
+    Func,
+    Struct,
+    Enum,
+    Import,
+    Export,
+    Pub,
+    Return,
+    If,
+    Else,
+    While,
+    For,
+    In,
+    Break,
+    Continue,
+    Match,
+    InstanceOf,
+    True,
+    False,
+    Null,
+
+    // punctuation/operators
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    LeftBracket,
+    RightBracket,
+    Comma,
+    Dot,
+    Semicolon,
+    Colon,
+    ColonColon,
+    Arrow,
+    Equal,
+    EqualEqual,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Plus,
+    PlusPlus,
+    PlusEqual,
+    Minus,
+    MinusMinus,
+    MinusEqual,
+    Star,
+    StarEqual,
+    Slash,
+    SlashEqual,
+    Percent,
+    PercentEqual,
+    AndAnd,
+    OrOr,
+    Not,
+
+    Eof,
+}
+
+struct Span {
+    pub start: int,
+    pub end: int,
+    pub line: int,
+    pub column: int,
+}
+
+struct Token {
+    pub kind: String,
+    pub lexeme: String,
+    pub span: Span,
+}
+
+enum LexErrorKind {
+    UnexpectedCharacter,
+    UnterminatedString,
+    UnterminatedChar,
+    InvalidNumber,
+}
+
+struct LexError {
+    pub kind: String,
+    pub message: String,
+    pub span: Span,
+}
+
 struct Lexer {
     pub source: String,
     pub pos: int,
     pub start: int,
     pub line: int,
     pub column: int,
-    pub tokens: Vec<Token>,
-    pub errors: Vec<LexError>,
+    pub tokens: [Token],
+    pub errors: [LexError],
 }
 
-export struct LexerResult {
-    pub tokens: Vec<Token>,
-    pub errors: Vec<LexError>,
+struct LexerResult {
+    pub tokens: [Token],
+    pub errors: [LexError],
 }
 
 func isAlpha(c: String): bool {
@@ -36,31 +133,31 @@ func isPunctuation(c: String): bool {
            c == "!" || c == "=" || c == "<" || c == ">" || c == "?";
 }
 
-func newSpan(start: int, end: int, line: int, column: int): Span {
+func newSpan(start: int, end: int, line: int, column: int) {
     return Span { start: start, end: end, line: line, column: column };
 }
 
-func makeToken(kind: TokenKind, lexeme: String, span: Span): Token {
+func makeToken(kind, lexeme: String, span) {
     return Token { kind: kind, lexeme: lexeme, span: span };
 }
 
-func makeError(kind: LexErrorKind, message: String, span: Span): LexError {
+func makeError(kind, message: String, span) {
     return LexError { kind: kind, message: message, span: span };
 }
 
-func addToken(lexer: Lexer, kind: TokenKind, lexeme: String) {
+func addToken(lexer, kind, lexeme: String) {
     var span = newSpan(lexer.start, lexer.pos, lexer.line, lexer.column);
     var token = makeToken(kind, lexeme, span);
     lexer.tokens.push(token);
 }
 
-func addError(lexer: Lexer, kind: LexErrorKind, message: String) {
+func addError(lexer, kind, message: String) {
     var span = newSpan(lexer.pos, lexer.pos + 1, lexer.line, lexer.column);
     var error = makeError(kind, message, span);
     lexer.errors.push(error);
 }
 
-func advance(lexer: Lexer): String {
+func advance(lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
@@ -75,21 +172,21 @@ func advance(lexer: Lexer): String {
     return c;
 }
 
-func peek(lexer: Lexer): String {
+func peek(lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos];
 }
 
-func peekNext(lexer: Lexer): String {
+func peekNext(lexer): String {
     if lexer.pos + 1 >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos + 1];
 }
 
-func match(lexer: Lexer, expected: String): bool {
+func matchChar(lexer, expected: String): bool {
     if lexer.pos >= lexer.source.len() {
         return false;
     }
@@ -101,7 +198,7 @@ func match(lexer: Lexer, expected: String): bool {
     return true;
 }
 
-func skipWhitespace(lexer: Lexer) {
+func skipWhitespace(lexer) {
     loop {
         if lexer.pos >= lexer.source.len() {
             break;
@@ -130,7 +227,7 @@ func skipWhitespace(lexer: Lexer) {
                 advance(lexer);
                 loop {
                     if lexer.pos >= lexer.source.len() {
-                        addError(lexer, UnexpectedCharacter, "Unterminated block comment");
+                        addError(lexer, "UnexpectedCharacter", "Unterminated block comment");
                         break;
                     }
                     if peek(lexer) == "*" && peekNext(lexer) == "/" {
@@ -149,11 +246,11 @@ func skipWhitespace(lexer: Lexer) {
     }
 }
 
-func scanString(lexer: Lexer): String {
+func scanString(lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
-            addError(lexer, UnterminatedString, "Unterminated string literal");
+            addError(lexer, "UnterminatedString", "Unterminated string literal");
             break;
         }
         var c = advance(lexer);
@@ -188,11 +285,11 @@ func scanString(lexer: Lexer): String {
     return result;
 }
 
-func scanChar(lexer: Lexer): String {
+func scanChar(lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
-            addError(lexer, UnterminatedChar, "Unterminated char literal");
+            addError(lexer, "UnterminatedChar", "Unterminated char literal");
             break;
         }
         var c = advance(lexer);
@@ -221,7 +318,7 @@ func scanChar(lexer: Lexer): String {
     return result;
 }
 
-func scanNumber(lexer: Lexer): String {
+func scanNumber(lexer): String {
     var result = "";
     var hasDot = false;
     loop {
@@ -256,7 +353,7 @@ func scanNumber(lexer: Lexer): String {
     return result;
 }
 
-func scanIdentifier(lexer: Lexer): String {
+func scanIdentifier(lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
@@ -273,123 +370,123 @@ func scanIdentifier(lexer: Lexer): String {
     return result;
 }
 
-func getKeyword(kind: String): TokenKind {
-    if kind == "var" { return TokenKind.Var; }
-    if kind == "const" { return TokenKind.Const; }
-    if kind == "func" { return TokenKind.Func; }
-    if kind == "struct" { return TokenKind.Struct; }
-    if kind == "enum" { return TokenKind.Enum; }
-    if kind == "import" { return TokenKind.Import; }
-    if kind == "export" { return TokenKind.Export; }
-    if kind == "pub" { return TokenKind.Pub; }
-    if kind == "return" { return TokenKind.Return; }
-    if kind == "if" { return TokenKind.If; }
-    if kind == "else" { return TokenKind.Else; }
-    if kind == "while" { return TokenKind.While; }
-    if kind == "for" { return TokenKind.For; }
-    if kind == "in" { return TokenKind.In; }
-    if kind == "break" { return TokenKind.Break; }
-    if kind == "continue" { return TokenKind.Continue; }
-    if kind == "match" { return TokenKind.Match; }
-    if kind == "instanceof" { return TokenKind.InstanceOf; }
-    if kind == "true" { return TokenKind.True; }
-    if kind == "false" { return TokenKind.False; }
-    if kind == "null" { return TokenKind.Null; }
-    return TokenKind.Identifier;
+func getKeyword(kind: String) {
+    if kind == "var" { return "Var"; }
+    if kind == "const" { return "Const"; }
+    if kind == "func" { return "Func"; }
+    if kind == "struct" { return "Struct"; }
+    if kind == "enum" { return "Enum"; }
+    if kind == "import" { return "Import"; }
+    if kind == "export" { return "Export"; }
+    if kind == "pub" { return "Pub"; }
+    if kind == "return" { return "Return"; }
+    if kind == "if" { return "If"; }
+    if kind == "else" { return "Else"; }
+    if kind == "while" { return "While"; }
+    if kind == "for" { return "For"; }
+    if kind == "in" { return "In"; }
+    if kind == "break" { return "Break"; }
+    if kind == "continue" { return "Continue"; }
+    if kind == "match" { return "Match"; }
+    if kind == "instanceof" { return "InstanceOf"; }
+    if kind == "true" { return "True"; }
+    if kind == "false" { return "False"; }
+    if kind == "null" { return "Null"; }
+    return "Identifier";
 }
 
-func scanToken(lexer: Lexer) {
+func scanToken(lexer) {
     lexer.start = lexer.pos;
     var c = advance(lexer);
     
     if c == "" {
-        addToken(lexer, TokenKind.Eof, "");
-        return;
+        addToken(lexer, "Eof", "");
+        return null;
     }
     
     if isWhitespace(c) {
-        return;
+        return null;
     }
     
-    if c == "(" { addToken(lexer, TokenKind.LeftParen, "("); return; }
-    if c == ")" { addToken(lexer, TokenKind.RightParen, ")"); return; }
-    if c == "{" { addToken(lexer, TokenKind.LeftBrace, "{"); return; }
-    if c == "}" { addToken(lexer, TokenKind.RightBrace, "}"); return; }
-    if c == "[" { addToken(lexer, TokenKind.LeftBracket, "["); return; }
-    if c == "]" { addToken(lexer, TokenKind.RightBracket, "]"); return; }
-    if c == "," { addToken(lexer, TokenKind.Comma, ","); return; }
-    if c == "." { addToken(lexer, TokenKind.Dot, "."); return; }
-    if c == ";" { addToken(lexer, TokenKind.Semicolon, ";"); return; }
+    if c == "(" { addToken(lexer, "LeftParen", "("); return null; }
+    if c == ")" { addToken(lexer, "RightParen", ")"); return null; }
+    if c == "{" { addToken(lexer, "LeftBrace", "{"); return null; }
+    if c == "}" { addToken(lexer, "RightBrace", "}"); return null; }
+    if c == "[" { addToken(lexer, "LeftBracket", "["); return null; }
+    if c == "]" { addToken(lexer, "RightBracket", "]"); return null; }
+    if c == "," { addToken(lexer, "Comma", ","); return null; }
+    if c == "." { addToken(lexer, "Dot", "."); return null; }
+    if c == ";" { addToken(lexer, "Semicolon", ";"); return null; }
     if c == "+" { 
-        if match(lexer, "+") { addToken(lexer, TokenKind.PlusPlus, "++"); return; }
-        if match(lexer, "=") { addToken(lexer, TokenKind.PlusEqual, "+="); return; }
-        addToken(lexer, TokenKind.Plus, "+"); return; 
+        if matchChar(lexer, "+") { addToken(lexer, "PlusPlus", "++"); return null; }
+        if matchChar(lexer, "=") { addToken(lexer, "PlusEqual", "+="); return null; }
+        addToken(lexer, "Plus", "+"); return null; 
     }
     if c == "-" {
-        if match(lexer, "-") { addToken(lexer, TokenKind.MinusMinus, "--"); return; }
-        if match(lexer, "=") { addToken(lexer, TokenKind.MinusEqual, "-="); return; }
-        if match(lexer, ">") { addToken(lexer, TokenKind.Arrow, "->"); return; }
-        addToken(lexer, TokenKind.Minus, "-"); return;
+        if matchChar(lexer, "-") { addToken(lexer, "MinusMinus", "--"); return null; }
+        if matchChar(lexer, "=") { addToken(lexer, "MinusEqual", "-="); return null; }
+        if matchChar(lexer, ">") { addToken(lexer, "Arrow", "->"); return null; }
+        addToken(lexer, "Minus", "-"); return null;
     }
     if c == "*" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.StarEqual, "*="); return; }
-        addToken(lexer, TokenKind.Star, "*"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "StarEqual", "*="); return null; }
+        addToken(lexer, "Star", "*"); return null;
     }
     if c == "/" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.SlashEqual, "/="); return; }
-        addToken(lexer, TokenKind.Slash, "/"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "SlashEqual", "/="); return null; }
+        addToken(lexer, "Slash", "/"); return null;
     }
     if c == "%" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.PercentEqual, "%="); return; }
-        addToken(lexer, TokenKind.Percent, "%"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "PercentEqual", "%="); return null; }
+        addToken(lexer, "Percent", "%"); return null;
     }
     if c == "=" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.EqualEqual, "=="); return; }
-        addToken(lexer, TokenKind.Equal, "="); return;
+        if matchChar(lexer, "=") { addToken(lexer, "EqualEqual", "=="); return null; }
+        addToken(lexer, "Equal", "="); return null;
     }
     if c == "!" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.NotEqual, "!="); return; }
-        addToken(lexer, TokenKind.Not, "!"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "NotEqual", "!="); return null; }
+        addToken(lexer, "Not", "!"); return null;
     }
     if c == "<" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.LessEqual, "<="); return; }
-        addToken(lexer, TokenKind.Less, "<"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "LessEqual", "<="); return null; }
+        addToken(lexer, "Less", "<"); return null;
     }
     if c == ">" {
-        if match(lexer, "=") { addToken(lexer, TokenKind.GreaterEqual, ">="); return; }
-        addToken(lexer, TokenKind.Greater, ">"); return;
+        if matchChar(lexer, "=") { addToken(lexer, "GreaterEqual", ">="); return null; }
+        addToken(lexer, "Greater", ">"); return null;
     }
     if c == ":" {
-        if match(lexer, ":") { addToken(lexer, TokenKind.ColonColon, "::"); return; }
-        addToken(lexer, TokenKind.Colon, ":"); return;
+        if matchChar(lexer, ":") { addToken(lexer, "ColonColon", "::"); return null; }
+        addToken(lexer, "Colon", ":"); return null;
     }
     if c == "&" {
-        if match(lexer, "&") { addToken(lexer, TokenKind.AndAnd, "&&"); return; }
-        addToken(lexer, TokenKind.Identifier, "&"); return;
+        if matchChar(lexer, "&") { addToken(lexer, "AndAnd", "&&"); return null; }
+        addToken(lexer, "Identifier", "&"); return null;
     }
     if c == "|" {
-        if match(lexer, "|") { addToken(lexer, TokenKind.OrOr, "||"); return; }
-        addToken(lexer, TokenKind.Identifier, "|"); return;
+        if matchChar(lexer, "|") { addToken(lexer, "OrOr", "||"); return null; }
+        addToken(lexer, "Identifier", "|"); return null;
     }
     
     if c == "\"" {
         var str = scanString(lexer);
-        addToken(lexer, TokenKind.StringLiteral, str);
-        return;
+        addToken(lexer, "StringLiteral", str);
+        return null;
     }
     
     if c == "'" {
         var ch = scanChar(lexer);
-        addToken(lexer, TokenKind.CharLiteral, ch);
-        return;
+        addToken(lexer, "CharLiteral", ch);
+        return null;
     }
     
     if isDigit(c) {
         lexer.pos = lexer.pos - 1;
         lexer.column = lexer.column - 1;
         var num = scanNumber(lexer);
-        addToken(lexer, TokenKind.NumberLiteral, num);
-        return;
+        addToken(lexer, "NumberLiteral", num);
+        return null;
     }
     
     if isAlpha(c) {
@@ -398,25 +495,25 @@ func scanToken(lexer: Lexer) {
         var ident = scanIdentifier(lexer);
         var kind = getKeyword(ident);
         addToken(lexer, kind, ident);
-        return;
+        return null;
     }
     
-    addError(lexer, UnexpectedCharacter, "Unexpected character: " + c);
+    addError(lexer, "UnexpectedCharacter", "Unexpected character: " + c);
 }
 
-export pub func newLexer(source: String): Lexer {
+export pub func newLexer(source: String) {
     return Lexer {
         source: source,
         pos: 0,
         start: 0,
         line: 1,
         column: 0,
-        tokens: Vec.new(),
-        errors: Vec.new(),
+        tokens: [],
+        errors: []
     };
 }
 
-export pub func tokenize(source: String, path: String): LexerResult {
+export pub func tokenize(source: String, path: String) {
     var lexer = newLexer(source);
     
     loop {
@@ -440,10 +537,10 @@ export pub func tokenize(source: String, path: String): LexerResult {
         scanToken(lexer);
     }
     
-    addToken(lexer, TokenKind.Eof, "");
+    addToken(lexer, "Eof", "");
     
     return LexerResult {
         tokens: lexer.tokens,
-        errors: lexer.errors,
+        errors: lexer.errors
     };
 }

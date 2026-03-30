@@ -1,5 +1,12 @@
 // AST Definitions for Rey Parser
 
+struct Span {
+    pub start: int,
+    pub end: int,
+    pub line: int,
+    pub column: int,
+}
+
 // Literals
 enum LiteralKind {
     String,
@@ -54,14 +61,14 @@ struct IdentExpr {
 // Binary expression
 struct BinaryExpr {
     pub left: Expr,
-    pub op: TokenKind,
+    pub op: String,
     pub right: Expr,
     pub span: Span,
 }
 
 // Unary expression
 struct UnaryExpr {
-    pub op: TokenKind,
+    pub op: String,
     pub right: Expr,
     pub span: Span,
 }
@@ -69,7 +76,7 @@ struct UnaryExpr {
 // Call expression
 struct CallExpr {
     pub callee: Expr,
-    pub args: Vec<Expr>,
+    pub args: [Expr],
     pub span: Span,
 }
 
@@ -89,15 +96,15 @@ struct FieldAccessExpr {
 
 // Lambda expression
 struct LambdaExpr {
-    pub params: Vec<String>,
-    pub body: Vec<Stmt>,
+    pub params: [String],
+    pub body: [Stmt],
     pub span: Span,
 }
 
 // Match expression
 struct MatchExpr {
     pub expr: Expr,
-    pub arms: Vec<MatchArm>,
+    pub arms: [MatchArm],
     pub span: Span,
 }
 
@@ -118,19 +125,19 @@ struct IfExpr {
 
 // Tuple expression
 struct TupleExpr {
-    pub elements: Vec<Expr>,
+    pub elements: [Expr],
     pub span: Span,
 }
 
 // Array expression
 struct ArrayExpr {
-    pub elements: Vec<Expr>,
+    pub elements: [Expr],
     pub span: Span,
 }
 
 // Dict expression
 struct DictExpr {
-    pub entries: Vec<DictEntry>,
+    pub entries: [DictEntry],
     pub span: Span,
 }
 
@@ -183,9 +190,9 @@ struct ConstDeclStmt {
 // Function declaration
 struct FuncDeclStmt {
     pub name: String,
-    pub params: Vec<FuncParam>,
+    pub params: [FuncParam],
     pub returnType: String,
-    pub body: Vec<Stmt>,
+    pub body: [Stmt],
     pub span: Span,
 }
 
@@ -198,8 +205,8 @@ struct FuncParam {
 // Struct declaration
 struct StructDeclStmt {
     pub name: String,
-    pub fields: Vec<StructField>,
-    pub methods: Vec<FuncDeclStmt>,
+    pub fields: [StructField],
+    pub methods: [FuncDeclStmt],
     pub span: Span,
 }
 
@@ -212,14 +219,14 @@ struct StructField {
 // Enum declaration
 struct EnumDeclStmt {
     pub name: String,
-    pub variants: Vec<String>,
+    pub variants: [String],
     pub span: Span,
 }
 
 // Import statement
 struct ImportStmt {
     pub path: String,
-    pub items: Vec<String>,
+    pub items: [String],
     pub span: Span,
 }
 
@@ -244,7 +251,7 @@ struct ContinueStmt {
 // While statement
 struct WhileStmt {
     pub condition: Expr,
-    pub body: Vec<Stmt>,
+    pub body: [Stmt],
     pub span: Span,
 }
 
@@ -252,19 +259,19 @@ struct WhileStmt {
 struct ForStmt {
     pub variable: String,
     pub iterable: Expr,
-    pub body: Vec<Stmt>,
+    pub body: [Stmt],
     pub span: Span,
 }
 
 // Loop statement
 struct LoopStmt {
-    pub body: Vec<Stmt>,
+    pub body: [Stmt],
     pub span: Span,
 }
 
 // Block statement
 struct BlockStmt {
-    pub statements: Vec<Stmt>,
+    pub statements: [Stmt],
     pub span: Span,
 }
 
@@ -311,7 +318,7 @@ struct EnumVariantPattern {
 
 struct StructPattern {
     pub structName: String,
-    pub fields: Vec<PatternField>,
+    pub fields: [PatternField],
     pub span: Span,
 }
 
@@ -329,7 +336,7 @@ struct OrPattern {
 
 // Program root
 struct Program {
-    pub statements: Vec<Stmt>,
+    pub statements: [Stmt],
     pub span: Span,
 }
 
