@@ -1,9 +1,9 @@
 // Rey Compiler - Full Pipeline
 
-import lexer.main;
-import parser.main;
-import typecheck.main;
-import codegen.main;
+import lexer;
+import parser;
+import typecheck;
+import codegen;
 
 struct CompileResult {
     pub ok: bool,
@@ -16,12 +16,12 @@ func compileSource(source: String, path: String, cmd: String): CompileResult {
     var errors = Vec.new();
     
     var lexResult = lexer.tokenize(source, path);
-    if lexResult.errors.len() > 0 {
+    if lexResult.errors.length() > 0 {
         return CompileResult { ok: false, errors: "lexer error", ir: "", outputPath: "" };
     }
     
     var parseResult = parser.parse(lexResult.tokens, path);
-    if parseResult.errors.len() > 0 {
+    if parseResult.errors.length() > 0 {
         return CompileResult { ok: false, errors: "parse error", ir: "", outputPath: "" };
     }
     
@@ -55,11 +55,11 @@ func compileFile(entryPath: String, cmd: String): CompileResult {
 
 func main() {
     var cliArgs = args();
-    if cliArgs.len() < 2 {
+    if cliArgs.length() < 4 {
         println("Usage: reyc <build|run|check> <file>");
     } else {
-        var cmd = cliArgs[1];
-        var path = cliArgs[2];
+        var cmd = cliArgs[2];
+        var path = cliArgs[3];
         
         var result = compileFile(path, cmd);
         
