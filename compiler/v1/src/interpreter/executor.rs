@@ -1207,6 +1207,210 @@ impl Executor {
                 let arr = parts.into_iter().map(Value::String).collect::<Vec<_>>();
                 Ok(Value::Array(Rc::new(RefCell::new(arr))))
             }
+            (Value::String(s), "trim") => {
+                if !args.is_empty() {
+                    return Err(format!(
+                        "{}.trim() expects 0 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                Ok(Value::String(s.trim().to_string()))
+            }
+            (Value::String(s), "startsWith") => {
+                if args.len() != 1 {
+                    return Err(format!(
+                        "{}.startsWith() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                match &args[0] {
+                    Value::String(prefix) => Ok(Value::Bool(s.starts_with(prefix))),
+                    _ => Err("String.startsWith() expects a string prefix".to_string()),
+                }
+            }
+            (Value::String(s), "endsWith") => {
+                if args.len() != 1 {
+                    return Err(format!(
+                        "{}.endsWith() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                match &args[0] {
+                    Value::String(suffix) => Ok(Value::Bool(s.ends_with(suffix))),
+                    _ => Err("String.endsWith() expects a string suffix".to_string()),
+                }
+            }
+            (Value::String(s), "replace") => {
+                if args.len() != 2 {
+                    return Err(format!(
+                        "{}.replace() expects 2 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let from = match &args[0] {
+                    Value::String(v) => v.as_str(),
+                    _ => return Err("String.replace() expects string 'from'".to_string()),
+                };
+                let to = match &args[1] {
+                    Value::String(v) => v.as_str(),
+                    _ => return Err("String.replace() expects string 'to'".to_string()),
+                };
+                Ok(Value::String(s.replace(from, to)))
+            }
+            (Value::String(s), "slice") => {
+                if args.len() != 2 {
+                    return Err(format!(
+                        "{}.slice() expects 2 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let toIndex = |v: &Value| -> Result<isize, String> {
+                    match v {
+                        Value::Int(n) => Ok(*n as isize),
+                        Value::Float(n) => {
+                            if n.fract() != 0.0 {
+                                return Err("String.slice() index must be an integer".to_string());
+                            }
+                            Ok(*n as isize)
+                        }
+                        _ => Err("String.slice() expects int indices".to_string()),
+                    }
+                };
+                let start = toIndex(&args[0])?;
+                let end = toIndex(&args[1])?;
+                if start < 0 || end < 0 {
+                    return Err("String.slice() indices must be non-negative".to_string());
+                }
+                let chars = s.chars().collect::<Vec<_>>();
+                let len = chars.len() as isize;
+                let start = start.min(len) as usize;
+                let end = end.min(len) as usize;
+                if end < start {
+                    return Ok(Value::String(String::new()));
+                }
+                let out = chars[start..end].iter().collect::<String>();
+                Ok(Value::String(out))
+            }
+            (Value::String(s), "indexOf") => {
+                if args.len() != 1 {
+                    return Err(format!(
+                        "{}.indexOf() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let needle = match &args[0] {
+                    Value::String(v) => v,
+                    _ => return Err("String.indexOf() expects a string".to_string()),
+                };
+                match s.find(needle) {
+                    Some(byte_idx) => Ok(Value::Int(s[..byte_idx].chars().count() as i64)),
+                    None => Ok(Value::Int(-1)),
+                }
+            }
+            (Value::String(s), "repeat") => {
+                if args.len() != 1 {
+                    return Err(format!(
+                        "{}.repeat() expects 1 argument, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v,
+                    Value::Float(v) => {
+                        if v.fract() != 0.0 {
+                            return Err("String.repeat() expects int count".to_string());
+                        }
+                        *v as i64
+                    }
+                    _ => return Err("String.repeat() expects int count".to_string()),
+                };
+                if n < 0 {
+                    return Err("String.repeat() count must be non-negative".to_string());
+                }
+                Ok(Value::String(s.repeat(n as usize)))
+            }
+            (Value::String(s), "padLeft") => {
+                if args.len() != 2 {
+                    return Err(format!(
+                        "{}.padLeft() expects 2 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let width = match &args[0] {
+                    Value::Int(v) => *v,
+                    Value::Float(v) => {
+                        if v.fract() != 0.0 {
+                            return Err("String.padLeft() expects int width".to_string());
+                        }
+                        *v as i64
+                    }
+                    _ => return Err("String.padLeft() expects int width".to_string()),
+                };
+                if width < 0 {
+                    return Err("String.padLeft() width must be non-negative".to_string());
+                }
+                let pad = match &args[1] {
+                    Value::String(v) => v,
+                    _ => return Err("String.padLeft() expects string pad char".to_string()),
+                };
+                let pad_ch = pad.chars().next().ok_or_else(|| {
+                    "String.padLeft() expects non-empty string pad char".to_string()
+                })?;
+                let cur_len = s.chars().count() as i64;
+                if cur_len >= width {
+                    return Ok(Value::String(s));
+                }
+                let missing = (width - cur_len) as usize;
+                let mut out = String::new();
+                out.extend(std::iter::repeat(pad_ch).take(missing));
+                out.push_str(&s);
+                Ok(Value::String(out))
+            }
+            (Value::String(s), "padRight") => {
+                if args.len() != 2 {
+                    return Err(format!(
+                        "{}.padRight() expects 2 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                let width = match &args[0] {
+                    Value::Int(v) => *v,
+                    Value::Float(v) => {
+                        if v.fract() != 0.0 {
+                            return Err("String.padRight() expects int width".to_string());
+                        }
+                        *v as i64
+                    }
+                    _ => return Err("String.padRight() expects int width".to_string()),
+                };
+                if width < 0 {
+                    return Err("String.padRight() width must be non-negative".to_string());
+                }
+                let pad = match &args[1] {
+                    Value::String(v) => v,
+                    _ => return Err("String.padRight() expects string pad char".to_string()),
+                };
+                let pad_ch = pad.chars().next().ok_or_else(|| {
+                    "String.padRight() expects non-empty string pad char".to_string()
+                })?;
+                let cur_len = s.chars().count() as i64;
+                if cur_len >= width {
+                    return Ok(Value::String(s));
+                }
+                let missing = (width - cur_len) as usize;
+                let mut out = s;
+                out.extend(std::iter::repeat(pad_ch).take(missing));
+                Ok(Value::String(out))
+            }
             // Vec methods
             (Value::Vec(v), "push") => {
                 if args.len() != 1 {
