@@ -37,6 +37,14 @@
 ### Next up
 - Phase 4 — run the bootstrap compiler end-to-end (`rey rey-compiler/main.rey build ...`)
 
+### Phase 4 — In progress (bootstrap compiler)
+- `rey-compiler/main.rey` now runs and successfully lexes/parses `rey-compiler/tests/e2e/hello.rey`.
+- `exec()` now returns `Result`, and `compileLLVM()` uses `llc -filetype=obj` + `clang` as required.
+- Still blocked on end-to-end native build:
+  - `rey-compiler/src/codegen/main.rey:generateIR()` currently returns `""` (stub), so `/tmp/rey_out.ll` is empty and no binary is produced.
+  - The Rey parser currently returns concrete `*Stmt` structs (e.g. `FuncDeclStmt`) that do not include a `kind` field, but the codegen helpers in `rey-compiler/src/codegen/main.rey` expect `stmt.kind == StmtKind.*`. AST/codegen representation must be aligned before IR can be generated.
+  - `rey-compiler/main.rey` does not yet check/propagate the `Result` from `compileLLVM()`.
+
 ---
 # Previous checkpoint
 # Date: Mar 27, 2026

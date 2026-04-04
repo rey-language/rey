@@ -17,6 +17,10 @@
 - Added missing `Vec` methods: `map`, `filter`, `reduce`, `reverse`, `sort`, `slice`, `join`.
 - Added missing `HashMap` methods: `keys`, `values`, `entries`.
 - Added math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`.
+- Import resolver now supports module/file lookup under a project `src/` directory, and module imports include struct/enum declarations.
+- Enums now expose a namespace dict under the enum name (enables `Enum.Variant` access) and typecheck defines enum names in scope.
+- `exec()` now returns a `Result` value instead of a raw string.
+- Added `String.len()` alias and lexicographic string comparisons (`<`, `<=`, `>`, `>=`) for bootstrap tooling.
 
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
