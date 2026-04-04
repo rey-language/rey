@@ -1694,6 +1694,41 @@ impl Executor {
                 }
                 Ok(Value::Int(m.borrow().len() as i64))
             }
+            (Value::HashMap(m), "keys") => {
+                if !args.is_empty() {
+                    return Err("HashMap.keys() expects 0 arguments".to_string());
+                }
+                let keys = m
+                    .borrow()
+                    .keys()
+                    .cloned()
+                    .map(Value::String)
+                    .collect::<Vec<_>>();
+                Ok(Value::Vec(Rc::new(RefCell::new(keys))))
+            }
+            (Value::HashMap(m), "values") => {
+                if !args.is_empty() {
+                    return Err("HashMap.values() expects 0 arguments".to_string());
+                }
+                let values = m.borrow().values().cloned().collect::<Vec<_>>();
+                Ok(Value::Vec(Rc::new(RefCell::new(values))))
+            }
+            (Value::HashMap(m), "entries") => {
+                if !args.is_empty() {
+                    return Err("HashMap.entries() expects 0 arguments".to_string());
+                }
+                let entries = m
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| {
+                        Value::Array(Rc::new(RefCell::new(vec![
+                            Value::String(k.clone()),
+                            v.clone(),
+                        ])))
+                    })
+                    .collect::<Vec<_>>();
+                Ok(Value::Vec(Rc::new(RefCell::new(entries))))
+            }
             // Stack methods
             (Value::Stack(s), "push") => {
                 if args.len() != 1 {
