@@ -805,13 +805,38 @@ impl Executor {
                     _ => Err("Can only apply ++/-- to numbers".to_string()),
                 }
             }
-            Expr::Call { callee, args, .. } => {
+            Expr::Call { callee, args, span } => {
                 let mut evaluated_args = Vec::new();
                 for arg in args {
                     evaluated_args.push(self.evaluate_expr(arg, env)?);
                 }
 
                 if let Expr::Variable { name, .. } = callee.as_ref() {
+                    if name == "assert" {
+                        if evaluated_args.len() != 2 {
+                            return Err(format!(
+                                "assert() expects 2 arguments, got {}",
+                                evaluated_args.len()
+                            ));
+                        }
+                        let ok = match evaluated_args[0] {
+                            Value::Bool(b) => b,
+                            _ => return Err("assert() expects boolean condition".to_string()),
+                        };
+                        if !ok {
+                            let msg = super::std::StdLib::formatValue(&evaluated_args[1]);
+                            if span.line > 0 {
+                                eprintln!(
+                                    "\x1b[1;31merror[assert]\x1b[0m: {} (line {})",
+                                    msg, span.line
+                                );
+                            } else {
+                                eprintln!("\x1b[1;31merror[assert]\x1b[0m: {}", msg);
+                            }
+                            std::process::exit(1);
+                        }
+                        return Ok(Value::Null);
+                    }
                     if let Some(result) =
                         super::std::StdLib::call_builtin_function(name, &evaluated_args)
                     {

@@ -175,6 +175,15 @@ impl TypeChecker {
             },
         );
         c.functions.insert(
+            "assert".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::Bool, Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Void),
+            },
+        );
+        c.functions.insert(
             "abs".to_string(),
             Ty::Function {
                 minArgs: 1,
