@@ -19,7 +19,7 @@ impl StdLib {
             "println".to_string(),
             vec![], // No parameters - accepts any number of arguments
             vec![], // Empty body - handled specially
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("println".to_string(), Value::Function(println_func));
@@ -28,7 +28,7 @@ impl StdLib {
             "print".to_string(),
             vec![],
             vec![],
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("print".to_string(), Value::Function(print_func));
@@ -37,7 +37,7 @@ impl StdLib {
             "abs".to_string(),
             vec![],
             vec![],
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("abs".to_string(), Value::Function(abs_func));
@@ -46,7 +46,7 @@ impl StdLib {
             "max".to_string(),
             vec![],
             vec![],
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("max".to_string(), Value::Function(max_func));
@@ -55,7 +55,7 @@ impl StdLib {
             "min".to_string(),
             vec![],
             vec![],
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("min".to_string(), Value::Function(min_func));
@@ -64,7 +64,7 @@ impl StdLib {
             "random".to_string(),
             vec![],
             vec![],
-            Span { start: 0, end: 0 },
+            Span::new(0, 0),
             None,
         );
         globals.insert("random".to_string(), Value::Function(random_func));

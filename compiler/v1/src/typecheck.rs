@@ -401,7 +401,12 @@ impl TypeChecker {
                     _ => {
                         return Err(TypeError {
                             message: "Type error: variadic param must be an array type".to_string(),
-                            span: Span { start: 0, end: 0 },
+                            span: Span {
+                                start: 0,
+                                end: 0,
+                                line: 0,
+                                column: 0,
+                            },
                         })
                     }
                 }
@@ -649,7 +654,12 @@ impl TypeChecker {
                         if *expected != Ty::Void {
                             return Err(TypeError {
                                 message: "Type error: return value required".to_string(),
-                                span: Span { start: 0, end: 0 },
+                                span: Span {
+                                    start: 0,
+                                    end: 0,
+                                    line: 0,
+                                    column: 0,
+                                },
                             });
                         }
                     }

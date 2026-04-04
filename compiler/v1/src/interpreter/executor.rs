@@ -43,7 +43,12 @@ impl Executor {
                     name.clone(),
                     params.clone(),
                     body.clone(),
-                    Span { start: 0, end: 0 },
+                    Span {
+                        start: 0,
+                        end: 0,
+                        line: 0,
+                        column: 0,
+                    },
                     None,
                 );
                 env.define(name.clone(), Value::Function(function));
@@ -437,7 +442,7 @@ impl Executor {
                 receiver,
                 name,
                 args,
-                ..
+                span,
             } => {
                 let recv = self.evaluate_expr(receiver, env)?;
                 let mut evaluated_args = Vec::new();
@@ -458,7 +463,7 @@ impl Executor {
                         env,
                     );
                 }
-                self.evaluate_method_call(recv, name, &evaluated_args, env)
+                self.evaluate_method_call(recv, name, &evaluated_args, *span, env)
             }
             Expr::StructLiteral {
                 name,
@@ -644,7 +649,12 @@ impl Executor {
                     "<lambda>".to_string(),
                     params.clone(),
                     vec![Stmt::Return(Some(*body.clone()))],
-                    Span { start: 0, end: 0 },
+                    Span {
+                        start: 0,
+                        end: 0,
+                        line: 0,
+                        column: 0,
+                    },
                     Some(env.clone()),
                 );
                 Ok(Value::Function(func))
@@ -997,8 +1007,18 @@ impl Executor {
         receiver: Value,
         name: &str,
         args: &[Value],
+        callSpan: Span,
         env: &mut Environment,
     ) -> Result<Value, String> {
+        if matches!(receiver, Value::Null) {
+            if callSpan.line > 0 {
+                return Err(format!(
+                    "error[null]: cannot call method '{}' on null (line {})",
+                    name, callSpan.line
+                ));
+            }
+            return Err(format!("error[null]: cannot call method '{}' on null", name));
+        }
         match (receiver, name) {
             (Value::Dict(d), method_name) => {
                 let value = d

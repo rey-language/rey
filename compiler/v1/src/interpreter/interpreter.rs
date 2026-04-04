@@ -59,14 +59,24 @@ impl Interpreter {
             .execute_block(statements, &mut self.environment)?;
 
         if self.environment.get("main").is_some() {
-            let call = Expr::Call {
-                callee: Box::new(Expr::Variable {
-                    name: "main".to_string(),
-                    span: crate::lexer::span::Span { start: 0, end: 0 },
-                }),
-                args: vec![],
-                span: crate::lexer::span::Span { start: 0, end: 0 },
-            };
+                let call = Expr::Call {
+                    callee: Box::new(Expr::Variable {
+                        name: "main".to_string(),
+                        span: crate::lexer::span::Span {
+                            start: 0,
+                            end: 0,
+                            line: 0,
+                            column: 0,
+                        },
+                    }),
+                    args: vec![],
+                    span: crate::lexer::span::Span {
+                        start: 0,
+                        end: 0,
+                        line: 0,
+                        column: 0,
+                    },
+                };
             self.executor.evaluate_expr(&call, &mut self.environment)?;
         }
 

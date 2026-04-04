@@ -27,6 +27,8 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
+        let startLine = self.cursor.line();
+        let startColumn = self.cursor.column();
         let start = self.cursor.position();
 
         // 2.end of sc input
@@ -35,7 +37,7 @@ impl<'a> Lexer<'a> {
             None => {
                 return Ok(Token {
                     kind: TokenKind::Eof,
-                    span: Span::new(start, start),
+                    span: Span::new_at(start, start, startLine, startColumn),
                 });
             }
         };
@@ -44,22 +46,22 @@ impl<'a> Lexer<'a> {
                 if self.cursor.peek() == Some('"') && self.cursor.peekN(1) == Some('"') {
                     self.cursor.advance();
                     self.cursor.advance();
-                    self.lexMultilineString(start)
+                    self.lexMultilineString(start, startLine, startColumn)
                 } else {
-                    self.lexString(start)
+                    self.lexString(start, startLine, startColumn)
                 }
             }
-            '\'' => self.lexChar(start),
+            '\'' => self.lexChar(start, startLine, startColumn),
 
-            c if c.is_alphabetic() || c == '_' => Ok(self.lexIdentifier(start, c)),
+            c if c.is_alphabetic() || c == '_' => Ok(self.lexIdentifier(start, startLine, startColumn, c)),
 
-            '(' => Ok(self.simpleToken(TokenKind::LeftParen, start)),
-            ')' => Ok(self.simpleToken(TokenKind::RightParen, start)),
-            '{' => Ok(self.simpleToken(TokenKind::LeftBrace, start)),
-            '}' => Ok(self.simpleToken(TokenKind::RightBrace, start)),
-            '[' => Ok(self.simpleToken(TokenKind::LeftBracket, start)),
-            ']' => Ok(self.simpleToken(TokenKind::RightBracket, start)),
-            ';' => Ok(self.simpleToken(TokenKind::Semicolon, start)),
+            '(' => Ok(self.simpleToken(TokenKind::LeftParen, start, startLine, startColumn)),
+            ')' => Ok(self.simpleToken(TokenKind::RightParen, start, startLine, startColumn)),
+            '{' => Ok(self.simpleToken(TokenKind::LeftBrace, start, startLine, startColumn)),
+            '}' => Ok(self.simpleToken(TokenKind::RightBrace, start, startLine, startColumn)),
+            '[' => Ok(self.simpleToken(TokenKind::LeftBracket, start, startLine, startColumn)),
+            ']' => Ok(self.simpleToken(TokenKind::RightBracket, start, startLine, startColumn)),
+            ';' => Ok(self.simpleToken(TokenKind::Semicolon, start, startLine, startColumn)),
             '+' => {
                 let kind = if self.matchNext('+') {
                     TokenKind::PlusPlus
@@ -70,7 +72,7 @@ impl<'a> Lexer<'a> {
                 };
                 Ok(Token {
                     kind,
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
             '-' => {
@@ -83,7 +85,7 @@ impl<'a> Lexer<'a> {
                 };
                 Ok(Token {
                     kind,
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
             '*' => {
@@ -94,7 +96,7 @@ impl<'a> Lexer<'a> {
                 };
                 Ok(Token {
                     kind,
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
             '/' => {
@@ -119,7 +121,7 @@ impl<'a> Lexer<'a> {
                 };
                 Ok(Token {
                     kind,
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
             ':' => {
@@ -128,22 +130,22 @@ impl<'a> Lexer<'a> {
                 } else {
                     TokenKind::Colon
                 };
-                Ok(self.simpleToken(kind, start))
+                Ok(self.simpleToken(kind, start, startLine, startColumn))
             }
-            '?' => Ok(self.simpleToken(TokenKind::Question, start)),
+            '?' => Ok(self.simpleToken(TokenKind::Question, start, startLine, startColumn)),
             '.' => {
                 if self.cursor.peek() == Some('.') && self.cursor.peekN(1) == Some('.') {
                     self.cursor.advance();
                     self.cursor.advance();
                     Ok(Token {
                         kind: TokenKind::Ellipsis,
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     })
                 } else {
-                    Ok(self.simpleToken(TokenKind::Dot, start))
+                    Ok(self.simpleToken(TokenKind::Dot, start, startLine, startColumn))
                 }
             }
-            ',' => Ok(self.simpleToken(TokenKind::Comma, start)),
+            ',' => Ok(self.simpleToken(TokenKind::Comma, start, startLine, startColumn)),
             '%' => {
                 let kind = if self.matchNext('=') {
                     TokenKind::PercentEqual
@@ -152,7 +154,7 @@ impl<'a> Lexer<'a> {
                 };
                 Ok(Token {
                     kind,
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
 
@@ -160,12 +162,12 @@ impl<'a> Lexer<'a> {
                 if self.matchNext('&') {
                     Ok(Token {
                         kind: TokenKind::AndAnd,
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     })
                 } else {
                     Err(LexerError::UnexpectedCharacter {
                         found: ch,
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     })
                 }
             }
@@ -173,12 +175,12 @@ impl<'a> Lexer<'a> {
                 if self.matchNext('|') {
                     Ok(Token {
                         kind: TokenKind::OrOr,
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     })
                 } else {
                     Ok(Token {
                         kind: TokenKind::Pipe,
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     })
                 }
             }
@@ -191,7 +193,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     TokenKind::Equal
                 };
-                Ok(self.simpleToken(kind, start))
+                Ok(self.simpleToken(kind, start, startLine, startColumn))
             }
             '<' => {
                 let kind = if self.matchNext('=') {
@@ -199,7 +201,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     TokenKind::Less
                 };
-                Ok(self.simpleToken(kind, start))
+                Ok(self.simpleToken(kind, start, startLine, startColumn))
             }
             '>' => {
                 let kind = if self.matchNext('=') {
@@ -207,7 +209,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     TokenKind::Greater
                 };
-                Ok(self.simpleToken(kind, start))
+                Ok(self.simpleToken(kind, start, startLine, startColumn))
             }
             '!' => {
                 let kind = if self.matchNext('=') {
@@ -215,7 +217,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     TokenKind::Not
                 };
-                Ok(self.simpleToken(kind, start))
+                Ok(self.simpleToken(kind, start, startLine, startColumn))
             }
 
             int if int.is_digit(10) => {
@@ -233,13 +235,13 @@ impl<'a> Lexer<'a> {
 
                 Ok(Token {
                     kind: TokenKind::NumberLiteral(number),
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })
             }
 
             _ => Err(LexerError::UnexpectedCharacter {
                 found: ch,
-                span: Span::new(start, self.cursor.position()),
+                span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
             }),
         }
     }
@@ -252,7 +254,12 @@ impl<'a> Lexer<'a> {
             _ => false,
         }
     }
-    fn lexString(&mut self, start: usize) -> Result<Token, LexerError> {
+    fn lexString(
+        &mut self,
+        start: usize,
+        startLine: usize,
+        startColumn: usize,
+    ) -> Result<Token, LexerError> {
         let mut value = String::new();
 
         while let Some(ch) = self.cursor.advance() {
@@ -269,13 +276,13 @@ impl<'a> Lexer<'a> {
                     }
                 } else {
                     return Err(LexerError::UnterminatedString {
-                        span: Span::new(start, self.cursor.position()),
+                        span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                     });
                 }
             } else if ch == '"' {
                 return Ok(Token {
                     kind: TokenKind::StringLiteral(value),
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 });
             } else {
                 value.push(ch);
@@ -283,11 +290,16 @@ impl<'a> Lexer<'a> {
         }
 
         Err(LexerError::UnterminatedString {
-            span: Span::new(start, self.cursor.position()),
+            span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
         })
     }
 
-    fn lexMultilineString(&mut self, start: usize) -> Result<Token, LexerError> {
+    fn lexMultilineString(
+        &mut self,
+        start: usize,
+        startLine: usize,
+        startColumn: usize,
+    ) -> Result<Token, LexerError> {
         let mut value = String::new();
 
         while let Some(ch) = self.cursor.advance() {
@@ -301,23 +313,28 @@ impl<'a> Lexer<'a> {
                 }
                 return Ok(Token {
                     kind: TokenKind::StringLiteral(value),
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 });
             }
             value.push(ch);
         }
 
         Err(LexerError::UnterminatedString {
-            span: Span::new(start, self.cursor.position()),
+            span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
         })
     }
 
-    fn lexChar(&mut self, start: usize) -> Result<Token, LexerError> {
+    fn lexChar(
+        &mut self,
+        start: usize,
+        startLine: usize,
+        startColumn: usize,
+    ) -> Result<Token, LexerError> {
         let ch = match self.cursor.advance() {
             Some(c) => c,
             None => {
                 return Err(LexerError::UnterminatedChar {
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 });
             }
         };
@@ -327,7 +344,7 @@ impl<'a> Lexer<'a> {
                 .cursor
                 .advance()
                 .ok_or_else(|| LexerError::UnterminatedChar {
-                    span: Span::new(start, self.cursor.position()),
+                    span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
                 })?;
             match esc {
                 'n' => '\n',
@@ -344,18 +361,24 @@ impl<'a> Lexer<'a> {
         match self.cursor.advance() {
             Some('\'') => Ok(Token {
                 kind: TokenKind::CharLiteral(value),
-                span: Span::new(start, self.cursor.position()),
+                span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
             }),
             Some(other) => Err(LexerError::UnexpectedCharacter {
                 found: other,
-                span: Span::new(start, self.cursor.position()),
+                span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
             }),
             None => Err(LexerError::UnterminatedChar {
-                span: Span::new(start, self.cursor.position()),
+                span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
             }),
         }
     }
-    fn lexIdentifier(&mut self, start: usize, first: char) -> Token {
+    fn lexIdentifier(
+        &mut self,
+        start: usize,
+        startLine: usize,
+        startColumn: usize,
+        first: char,
+    ) -> Token {
         let mut ident = String::new();
         ident.push(first);
 
@@ -397,14 +420,14 @@ impl<'a> Lexer<'a> {
 
         Token {
             kind,
-            span: Span::new(start, self.cursor.position()),
+            span: Span::new_at(start, self.cursor.position(), startLine, startColumn),
         }
     }
 
-    fn simpleToken(&self, kind: TokenKind, start: usize) -> Token {
+    fn simpleToken(&self, kind: TokenKind, start: usize, line: usize, column: usize) -> Token {
         Token {
             kind,
-            span: Span::new(start, start + 1),
+            span: Span::new_at(start, start + 1, line, column),
         }
     }
 }
