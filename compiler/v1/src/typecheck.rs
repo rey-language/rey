@@ -220,6 +220,87 @@ impl TypeChecker {
             },
         );
         c.functions.insert(
+            "floor".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Int),
+            },
+        );
+        c.functions.insert(
+            "ceil".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Int),
+            },
+        );
+        c.functions.insert(
+            "round".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Int),
+            },
+        );
+        c.functions.insert(
+            "sqrt".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
+            "pow".to_string(),
+            Ty::Function {
+                minArgs: 2,
+                params: vec![Ty::Any, Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
+            "log".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
+            "sin".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
+            "cos".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
+            "tan".to_string(),
+            Ty::Function {
+                minArgs: 1,
+                params: vec![Ty::Any],
+                variadic: None,
+                ret: Box::new(Ty::Float),
+            },
+        );
+        c.functions.insert(
             "len".to_string(),
             Ty::Function {
                 minArgs: 1,

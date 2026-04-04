@@ -318,6 +318,116 @@ impl StdLib {
                     ((time.wrapping_mul(1103515245).wrapping_add(12345)) % 10000) as f64 / 10000.0;
                 Some(Ok(Value::Float(rand_val)))
             }
+            "floor" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("floor expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("floor expects a number".to_string())),
+                };
+                Some(Ok(Value::Int(n.floor() as i64)))
+            }
+            "ceil" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("ceil expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("ceil expects a number".to_string())),
+                };
+                Some(Ok(Value::Int(n.ceil() as i64)))
+            }
+            "round" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("round expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("round expects a number".to_string())),
+                };
+                Some(Ok(Value::Int(n.round() as i64)))
+            }
+            "sqrt" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("sqrt expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("sqrt expects a number".to_string())),
+                };
+                if n < 0.0 {
+                    return Some(Err("sqrt expects non-negative input".to_string()));
+                }
+                Some(Ok(Value::Float(n.sqrt())))
+            }
+            "pow" => {
+                if args.len() != 2 {
+                    return Some(Err(format!("pow expects 2 arguments, got {}", args.len())));
+                }
+                let base = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("pow expects numeric base".to_string())),
+                };
+                let exp = match &args[1] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("pow expects numeric exponent".to_string())),
+                };
+                Some(Ok(Value::Float(base.powf(exp))))
+            }
+            "log" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("log expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("log expects a number".to_string())),
+                };
+                if n <= 0.0 {
+                    return Some(Err("log expects positive input".to_string()));
+                }
+                Some(Ok(Value::Float(n.ln())))
+            }
+            "sin" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("sin expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("sin expects a number".to_string())),
+                };
+                Some(Ok(Value::Float(n.sin())))
+            }
+            "cos" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("cos expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("cos expects a number".to_string())),
+                };
+                Some(Ok(Value::Float(n.cos())))
+            }
+            "tan" => {
+                if args.len() != 1 {
+                    return Some(Err(format!("tan expects 1 argument, got {}", args.len())));
+                }
+                let n = match &args[0] {
+                    Value::Int(v) => *v as f64,
+                    Value::Float(v) => *v,
+                    _ => return Some(Err("tan expects a number".to_string())),
+                };
+                Some(Ok(Value::Float(n.tan())))
+            }
             "len" => {
                 if args.len() != 1 {
                     return Some(Err(format!("len expects 1 argument, got {}", args.len())));
