@@ -11,8 +11,16 @@
   - Repro: struct field `pub tokens: Vec<String>,` fails parsing at `<` with `error[syntax]: Expected field name or 'func'.`
   - Root cause: `parseTypeAtom()` in `compiler/v1/src/parser/parser.rs` consumes only the identifier and leaves `<...>` tokens behind.
 
+### ✅ Phase 1 — Generic type annotations in interpreter
+- Parser now skips/ignores `<...>` generic params in all type annotation positions (including nested generics).
+- Type checker now accepts collection type annotations (`Vec`, `HashMap`, etc.) with erased type params.
+- Verified:
+  - `compiler/v1`: `cargo build --release` ✅
+  - `compiler/v1`: `cargo test` ✅
+  - Repro file with `Vec<String>` in struct field now runs ✅
+
 ### Next up
-- Phase 1 — fix parser/type system to accept/ignore generic type params everywhere, then re-run `cargo build --release` + `cargo test`.
+- Phase 2.1 — parameter reassignment (parameters must be mutable locals)
 
 ---
 # Previous checkpoint

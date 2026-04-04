@@ -5,6 +5,10 @@
 - Verified `compiler/v1` builds in release mode and all Rust tests pass (7/7).
 - Confirmed interpreter parse failure for generic type annotations like `Vec<String>` (fails at `<` in type positions); tracked to `parseTypeAtom()` not consuming generic parameter tokens.
 
+## [fix] — 2026-04-05
+- Parser now accepts generic type annotations like `Vec<Token>` / `HashMap<String, Vec<int>>` by skipping the `<...>` portion during type parsing.
+- Type checker recognizes collection type annotations (`Vec`, `HashMap`, `LinkedList`, `Stack`, `Queue`, `Option`, `Result`) as dynamically-dispatched at runtime (type params erased).
+
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
 - Fixed string indexing: `source[i]` now returns single character as String.
