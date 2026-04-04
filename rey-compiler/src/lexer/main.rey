@@ -157,7 +157,7 @@ func addError(lexer, kind, message: String) {
     lexer.errors.push(error);
 }
 
-func advance(lexer): String {
+func lexAdvance(lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
@@ -172,21 +172,21 @@ func advance(lexer): String {
     return c;
 }
 
-func peek(lexer): String {
+func lexPeek(lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos];
 }
 
-func peekNext(lexer): String {
+func lexPeekNext(lexer): String {
     if lexer.pos + 1 >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos + 1];
 }
 
-func matchChar(lexer, expected: String): bool {
+func lexMatchChar(lexer, expected: String): bool {
     if lexer.pos >= lexer.source.len() {
         return false;
     }
@@ -203,39 +203,39 @@ func skipWhitespace(lexer) {
         if lexer.pos >= lexer.source.len() {
             break;
         }
-        var c = peek(lexer);
+        var c = lexPeek(lexer);
         if c == " " || c == "\t" || c == "\r" {
-            advance(lexer);
+            lexAdvance(lexer);
         } else if c == "\n" {
-            advance(lexer);
+            lexAdvance(lexer);
             lexer.line = lexer.line + 1;
             lexer.column = 0;
         } else if c == "/" {
-            var next = peekNext(lexer);
+            var next = lexPeekNext(lexer);
             if next == "/" {
                 loop {
                     if lexer.pos >= lexer.source.len() {
                         break;
                     }
-                    if peek(lexer) == "\n" {
+                    if lexPeek(lexer) == "\n" {
                         break;
                     }
-                    advance(lexer);
+                    lexAdvance(lexer);
                 }
             } else if next == "*" {
-                advance(lexer);
-                advance(lexer);
+                lexAdvance(lexer);
+                lexAdvance(lexer);
                 loop {
                     if lexer.pos >= lexer.source.len() {
                         addError(lexer, "UnexpectedCharacter", "Unterminated block comment");
                         break;
                     }
-                    if peek(lexer) == "*" && peekNext(lexer) == "/" {
-                        advance(lexer);
-                        advance(lexer);
+                    if lexPeek(lexer) == "*" && lexPeekNext(lexer) == "/" {
+                        lexAdvance(lexer);
+                        lexAdvance(lexer);
                         break;
                     }
-                    advance(lexer);
+                    lexAdvance(lexer);
                 }
             } else {
                 break;
@@ -253,30 +253,30 @@ func scanString(lexer): String {
             addError(lexer, "UnterminatedString", "Unterminated string literal");
             break;
         }
-        var c = advance(lexer);
+        var c = lexAdvance(lexer);
         if c == "\"" {
             break;
         }
         if c == "\\" {
-            var next = peek(lexer);
+            var next = lexPeek(lexer);
             if next == "n" {
                 result = result + "\n";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "t" {
                 result = result + "\t";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "r" {
                 result = result + "\r";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "\\" {
                 result = result + "\\";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "\"" {
                 result = result + "\"";
-                advance(lexer);
+                lexAdvance(lexer);
             } else {
                 result = result + next;
-                advance(lexer);
+                lexAdvance(lexer);
             }
         } else {
             result = result + c;
@@ -292,24 +292,24 @@ func scanChar(lexer): String {
             addError(lexer, "UnterminatedChar", "Unterminated char literal");
             break;
         }
-        var c = advance(lexer);
+        var c = lexAdvance(lexer);
         if c == "'" {
             break;
         }
         if c == "\\" {
-            var next = peek(lexer);
+            var next = lexPeek(lexer);
             if next == "n" {
                 result = result + "\n";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "t" {
                 result = result + "\t";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "\\" {
                 result = result + "\\";
-                advance(lexer);
+                lexAdvance(lexer);
             } else if next == "'" {
                 result = result + "'";
-                advance(lexer);
+                lexAdvance(lexer);
             }
         } else {
             result = result + c;
@@ -325,26 +325,26 @@ func scanNumber(lexer): String {
         if lexer.pos >= lexer.source.len() {
             break;
         }
-        var c = peek(lexer);
+        var c = lexPeek(lexer);
         if c == "." {
-            var next = peekNext(lexer);
+            var next = lexPeekNext(lexer);
             if isDigit(next) && !hasDot {
                 result = result + c;
-                advance(lexer);
+                lexAdvance(lexer);
                 hasDot = true;
             } else {
                 break;
             }
         } else if isDigit(c) {
             result = result + c;
-            advance(lexer);
+            lexAdvance(lexer);
         } else if c == "e" || c == "E" {
             result = result + c;
-            advance(lexer);
-            var next = peek(lexer);
+            lexAdvance(lexer);
+            var next = lexPeek(lexer);
             if next == "+" || next == "-" {
                 result = result + next;
-                advance(lexer);
+                lexAdvance(lexer);
             }
         } else {
             break;
@@ -359,10 +359,10 @@ func scanIdentifier(lexer): String {
         if lexer.pos >= lexer.source.len() {
             break;
         }
-        var c = peek(lexer);
+        var c = lexPeek(lexer);
         if isAlphaNumeric(c) {
             result = result + c;
-            advance(lexer);
+            lexAdvance(lexer);
         } else {
             break;
         }
@@ -397,7 +397,7 @@ func getKeyword(kind: String) {
 
 func scanToken(lexer) {
     lexer.start = lexer.pos;
-    var c = advance(lexer);
+    var c = lexAdvance(lexer);
     
     if c == "" {
         addToken(lexer, "Eof", "");
@@ -418,54 +418,54 @@ func scanToken(lexer) {
     if c == "." { addToken(lexer, "Dot", "."); return null; }
     if c == ";" { addToken(lexer, "Semicolon", ";"); return null; }
     if c == "+" { 
-        if matchChar(lexer, "+") { addToken(lexer, "PlusPlus", "++"); return null; }
-        if matchChar(lexer, "=") { addToken(lexer, "PlusEqual", "+="); return null; }
+        if lexMatchChar(lexer, "+") { addToken(lexer, "PlusPlus", "++"); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "PlusEqual", "+="); return null; }
         addToken(lexer, "Plus", "+"); return null; 
     }
     if c == "-" {
-        if matchChar(lexer, "-") { addToken(lexer, "MinusMinus", "--"); return null; }
-        if matchChar(lexer, "=") { addToken(lexer, "MinusEqual", "-="); return null; }
-        if matchChar(lexer, ">") { addToken(lexer, "Arrow", "->"); return null; }
+        if lexMatchChar(lexer, "-") { addToken(lexer, "MinusMinus", "--"); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "MinusEqual", "-="); return null; }
+        if lexMatchChar(lexer, ">") { addToken(lexer, "Arrow", "->"); return null; }
         addToken(lexer, "Minus", "-"); return null;
     }
     if c == "*" {
-        if matchChar(lexer, "=") { addToken(lexer, "StarEqual", "*="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "StarEqual", "*="); return null; }
         addToken(lexer, "Star", "*"); return null;
     }
     if c == "/" {
-        if matchChar(lexer, "=") { addToken(lexer, "SlashEqual", "/="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "SlashEqual", "/="); return null; }
         addToken(lexer, "Slash", "/"); return null;
     }
     if c == "%" {
-        if matchChar(lexer, "=") { addToken(lexer, "PercentEqual", "%="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "PercentEqual", "%="); return null; }
         addToken(lexer, "Percent", "%"); return null;
     }
     if c == "=" {
-        if matchChar(lexer, "=") { addToken(lexer, "EqualEqual", "=="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "EqualEqual", "=="); return null; }
         addToken(lexer, "Equal", "="); return null;
     }
     if c == "!" {
-        if matchChar(lexer, "=") { addToken(lexer, "NotEqual", "!="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "NotEqual", "!="); return null; }
         addToken(lexer, "Not", "!"); return null;
     }
     if c == "<" {
-        if matchChar(lexer, "=") { addToken(lexer, "LessEqual", "<="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "LessEqual", "<="); return null; }
         addToken(lexer, "Less", "<"); return null;
     }
     if c == ">" {
-        if matchChar(lexer, "=") { addToken(lexer, "GreaterEqual", ">="); return null; }
+        if lexMatchChar(lexer, "=") { addToken(lexer, "GreaterEqual", ">="); return null; }
         addToken(lexer, "Greater", ">"); return null;
     }
     if c == ":" {
-        if matchChar(lexer, ":") { addToken(lexer, "ColonColon", "::"); return null; }
+        if lexMatchChar(lexer, ":") { addToken(lexer, "ColonColon", "::"); return null; }
         addToken(lexer, "Colon", ":"); return null;
     }
     if c == "&" {
-        if matchChar(lexer, "&") { addToken(lexer, "AndAnd", "&&"); return null; }
+        if lexMatchChar(lexer, "&") { addToken(lexer, "AndAnd", "&&"); return null; }
         addToken(lexer, "Identifier", "&"); return null;
     }
     if c == "|" {
-        if matchChar(lexer, "|") { addToken(lexer, "OrOr", "||"); return null; }
+        if lexMatchChar(lexer, "|") { addToken(lexer, "OrOr", "||"); return null; }
         addToken(lexer, "Identifier", "|"); return null;
     }
     
@@ -524,12 +524,12 @@ export pub func tokenize(source: String, path: String) {
         if lexer.pos >= lexer.source.len() {
             break;
         }
-        var c = peek(lexer);
+        var c = lexPeek(lexer);
         if c == "" {
             break;
         }
         if c == "\n" {
-            advance(lexer);
+            lexAdvance(lexer);
             lexer.line = lexer.line + 1;
             lexer.column = 0;
             continue;
