@@ -74,6 +74,7 @@ impl Ty {
             return Ok(Ty::Nullable(Box::new(baseTy)));
         }
         match name {
+            "Any" => Ok(Ty::Any),
             "Void" => Ok(Ty::Void),
             "null" => Ok(Ty::Null),
             "bool" => Ok(Ty::Bool),
@@ -84,6 +85,10 @@ impl Ty {
             "float" => Ok(Ty::Float),
             "double" => Ok(Ty::Double),
             "byte" => Ok(Ty::Byte),
+            // collection types are dynamically dispatched at runtime; type params are erased
+            "Vec" | "HashMap" | "LinkedList" | "Stack" | "Queue" | "Option" | "Result" => {
+                Ok(Ty::Any)
+            }
             _ => {
                 if let Some(inner) = name.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
                     let inner = Ty::fromName(inner.trim())?;

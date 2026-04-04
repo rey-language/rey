@@ -723,6 +723,32 @@ impl Parser {
         }))
     }
 
+    fn skipGenericTypeArgs(&mut self) -> Result<(), ParserError> {
+        if !self.matchToken(&TokenKind::Less) {
+            return Ok(());
+        }
+        let mut depth = 1usize;
+        while depth > 0 {
+            if self.isAtEnd() {
+                return Err(self.error("Unterminated generic type parameters."));
+            }
+            match &self.peek().kind {
+                TokenKind::Less => {
+                    depth += 1;
+                    self.advance();
+                }
+                TokenKind::Greater => {
+                    depth -= 1;
+                    self.advance();
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn parseTypeAtom(&mut self) -> Result<Option<Type>, ParserError> {
         if self.matchToken(&TokenKind::LeftBracket) {
             let inner = match &self.peek().kind {
@@ -730,6 +756,7 @@ impl Parser {
                 _ => return Err(self.error("Expected type name inside '[]'.")),
             };
             self.advance();
+            self.skipGenericTypeArgs()?;
             self.consume(&TokenKind::RightBracket, "Expected ']' after array type.")?;
             let mut name = format!("[{}]", inner);
             if self.matchToken(&TokenKind::Question) {
@@ -742,6 +769,7 @@ impl Parser {
                 _ => return Err(self.error("Expected key type name inside '{}'.")),
             };
             self.advance();
+            self.skipGenericTypeArgs()?;
             self.consume(
                 &TokenKind::Colon,
                 "Expected ':' between dict key/value types.",
@@ -751,6 +779,7 @@ impl Parser {
                 _ => return Err(self.error("Expected value type name inside '{}'.")),
             };
             self.advance();
+            self.skipGenericTypeArgs()?;
             self.consume(&TokenKind::RightBrace, "Expected '}' after dict type.")?;
             let mut name = format!("{{{}:{}}}", key, value);
             if self.matchToken(&TokenKind::Question) {
@@ -762,6 +791,7 @@ impl Parser {
                 TokenKind::Identifier(name) => {
                     let mut n = name.clone();
                     self.advance();
+                    self.skipGenericTypeArgs()?;
                     if self.matchToken(&TokenKind::Question) {
                         n.push('?');
                     }
