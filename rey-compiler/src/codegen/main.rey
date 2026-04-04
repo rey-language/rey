@@ -229,18 +229,16 @@ export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
     var opt = "-O2";
     if release { opt = "-O3"; }
     
-    var llcCmd = "llc " + opt + " /tmp/rey_out.ll -o /tmp/rey_out.o";
+    var llcCmd = "llc " + opt + " -filetype=obj /tmp/rey_out.ll -o /tmp/rey_out.o";
     var llcResult = exec(llcCmd);
-    if llcResult.kind == Result.Err {
-        var errMsg = "llc failed";
-        return Result.Err(errMsg);
+    if llcResult.isErr() {
+        return Result.Err("llc failed");
     }
     
     var clangCmd = "clang /tmp/rey_out.o -o " + outputPath;
     var clangResult = exec(clangCmd);
-    if clangResult.kind == Result.Err {
-        var errMsg = "clang failed";
-        return Result.Err(errMsg);
+    if clangResult.isErr() {
+        return Result.Err("clang failed");
     }
     
     return Result.Ok(outputPath);
