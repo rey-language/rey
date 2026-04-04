@@ -643,9 +643,23 @@ impl StdLib {
                         match std::process::Command::new("sh").arg("-c").arg(cmd).output() {
                             Ok(output) => {
                                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                                Some(Ok(Value::String(stdout)))
+                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                if output.status.success() {
+                                    Some(Ok(Value::Result(Rc::new(RefCell::new(Ok(
+                                        Value::String(stdout),
+                                    ))))))
+                                } else {
+                                    let msg = if stderr.trim().is_empty() {
+                                        format!("command failed: {}", output.status)
+                                    } else {
+                                        stderr
+                                    };
+                                    Some(Ok(Value::Result(Rc::new(RefCell::new(Err(msg))))))
+                                }
                             }
-                            Err(e) => Some(Err(format!("{}", e))),
+                            Err(e) => Some(Ok(Value::Result(Rc::new(RefCell::new(Err(
+                                format!("{}", e),
+                            )))))),
                         }
                     }
                     _ => Some(Err("exec expects a string command".to_string())),
