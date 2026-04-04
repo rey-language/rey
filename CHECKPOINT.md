@@ -19,8 +19,16 @@
   - `compiler/v1`: `cargo test` ✅
   - Repro file with `Vec<String>` in struct field now runs ✅
 
+### ✅ Phase 2 — Remaining interpreter bugs
+- Parameter reassignment inside functions: already working ✅
+- `return;` in `Void` functions: fixed ✅
+- `const` inside functions: already working ✅
+- String indexing (`str[i]`): already working ✅
+- Null propagation for method calls: fixed ✅ (now errors with line number)
+- Circular import diagnostics: already includes full cycle path ✅
+
 ### Next up
-- Phase 2.1 — parameter reassignment (parameters must be mutable locals)
+- Phase 3 — complete language surface (assert + String/Vec/HashMap methods + math builtins)
 
 ---
 # Previous checkpoint

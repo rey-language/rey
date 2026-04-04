@@ -8,6 +8,8 @@
 ## [fix] — 2026-04-05
 - Parser now accepts generic type annotations like `Vec<Token>` / `HashMap<String, Vec<int>>` by skipping the `<...>` portion during type parsing.
 - Type checker recognizes collection type annotations (`Vec`, `HashMap`, `LinkedList`, `Stack`, `Queue`, `Option`, `Result`) as dynamically-dispatched at runtime (type params erased).
+- Added support for bare `return;` (no expression), enabling early returns from `Void` functions.
+- Method calls on `null` now error explicitly and include a line number.
 
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
