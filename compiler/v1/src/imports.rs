@@ -26,6 +26,7 @@ pub struct ResolvedProgram {
 struct ResolvedFile {
     statements: Vec<Stmt>,
     functionStatements: Vec<Stmt>,
+    declStatements: Vec<Stmt>,
     localFunctionVisibility: HashMap<String, FunctionVisibility>,
 }
 
@@ -116,10 +117,21 @@ impl ResolverState {
                 .filter(|stmt| matches!(stmt, Stmt::FuncDecl { .. }))
                 .cloned()
                 .collect::<Vec<_>>();
+            let declStatements = resolved
+                .iter()
+                .filter(|stmt| {
+                    matches!(
+                        stmt,
+                        Stmt::FuncDecl { .. } | Stmt::StructDecl { .. } | Stmt::EnumDecl { .. }
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>();
 
             Ok(ResolvedFile {
                 statements: resolved,
                 functionStatements,
+                declStatements,
                 localFunctionVisibility,
             })
         })();
@@ -259,7 +271,7 @@ impl ResolverState {
                     }
                     let imported = self.resolveFile(&path)?;
                     if !includedFiles.contains(&path) {
-                        resolved.extend(imported.functionStatements.clone());
+                        resolved.extend(imported.declStatements.clone());
                         includedFiles.insert(path.clone());
                     }
 
@@ -321,7 +333,7 @@ impl ResolverState {
                     }
                     let imported = self.resolveFile(&importFile)?;
                     if !includedFiles.contains(&importFile) {
-                        resolved.extend(imported.functionStatements.clone());
+                        resolved.extend(imported.declStatements.clone());
                         includedFiles.insert(importFile.clone());
                     }
 
@@ -385,7 +397,9 @@ impl ResolverState {
     ) -> Result<PathBuf, CompileError> {
         let mut candidates = Vec::new();
         candidates.push(currentDir.join(format!("{}.rey", module)));
+        candidates.push(currentDir.join("src").join(format!("{}.rey", module)));
         candidates.push(self.projectRoot.join(format!("{}.rey", module)));
+        candidates.push(self.projectRoot.join("src").join(format!("{}.rey", module)));
         if let Some(home) = homePath() {
             candidates.push(home.join(".reyc/std/src").join(format!("{}.rey", module)));
         }
@@ -418,7 +432,9 @@ impl ResolverState {
     ) -> Result<PathBuf, CompileError> {
         let mut candidates = Vec::new();
         candidates.push(currentDir.join(module));
+        candidates.push(currentDir.join("src").join(module));
         candidates.push(self.projectRoot.join(module));
+        candidates.push(self.projectRoot.join("src").join(module));
         if module == "std" {
             if let Some(home) = homePath() {
                 candidates.push(home.join(".reyc/std/src"));
@@ -455,8 +471,23 @@ impl ResolverState {
         let mut candidates = Vec::new();
         candidates.push(currentDir.join(module).join(item).join("main.rey"));
         candidates.push(currentDir.join(module).join(format!("{}.rey", item)));
+        candidates.push(currentDir.join("src").join(module).join(item).join("main.rey"));
+        candidates.push(currentDir.join("src").join(module).join(format!("{}.rey", item)));
         candidates.push(self.projectRoot.join(module).join(item).join("main.rey"));
         candidates.push(self.projectRoot.join(module).join(format!("{}.rey", item)));
+        candidates.push(
+            self.projectRoot
+                .join("src")
+                .join(module)
+                .join(item)
+                .join("main.rey"),
+        );
+        candidates.push(
+            self.projectRoot
+                .join("src")
+                .join(module)
+                .join(format!("{}.rey", item)),
+        );
         if module == "std" {
             if let Some(home) = homePath() {
                 candidates.push(home.join(".reyc/std/src").join(item).join("main.rey"));
