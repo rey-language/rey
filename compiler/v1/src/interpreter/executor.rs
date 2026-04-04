@@ -1482,6 +1482,166 @@ impl Executor {
                     None => Ok(Value::Int(-1)),
                 }
             }
+            (Value::Vec(v), "map") => {
+                if args.len() != 1 {
+                    return Err("Vec.map() expects 1 argument".to_string());
+                }
+                let func = match &args[0] {
+                    Value::Function(f) => f,
+                    _ => return Err("Vec.map() expects a function".to_string()),
+                };
+                let mut out = Vec::new();
+                for item in v.borrow().iter() {
+                    let val = self.call_value_function(func, &[item.clone()], env)?;
+                    out.push(val);
+                }
+                Ok(Value::Vec(Rc::new(RefCell::new(out))))
+            }
+            (Value::Vec(v), "filter") => {
+                if args.len() != 1 {
+                    return Err("Vec.filter() expects 1 argument".to_string());
+                }
+                let func = match &args[0] {
+                    Value::Function(f) => f,
+                    _ => return Err("Vec.filter() expects a function".to_string()),
+                };
+                let mut out = Vec::new();
+                for item in v.borrow().iter() {
+                    let keep = self.call_value_function(func, &[item.clone()], env)?;
+                    match keep {
+                        Value::Bool(true) => out.push(item.clone()),
+                        Value::Bool(false) => {}
+                        _ => return Err("Vec.filter() predicate must return bool".to_string()),
+                    }
+                }
+                Ok(Value::Vec(Rc::new(RefCell::new(out))))
+            }
+            (Value::Vec(v), "reduce") => {
+                if args.len() != 2 {
+                    return Err("Vec.reduce() expects 2 arguments".to_string());
+                }
+                let func = match &args[0] {
+                    Value::Function(f) => f,
+                    _ => return Err("Vec.reduce() expects a function".to_string()),
+                };
+                let mut acc = args[1].clone();
+                for item in v.borrow().iter() {
+                    acc = self.call_value_function(func, &[acc.clone(), item.clone()], env)?;
+                }
+                Ok(acc)
+            }
+            (Value::Vec(v), "reverse") => {
+                if !args.is_empty() {
+                    return Err("Vec.reverse() expects 0 arguments".to_string());
+                }
+                v.borrow_mut().reverse();
+                Ok(Value::Null)
+            }
+            (Value::Vec(v), "sort") => {
+                if !args.is_empty() {
+                    return Err("Vec.sort() expects 0 arguments".to_string());
+                }
+                let mut v_mut = v.borrow_mut();
+                if v_mut.len() <= 1 {
+                    return Ok(Value::Null);
+                }
+
+                enum SortKind {
+                    Int,
+                    Float,
+                    String,
+                    Bool,
+                }
+                let kind = match &v_mut[0] {
+                    Value::Int(_) => SortKind::Int,
+                    Value::Float(_) => SortKind::Float,
+                    Value::String(_) => SortKind::String,
+                    Value::Bool(_) => SortKind::Bool,
+                    _ => return Err("Vec.sort() only supports int, float, String, bool".to_string()),
+                };
+
+                for item in v_mut.iter() {
+                    let ok = match (&kind, item) {
+                        (SortKind::Int, Value::Int(_)) => true,
+                        (SortKind::Float, Value::Float(_)) => true,
+                        (SortKind::String, Value::String(_)) => true,
+                        (SortKind::Bool, Value::Bool(_)) => true,
+                        _ => false,
+                    };
+                    if !ok {
+                        return Err("Vec.sort() requires all elements to be the same comparable type".to_string());
+                    }
+                }
+
+                match kind {
+                    SortKind::Int => v_mut.sort_by(|a, b| match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+                        _ => std::cmp::Ordering::Equal,
+                    }),
+                    SortKind::Float => v_mut.sort_by(|a, b| match (a, b) {
+                        (Value::Float(x), Value::Float(y)) => x
+                            .partial_cmp(y)
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                        _ => std::cmp::Ordering::Equal,
+                    }),
+                    SortKind::String => v_mut.sort_by(|a, b| match (a, b) {
+                        (Value::String(x), Value::String(y)) => x.cmp(y),
+                        _ => std::cmp::Ordering::Equal,
+                    }),
+                    SortKind::Bool => v_mut.sort_by(|a, b| match (a, b) {
+                        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+                        _ => std::cmp::Ordering::Equal,
+                    }),
+                }
+                Ok(Value::Null)
+            }
+            (Value::Vec(v), "slice") => {
+                if args.len() != 2 {
+                    return Err("Vec.slice() expects 2 arguments".to_string());
+                }
+                let toIndex = |v: &Value| -> Result<isize, String> {
+                    match v {
+                        Value::Int(n) => Ok(*n as isize),
+                        Value::Float(n) => {
+                            if n.fract() != 0.0 {
+                                return Err("Vec.slice() index must be an integer".to_string());
+                            }
+                            Ok(*n as isize)
+                        }
+                        _ => Err("Vec.slice() expects int indices".to_string()),
+                    }
+                };
+                let start = toIndex(&args[0])?;
+                let end = toIndex(&args[1])?;
+                if start < 0 || end < 0 {
+                    return Err("Vec.slice() indices must be non-negative".to_string());
+                }
+                let items = v.borrow();
+                let len = items.len() as isize;
+                let start = start.min(len) as usize;
+                let end = end.min(len) as usize;
+                if end < start {
+                    return Ok(Value::Vec(Rc::new(RefCell::new(vec![]))));
+                }
+                Ok(Value::Vec(Rc::new(RefCell::new(
+                    items[start..end].to_vec(),
+                ))))
+            }
+            (Value::Vec(v), "join") => {
+                if args.len() != 1 {
+                    return Err("Vec.join() expects 1 argument".to_string());
+                }
+                let sep = match &args[0] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err("Vec.join() expects string separator".to_string()),
+                };
+                let parts = v
+                    .borrow()
+                    .iter()
+                    .map(|x| super::std::StdLib::formatValue(x))
+                    .collect::<Vec<_>>();
+                Ok(Value::String(parts.join(&sep)))
+            }
             // HashMap methods
             (Value::HashMap(m), "set") => {
                 if args.len() != 2 {
@@ -1698,6 +1858,66 @@ impl Executor {
             }
             (other, _) => Err(format!("Method call not supported on {:?}", other)),
         }
+    }
+
+    fn call_value_function(
+        &self,
+        func: &Function,
+        args: &[Value],
+        env: &mut Environment,
+    ) -> Result<Value, String> {
+        let hasVariadic = func.params.last().map(|p| p.variadic).unwrap_or(false);
+        let minArgs = func
+            .params
+            .iter()
+            .filter(|p| p.default.is_none() && !p.variadic)
+            .count();
+
+        if args.len() < minArgs || (!hasVariadic && args.len() > func.arity()) {
+            return Err(format!(
+                "Expected {}..={} arguments but got {}",
+                minArgs,
+                func.arity(),
+                args.len()
+            ));
+        }
+
+        let mut function_env = if let Some(closure) = &func.closure {
+            Environment::with_parent(closure.clone())
+        } else {
+            Environment::with_parent(env.clone())
+        };
+
+        let mut argIndex = 0usize;
+        for param in func.params.iter() {
+            if param.variadic {
+                let mut rest = Vec::new();
+                while argIndex < args.len() {
+                    rest.push(args[argIndex].clone());
+                    argIndex += 1;
+                }
+                function_env.define(
+                    param.name.clone(),
+                    Value::Array(Rc::new(RefCell::new(rest))),
+                );
+                continue;
+            }
+
+            if argIndex < args.len() {
+                function_env.define(param.name.clone(), args[argIndex].clone());
+                argIndex += 1;
+                continue;
+            }
+
+            let def = param
+                .default
+                .as_ref()
+                .ok_or_else(|| format!("Missing argument '{}' and no default provided", param.name))?;
+            let val = self.evaluate_expr(def, &mut function_env)?;
+            function_env.define(param.name.clone(), val);
+        }
+
+        self.execute_block(&func.body, &mut function_env)
     }
 
     fn isTruthy(&self, value: &Value) -> bool {
