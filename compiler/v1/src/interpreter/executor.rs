@@ -1154,6 +1154,16 @@ impl Executor {
                 }
                 Ok(Value::Int(s.chars().count() as i64))
             }
+            (Value::String(s), "len") => {
+                if !args.is_empty() {
+                    return Err(format!(
+                        "{}.len() expects 0 arguments, got {}",
+                        "String",
+                        args.len()
+                    ));
+                }
+                Ok(Value::Int(s.chars().count() as i64))
+            }
             (Value::String(s), "upper") => {
                 if !args.is_empty() {
                     return Err(format!(
@@ -2078,6 +2088,10 @@ impl Executor {
             }
             (Value::String(l), EqualEqual, Value::String(r)) => Ok(Value::Bool(l == r)),
             (Value::String(l), NotEqual, Value::String(r)) => Ok(Value::Bool(l != r)),
+            (Value::String(l), Less, Value::String(r)) => Ok(Value::Bool(l < r)),
+            (Value::String(l), LessEqual, Value::String(r)) => Ok(Value::Bool(l <= r)),
+            (Value::String(l), Greater, Value::String(r)) => Ok(Value::Bool(l > r)),
+            (Value::String(l), GreaterEqual, Value::String(r)) => Ok(Value::Bool(l >= r)),
 
             (Value::Bool(l), EqualEqual, Value::Bool(r)) => Ok(Value::Bool(l == r)),
             (Value::Bool(l), NotEqual, Value::Bool(r)) => Ok(Value::Bool(l != r)),
