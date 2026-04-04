@@ -628,21 +628,34 @@ impl TypeChecker {
             }
             Stmt::Import { .. } => Ok(()),
             Stmt::Break | Stmt::Continue => Ok(()),
-            Stmt::Return(expr) => {
-                let rty = self.exprTy(expr)?;
-                if let Some(expected) = &self.currentReturn {
-                    if !rty.isAssignableTo(expected) {
-                        return Err(TypeError {
-                            message: format!(
-                                "Type error: return expected {:?} but got {:?}",
-                                expected, rty
-                            ),
-                            span: expr.span(),
-                        });
+            Stmt::Return(expr) => match expr {
+                Some(expr) => {
+                    let rty = self.exprTy(expr)?;
+                    if let Some(expected) = &self.currentReturn {
+                        if !rty.isAssignableTo(expected) {
+                            return Err(TypeError {
+                                message: format!(
+                                    "Type error: return expected {:?} but got {:?}",
+                                    expected, rty
+                                ),
+                                span: expr.span(),
+                            });
+                        }
                     }
+                    Ok(())
                 }
-                Ok(())
-            }
+                None => {
+                    if let Some(expected) = &self.currentReturn {
+                        if *expected != Ty::Void {
+                            return Err(TypeError {
+                                message: "Type error: return value required".to_string(),
+                                span: Span { start: 0, end: 0 },
+                            });
+                        }
+                    }
+                    Ok(())
+                }
+            },
             Stmt::StructDecl {
                 name: _,
                 fields: _,

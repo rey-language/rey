@@ -178,7 +178,10 @@ impl Executor {
             Stmt::Break => Ok(ControlFlow::Break),
             Stmt::Continue => Ok(ControlFlow::Continue),
             Stmt::Return(expr) => {
-                let value = self.evaluate_expr(expr, env)?;
+                let value = match expr {
+                    Some(expr) => self.evaluate_expr(expr, env)?,
+                    None => Value::Null,
+                };
                 Ok(ControlFlow::return_value(value))
             }
             Stmt::EnumDecl { name, variants } => {
@@ -640,7 +643,7 @@ impl Executor {
                 let func = Function::new(
                     "<lambda>".to_string(),
                     params.clone(),
-                    vec![Stmt::Return(*body.clone())],
+                    vec![Stmt::Return(Some(*body.clone()))],
                     Span { start: 0, end: 0 },
                     Some(env.clone()),
                 );

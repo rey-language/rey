@@ -516,7 +516,7 @@ impl Parser {
                 block
             } else {
                 let expr = self.parseExpression()?;
-                vec![Stmt::Return(expr)]
+                vec![Stmt::Return(Some(expr))]
             };
 
             arms.push(MatchArm { pattern, body });
@@ -688,9 +688,13 @@ impl Parser {
     }
 
     fn parseReturnStatement(&mut self) -> Result<Stmt, ParserError> {
+        if self.check(&TokenKind::Semicolon) {
+            self.advance();
+            return Ok(Stmt::Return(None));
+        }
         let expr = self.parseExpression()?;
         self.consume(&TokenKind::Semicolon, "Expected ';' after return value.")?;
-        Ok(Stmt::Return(expr))
+        Ok(Stmt::Return(Some(expr)))
     }
 
     fn parseExpressionStatement(&mut self) -> Result<Stmt, ParserError> {
