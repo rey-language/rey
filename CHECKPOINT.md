@@ -27,8 +27,15 @@
 - Null propagation for method calls: fixed ✅ (now errors with line number)
 - Circular import diagnostics: already includes full cycle path ✅
 
+### ✅ Phase 3 — Language surface completion (interpreter)
+- Added `assert(condition, message)` builtin (fails with `error[assert]` + line number).
+- Added missing `String` methods: `trim`, `startsWith`, `endsWith`, `replace`, `slice`, `indexOf`, `repeat`, `padLeft`, `padRight`.
+- Added missing `Vec` methods: `map`, `filter`, `reduce`, `reverse`, `sort`, `slice`, `join`.
+- Added missing `HashMap` methods: `keys`, `values`, `entries`.
+- Added math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`.
+
 ### Next up
-- Phase 3 — complete language surface (assert + String/Vec/HashMap methods + math builtins)
+- Phase 4 — run the bootstrap compiler end-to-end (`rey rey-compiler/main.rey build ...`)
 
 ---
 # Previous checkpoint

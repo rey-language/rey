@@ -11,6 +11,13 @@
 - Added support for bare `return;` (no expression), enabling early returns from `Void` functions.
 - Method calls on `null` now error explicitly and include a line number.
 
+## [feat] — 2026-04-05
+- Added `assert(condition, message)` builtin (exits with `error[assert]`).
+- Added missing `String` methods: `trim`, `startsWith`, `endsWith`, `replace`, `slice`, `indexOf`, `repeat`, `padLeft`, `padRight`.
+- Added missing `Vec` methods: `map`, `filter`, `reduce`, `reverse`, `sort`, `slice`, `join`.
+- Added missing `HashMap` methods: `keys`, `values`, `entries`.
+- Added math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`.
+
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
 - Fixed string indexing: `source[i]` now returns single character as String.
