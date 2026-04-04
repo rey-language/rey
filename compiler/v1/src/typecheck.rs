@@ -102,6 +102,14 @@ impl Ty {
                     let value = Ty::fromName(v.trim())?;
                     return Ok(Ty::Dict(Box::new(key), Box::new(value)));
                 }
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
+                    return Ok(Ty::Any);
+                }
                 Err(format!("Unknown type annotation '{}'", name))
             }
         }
@@ -455,6 +463,7 @@ impl TypeChecker {
                 self.registerFunction(name, params, return_ty)?;
             }
             if let Stmt::EnumDecl { name, variants } = stmt {
+                self.define(name, Ty::Any, true);
                 for variant in variants {
                     self.enum_variants
                         .insert(variant.clone(), (name.clone(), variant.clone()));
@@ -765,6 +774,7 @@ impl TypeChecker {
                 Ok(())
             }
             Stmt::EnumDecl { name, variants } => {
+                self.define(name, Ty::Any, true);
                 // Register each variant as a valid variable
                 for variant in variants {
                     self.enum_variants

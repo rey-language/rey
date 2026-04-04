@@ -1,4 +1,5 @@
 use super::value::{StructDef, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -67,14 +68,20 @@ impl Environment {
 
     pub fn register_enum(&mut self, name: String, variants: Vec<String>) {
         self.enum_defs.insert(name.clone(), variants.clone());
-        // Also register each variant as a value
+        // Also register each variant as a value, and expose a namespace dict under the enum name
+        let mut namespace = HashMap::new();
         for variant in variants {
             let val = Value::EnumVariant {
                 enum_name: name.clone(),
                 variant: variant.clone(),
             };
+            namespace.insert(variant.clone(), val.clone());
             self.values.insert(variant, val);
         }
+        self.values.insert(
+            name,
+            Value::Dict(Rc::new(RefCell::new(namespace))),
+        );
     }
 
     pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
