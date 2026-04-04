@@ -1,5 +1,10 @@
 # Changelog
 
+## [checkpoint] — 2026-04-05
+- Synced `master` with `origin/master`.
+- Verified `compiler/v1` builds in release mode and all Rust tests pass (7/7).
+- Confirmed interpreter parse failure for generic type annotations like `Vec<String>` (fails at `<` in type positions); tracked to `parseTypeAtom()` not consuming generic parameter tokens.
+
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
 - Fixed string indexing: `source[i]` now returns single character as String.

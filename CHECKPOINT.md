@@ -1,4 +1,21 @@
 # Rey Language - Phase Checkpoint
+# Date: Apr 5, 2026
+
+## Current milestone — v0.3.0 self-hosting (new phases)
+
+### ✅ Phase 0 — Read and understand (baseline audit)
+- Read `compiler/v1/src/` and `rey-compiler/` (focused on parser/type system + bootstrap pipeline).
+- `compiler/v1`: `cargo build --release` ✅
+- `compiler/v1`: `cargo test` ✅ (7 passing)
+- Interpreter currently rejects generic type annotations like `Vec<String>` / `HashMap<K,V>` in type positions:
+  - Repro: struct field `pub tokens: Vec<String>,` fails parsing at `<` with `error[syntax]: Expected field name or 'func'.`
+  - Root cause: `parseTypeAtom()` in `compiler/v1/src/parser/parser.rs` consumes only the identifier and leaves `<...>` tokens behind.
+
+### Next up
+- Phase 1 — fix parser/type system to accept/ignore generic type params everywhere, then re-run `cargo build --release` + `cargo test`.
+
+---
+# Previous checkpoint
 # Date: Mar 27, 2026
 
 ## PHASES 0-10 COMPLETE - ALL WORK DONE ON MASTER BRANCH
