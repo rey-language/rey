@@ -193,6 +193,28 @@ func genExprValue(ctx, expr) {
             return { ty: "i64", val: tmp5, code: code2 };
         }
     }
+    if expr instanceof CallExpr {
+        if expr.callee instanceof IdentExpr {
+            var name = expr.callee.name;
+            var retTy = "i64";
+
+            var codeC = "";
+            var argsOut = "";
+            var i = 0;
+            loop {
+                if i >= expr.args.length() { break; }
+                var av = genExprValue(ctx, expr.args[i]);
+                codeC = codeC + av.code;
+                if i > 0 { argsOut = argsOut + ", "; }
+                argsOut = argsOut + av.ty + " " + av.val;
+                i = i + 1;
+            }
+
+            var tmp = nextTemp(ctx);
+            codeC = codeC + tmp + " = call " + retTy + " @" + name + "(" + argsOut + ")\n";
+            return { ty: retTy, val: tmp, code: codeC };
+        }
+    }
     return { ty: "i64", val: "0", code: "" };
 }
 
@@ -408,12 +430,14 @@ func genStmt2(ctx, stmt): String {
         if ctx.currentRetTy == "void" {
             return "ret void\n";
         }
-        if stmt.value instanceof LiteralExpr && stmt.value.kind.toString() == "LiteralKind::Null" {
-            if ctx.currentRetTy == "i32" {
-                return "ret i32 0\n";
-            }
-            if ctx.currentRetTy == "i64" {
-                return "ret i64 0\n";
+        if stmt.value instanceof LiteralExpr {
+            if stmt.value.kind.toString() == "LiteralKind::Null" {
+                if ctx.currentRetTy == "i32" {
+                    return "ret i32 0\n";
+                }
+                if ctx.currentRetTy == "i64" {
+                    return "ret i64 0\n";
+                }
             }
         }
         var rv = genExprValue(ctx, stmt.value);
