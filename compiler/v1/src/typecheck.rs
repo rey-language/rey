@@ -1181,7 +1181,7 @@ impl TypeChecker {
                 }
                 Ok(Ty::Void)
             }
-            (Ty::String, "length") | (Ty::String, "upper") | (Ty::String, "lower") => {
+            (Ty::String, "length") | (Ty::String, "len") | (Ty::String, "upper") | (Ty::String, "lower") => {
                 if !args.is_empty() {
                     return Err(TypeError {
                         message: format!("Type error: String.{}() expects 0 arguments", name),
@@ -1189,7 +1189,7 @@ impl TypeChecker {
                     });
                 }
                 Ok(match name {
-                    "length" => Ty::Int,
+                    "length" | "len" => Ty::Int,
                     _ => Ty::String,
                 })
             }

@@ -35,6 +35,10 @@ func compileSource(source: String, path: String, cmd: String): CompileResult {
     if cmd == "build" || cmd == "run" {
         var outputPath = "/tmp/rey_out";
         var compileRes = codegen.compileLLVM(ir, outputPath, false);
+        if compileRes.isErr() {
+            return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
+        }
+        outputPath = compileRes.unwrap();
         
         println("Compiled: " + path);
         return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };

@@ -18,6 +18,213 @@ func ctxNew(name: String) {
     };
 }
 
+func cgInternString(ctx, s: String): int {
+    var i = 0;
+    loop {
+        if i >= ctx.strings.length() {
+            break;
+        }
+        if ctx.strings[i] == s {
+            return i;
+        }
+        i = i + 1;
+    }
+    ctx.strings.push(s);
+    return ctx.strings.length() - 1;
+}
+
+func llvmEscapeByte(c: String): String {
+    if c == "\n" { return "\\0A"; }
+    if c == "\r" { return "\\0D"; }
+    if c == "\t" { return "\\09"; }
+    if c == "\"" { return "\\22"; }
+    if c == "\\" { return "\\5C"; }
+    return c;
+}
+
+func llvmCStringInfo(s: String) {
+    var out = "";
+    var i = 0;
+    var n = 0;
+    loop {
+        if i >= s.len() {
+            break;
+        }
+        var c = s[i];
+        out = out + llvmEscapeByte(c);
+        n = n + 1;
+        i = i + 1;
+    }
+    // null terminator
+    out = out + "\\00";
+    n = n + 1;
+    return { escaped: out, len: n };
+}
+
+func llvmStrGlobalName(idx: int): String {
+    return "@.str" + idx.toString();
+}
+
+func llvmStrPtr(idx: int, len: int): String {
+    return "getelementptr inbounds ([" + len.toString() + " x i8], [" + len.toString() + " x i8]* " + llvmStrGlobalName(idx) + ", i64 0, i64 0)";
+}
+
+func nextTemp(ctx): String {
+    var n = ctx.blockId;
+    ctx.blockId = ctx.blockId + 1;
+    return "%t" + n.toString();
+}
+
+func genExprValue(ctx, expr) {
+    if expr instanceof LiteralExpr {
+        var k = expr.kind.toString();
+        if k == "LiteralKind::String" {
+            var idx = cgInternString(ctx, expr.text);
+            var info = llvmCStringInfo(expr.text);
+            return { ty: "i8*", val: llvmStrPtr(idx, info.len), code: "" };
+        }
+        if k == "LiteralKind::Int" {
+            return { ty: "i64", val: expr.text, code: "" };
+        }
+        if k == "LiteralKind::Float" {
+            return { ty: "double", val: expr.text, code: "" };
+        }
+        if k == "LiteralKind::Bool" {
+            if expr.text == "true" { return { ty: "i1", val: "1", code: "" }; }
+            return { ty: "i1", val: "0", code: "" };
+        }
+    }
+    if expr instanceof IdentExpr {
+        // minimal: treat identifier as an SSA value
+        return { ty: "i64", val: "%" + expr.name, code: "" };
+    }
+    if expr instanceof BinaryExpr {
+        var l = genExprValue(ctx, expr.left);
+        var r = genExprValue(ctx, expr.right);
+        var code = l.code + r.code;
+        if expr.op == "+" || expr.op == "-" || expr.op == "*" || expr.op == "/" {
+            var tmp = nextTemp(ctx);
+            var inst = "add";
+            if expr.op == "-" { inst = "sub"; }
+            if expr.op == "*" { inst = "mul"; }
+            if expr.op == "/" { inst = "sdiv"; }
+            code = code + tmp + " = " + inst + " i64 " + l.val + ", " + r.val + "\n";
+            return { ty: "i64", val: tmp, code: code };
+        }
+    }
+    return { ty: "i64", val: "0", code: "" };
+}
+
+func genStmt2(ctx, stmt): String {
+    if stmt instanceof ExprStmt {
+        var e = stmt.expr;
+        if e instanceof CallExpr {
+            var callee = e.callee;
+            if callee instanceof IdentExpr && callee.name == "println" {
+                if e.args.length() != 1 {
+                    return "";
+                }
+                var arg = genExprValue(ctx, e.args[0]);
+                var code = arg.code;
+                // format strings
+                if arg.ty == "i8*" {
+                    var fmtIdx = cgInternString(ctx, "%s\n");
+                    var fmtInfo = llvmCStringInfo("%s\n");
+                    var fmtPtr = llvmStrPtr(fmtIdx, fmtInfo.len);
+                    code = code + "call i32 (i8*, ...) @printf(i8* " + fmtPtr + ", i8* " + arg.val + ")\n";
+                    return code;
+                }
+                if arg.ty == "i64" {
+                    var fmtIdx2 = cgInternString(ctx, "%ld\n");
+                    var fmtInfo2 = llvmCStringInfo("%ld\n");
+                    var fmtPtr2 = llvmStrPtr(fmtIdx2, fmtInfo2.len);
+                    code = code + "call i32 (i8*, ...) @printf(i8* " + fmtPtr2 + ", i64 " + arg.val + ")\n";
+                    return code;
+                }
+            }
+        }
+        return "";
+    }
+    if stmt instanceof ReturnStmt {
+        var rv = genExprValue(ctx, stmt.value);
+        return rv.code + "ret i64 " + rv.val + "\n";
+    }
+    if stmt instanceof BlockStmt {
+        var out = "";
+        var i = 0;
+        loop {
+            if i >= stmt.statements.length() { break; }
+            out = out + genStmt2(ctx, stmt.statements[i]);
+            i = i + 1;
+        }
+        return out;
+    }
+    return "";
+}
+
+func genFunc2(ctx, f): String {
+    ctx.blockId = 0;
+    var fnName = f.name;
+    var retTy = "i32";
+    if f.returnType != "" && f.returnType != "Void" {
+        if f.returnType == "int" { retTy = "i64"; }
+    }
+
+    var code = "define " + retTy + " @" + fnName + "() {\n";
+    code = code + "entry:\n";
+    // body is a BlockStmt
+    code = code + genStmt2(ctx, f.body);
+    if retTy == "i32" {
+        code = code + "ret i32 0\n";
+    } else {
+        code = code + "ret i64 0\n";
+    }
+    code = code + "}\n\n";
+    return code;
+}
+
+func codegenProgram2(program): String {
+    var ctx = ctxNew("rey");
+    var bodies = [];
+
+    var i = 0;
+    loop {
+        if i >= program.statements.length() { break; }
+        var st = program.statements[i];
+        if st instanceof FuncDeclStmt {
+            bodies.push(genFunc2(ctx, st));
+        }
+        i = i + 1;
+    }
+
+    var code = "; Module: " + ctx.moduleName + "\n";
+    code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
+    code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
+    code = code + "declare i32 @printf(i8*, ...)\n\n";
+
+    // string constants
+    i = 0;
+    loop {
+        if i >= ctx.strings.length() { break; }
+        var s = ctx.strings[i];
+        // interpret stored strings: if they already contain \\0A, decode for length via llvmCStringInfo on decoded form
+        var info = llvmCStringInfo(s);
+        code = code + llvmStrGlobalName(i) + " = private unnamed_addr constant [" + info.len.toString() + " x i8] c\"" + info.escaped + "\", align 1\n";
+        i = i + 1;
+    }
+    if ctx.strings.length() > 0 {
+        code = code + "\n";
+    }
+
+    i = 0;
+    loop {
+        if i >= bodies.length() { break; }
+        code = code + bodies[i];
+        i = i + 1;
+    }
+    return code;
+}
+
 func llvmType(ty): String {
     if ty.kind == TypeKind.Int {
         return "i64";
@@ -219,8 +426,7 @@ func codegenProgram(ctx, program): String {
 }
 
 export pub func generateIR(program): String {
-    // bootstrap mode: IR gen not wired yet
-    return "";
+    return codegenProgram2(program);
 }
 
 export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
@@ -232,13 +438,18 @@ export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
     var llcCmd = "llc " + opt + " -filetype=obj /tmp/rey_out.ll -o /tmp/rey_out.o";
     var llcResult = exec(llcCmd);
     if llcResult.isErr() {
-        return Result.Err("llc failed");
+        // fallback: clang can compile LLVM IR directly (useful when llc isn't installed)
+        var clangObjCmd = "clang " + opt + " -c -x ir /tmp/rey_out.ll -o /tmp/rey_out.o";
+        var clangObjResult = exec(clangObjCmd);
+        if clangObjResult.isErr() {
+            return Result.Err(clangObjResult.unwrapOr(llcResult.unwrapOr("llc failed")));
+        }
     }
     
     var clangCmd = "clang /tmp/rey_out.o -o " + outputPath;
     var clangResult = exec(clangCmd);
     if clangResult.isErr() {
-        return Result.Err("clang failed");
+        return Result.Err(clangResult.unwrapOr("clang failed"));
     }
     
     return Result.Ok(outputPath);
