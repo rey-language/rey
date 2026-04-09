@@ -6,6 +6,8 @@ struct CodegenContext {
     pub strings: [String],
     pub currentFunc: String,
     pub blockId: int,
+    pub locals: HashMap,
+    pub currentRetTy: String,
 }
 
 func ctxNew(name: String) {
@@ -14,7 +16,9 @@ func ctxNew(name: String) {
         functions: [],
         strings: [],
         currentFunc: "",
-        blockId: 0
+        blockId: 0,
+        locals: HashMap.new(),
+        currentRetTy: "i32"
     };
 }
 
@@ -75,6 +79,29 @@ func nextTemp(ctx): String {
     return "%t" + n.toString();
 }
 
+func nextLabel(ctx, prefix: String): String {
+    var n = ctx.blockId;
+    ctx.blockId = ctx.blockId + 1;
+    return prefix + n.toString();
+}
+
+func llvmTypeFromTag(tag: String): String {
+    if tag == "" { return "i64"; }
+    if tag == "int" { return "i64"; }
+    if tag == "float" { return "double"; }
+    if tag == "bool" { return "i1"; }
+    if tag == "String" { return "i8*"; }
+    if tag == "Void" { return "void"; }
+    return "i64";
+}
+
+func blockEndsWithReturn(block): bool {
+    if !(block instanceof BlockStmt) { return false; }
+    if block.statements.length() == 0 { return false; }
+    var last = block.statements[block.statements.length() - 1];
+    return last instanceof ReturnStmt;
+}
+
 func genExprValue(ctx, expr) {
     if expr instanceof LiteralExpr {
         var k = expr.kind.toString();
@@ -95,27 +122,91 @@ func genExprValue(ctx, expr) {
         }
     }
     if expr instanceof IdentExpr {
-        // minimal: treat identifier as an SSA value
+        if ctx.locals.has(expr.name) {
+            var local = ctx.locals.get(expr.name);
+            var tmp = nextTemp(ctx);
+            var code = tmp + " = load " + local.ty + ", " + local.ty + "* " + local.ptr + "\n";
+            return { ty: local.ty, val: tmp, code: code };
+        }
         return { ty: "i64", val: "%" + expr.name, code: "" };
     }
     if expr instanceof BinaryExpr {
         var l = genExprValue(ctx, expr.left);
         var r = genExprValue(ctx, expr.right);
         var code = l.code + r.code;
-        if expr.op == "+" || expr.op == "-" || expr.op == "*" || expr.op == "/" {
+        if expr.op == "+" || expr.op == "-" || expr.op == "*" || expr.op == "/" || expr.op == "%" {
             var tmp = nextTemp(ctx);
             var inst = "add";
             if expr.op == "-" { inst = "sub"; }
             if expr.op == "*" { inst = "mul"; }
             if expr.op == "/" { inst = "sdiv"; }
+            if expr.op == "%" { inst = "srem"; }
             code = code + tmp + " = " + inst + " i64 " + l.val + ", " + r.val + "\n";
             return { ty: "i64", val: tmp, code: code };
+        }
+        if expr.op == "==" || expr.op == "!=" || expr.op == "<" || expr.op == ">" || expr.op == "<=" || expr.op == ">=" {
+            var pred = "eq";
+            if expr.op == "!=" { pred = "ne"; }
+            if expr.op == "<" { pred = "slt"; }
+            if expr.op == ">" { pred = "sgt"; }
+            if expr.op == "<=" { pred = "sle"; }
+            if expr.op == ">=" { pred = "sge"; }
+            var tmp2 = nextTemp(ctx);
+            code = code + tmp2 + " = icmp " + pred + " i64 " + l.val + ", " + r.val + "\n";
+            return { ty: "i1", val: tmp2, code: code };
+        }
+        if expr.op == "&&" || expr.op == "||" {
+            var tmp3 = nextTemp(ctx);
+            var inst2 = "and";
+            if expr.op == "||" { inst2 = "or"; }
+            code = code + tmp3 + " = " + inst2 + " i1 " + l.val + ", " + r.val + "\n";
+            return { ty: "i1", val: tmp3, code: code };
+        }
+    }
+    if expr instanceof UnaryExpr {
+        var rv = genExprValue(ctx, expr.right);
+        var code2 = rv.code;
+        if expr.op == "!" {
+            var tmp4 = nextTemp(ctx);
+            code2 = code2 + tmp4 + " = xor i1 " + rv.val + ", true\n";
+            return { ty: "i1", val: tmp4, code: code2 };
+        }
+        if expr.op == "-" {
+            var tmp5 = nextTemp(ctx);
+            code2 = code2 + tmp5 + " = sub i64 0, " + rv.val + "\n";
+            return { ty: "i64", val: tmp5, code: code2 };
         }
     }
     return { ty: "i64", val: "0", code: "" };
 }
 
 func genStmt2(ctx, stmt): String {
+    if stmt instanceof VarDeclStmt {
+        var init = genExprValue(ctx, stmt.value);
+        var ty = llvmTypeFromTag(stmt.typeTag);
+        if stmt.typeTag == "" {
+            ty = init.ty;
+        }
+        var ptr = "%" + stmt.name + ".addr";
+        var code0 = init.code;
+        code0 = code0 + ptr + " = alloca " + ty + ", align 8\n";
+        code0 = code0 + "store " + ty + " " + init.val + ", " + ty + "* " + ptr + "\n";
+        ctx.locals.set(stmt.name, { ptr: ptr, ty: ty });
+        return code0;
+    }
+    if stmt instanceof ConstDeclStmt {
+        var init2 = genExprValue(ctx, stmt.value);
+        var ty2 = llvmTypeFromTag(stmt.typeTag);
+        if stmt.typeTag == "" {
+            ty2 = init2.ty;
+        }
+        var ptr2 = "%" + stmt.name + ".addr";
+        var codeC = init2.code;
+        codeC = codeC + ptr2 + " = alloca " + ty2 + ", align 8\n";
+        codeC = codeC + "store " + ty2 + " " + init2.val + ", " + ty2 + "* " + ptr2 + "\n";
+        ctx.locals.set(stmt.name, { ptr: ptr2, ty: ty2 });
+        return codeC;
+    }
     if stmt instanceof ExprStmt {
         var e = stmt.expr;
         if e instanceof CallExpr {
@@ -143,11 +234,61 @@ func genStmt2(ctx, stmt): String {
                 }
             }
         }
-        return "";
+        var ignored = genExprValue(ctx, e);
+        return ignored.code;
+    }
+    if stmt instanceof IfStmt {
+        var condv = genExprValue(ctx, stmt.condition);
+        var codeIf = condv.code;
+        var condVal = condv.val;
+        if condv.ty == "i64" {
+            var tmpc = nextTemp(ctx);
+            codeIf = codeIf + tmpc + " = icmp ne i64 " + condv.val + ", 0\n";
+            condVal = tmpc;
+        }
+        var thenLabel = nextLabel(ctx, "then");
+        var elseLabel = nextLabel(ctx, "else");
+        var endLabel = nextLabel(ctx, "endif");
+
+        if stmt.elseBranch == null {
+            codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + endLabel + "\n";
+            codeIf = codeIf + thenLabel + ":\n";
+            codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
+            if !blockEndsWithReturn(stmt.thenBranch) {
+                codeIf = codeIf + "br label %" + endLabel + "\n";
+            }
+            codeIf = codeIf + endLabel + ":\n";
+            return codeIf;
+        }
+
+        codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + elseLabel + "\n";
+        codeIf = codeIf + thenLabel + ":\n";
+        codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
+        if !blockEndsWithReturn(stmt.thenBranch) {
+            codeIf = codeIf + "br label %" + endLabel + "\n";
+        }
+        codeIf = codeIf + elseLabel + ":\n";
+        codeIf = codeIf + genStmt2(ctx, stmt.elseBranch);
+        if !blockEndsWithReturn(stmt.elseBranch) {
+            codeIf = codeIf + "br label %" + endLabel + "\n";
+        }
+        codeIf = codeIf + endLabel + ":\n";
+        return codeIf;
     }
     if stmt instanceof ReturnStmt {
+        if ctx.currentRetTy == "void" {
+            return "ret void\n";
+        }
+        if stmt.value instanceof LiteralExpr && stmt.value.kind.toString() == "LiteralKind::Null" {
+            if ctx.currentRetTy == "i32" {
+                return "ret i32 0\n";
+            }
+            if ctx.currentRetTy == "i64" {
+                return "ret i64 0\n";
+            }
+        }
         var rv = genExprValue(ctx, stmt.value);
-        return rv.code + "ret i64 " + rv.val + "\n";
+        return rv.code + "ret " + ctx.currentRetTy + " " + rv.val + "\n";
     }
     if stmt instanceof BlockStmt {
         var out = "";
@@ -165,17 +306,47 @@ func genStmt2(ctx, stmt): String {
 func genFunc2(ctx, f): String {
     ctx.blockId = 0;
     var fnName = f.name;
-    var retTy = "i32";
-    if f.returnType != "" && f.returnType != "Void" {
-        if f.returnType == "int" { retTy = "i64"; }
+    ctx.locals = HashMap.new();
+    var retTy = "i64";
+    if fnName == "main" {
+        retTy = "i32";
+    } else {
+        retTy = llvmTypeFromTag(f.returnType);
+    }
+    ctx.currentRetTy = retTy;
+
+    var params = "";
+    var i = 0;
+    loop {
+        if i >= f.params.length() { break; }
+        if i > 0 { params = params + ", "; }
+        var p = f.params[i];
+        var pty = llvmTypeFromTag(p.typeTag);
+        params = params + pty + " %" + p.name;
+        i = i + 1;
     }
 
-    var code = "define " + retTy + " @" + fnName + "() {\n";
+    var code = "define " + retTy + " @" + fnName + "(" + params + ") {\n";
     code = code + "entry:\n";
+
+    i = 0;
+    loop {
+        if i >= f.params.length() { break; }
+        var p2 = f.params[i];
+        var pty2 = llvmTypeFromTag(p2.typeTag);
+        var ptrp = "%" + p2.name + ".addr";
+        code = code + ptrp + " = alloca " + pty2 + ", align 8\n";
+        code = code + "store " + pty2 + " %" + p2.name + ", " + pty2 + "* " + ptrp + "\n";
+        ctx.locals.set(p2.name, { ptr: ptrp, ty: pty2 });
+        i = i + 1;
+    }
+
     // body is a BlockStmt
     code = code + genStmt2(ctx, f.body);
     if retTy == "i32" {
         code = code + "ret i32 0\n";
+    } else if retTy == "void" {
+        code = code + "ret void\n";
     } else {
         code = code + "ret i64 0\n";
     }

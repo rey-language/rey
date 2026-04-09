@@ -132,6 +132,9 @@ func parseStatement(p) {
     if token.kind == "Const" {
         return parseConstDecl(p);
     }
+    if token.kind == "If" {
+        return parseIf(p);
+    }
     if token.kind == "Func" {
         return parseFuncDecl(p);
     }
@@ -165,6 +168,12 @@ func parseStatement(p) {
     if token.kind == "LeftBrace" {
         return parseBlock(p);
     }
+
+    if token.kind == "Identifier" {
+        if checkNext(p, "Equal") || checkNext(p, "PlusEqual") || checkNext(p, "MinusEqual") || checkNext(p, "StarEqual") || checkNext(p, "SlashEqual") || checkNext(p, "PercentEqual") {
+            return parseAssign(p);
+        }
+    }
     
     return parseExprStmt(p);
 }
@@ -178,6 +187,7 @@ func parseVarDecl(p) {
         var tt = consume(p, "Identifier", "type expected");
         typeTag = tt.lexeme;
     }
+    consume(p, "Equal", "= expected");
     var value = parseExpression(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
@@ -193,6 +203,7 @@ func parseConstDecl(p) {
         var tt = consume(p, "Identifier", "type expected");
         typeTag = tt.lexeme;
     }
+    consume(p, "Equal", "= expected");
     var value = parseExpression(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
@@ -302,12 +313,40 @@ func parseImport(p) {
     return ImportStmt { path: path, items: items, span: span };
 }
 
+func parseIf(p) {
+    var startToken = advance(p);
+    consume(p, "LeftParen", "( expected");
+    var cond = parseExpression(p);
+    consume(p, "RightParen", ") expected");
+    var thenBranch = parseBlock(p);
+    var elseBranch = null;
+    if matchToken(p, ["Else"]) {
+        elseBranch = parseBlock(p);
+    }
+    var span = makeSpan(p, startToken.span.start, previous(p).span.end);
+    return IfStmt { condition: cond, thenBranch: thenBranch, elseBranch: elseBranch, span: span };
+}
+
 func parseReturn(p) {
     var startToken = advance(p);
-    var value = parseExpression(p);
+    var value = LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(startToken.span) };
+    if !check(p, "Semicolon") {
+        value = parseExpression(p);
+    }
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return ReturnStmt { value: value, span: span };
+}
+
+func parseAssign(p) {
+    var startTok = peek(p);
+    var target = parseCall(p);
+    var opTok = advance(p);
+    var op = opTok.lexeme;
+    var value = parseExpression(p);
+    consume(p, "Semicolon", "; expected");
+    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+    return AssignStmt { target: target, op: op, value: value, span: span };
 }
 
 func parseWhile(p) {

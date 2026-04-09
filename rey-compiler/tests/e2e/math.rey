@@ -1,0 +1,12 @@
+func main(): Void {
+    var a: int = 10;
+    var b: int = 3;
+    var c: int = a * 2 + b;
+    println(c);
+
+    if (c > 20) {
+        println("big");
+    } else {
+        println("small");
+    }
+}

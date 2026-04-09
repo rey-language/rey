@@ -17,16 +17,22 @@ func compileSource(source: String, path: String, cmd: String): CompileResult {
     
     var lexResult = lexer.tokenize(source, path);
     if lexResult.errors.length() > 0 {
-        return CompileResult { ok: false, errors: "lexer error", ir: "", outputPath: "" };
+        var e = lexResult.errors[0];
+        return CompileResult { ok: false, errors: "lexer error at line " + e.span.line.toString() + ": " + e.message, ir: "", outputPath: "" };
     }
     
     var parseResult = parser.parse(lexResult.tokens, path);
     if parseResult.errors.length() > 0 {
-        return CompileResult { ok: false, errors: "parse error", ir: "", outputPath: "" };
+        var pe = parseResult.errors[0];
+        return CompileResult { ok: false, errors: "parse error at line " + pe.span.line.toString() + ": " + pe.message, ir: "", outputPath: "" };
     }
     
     var typeResult = typecheck.typecheck(parseResult.program);
     if !typeResult.ok {
+        if typeResult.errors.length() > 0 {
+            var te = typeResult.errors[0];
+            return CompileResult { ok: false, errors: "type error: " + te.message, ir: "", outputPath: "" };
+        }
         return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
     }
     

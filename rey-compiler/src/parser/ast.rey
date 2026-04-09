@@ -155,6 +155,8 @@ enum StmtKind {
     StructDecl,
     EnumDecl,
     Import,
+    If,
+    Assign,
     Return,
     Break,
     Continue,
@@ -278,6 +280,22 @@ struct BlockStmt {
 // Expression statement
 struct ExprStmt {
     pub expr: Expr,
+    pub span: Span,
+}
+
+// If statement
+struct IfStmt {
+    pub condition: Expr,
+    pub thenBranch: BlockStmt,
+    pub elseBranch: BlockStmt?,
+    pub span: Span,
+}
+
+// Assignment statement
+struct AssignStmt {
+    pub target: Expr,
+    pub op: String,
+    pub value: Expr,
     pub span: Span,
 }
 
