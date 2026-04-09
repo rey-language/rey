@@ -1,0 +1,14 @@
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+func main(): Void {
+    var c: Color = Color.Green;
+    if (c == Color.Red) {
+        println("red");
+    } else {
+        println("not red");
+    }
+}
