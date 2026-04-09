@@ -37,6 +37,38 @@ func resolveImportPath(basePath: String, importPath: String): String {
     return dirname(basePath) + "/" + importPath;
 }
 
+func lastDotIndex(path: String): int {
+    var i = path.len() - 1;
+    loop {
+        if i < 0 { break; }
+        if path[i] == "." { return i; }
+        if path[i] == "/" { break; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+func basenameNoExt(path: String): String {
+    var slash = lastSlashIndex(path);
+    var start = 0;
+    if slash >= 0 { start = slash + 1; }
+    var name = path.slice(start, path.len());
+    var dot = lastDotIndex(name);
+    if dot >= 0 {
+        return name.slice(0, dot);
+    }
+    return name;
+}
+
+func defaultOutputPath(srcPath: String): String {
+    var out = dirname(srcPath) + "/" + basenameNoExt(srcPath);
+    // avoid collisions with existing files/dirs (common in tests, e.g. `imports/`)
+    if fileExists(out) {
+        return out + ".bin";
+    }
+    return out;
+}
+
 func parseFileToProgram(path: String) {
     var content = readFile(path);
     var lexResult = lexer.tokenize(content, path);
@@ -119,7 +151,7 @@ func compileSource(source: String, path: String, cmd: String): CompileResult {
     var ir = codegen.generateIR(parseResult.program);
     
     if cmd == "build" || cmd == "run" {
-        var outputPath = "/tmp/rey_out";
+        var outputPath = defaultOutputPath(path);
         var compileRes = codegen.compileLLVM(ir, outputPath, false);
         if compileRes.isErr() {
             return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
@@ -159,7 +191,7 @@ func compileFile(entryPath: String, cmd: String): CompileResult {
     var ir = codegen.generateIR(program);
 
     if cmd == "build" || cmd == "run" {
-        var outputPath = "/tmp/rey_out";
+        var outputPath = defaultOutputPath(entryPath);
         var compileRes = codegen.compileLLVM(ir, outputPath, false);
         if compileRes.isErr() {
             return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };

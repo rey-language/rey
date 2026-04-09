@@ -919,27 +919,34 @@ export pub func generateIR(program): String {
 }
 
 export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
-    writeFile("/tmp/rey_out.ll", ir);
+    var llPath = outputPath + ".ll";
+    var objPath = outputPath + ".o";
+
+    writeFile(llPath, ir);
     
     var opt = "-O2";
     if release { opt = "-O3"; }
     
-    var llcCmd = "llc " + opt + " -filetype=obj /tmp/rey_out.ll -o /tmp/rey_out.o";
+    var llcCmd = "llc " + opt + " -filetype=obj \"" + llPath + "\" -o \"" + objPath + "\"";
     var llcResult = exec(llcCmd);
     if llcResult.isErr() {
         // fallback: clang can compile LLVM IR directly (useful when llc isn't installed)
-        var clangObjCmd = "clang " + opt + " -c -x ir /tmp/rey_out.ll -o /tmp/rey_out.o";
+        var clangObjCmd = "clang " + opt + " -c -x ir \"" + llPath + "\" -o \"" + objPath + "\"";
         var clangObjResult = exec(clangObjCmd);
         if clangObjResult.isErr() {
             return Result.Err(clangObjResult.unwrapOr(llcResult.unwrapOr("llc failed")));
         }
     }
     
-    var clangCmd = "clang /tmp/rey_out.o -o " + outputPath;
+    var clangCmd = "clang \"" + objPath + "\" -o \"" + outputPath + "\"";
     var clangResult = exec(clangCmd);
     if clangResult.isErr() {
         return Result.Err(clangResult.unwrapOr("clang failed"));
     }
+
+    // best-effort cleanup
+    deleteFile(llPath);
+    deleteFile(objPath);
     
     return Result.Ok(outputPath);
 }
