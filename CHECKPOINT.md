@@ -1,5 +1,5 @@
 # Rey Language - Phase Checkpoint
-# Date: Apr 5, 2026
+# Date: Apr 9, 2026
 
 ## Current milestone — v0.3.0 self-hosting (new phases)
 
@@ -35,15 +35,25 @@
 - Added math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`.
 
 ### Next up
-- Phase 4 — run the bootstrap compiler end-to-end (`rey rey-compiler/main.rey build ...`)
+- Phase 5 — make the bootstrap compiler feature-complete (beyond `hello.rey`)
 
-### Phase 4 — In progress (bootstrap compiler)
-- `rey-compiler/main.rey` now runs and successfully lexes/parses `rey-compiler/tests/e2e/hello.rey`.
-- `exec()` now returns `Result`, and `compileLLVM()` uses `llc -filetype=obj` + `clang` as required.
-- Still blocked on end-to-end native build:
-  - `rey-compiler/src/codegen/main.rey:generateIR()` currently returns `""` (stub), so `/tmp/rey_out.ll` is empty and no binary is produced.
-  - The Rey parser currently returns concrete `*Stmt` structs (e.g. `FuncDeclStmt`) that do not include a `kind` field, but the codegen helpers in `rey-compiler/src/codegen/main.rey` expect `stmt.kind == StmtKind.*`. AST/codegen representation must be aligned before IR can be generated.
-  - `rey-compiler/main.rey` does not yet check/propagate the `Result` from `compileLLVM()`.
+### ✅ Phase 4 — Run the bootstrap compiler (end-to-end native hello)
+- Verified end-to-end pipeline works for the minimal `hello.rey` program:
+  - Build: `compiler/v1/target/release/rey-v0 rey-compiler/main.rey build rey-compiler/tests/e2e/hello.rey`
+  - Output binary: `/tmp/rey_out`
+  - Running `/tmp/rey_out` prints: `Hello from native Rey!`
+- `rey-compiler/src/codegen/main.rey:generateIR()` is now wired and emits a minimal LLVM IR module sufficient for:
+  - `func main(): Void { println("..."); }`
+  - integer/string literals
+  - basic integer arithmetic (limited)
+- `compileLLVM()` now:
+  - Writes IR to `/tmp/rey_out.ll`
+  - Tries `llc ... -filetype=obj` then `clang /tmp/rey_out.o -o <outputPath>`
+  - Falls back to `clang -c -x ir /tmp/rey_out.ll -o /tmp/rey_out.o` when `llc` is not installed
+- `rey-compiler/main.rey` now propagates `compileLLVM()` errors via `CompileResult.ok=false`.
+
+### Resume point
+- Start Phase 5 with the next test program after `hello.rey` (arithmetic/variables/if/else), then iterate until `structs`, `enums`, and `imports` compile end-to-end.
 
 ---
 # Previous checkpoint

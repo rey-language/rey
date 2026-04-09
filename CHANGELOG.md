@@ -1,7 +1,6 @@
 # Changelog
 
 ## [checkpoint] — 2026-04-05
-- Synced `master` with `origin/master`.
 - Verified `compiler/v1` builds in release mode and all Rust tests pass (7/7).
 - Confirmed interpreter parse failure for generic type annotations like `Vec<String>` (fails at `<` in type positions); tracked to `parseTypeAtom()` not consuming generic parameter tokens.
 
@@ -21,6 +20,10 @@
 - Enums now expose a namespace dict under the enum name (enables `Enum.Variant` access) and typecheck defines enum names in scope.
 - `exec()` now returns a `Result` value instead of a raw string.
 - Added `String.len()` alias and lexicographic string comparisons (`<`, `<=`, `>`, `>=`) for bootstrap tooling.
+
+## [feat] — 2026-04-09
+- Bootstrap compiler now generates a minimal LLVM IR module and produces a working native binary end-to-end for `rey-compiler/tests/e2e/hello.rey`.
+- `compileLLVM()` writes `/tmp/rey_out.ll`, compiles via `llc` + `clang`, and falls back to `clang -c -x ir` when `llc` is unavailable.
 
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
