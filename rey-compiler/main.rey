@@ -12,6 +12,86 @@ struct CompileResult {
     pub outputPath: String,
 }
 
+func lastSlashIndex(path: String): int {
+    var i = path.len() - 1;
+    loop {
+        if i < 0 { break; }
+        if path[i] == "/" { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+func dirname(path: String): String {
+    var idx = lastSlashIndex(path);
+    if idx < 0 { return "."; }
+    if idx == 0 { return "/"; }
+    return path.slice(0, idx);
+}
+
+func resolveImportPath(basePath: String, importPath: String): String {
+    if importPath.startsWith("/") { return importPath; }
+    if importPath.startsWith("./") {
+        return dirname(basePath) + "/" + importPath.slice(2, importPath.len());
+    }
+    return dirname(basePath) + "/" + importPath;
+}
+
+func parseFileToProgram(path: String) {
+    var content = readFile(path);
+    var lexResult = lexer.tokenize(content, path);
+    if lexResult.errors.length() > 0 {
+        var e = lexResult.errors[0];
+        return Result.Err("lexer error at line " + e.span.line.toString() + ": " + e.message);
+    }
+    var parseResult = parser.parse(lexResult.tokens, path);
+    if parseResult.errors.length() > 0 {
+        var pe = parseResult.errors[0];
+        return Result.Err("parse error at line " + pe.span.line.toString() + ": " + pe.message);
+    }
+    return Result.Ok(parseResult.program);
+}
+
+func loadProgramWithImports(path: String, visited, stack) {
+    if visited.has(path) {
+        return Result.Ok(Program { statements: [], span: Span { start: 0, end: 0, line: 0, column: 0 } });
+    }
+    if stack.contains(path) {
+        return Result.Err("circular import: " + stack.join(" -> ") + " -> " + path);
+    }
+    stack.push(path);
+    visited.set(path, true);
+
+    var pr = parseFileToProgram(path);
+    if pr.isErr() { return pr; }
+    var prog = pr.unwrap();
+
+    var merged = [];
+    var i = 0;
+    loop {
+        if i >= prog.statements.length() { break; }
+        var st = prog.statements[i];
+        if st instanceof ImportStmt {
+            var ip = resolveImportPath(path, st.path);
+            var sub = loadProgramWithImports(ip, visited, stack);
+            if sub.isErr() { return sub; }
+            var subProg = sub.unwrap();
+            var j = 0;
+            loop {
+                if j >= subProg.statements.length() { break; }
+                merged.push(subProg.statements[j]);
+                j = j + 1;
+            }
+        } else {
+            merged.push(st);
+        }
+        i = i + 1;
+    }
+
+    stack.pop();
+    return Result.Ok(Program { statements: merged, span: prog.span });
+}
+
 func compileSource(source: String, path: String, cmd: String): CompileResult {
     var errors = Vec.new();
     
@@ -58,9 +138,39 @@ func compileFile(entryPath: String, cmd: String): CompileResult {
     if !exists {
         return CompileResult { ok: false, errors: "file not found", ir: "", outputPath: "" };
     }
-    
-    var content = readFile(entryPath);
-    return compileSource(content, entryPath, cmd);
+
+    var visited = HashMap.new();
+    var stack = Vec.new();
+    var pr = loadProgramWithImports(entryPath, visited, stack);
+    if pr.isErr() {
+        return CompileResult { ok: false, errors: pr.unwrapOr("import error"), ir: "", outputPath: "" };
+    }
+    var program = pr.unwrap();
+
+    var typeResult = typecheck.typecheck(program);
+    if !typeResult.ok {
+        if typeResult.errors.length() > 0 {
+            var te = typeResult.errors[0];
+            return CompileResult { ok: false, errors: "type error: " + te.message, ir: "", outputPath: "" };
+        }
+        return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
+    }
+
+    var ir = codegen.generateIR(program);
+
+    if cmd == "build" || cmd == "run" {
+        var outputPath = "/tmp/rey_out";
+        var compileRes = codegen.compileLLVM(ir, outputPath, false);
+        if compileRes.isErr() {
+            return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
+        }
+        outputPath = compileRes.unwrap();
+        
+        println("Compiled: " + entryPath);
+        return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
+    }
+
+    return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: "a.out" };
 }
 
 func main() {

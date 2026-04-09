@@ -126,6 +126,25 @@ func parseProgram(p) {
 func parseStatement(p) {
     var token = peek(p);
     
+    if token.kind == "Export" {
+        advance(p);
+        if check(p, "Pub") { advance(p); }
+        var next = peek(p);
+        if next.kind == "Func" { return parseFuncDecl(p); }
+        if next.kind == "Struct" { return parseStructDecl(p); }
+        if next.kind == "Enum" { return parseEnumDecl(p); }
+        error(p, "declaration expected after export");
+        return parseExprStmt(p);
+    }
+    if token.kind == "Pub" {
+        advance(p);
+        var next2 = peek(p);
+        if next2.kind == "Func" { return parseFuncDecl(p); }
+        if next2.kind == "Struct" { return parseStructDecl(p); }
+        if next2.kind == "Enum" { return parseEnumDecl(p); }
+        error(p, "declaration expected after pub");
+        return parseExprStmt(p);
+    }
     if token.kind == "Var" {
         return parseVarDecl(p);
     }
@@ -305,8 +324,13 @@ func parseEnumDecl(p) {
 
 func parseImport(p) {
     var startToken = advance(p);
-    var pathTok = consume(p, "Identifier", "path expected");
-    var path = pathTok.lexeme;
+    var path = "";
+    if check(p, "StringLiteral") {
+        path = advance(p).lexeme;
+    } else {
+        var pathTok = consume(p, "Identifier", "path expected");
+        path = pathTok.lexeme;
+    }
     var items = [];
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);

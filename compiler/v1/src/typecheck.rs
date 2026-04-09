@@ -1181,7 +1181,11 @@ impl TypeChecker {
                 }
                 Ok(Ty::Void)
             }
-            (Ty::String, "length") | (Ty::String, "len") | (Ty::String, "upper") | (Ty::String, "lower") => {
+            (Ty::String, "length")
+            | (Ty::String, "len")
+            | (Ty::String, "upper")
+            | (Ty::String, "lower")
+            | (Ty::String, "trim") => {
                 if !args.is_empty() {
                     return Err(TypeError {
                         message: format!("Type error: String.{}() expects 0 arguments", name),
@@ -1192,6 +1196,105 @@ impl TypeChecker {
                     "length" | "len" => Ty::Int,
                     _ => Ty::String,
                 })
+            }
+            (Ty::String, "startsWith") | (Ty::String, "endsWith") => {
+                if args.len() != 1 {
+                    return Err(TypeError {
+                        message: format!("Type error: String.{}() expects 1 argument", name),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                if !a0.isAssignableTo(&Ty::String) {
+                    return Err(TypeError {
+                        message: format!("Type error: String.{}() expects a string", name),
+                        span: args[0].span(),
+                    });
+                }
+                Ok(Ty::Bool)
+            }
+            (Ty::String, "replace") => {
+                if args.len() != 2 {
+                    return Err(TypeError {
+                        message: "Type error: String.replace() expects 2 arguments".to_string(),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                let a1 = self.exprTy(&args[1])?;
+                if !a0.isAssignableTo(&Ty::String) || !a1.isAssignableTo(&Ty::String) {
+                    return Err(TypeError {
+                        message: "Type error: String.replace() expects string arguments".to_string(),
+                        span: callSpan,
+                    });
+                }
+                Ok(Ty::String)
+            }
+            (Ty::String, "slice") => {
+                if args.len() != 2 {
+                    return Err(TypeError {
+                        message: "Type error: String.slice() expects 2 arguments".to_string(),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                let a1 = self.exprTy(&args[1])?;
+                if !a0.isAssignableTo(&Ty::Int) || !a1.isAssignableTo(&Ty::Int) {
+                    return Err(TypeError {
+                        message: "Type error: String.slice() expects int indices".to_string(),
+                        span: callSpan,
+                    });
+                }
+                Ok(Ty::String)
+            }
+            (Ty::String, "indexOf") => {
+                if args.len() != 1 {
+                    return Err(TypeError {
+                        message: "Type error: String.indexOf() expects 1 argument".to_string(),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                if !a0.isAssignableTo(&Ty::String) {
+                    return Err(TypeError {
+                        message: "Type error: String.indexOf() expects a string".to_string(),
+                        span: args[0].span(),
+                    });
+                }
+                Ok(Ty::Int)
+            }
+            (Ty::String, "repeat") => {
+                if args.len() != 1 {
+                    return Err(TypeError {
+                        message: "Type error: String.repeat() expects 1 argument".to_string(),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                if !a0.isAssignableTo(&Ty::Int) {
+                    return Err(TypeError {
+                        message: "Type error: String.repeat() expects an int".to_string(),
+                        span: args[0].span(),
+                    });
+                }
+                Ok(Ty::String)
+            }
+            (Ty::String, "padLeft") | (Ty::String, "padRight") => {
+                if args.len() != 2 {
+                    return Err(TypeError {
+                        message: format!("Type error: String.{}() expects 2 arguments", name),
+                        span: callSpan,
+                    });
+                }
+                let a0 = self.exprTy(&args[0])?;
+                let a1 = self.exprTy(&args[1])?;
+                if !a0.isAssignableTo(&Ty::Int) || !a1.isAssignableTo(&Ty::String) {
+                    return Err(TypeError {
+                        message: format!("Type error: String.{}() expects (int, String)", name),
+                        span: callSpan,
+                    });
+                }
+                Ok(Ty::String)
             }
             (Ty::String, "contains") => {
                 if args.len() != 1 {
