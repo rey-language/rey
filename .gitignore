@@ -1,9 +1,20 @@
 target/
 .DS_Store
 *.lock
+*.ll
+*.o
 
 
 resumes.txt
 test_all.rey
 projects/bank/
 projects/bank-project/
+
+# bootstrap compiler e2e outputs (native binaries next to sources)
+rey-compiler/tests/e2e/*
+!rey-compiler/tests/e2e/*.rey
+!rey-compiler/tests/e2e/*.out
+!rey-compiler/tests/e2e/run.sh
+!rey-compiler/tests/e2e/imports/
+!rey-compiler/tests/e2e/imports/**/*.rey
+!rey-compiler/tests/e2e/imports/**/*.out
