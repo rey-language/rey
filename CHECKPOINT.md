@@ -55,6 +55,19 @@
 ### Resume point
 - Start Phase 5 with the next test program after `hello.rey` (arithmetic/variables/if/else), then iterate until `structs`, `enums`, and `imports` compile end-to-end.
 
+### ✅ Phase 5 — Bootstrap compiler (expanded test coverage)
+- Added e2e fixtures under `rey-compiler/tests/e2e/` and verified native compilation + execution for:
+  - `math.rey` (vars, arithmetic, if/else, println)
+  - `loops.rey` (while, loop, break, continue, and a minimal `for (x in [..])` unroll)
+  - `functions.rey` (func params, calls, recursion)
+  - `structs.rey` (struct decl + struct literal + field access for `int` fields)
+  - `enums.rey` (enum decl + `Enum.Variant` tags, comparisons)
+  - `imports.rey` (string-literal import path + recursive merge of imported programs)
+- Note: native codegen is still a **minimal subset** (no heap runtime, no stdlib/runtime calls, no match, no real Vec/HashMap lowering, no packed layouts, and no general import/export visibility system).
+
+### Next up
+- Phase 6 — self-hosting verification: currently blocked until native codegen/runtime can compile and run the full `rey-compiler` itself (needs a real runtime for `Vec`, `HashMap`, strings, IO/process, etc.).
+
 ---
 # Previous checkpoint
 # Date: Mar 27, 2026

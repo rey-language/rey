@@ -24,6 +24,10 @@
 ## [feat] — 2026-04-09
 - Bootstrap compiler now generates a minimal LLVM IR module and produces a working native binary end-to-end for `rey-compiler/tests/e2e/hello.rey`.
 - `compileLLVM()` writes `/tmp/rey_out.ll`, compiles via `llc` + `clang`, and falls back to `clang -c -x ir` when `llc` is unavailable.
+- Extended bootstrap compiler parser/codegen to compile additional e2e programs end-to-end: `math.rey`, `loops.rey`, `functions.rey`, `structs.rey`, `enums.rey`, `imports.rey`.
+- Added minimal struct literals (`Point { x: 1, y: 2 }`) and field access codegen for `int` fields.
+- Added minimal enum variant codegen via `Enum.Variant` as integer tags.
+- Added minimal import loader in `rey-compiler/main.rey` that recursively merges imported programs for compilation.
 
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.
