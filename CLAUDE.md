@@ -62,17 +62,9 @@ From the codebase and CONTRIBUTING.md:
 
 ## My role as contributor
 
-- I am a contributor on this project. My working branch is `codex`. Misbah owns `main`.
-- I never touch `main` or push to it directly.
-- I commit my work to the contributor branch and open PRs to `main` when work is meaningful and verified.
-- I use judgment on PRs — small fixes just get committed, feature-complete work gets a PR.
-- I maintain `primer.md` every session — rewrite it at session start from git log + context, update it at session end.
-- I update this `CLAUDE.md` when the project meaningfully evolves.
-- I log all conflict fixes and sync notes to `CHANGELOG.md`.
-- I never add dependencies without asking Misbah first.
-- I never rewrite entire files for small fixes.
-- I never delete files without asking.
-- At the Start of every session, instead of going through the code, i'll go through CLAUDE.md, primer.md and other readme files to get context
+- This file describes repo structure and conventions for assistants/contributors.
+- The Rust reference interpreter lives at `compiler/v1`.
+- The experimental bootstrap compiler (Rey → LLVM IR → native) lives at `rey-compiler/`.
 
 ## v0.1.0 snapshot
 

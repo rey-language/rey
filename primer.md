@@ -1,8 +1,8 @@
 # Primer — rey-lang
-Last updated: Mar 30, 2026 (bootstrap unblock)
+Last updated: Apr 9, 2026 (bootstrap compiler progress)
 
 ## Session objective
-Unblock bootstrap: remove generic type params (`Vec<T>`, `HashMap<K,V>`) from `rey-compiler/` so it can compile without generics support.
+Get the bootstrap compiler (`rey-compiler/`) compiling more of the language to native binaries, and keep docs/tests in sync with what actually works.
 
 ## What was done - Session Complete
 
@@ -25,27 +25,24 @@ Unblock bootstrap: remove generic type params (`Vec<T>`, `HashMap<K,V>`) from `r
 ## What's working now (v0.2.0+)
 - Integer division, struct mutation, enum match, imports
 - String indexing, parameter reassignment, return from nested blocks
-- Vec: push, pop, len, get, set, contains, indexOf
-- HashMap: set, get, delete, has, len  
+- Vec: push, pop, len, get, set, contains, indexOf, map/filter/reduce, reverse/sort/slice/join
+- HashMap: set, get, delete, has, len, keys/values/entries
 - Stack: push, pop, peek, isEmpty, len
 - Queue: enqueue, dequeue, peek, isEmpty, len
 - Option: Some, None, unwrap, unwrapOr, isSome, isNone
 - Result: Ok, Err, unwrap, unwrapOr, isOk, isErr
+- `assert(condition, message)` builtin
+- Math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`
 
-## Next steps - Phase 3
-Add native file system builtins:
-- readFile, writeFile, appendFile
-- fileExists, deleteFile, mkdir, listDir
-- getEnv, args, exit, exec
+## Bootstrap compiler status
+The bootstrap compiler is still **experimental**. It can compile the e2e fixtures under `rey-compiler/tests/e2e/` to native binaries using LLVM IR.
 
-Then Phase 4: std library in Rey
+Run:
+```bash
+rey-compiler/tests/e2e/run.sh
+```
 
 ## Blockers
-- Generics in `rey-compiler/` are removed (no more `Vec<T>` / `HashMap<K,V>` in token/AST).
-- Bootstrap pipeline is still incomplete (typecheck/codegen are stubbed; CLI arg indexing is probably off).
-
-## Rey-compiler bootstrap
-- `rey-compiler/src` now avoids generics and uses concrete-ish shapes (arrays + string token kinds) to keep parsing simple.
-- Next: wire `typecheck` + `codegen` back in once module/value scoping for enums/types is sorted.
+- Self-hosting is not reached yet: native codegen/runtime needs a real lowering/runtime for `Vec`, `HashMap`, strings, IO/process, and more of the language surface.
 
 (End file)

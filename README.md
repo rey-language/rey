@@ -56,13 +56,13 @@ func main(): Void {
 - **Structs with methods** — data and behavior together, no inheritance complexity
 - **Smart memory** — the compiler manages memory, you don't
 - **Multidomain** — one language for web, CLI, games, AI, systems
-- **reyc** — one tool for everything (build, run, package management)
+- **Bootstrap compiler (experimental)** — early LLVM backend work lives in `rey-compiler/`
 
 ---
 
 ## Status
 
-Rey is under active development. Current version: **v0.1.0**
+Rey is under active development. Current interpreter version: **v0.2.0** (`compiler/v1`).
 
 | Feature | Status |
 |---------|--------|
@@ -74,10 +74,9 @@ Rey is under active development. Current version: **v0.1.0**
 | String interpolation | ✅ Done |
 | Error messages | ✅ Done |
 | Import system | ✅ Done |
-| Standard library | 🔨 In progress |
-| Package manager (reyc) | 📅 Planned |
-| LLVM backend | 📅 Planned |
-| Self-hosting compiler | 📅 Planned |
+| Standard library | ✅ Done (bootstrap-focused) |
+| LLVM backend | 🔨 In progress (bootstrap subset) |
+| Self-hosting compiler | 🔨 In progress |
 
 ---
 
@@ -101,6 +100,17 @@ Download `rey-v0-windows-x86_64.exe` from releases and add to PATH.
 
 ```bash
 rey hello.rey
+```
+
+### Build a native binary (experimental)
+The experimental bootstrap compiler lives in `rey-compiler/` and currently supports a limited subset of the language (see `syntax.md`).
+
+From this repo:
+```bash
+cd compiler/v1
+cargo build --release
+./target/release/rey-v0 ../rey-compiler/main.rey build ../rey-compiler/tests/e2e/hello.rey
+../rey-compiler/tests/e2e/hello
 ```
 
 ### Write your first program

@@ -9,6 +9,7 @@ resumes.txt
 test_all.rey
 projects/bank/
 projects/bank-project/
+compmaster
 
 # bootstrap compiler e2e outputs (native binaries next to sources)
 rey-compiler/tests/e2e/*

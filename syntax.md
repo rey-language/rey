@@ -1,22 +1,85 @@
-# Rey Language Syntax Reference (v0.1.1)
+# Rey Language Syntax Reference (v0.2.0)
 
-This document reflects the behavior currently implemented in `compiler/v1`.
+This document describes the syntax and runtime behavior currently implemented by the Rust reference interpreter at `compiler/v1`.
 
-## Table of Contents
-1. Variables and Types
-2. Operators
-3. Control Flow
-4. Functions
-5. Imports and Visibility
-6. Collections
-7. Strings
-8. Structs
-9. Enums and Match
-10. Built-ins
-11. Diagnostics
+Notes:
+- Rey supports optional type annotations. When present, they are enforced by the interpreter’s typechecker.
+- Some type annotations (notably generic type params like `Vec<String>`) are accepted but **erased** at runtime.
+- The bootstrap compiler under `rey-compiler/` is experimental and currently supports only a small subset for native codegen (see “Bootstrap Compiler Subset”).
 
-## Variables and Types
-Rey supports explicit and inferred typing.
+## Contents
+- Lexical structure
+- Types
+- Variables
+- Operators
+- Control flow
+- Functions and lambdas
+- Collections
+- Strings
+- Structs
+- Enums and match
+- Imports and visibility
+- Builtins
+- Diagnostics
+- Bootstrap compiler subset
+
+## Lexical structure
+
+### Comments
+```rey
+// single-line comment
+```
+
+### Strings
+```rey
+var a = "hello";
+var b = """
+line 1
+line 2
+""";
+```
+
+### Chars
+```rey
+var c: char = 'x';
+```
+
+## Types
+
+### Primitive type names
+- `int` (i64)
+- `float` / `double` (f64)
+- `bool`
+- `String`
+- `char`
+- `Void`
+- `null` (literal)
+
+Additional numeric type names may parse in annotations, but `int`/`float`/`double` are the core runtime numeric kinds.
+
+### Type forms
+- Nullable: `T?` (ex: `int?`)
+- Arrays: `[T]` (ex: `[int]`)
+- Dict type tags: `{K:V}` (ex: `{String:int}`) — used mainly for annotations
+- Union: `A | B` (ex: `int | String`)
+- Tuples: `Tuple` (runtime tuples exist; tuple typing is dynamic)
+
+### Generic type annotations (erased)
+Generic parameter syntax is accepted in type positions and ignored:
+```rey
+struct LexerState {
+    pub tokens: Vec<Token>;
+    pub map: HashMap<String, Vec<int>>;
+}
+
+func f(xs: Vec<String>): Vec<int> {
+    return [];
+}
+```
+
+The runtime collections (`Vec`, `HashMap`, etc.) use dynamic dispatch; type parameters are not represented at runtime.
+
+## Variables
 
 ```rey
 var x = 10;
@@ -24,67 +87,47 @@ var y: int = 20;
 const pi: float = 3.14;
 ```
 
-- `var` declares a mutable variable
-- `const` declares an immutable variable (cannot be reassigned)
-
-Implemented primitive type names:
-- `int`
-- `uint`
-- `byte`
-- `float`
-- `double`
-- `String`
-- `bool`
-- `char`
-- `null`
-- `Void`
-
-Implemented type forms:
-- Nullable: `int?`
-- Array: `[int]`
-- Dictionary: `{String:int}`
-- Union: `int | String`
-
-Comments:
-```rey
-// single-line comment
-```
-
-Tuples are supported as literals and index access:
-
-```rey
-var t = (1, "ok", true);
-println(t.0);
-println(t.1);
-println(t.2);
-```
+- `var` declares a mutable binding
+- `const` declares an immutable binding (cannot be reassigned)
+- `const` works at global scope and inside functions
 
 ## Operators
-Arithmetic:
+
+### Arithmetic
 - `+`, `-`, `*`, `/`, `%`
 
 Division rules:
 - `int / int` performs integer division (truncates)
-- any `float` operand produces a `float` result (`10.0 / 3.0`, `10 / 3.0`)
+- any float operand produces a float result (`10.0 / 3.0`, `10 / 3.0`)
 
-Comparison:
+### Comparison
 - `==`, `!=`, `<`, `<=`, `>`, `>=`
 
-Logical:
+Strings support lexicographic comparisons.
+
+### Logical
 - `&&`, `||`, `!`
 
-Update / assignment:
+### Assignment / update
 - `=`, `+=`, `-=`, `*=`, `/=`, `%=`
-- `++`, `--` (prefix and postfix on variables)
+- `++`, `--` (prefix/postfix on variables)
 
-Type check:
+### Type check
 - `instanceof`
 
-## Control Flow
-Conditionals:
+```rey
+if (value instanceof String) {
+    println("got a string");
+}
+```
+
+## Control flow
+
+### if / else if / else
+Parentheses around conditions are optional.
 
 ```rey
-if (x > 10) {
+if x > 10 {
     println("big");
 } else if (x > 5) {
     println("mid");
@@ -93,37 +136,33 @@ if (x > 10) {
 }
 ```
 
-Parentheses around `if`/`while` conditions are optional.
-
-Loops:
+### Loops
 - `while`
 - `loop` (infinite loop)
-- `for i in range(start, end)`
+- `for n in range(start, end)`
 - `for item in arrayExpr`
 
 Loop control:
 - `break`
 - `continue`
 
-## Functions
-Function declarations:
+## Functions and lambdas
 
+### Declarations
 ```rey
 func add(a: int, b: int): int {
     return a + b;
 }
 ```
 
-Default parameters:
-
+### Default parameters
 ```rey
 func add(a: int, b: int = 10): int {
     return a + b;
 }
 ```
 
-Variadic parameter (must be last):
-
+### Variadics
 ```rey
 func sum(nums:...int): int {
     var total = 0;
@@ -134,136 +173,136 @@ func sum(nums:...int): int {
 }
 ```
 
-Lambda expressions:
-
+### Lambdas
 ```rey
 var mul = (x: int, y: int) => x * y;
 println(mul(3, 4));
 ```
 
-## Imports and Visibility
-Function visibility modifiers:
-- `func name()` -> private
-- `pub func name()` -> public inside file/module, not importable
-- `export pub func name()` -> importable
-
-File imports:
-
-```rey
-import actuator.name;
-import actuator.{name, other};
-```
-
-Module imports:
-
-```rey
-import action;
-import action::walk;
-import action::{walk, run};
-```
-
-Resolver order:
-1. Current file directory
-2. Project root (entry file directory)
-3. `~/.reyc/std/src` (for `std` module resolution)
-4. `~/.reyc/packages`
-
-Module rules:
-- `import module` requires `module/main.rey`
-- `import module` injects a namespace object used as `module.func()`
-- `import module::item` injects `item` namespace used as `item.func()`
-- Only `export pub` functions are importable
-
-Compile-time import diagnostics include:
-- file not found
-- missing module `main.rey`
-- function not found
-- function is `pub` but not `export pub`
-- circular import
-- duplicate import
-
 ## Collections
-Arrays:
 
+### Arrays (`[T]`)
 ```rey
 var xs: [int] = [1, 2, 3];
 println(xs[0]);
 xs[0] = 9;
-push(xs, 4);
-println(pop(xs));
-println(xs.length());
 ```
 
+Array functions:
+- `len(xs)`
+- `push(xs, v)`
+- `pop(xs)`
+
 Array methods:
-- `length()`
-- `push(value)`
+- `xs.length()`
+- `xs.push(v)`
 
-Arrays also support method-call syntax: `xs.push(4)`, `xs.length()`.
-
-Dictionaries (identifier or string keys in literals):
-
+### Dicts (dynamic)
+Dict literals accept identifier keys and string keys:
 ```rey
-var user = {name: "Rey", id: 1};
+var user = {name: "Rey", "id": 1};
 println(user.name);
 println(user["id"]);
 user.name = "ReyLang";
 ```
 
-Dictionary access:
-- `len(dict)` works via the built-in function
+### Vec
+`Vec` is a builtin dynamic collection type:
+```rey
+var v = Vec.new();
+v.push(1);
+v.push(2);
+println(v.len());
+```
+
+Methods:
+- `push(value)`
+- `pop()`
+- `len()`
+- `get(index)`
+- `set(index, value)`
+- `contains(value)`
+- `indexOf(value)`
+- `map(lambda)`
+- `filter(lambda)`
+- `reduce(lambda, init)`
+- `reverse()` (in-place)
+- `sort()` (in-place; comparable types)
+- `slice(start, end)`
+- `join(separator)`
+
+### HashMap
+`HashMap` is a builtin key/value map with string keys:
+```rey
+var m = HashMap.new();
+m.set("a", 1);
+println(m.get("a"));
+```
+
+Methods:
+- `set(key: String, value)`
+- `get(key: String)`
+- `delete(key: String)`
+- `has(key: String)`
+- `len()`
+- `keys()` -> `Vec`
+- `values()` -> `Vec`
+- `entries()` -> `Vec` of `[key, value]` pairs
 
 ## Strings
-Regular and multiline strings:
 
+### Concatenation and interpolation
 ```rey
-var a = "hello";
-var b = """
-line 1
-line 2
-""";
+var name = "Rey";
+println("hello " + name);
+println("hello {name}");
 ```
 
-String concatenation with `+`:
+### Indexing
+`s[i]` returns a 1-character `String`.
 
-```rey
-var greeting = "hello " + "world";
-var label = "count: " + 42;   // non-string values are auto-converted
-```
-
-Char literals:
-```rey
-var c: char = 'x';
-```
-
-Interpolation:
-
-```rey
-var hp = 100;
-println("HP: {hp}");
-println("Buffed: {hp + 50}");
-```
-
-String methods (called via dot notation):
-- `length()`
+### Methods
+- `length()` / `len()`
 - `upper()`
 - `lower()`
-- `contains(str)`
-- `split(str)` — returns `[String]`
-- `toString()`
-- `toInt()`
-- `toFloat()`
+- `trim()`
+- `contains(sub: String)` -> `bool`
+- `split(delim: String)` -> `[String]`
+- `startsWith(prefix: String)` -> `bool`
+- `endsWith(suffix: String)` -> `bool`
+- `replace(from: String, to: String)` -> `String`
+- `slice(start: int, end: int)` -> `String`
+- `indexOf(sub: String)` -> `int` (returns `-1` if not found)
+- `repeat(n: int)` -> `String`
+- `padLeft(width: int, char: String)` -> `String`
+- `padRight(width: int, char: String)` -> `String`
+- Conversions:
+  - `toString()`
+  - `toInt()`
+  - `toFloat()`
 
 ## Structs
-Struct declaration:
 
+### Declaration and fields
 ```rey
 struct Player {
     pub health: int,
     pub name: String,
+}
+```
 
-    pub func create(n: String, h: int): Player {
-        return Player { name: n, health: h };
-    }
+Fields are private by default. Prefix a field with `pub` to allow external mutation.
+
+### Struct literals
+```rey
+var p = Player { name: "Hero", health: 100 };
+```
+
+### Methods
+```rey
+struct Player {
+    pub health: int,
+    pub name: String,
 
     pub func takeDamage(amount: int): Void {
         health -= amount;
@@ -271,29 +310,17 @@ struct Player {
 }
 ```
 
-Fields are private by default. Prefix a field with `pub` to allow external mutation.
+Runtime behavior:
+- Field names are in scope directly inside instance methods (no `self.` required).
+- Mutations to fields inside methods are written back to the instance.
+- `StructName.method(...)` is used for static-style calls (constructor-style helpers are commonly named `create`).
 
-Struct literal:
+Limitations:
+- Nested field assignment like `obj.inner.field = ...` is currently rejected (you must assign through temporaries).
 
-```rey
-var p = Player { name: "Hero", health: 100 };
-```
+## Enums and match
 
-Field mutation:
-- `obj.field = value` works for `pub` struct fields
-- `obj.field += value` works for `pub` struct fields
-- nested field assignment like `obj.inner.field = value` is currently rejected
-
-Implemented method behavior:
-- Instance method calls inject fields into method scope by field name — use field names directly inside methods (no `self.` required).
-- Mutated field names are written back to the instance.
-- Static calls are parsed as `StructName.method(...)`.
-- In current parser behavior, methods named `create` that are `pub` and return the struct type are treated as static.
-- `self` is a reserved keyword but is not required for field access within struct methods.
-
-## Enums and Match
-Enum declaration:
-
+### Enums
 ```rey
 enum Direction {
     North,
@@ -303,8 +330,7 @@ enum Direction {
 }
 ```
 
-Match:
-
+### Match
 ```rey
 match dir {
     Direction::North => { println("north"); },
@@ -313,32 +339,118 @@ match dir {
 }
 ```
 
-Pattern kinds:
-- enum variant (`Type::Variant` or unqualified `Variant`)
-- struct pattern (`StructName { field: pattern, ... }`)
-- literal (`1`, `"x"`, `true`, `null`)
-- variable binding (`n`)
-- wildcard (`_`)
+Supported pattern kinds:
+- Enum variant (`Type::Variant` or unqualified `Variant`)
+- Struct pattern (`StructName { field: pattern, ... }`)
+- Literals (`1`, `"x"`, `true`, `null`)
+- Variable binding (`n`)
+- Wildcard (`_`)
+- Or patterns (`A | B`)
 
-## Built-ins
-Global built-ins:
+## Imports and visibility
+
+### Visibility modifiers
+- `func name()` -> private
+- `pub func name()` -> public inside file/module, not importable
+- `export pub func name()` -> importable
+
+### Import forms
+File imports:
+```rey
+import file.symbol;
+import file.{symbolA, symbolB};
+```
+
+Module imports:
+```rey
+import module;
+import module::file;
+import module::{fileA, fileB};
+```
+
+Resolver order:
+1. Current file directory
+2. Project root (entry file directory)
+3. `~/.reyc/std/src` (for `std` module resolution)
+4. `~/.reyc/packages`
+
+Diagnostics include missing files/modules/symbols, non-exported symbols, circular imports, and duplicates.
+
+## Builtins
+
+### IO / process
 - `print(...)`
 - `println(...)`
-- `input()` / `input(promptString)`
-- `len(value)` — works on strings, arrays, dictionaries
+- `input()` / `input(prompt: String)`
+- `args()` -> `Vec` of CLI args
+- `exit(code: int)`
+- `exec(cmd: String)` -> `Result` (see standard library notes)
+
+### Filesystem / environment
+- `readFile(path: String)` -> `String`
+- `writeFile(path: String, content: String)`
+- `appendFile(path: String, content: String)`
+- `fileExists(path: String)` -> `bool`
+- `deleteFile(path: String)`
+- `mkdir(path: String)`
+- `listDir(path: String)` -> `Vec`
+- `getEnv(name: String)` -> `String?`
+
+### Assertions
+```rey
+assert(x > 0, "x must be > 0");
+```
+
+If the condition is false, the interpreter prints an `error[assert]` with a line number and exits with code 1.
+
+### Utility
+- `len(value)` for strings, arrays, dicts
 - `push(array, value)`
 - `pop(array)`
 - `abs(number)`
-- `max(a, b)` — two numbers
-- `min(a, b)` — two numbers
-- `random()` — returns float in [0, 1)
-- `range(start, end)` — used inside `for` loops (see Control Flow)
+- `max(a, b)`
+- `min(a, b)`
+- `random()` -> float in `[0,1)`
+- `range(start, end)` (used in `for` loops)
+
+Math:
+- `floor(n)`
+- `ceil(n)`
+- `round(n)`
+- `sqrt(n)`
+- `pow(base, exp)`
+- `log(n)`
+- `sin(n)`, `cos(n)`, `tan(n)`
 
 ## Diagnostics
-Compiler and runtime errors are printed with category labels such as:
+
+Error categories include:
 - `error[lexer]`
 - `error[syntax]`
+- `error[type]`
 - `error[import]`
 - `error[runtime]`
+- `error[assert]`
 
-Parser/lexer/import errors include file/line/column spans.
+Most errors include file/line/column spans. Method calls on `null` error explicitly and include a line number.
+
+## Bootstrap compiler subset (native codegen)
+
+The experimental bootstrap compiler in `rey-compiler/` can compile a limited subset of Rey to a native binary for the e2e fixtures in `rey-compiler/tests/e2e/`.
+
+Supported (current minimum):
+- `func` declarations, parameters, recursion (int-only calling convention for now)
+- `var`/`const` for `int`/`String` in simple cases
+- Integer arithmetic and comparisons
+- `println(int)` and `println(String)` via `printf`
+- `if/else`
+- `while`, `loop`, `break`, `continue`
+- Minimal `for (x in [..])` by unrolling literal arrays
+- Minimal structs (int fields), struct literals, field access
+- Minimal enums as integer tags (`Enum.Variant`)
+- Minimal string-literal `import "path.rey";` via AST merge
+
+Run the current e2e suite:
+```bash
+rey-compiler/tests/e2e/run.sh
+```

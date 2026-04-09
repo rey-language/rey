@@ -40,16 +40,16 @@
 ### ✅ Phase 4 — Run the bootstrap compiler (end-to-end native hello)
 - Verified end-to-end pipeline works for the minimal `hello.rey` program:
   - Build: `compiler/v1/target/release/rey-v0 rey-compiler/main.rey build rey-compiler/tests/e2e/hello.rey`
-  - Output binary: `/tmp/rey_out`
-  - Running `/tmp/rey_out` prints: `Hello from native Rey!`
+  - Output binary: `rey-compiler/tests/e2e/hello`
+  - Running `rey-compiler/tests/e2e/hello` prints: `Hello from native Rey!`
 - `rey-compiler/src/codegen/main.rey:generateIR()` is now wired and emits a minimal LLVM IR module sufficient for:
   - `func main(): Void { println("..."); }`
   - integer/string literals
   - basic integer arithmetic (limited)
 - `compileLLVM()` now:
-  - Writes IR to `/tmp/rey_out.ll`
-  - Tries `llc ... -filetype=obj` then `clang /tmp/rey_out.o -o <outputPath>`
-  - Falls back to `clang -c -x ir /tmp/rey_out.ll -o /tmp/rey_out.o` when `llc` is not installed
+  - Writes IR to `<outputPath>.ll`
+  - Tries `llc ... -filetype=obj` then `clang <outputPath>.o -o <outputPath>`
+  - Falls back to `clang -c -x ir <outputPath>.ll -o <outputPath>.o` when `llc` is not installed
 - `rey-compiler/main.rey` now propagates `compileLLVM()` errors via `CompileResult.ok=false`.
 
 ### Resume point

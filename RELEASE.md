@@ -1,4 +1,4 @@
-# Rey v0.1.0 Release Notes
+# Rey Release Notes
 
 ## v0.0.1-pre
 - Initial pre-release binary drop for Rey (`rey-v0`).
@@ -64,10 +64,18 @@
 - Added import diagnostics for missing files/modules/symbols, non-exported symbols, circular imports, and duplicates.
 - Added import fixtures under `tests/imports/` for success and failure scenarios.
 
-## What's Next (v0.2.0)
-- Enums are done.
-- Match is done.
-- Planned focus:
-  - Generics
-  - Better closure ergonomics and runtime semantics
-  - Continued standard library and module ecosystem maturity
+## v0.2.0
+- Bumped Rust interpreter crate version to `0.2.0`.
+- Hardened diagnostics (span tracking improvements).
+- Added support for parsing/ignoring generic type annotations like `Vec<String>` / `HashMap<K,V>` in type positions (type params erased at runtime).
+- Added `assert(condition, message)` builtin.
+- Expanded core library surface:
+  - String methods: `trim`, `startsWith`, `endsWith`, `replace`, `slice`, `indexOf`, `repeat`, `padLeft`, `padRight`
+  - Vec methods: `map`, `filter`, `reduce`, `reverse`, `sort`, `slice`, `join`, `indexOf`
+  - HashMap methods: `keys`, `values`, `entries`
+  - Math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`
+- `exec()` now returns `Result` (for structured error handling).
+
+## v0.3.0 (in progress)
+- Experimental bootstrap compiler in `rey-compiler/` can compile a limited subset of Rey to native binaries for the e2e fixtures under `rey-compiler/tests/e2e/`.
+- Goal: compile the compiler with itself (self-hosting milestone).
