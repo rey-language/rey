@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+src="${BASH_SOURCE[0]}"
+while [[ -h "$src" ]]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+
+root="$(cd -P "$(dirname "$src")" && pwd)"
+rey="$root/compiler/v1/target/release/rey-v0"
+compiler="$root/rey-compiler/main.rey"
+
+if [[ ! -x "$rey" ]]; then
+  (cd "$root/compiler/v1" && cargo build --release)
+fi
+
+exec "$rey" "$compiler" "$@"
