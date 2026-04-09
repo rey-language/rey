@@ -147,6 +147,19 @@ struct DictEntry {
     pub span: Span,
 }
 
+// Struct literal expression: Point { x: 1, y: 2 }
+struct StructLiteralExpr {
+    pub name: String,
+    pub fields: [StructInitField],
+    pub span: Span,
+}
+
+struct StructInitField {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
+}
+
 // Statement Kinds
 enum StmtKind {
     VarDecl,

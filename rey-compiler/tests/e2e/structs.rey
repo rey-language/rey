@@ -1,0 +1,9 @@
+struct Point {
+    pub x: int;
+    pub y: int;
+}
+
+func main(): Void {
+    var p: Point = Point { x: 2, y: 3 };
+    println(p.x + p.y);
+}

@@ -9,6 +9,8 @@ struct CodegenContext {
     pub locals: HashMap,
     pub currentRetTy: String,
     pub loopStack: Vec,
+    pub structDefs: HashMap,
+    pub enumDefs: HashMap,
 }
 
 func ctxNew(name: String) {
@@ -20,7 +22,9 @@ func ctxNew(name: String) {
         blockId: 0,
         locals: HashMap.new(),
         currentRetTy: "i32",
-        loopStack: Vec.new()
+        loopStack: Vec.new(),
+        structDefs: HashMap.new(),
+        enumDefs: HashMap.new()
     };
 }
 
@@ -87,14 +91,25 @@ func nextLabel(ctx, prefix: String): String {
     return prefix + n.toString();
 }
 
-func llvmTypeFromTag(tag: String): String {
+func llvmTypeFromTagCtx(ctx, tag: String): String {
     if tag == "" { return "i64"; }
     if tag == "int" { return "i64"; }
     if tag == "float" { return "double"; }
     if tag == "bool" { return "i1"; }
     if tag == "String" { return "i8*"; }
     if tag == "Void" { return "void"; }
+    if ctx.structDefs.has(tag) {
+        var def = ctx.structDefs.get(tag);
+        return def.llvmName + "*";
+    }
+    if ctx.enumDefs.has(tag) {
+        return "i64";
+    }
     return "i64";
+}
+
+func llvmTypeFromTag(tag: String): String {
+    return llvmTypeFromTagCtx(ctxNew("tmp"), tag);
 }
 
 func blockEndsWithReturn(block): bool {
@@ -145,6 +160,63 @@ func genExprValue(ctx, expr) {
             return { ty: local.ty, val: tmp, code: code };
         }
         return { ty: "i64", val: "%" + expr.name, code: "" };
+    }
+    if expr instanceof FieldAccessExpr {
+        var obj = genExprValue(ctx, expr.object);
+        var codeF = obj.code;
+
+        if expr.object instanceof IdentExpr {
+            var enumName = expr.object.name;
+            if ctx.enumDefs.has(enumName) {
+                var variants = ctx.enumDefs.get(enumName);
+                var i0 = 0;
+                loop {
+                    if i0 >= variants.length() { break; }
+                    if variants[i0] == expr.name {
+                        return { ty: "i64", val: i0.toString(), code: codeF };
+                    }
+                    i0 = i0 + 1;
+                }
+            }
+        }
+
+        var keys = ctx.structDefs.keys();
+        var sname = "";
+        var i = 0;
+        loop {
+            if i >= keys.len() { break; }
+            var k = keys.get(i);
+            var def = ctx.structDefs.get(k);
+            if obj.ty == def.llvmName + "*" {
+                sname = k;
+                break;
+            }
+            i = i + 1;
+        }
+        if sname == "" {
+            return { ty: "i64", val: "0", code: codeF };
+        }
+        var def2 = ctx.structDefs.get(sname);
+        var fields = def2.fields;
+        var idx = -1;
+        i = 0;
+        loop {
+            if i >= fields.length() { break; }
+            if fields[i].name == expr.name {
+                idx = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if idx < 0 {
+            return { ty: "i64", val: "0", code: codeF };
+        }
+        var gep = nextTemp(ctx);
+        var fieldTy = fields[idx].ty;
+        codeF = codeF + gep + " = getelementptr inbounds " + def2.llvmName + ", " + def2.llvmName + "* " + obj.val + ", i32 0, i32 " + idx.toString() + "\n";
+        var tmp2 = nextTemp(ctx);
+        codeF = codeF + tmp2 + " = load " + fieldTy + ", " + fieldTy + "* " + gep + "\n";
+        return { ty: fieldTy, val: tmp2, code: codeF };
     }
     if expr instanceof BinaryExpr {
         var l = genExprValue(ctx, expr.left);
@@ -215,13 +287,57 @@ func genExprValue(ctx, expr) {
             return { ty: retTy, val: tmp, code: codeC };
         }
     }
+    if expr instanceof StructLiteralExpr {
+        if !ctx.structDefs.has(expr.name) {
+            return { ty: "i8*", val: "null", code: "" };
+        }
+        var def = ctx.structDefs.get(expr.name);
+        var ptr = nextTemp(ctx);
+        var codeS = ptr + " = alloca " + def.llvmName + ", align 8\n";
+
+        var fields = def.fields;
+        var i = 0;
+        loop {
+            if i >= fields.length() { break; }
+            var fty = fields[i].ty;
+            var gep0 = nextTemp(ctx);
+            codeS = codeS + gep0 + " = getelementptr inbounds " + def.llvmName + ", " + def.llvmName + "* " + ptr + ", i32 0, i32 " + i.toString() + "\n";
+            if fty == "i64" || fty == "i32" || fty == "i1" {
+                codeS = codeS + "store " + fty + " 0, " + fty + "* " + gep0 + "\n";
+            }
+            i = i + 1;
+        }
+
+        i = 0;
+        loop {
+            if i >= expr.fields.length() { break; }
+            var init = expr.fields[i];
+            var idx = -1;
+            var j = 0;
+            loop {
+                if j >= fields.length() { break; }
+                if fields[j].name == init.name { idx = j; break; }
+                j = j + 1;
+            }
+            if idx >= 0 {
+                var val = genExprValue(ctx, init.value);
+                codeS = codeS + val.code;
+                var gep = nextTemp(ctx);
+                var fty2 = fields[idx].ty;
+                codeS = codeS + gep + " = getelementptr inbounds " + def.llvmName + ", " + def.llvmName + "* " + ptr + ", i32 0, i32 " + idx.toString() + "\n";
+                codeS = codeS + "store " + fty2 + " " + val.val + ", " + fty2 + "* " + gep + "\n";
+            }
+            i = i + 1;
+        }
+        return { ty: def.llvmName + "*", val: ptr, code: codeS };
+    }
     return { ty: "i64", val: "0", code: "" };
 }
 
 func genStmt2(ctx, stmt): String {
     if stmt instanceof VarDeclStmt {
         var init = genExprValue(ctx, stmt.value);
-        var ty = llvmTypeFromTag(stmt.typeTag);
+        var ty = llvmTypeFromTagCtx(ctx, stmt.typeTag);
         if stmt.typeTag == "" {
             ty = init.ty;
         }
@@ -234,7 +350,7 @@ func genStmt2(ctx, stmt): String {
     }
     if stmt instanceof ConstDeclStmt {
         var init2 = genExprValue(ctx, stmt.value);
-        var ty2 = llvmTypeFromTag(stmt.typeTag);
+        var ty2 = llvmTypeFromTagCtx(ctx, stmt.typeTag);
         if stmt.typeTag == "" {
             ty2 = init2.ty;
         }
@@ -469,7 +585,7 @@ func genFunc2(ctx, f): String {
     if fnName == "main" {
         retTy = "i32";
     } else {
-        retTy = llvmTypeFromTag(f.returnType);
+        retTy = llvmTypeFromTagCtx(ctx, f.returnType);
     }
     ctx.currentRetTy = retTy;
 
@@ -479,7 +595,7 @@ func genFunc2(ctx, f): String {
         if i >= f.params.length() { break; }
         if i > 0 { params = params + ", "; }
         var p = f.params[i];
-        var pty = llvmTypeFromTag(p.typeTag);
+        var pty = llvmTypeFromTagCtx(ctx, p.typeTag);
         params = params + pty + " %" + p.name;
         i = i + 1;
     }
@@ -491,7 +607,7 @@ func genFunc2(ctx, f): String {
     loop {
         if i >= f.params.length() { break; }
         var p2 = f.params[i];
-        var pty2 = llvmTypeFromTag(p2.typeTag);
+        var pty2 = llvmTypeFromTagCtx(ctx, p2.typeTag);
         var ptrp = "%" + p2.name + ".addr";
         code = code + ptrp + " = alloca " + pty2 + ", align 8\n";
         code = code + "store " + pty2 + " %" + p2.name + ", " + pty2 + "* " + ptrp + "\n";
@@ -519,6 +635,28 @@ func codegenProgram2(program): String {
     var i = 0;
     loop {
         if i >= program.statements.length() { break; }
+        var st0 = program.statements[i];
+        if st0 instanceof StructDeclStmt {
+            var llvmName = "%struct." + st0.name;
+            var fields = [];
+            var j = 0;
+            loop {
+                if j >= st0.fields.length() { break; }
+                var f = st0.fields[j];
+                fields.push({ name: f.name, ty: llvmTypeFromTagCtx(ctx, f.typeTag) });
+                j = j + 1;
+            }
+            ctx.structDefs.set(st0.name, { llvmName: llvmName, fields: fields });
+        }
+        if st0 instanceof EnumDeclStmt {
+            ctx.enumDefs.set(st0.name, st0.variants);
+        }
+        i = i + 1;
+    }
+
+    i = 0;
+    loop {
+        if i >= program.statements.length() { break; }
         var st = program.statements[i];
         if st instanceof FuncDeclStmt {
             bodies.push(genFunc2(ctx, st));
@@ -530,6 +668,28 @@ func codegenProgram2(program): String {
     code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
     code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
     code = code + "declare i32 @printf(i8*, ...)\n\n";
+
+    var keys = ctx.structDefs.keys();
+    i = 0;
+    loop {
+        if i >= keys.len() { break; }
+        var name = keys.get(i);
+        var def = ctx.structDefs.get(name);
+        var line = def.llvmName + " = type { ";
+        var j = 0;
+        loop {
+            if j >= def.fields.length() { break; }
+            if j > 0 { line = line + ", "; }
+            line = line + def.fields[j].ty;
+            j = j + 1;
+        }
+        line = line + " }\n";
+        code = code + line;
+        i = i + 1;
+    }
+    if keys.len() > 0 {
+        code = code + "\n";
+    }
 
     // string constants
     i = 0;

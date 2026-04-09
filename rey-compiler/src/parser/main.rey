@@ -528,6 +528,29 @@ func parseCall(p) {
             consume(p, "RightParen", ") expected");
             var span = makeSpan(p, expr.span.start, previous(p).span.end);
             expr = CallExpr { callee: expr, args: args, span: span };
+        } else if check(p, "LeftBrace") {
+            if expr instanceof IdentExpr {
+                var startTok = advance(p);
+                var fields = [];
+                if !check(p, "RightBrace") {
+                    loop {
+                        var nameTok = consume(p, "Identifier", "field name expected");
+                        consume(p, "Colon", ": expected");
+                        var val = parseExpression(p);
+                        fields.push(StructInitField { name: nameTok.lexeme, value: val, span: toSpan(nameTok.span) });
+                        if check(p, "Comma") {
+                            advance(p);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                consume(p, "RightBrace", "} expected");
+                var span2 = makeSpan(p, expr.span.start, previous(p).span.end);
+                expr = StructLiteralExpr { name: expr.name, fields: fields, span: span2 };
+            } else {
+                break;
+            }
         } else if check(p, "Dot") {
             advance(p);
             var nameTok = consume(p, "Identifier", "prop expected");
