@@ -385,6 +385,7 @@ func getKeyword(kind: String) {
     if kind == "while" { return "While"; }
     if kind == "for" { return "For"; }
     if kind == "in" { return "In"; }
+    if kind == "loop" { return "Loop"; }
     if kind == "break" { return "Break"; }
     if kind == "continue" { return "Continue"; }
     if kind == "match" { return "Match"; }

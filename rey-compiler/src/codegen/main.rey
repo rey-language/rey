@@ -8,6 +8,7 @@ struct CodegenContext {
     pub blockId: int,
     pub locals: HashMap,
     pub currentRetTy: String,
+    pub loopStack: Vec,
 }
 
 func ctxNew(name: String) {
@@ -18,7 +19,8 @@ func ctxNew(name: String) {
         currentFunc: "",
         blockId: 0,
         locals: HashMap.new(),
-        currentRetTy: "i32"
+        currentRetTy: "i32",
+        loopStack: Vec.new()
     };
 }
 
@@ -100,6 +102,20 @@ func blockEndsWithReturn(block): bool {
     if block.statements.length() == 0 { return false; }
     var last = block.statements[block.statements.length() - 1];
     return last instanceof ReturnStmt;
+}
+
+func stmtIsTerminator(stmt): bool {
+    if stmt instanceof ReturnStmt { return true; }
+    if stmt instanceof BreakStmt { return true; }
+    if stmt instanceof ContinueStmt { return true; }
+    return false;
+}
+
+func blockEndsWithTerminator(block): bool {
+    if !(block instanceof BlockStmt) { return false; }
+    if block.statements.length() == 0 { return false; }
+    var last = block.statements[block.statements.length() - 1];
+    return stmtIsTerminator(last);
 }
 
 func genExprValue(ctx, expr) {
@@ -237,6 +253,42 @@ func genStmt2(ctx, stmt): String {
         var ignored = genExprValue(ctx, e);
         return ignored.code;
     }
+    if stmt instanceof AssignStmt {
+        if stmt.target instanceof IdentExpr {
+            var name = stmt.target.name;
+            var rhs = genExprValue(ctx, stmt.value);
+            var tyA = rhs.ty;
+            if ctx.locals.has(name) {
+                tyA = ctx.locals.get(name).ty;
+            } else {
+                var ptrNew = "%" + name + ".addr";
+                var codeNew = rhs.code + ptrNew + " = alloca " + tyA + ", align 8\n";
+                codeNew = codeNew + "store " + tyA + " " + rhs.val + ", " + tyA + "* " + ptrNew + "\n";
+                ctx.locals.set(name, { ptr: ptrNew, ty: tyA });
+                return codeNew;
+            }
+
+            var localA = ctx.locals.get(name);
+            var codeA = rhs.code;
+            if stmt.op == "=" {
+                codeA = codeA + "store " + localA.ty + " " + rhs.val + ", " + localA.ty + "* " + localA.ptr + "\n";
+                return codeA;
+            }
+
+            var cur = nextTemp(ctx);
+            codeA = codeA + cur + " = load " + localA.ty + ", " + localA.ty + "* " + localA.ptr + "\n";
+            var tmp = nextTemp(ctx);
+            var inst = "add";
+            if stmt.op == "-=" { inst = "sub"; }
+            if stmt.op == "*=" { inst = "mul"; }
+            if stmt.op == "/=" { inst = "sdiv"; }
+            if stmt.op == "%=" { inst = "srem"; }
+            codeA = codeA + tmp + " = " + inst + " " + localA.ty + " " + cur + ", " + rhs.val + "\n";
+            codeA = codeA + "store " + localA.ty + " " + tmp + ", " + localA.ty + "* " + localA.ptr + "\n";
+            return codeA;
+        }
+        return "";
+    }
     if stmt instanceof IfStmt {
         var condv = genExprValue(ctx, stmt.condition);
         var codeIf = condv.code;
@@ -254,7 +306,7 @@ func genStmt2(ctx, stmt): String {
             codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + endLabel + "\n";
             codeIf = codeIf + thenLabel + ":\n";
             codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
-            if !blockEndsWithReturn(stmt.thenBranch) {
+            if !blockEndsWithTerminator(stmt.thenBranch) {
                 codeIf = codeIf + "br label %" + endLabel + "\n";
             }
             codeIf = codeIf + endLabel + ":\n";
@@ -264,16 +316,93 @@ func genStmt2(ctx, stmt): String {
         codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + elseLabel + "\n";
         codeIf = codeIf + thenLabel + ":\n";
         codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
-        if !blockEndsWithReturn(stmt.thenBranch) {
+        if !blockEndsWithTerminator(stmt.thenBranch) {
             codeIf = codeIf + "br label %" + endLabel + "\n";
         }
         codeIf = codeIf + elseLabel + ":\n";
         codeIf = codeIf + genStmt2(ctx, stmt.elseBranch);
-        if !blockEndsWithReturn(stmt.elseBranch) {
+        if !blockEndsWithTerminator(stmt.elseBranch) {
             codeIf = codeIf + "br label %" + endLabel + "\n";
         }
         codeIf = codeIf + endLabel + ":\n";
         return codeIf;
+    }
+    if stmt instanceof BreakStmt {
+        if ctx.loopStack.len() == 0 { return ""; }
+        var top = ctx.loopStack.get(ctx.loopStack.len() - 1);
+        return "br label %" + top.breakLabel + "\n";
+    }
+    if stmt instanceof ContinueStmt {
+        if ctx.loopStack.len() == 0 { return ""; }
+        var top2 = ctx.loopStack.get(ctx.loopStack.len() - 1);
+        return "br label %" + top2.continueLabel + "\n";
+    }
+    if stmt instanceof WhileStmt {
+        var condLabel = nextLabel(ctx, "while.cond");
+        var bodyLabel = nextLabel(ctx, "while.body");
+        var endLabel = nextLabel(ctx, "while.end");
+
+        var codeW = "br label %" + condLabel + "\n";
+        codeW = codeW + condLabel + ":\n";
+        var condv = genExprValue(ctx, stmt.condition);
+        codeW = codeW + condv.code;
+        var condVal = condv.val;
+        if condv.ty == "i64" {
+            var tmpc = nextTemp(ctx);
+            codeW = codeW + tmpc + " = icmp ne i64 " + condv.val + ", 0\n";
+            condVal = tmpc;
+        }
+        codeW = codeW + "br i1 " + condVal + ", label %" + bodyLabel + ", label %" + endLabel + "\n";
+        codeW = codeW + bodyLabel + ":\n";
+        ctx.loopStack.push({ breakLabel: endLabel, continueLabel: condLabel });
+        codeW = codeW + genStmt2(ctx, stmt.body);
+        ctx.loopStack.pop();
+        if !(stmt.body instanceof BlockStmt) || !blockEndsWithTerminator(stmt.body) {
+            codeW = codeW + "br label %" + condLabel + "\n";
+        }
+        codeW = codeW + endLabel + ":\n";
+        return codeW;
+    }
+    if stmt instanceof LoopStmt {
+        var bodyLabel2 = nextLabel(ctx, "loop.body");
+        var endLabel2 = nextLabel(ctx, "loop.end");
+        var codeL = "br label %" + bodyLabel2 + "\n";
+        codeL = codeL + bodyLabel2 + ":\n";
+        ctx.loopStack.push({ breakLabel: endLabel2, continueLabel: bodyLabel2 });
+        codeL = codeL + genStmt2(ctx, stmt.body);
+        ctx.loopStack.pop();
+        if !(stmt.body instanceof BlockStmt) || !blockEndsWithTerminator(stmt.body) {
+            codeL = codeL + "br label %" + bodyLabel2 + "\n";
+        }
+        codeL = codeL + endLabel2 + ":\n";
+        return codeL;
+    }
+    if stmt instanceof ForStmt {
+        if stmt.iterable instanceof ArrayExpr {
+            var outF = "";
+            var nameF = stmt.variable;
+            var ptrF = "%" + nameF + ".addr";
+            var tyF = "i64";
+            if !ctx.locals.has(nameF) {
+                outF = outF + ptrF + " = alloca " + tyF + ", align 8\n";
+                ctx.locals.set(nameF, { ptr: ptrF, ty: tyF });
+            } else {
+                ptrF = ctx.locals.get(nameF).ptr;
+                tyF = ctx.locals.get(nameF).ty;
+            }
+
+            var iF = 0;
+            loop {
+                if iF >= stmt.iterable.elements.length() { break; }
+                var ev = genExprValue(ctx, stmt.iterable.elements[iF]);
+                outF = outF + ev.code;
+                outF = outF + "store " + tyF + " " + ev.val + ", " + tyF + "* " + ptrF + "\n";
+                outF = outF + genStmt2(ctx, stmt.body);
+                iF = iF + 1;
+            }
+            return outF;
+        }
+        return "";
     }
     if stmt instanceof ReturnStmt {
         if ctx.currentRetTy == "void" {
@@ -295,7 +424,11 @@ func genStmt2(ctx, stmt): String {
         var i = 0;
         loop {
             if i >= stmt.statements.length() { break; }
-            out = out + genStmt2(ctx, stmt.statements[i]);
+            var st = stmt.statements[i];
+            out = out + genStmt2(ctx, st);
+            if stmtIsTerminator(st) {
+                break;
+            }
             i = i + 1;
         }
         return out;
@@ -307,6 +440,7 @@ func genFunc2(ctx, f): String {
     ctx.blockId = 0;
     var fnName = f.name;
     ctx.locals = HashMap.new();
+    ctx.loopStack = Vec.new();
     var retTy = "i64";
     if fnName == "main" {
         retTy = "i32";
