@@ -214,7 +214,7 @@ impl Executor {
                     }
                 }
 
-                Err("No matching arm in match expression".to_string())
+                Err("error[match]: non-exhaustive patterns".to_string())
             }
             Stmt::Import { .. } => Ok(ControlFlow::normal(Value::Null)),
         }
@@ -305,11 +305,14 @@ impl Executor {
                 .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
             Expr::Binary {
-                left, op, right, ..
+                left,
+                op,
+                right,
+                span,
             } => {
                 let left_val = self.evaluate_expr(left, env)?;
                 let right_val = self.evaluate_expr(right, env)?;
-                self.evaluate_binary(left_val, op, right_val)
+                self.evaluate_binary(left_val, op, right_val, span.start)
             }
             Expr::ArrayLiteral { elements, .. } => {
                 let mut evaluated = Vec::new();
@@ -333,9 +336,16 @@ impl Executor {
                 }
                 Ok(Value::Dict(Rc::new(RefCell::new(m))))
             }
-            Expr::Index { target, index, .. } => {
+            Expr::Index {
+                target,
+                index,
+                span,
+            } => {
                 let target_val = self.evaluate_expr(target, env)?;
                 let index_val = self.evaluate_expr(index, env)?;
+                if matches!(target_val, Value::Null) {
+                    return Err(self.null_dereference_error(span.start));
+                }
                 match (target_val, index_val) {
                     (Value::Array(arr), Value::Int(n)) => {
                         let idx = n as isize;
@@ -343,10 +353,11 @@ impl Executor {
                             return Err("Array index must be non-negative".to_string());
                         }
                         let idx = idx as usize;
-                        arr.borrow()
+                        let arr_ref = arr.borrow();
+                        arr_ref
                             .get(idx)
                             .cloned()
-                            .ok_or_else(|| "Array index out of bounds".to_string())
+                            .ok_or_else(|| self.index_out_of_bounds_error(idx, arr_ref.len()))
                     }
                     (Value::Array(arr), Value::Float(n)) => {
                         if n.fract() != 0.0 {
@@ -357,10 +368,11 @@ impl Executor {
                             return Err("Array index must be non-negative".to_string());
                         }
                         let idx = idx as usize;
-                        arr.borrow()
+                        let arr_ref = arr.borrow();
+                        arr_ref
                             .get(idx)
                             .cloned()
-                            .ok_or_else(|| "Array index out of bounds".to_string())
+                            .ok_or_else(|| self.index_out_of_bounds_error(idx, arr_ref.len()))
                     }
                     (Value::Dict(d), Value::String(s)) => d
                         .borrow()
@@ -373,9 +385,10 @@ impl Executor {
                             return Err("String index must be non-negative".to_string());
                         }
                         let idx = idx as usize;
+                        let char_len = s.chars().count();
                         match s.chars().nth(idx) {
                             Some(c) => Ok(Value::String(c.to_string())),
-                            None => Err("String index out of bounds".to_string()),
+                            None => Err(self.index_out_of_bounds_error(idx, char_len)),
                         }
                     }
                     (Value::String(s), Value::Float(n)) => {
@@ -387,16 +400,20 @@ impl Executor {
                             return Err("String index must be non-negative".to_string());
                         }
                         let idx = idx as usize;
+                        let char_len = s.chars().count();
                         match s.chars().nth(idx) {
                             Some(c) => Ok(Value::String(c.to_string())),
-                            None => Err("String index out of bounds".to_string()),
+                            None => Err(self.index_out_of_bounds_error(idx, char_len)),
                         }
                     }
                     _ => Err("Indexing is only supported for arrays (number index), dictionaries (string key), and strings (number index)".to_string()),
                 }
             }
-            Expr::Get { object, name, .. } => {
+            Expr::Get { object, name, span } => {
                 let obj = self.evaluate_expr(object, env)?;
+                if matches!(obj, Value::Null) {
+                    return Err(self.null_dereference_error(span.start));
+                }
                 match obj {
                     Value::Dict(d) => d
                         .borrow()
@@ -445,6 +462,9 @@ impl Executor {
                 span,
             } => {
                 let recv = self.evaluate_expr(receiver, env)?;
+                if matches!(recv, Value::Null) {
+                    return Err(self.null_dereference_error(span.start));
+                }
                 let mut evaluated_args = Vec::new();
                 for a in args {
                     evaluated_args.push(self.evaluate_expr(a, env)?);
@@ -618,9 +638,9 @@ impl Executor {
                 // Execute the static method body
                 self.execute_block(&method_decl.body, &mut method_env)
             }
-            Expr::Unary { op, right, .. } => {
+            Expr::Unary { op, right, span } => {
                 let right_val = self.evaluate_expr(right, env)?;
-                self.evaluate_unary(op, right_val)
+                self.evaluate_unary(op, right_val, span.start)
             }
             Expr::InstanceOf { value, ty, .. } => {
                 let v = self.evaluate_expr(value, env)?;
@@ -671,45 +691,76 @@ impl Executor {
                             for part in &parts {
                                 // try zero-copy borrow for simple variable and field references
                                 let appended = match part {
-                                    Expr::Variable { name: pname, .. } => {
-                                        match env.get(pname) {
-                                            Some(Value::String(r)) => { base.push_str(r); true }
-                                            Some(Value::Int(n)) => { base.push_str(&n.to_string()); true }
-                                            _ => false,
+                                    Expr::Variable { name: pname, .. } => match env.get(pname) {
+                                        Some(Value::String(r)) => {
+                                            base.push_str(r);
+                                            true
                                         }
-                                    }
-                                    Expr::Get { object, name: fname, .. } => {
+                                        Some(Value::Int(n)) => {
+                                            base.push_str(&n.to_string());
+                                            true
+                                        }
+                                        _ => false,
+                                    },
+                                    Expr::Get {
+                                        object,
+                                        name: fname,
+                                        ..
+                                    } => {
                                         let obj = self.evaluate_expr(object, env)?;
                                         let fields_opt = match &obj {
-                                            Value::StructInstance { fields, .. } => Some(fields.clone()),
+                                            Value::StructInstance { fields, .. } => {
+                                                Some(fields.clone())
+                                            }
                                             Value::Dict(d) => Some(d.clone()),
                                             _ => None,
                                         };
                                         if let Some(fields_rc) = fields_opt {
                                             match fields_rc.borrow().get(fname.as_str()) {
-                                                Some(Value::String(r)) => { base.push_str(r); true }
-                                                Some(Value::Int(n)) => { base.push_str(&n.to_string()); true }
+                                                Some(Value::String(r)) => {
+                                                    base.push_str(r);
+                                                    true
+                                                }
+                                                Some(Value::Int(n)) => {
+                                                    base.push_str(&n.to_string());
+                                                    true
+                                                }
                                                 _ => false,
                                             }
-                                        } else { false }
-                                    }
-                                    Expr::Literal { value: lit, .. } => {
-                                        match lit {
-                                            crate::ast::Literal::String(s) => { base.push_str(s); true }
-                                            crate::ast::Literal::Int(n) => { base.push_str(&n.to_string()); true }
-                                            _ => false,
+                                        } else {
+                                            false
                                         }
                                     }
+                                    Expr::Literal { value: lit, .. } => match lit {
+                                        crate::ast::Literal::String(s) => {
+                                            base.push_str(s);
+                                            true
+                                        }
+                                        crate::ast::Literal::Int(n) => {
+                                            base.push_str(&n.to_string());
+                                            true
+                                        }
+                                        _ => false,
+                                    },
                                     _ => {
                                         let part_val = self.evaluate_expr(part, env)?;
                                         match part_val {
-                                            Value::String(r) => { base.push_str(&r); true }
-                                            Value::Int(n) => { base.push_str(&n.to_string()); true }
+                                            Value::String(r) => {
+                                                base.push_str(&r);
+                                                true
+                                            }
+                                            Value::Int(n) => {
+                                                base.push_str(&n.to_string());
+                                                true
+                                            }
                                             _ => false,
                                         }
                                     }
                                 };
-                                if !appended { all_ok = false; break; }
+                                if !appended {
+                                    all_ok = false;
+                                    break;
+                                }
                             }
                             env.restore_local(name.to_string(), Value::String(base));
                             if all_ok {
@@ -728,7 +779,7 @@ impl Executor {
                 object,
                 name,
                 value,
-                ..
+                span,
             } => {
                 if matches!(object.as_ref(), Expr::Get { .. }) {
                     return Err(format!(
@@ -737,6 +788,9 @@ impl Executor {
                     ));
                 }
                 let obj_val = self.evaluate_expr(object, env)?;
+                if matches!(obj_val, Value::Null) {
+                    return Err(self.null_dereference_error(span.start));
+                }
                 let val = self.evaluate_expr(value, env)?;
                 match obj_val {
                     Value::Dict(d) => {
@@ -783,9 +837,12 @@ impl Executor {
                 target,
                 index,
                 value,
-                ..
+                span,
             } => {
                 let target_val = self.evaluate_expr(target, env)?;
+                if matches!(target_val, Value::Null) {
+                    return Err(self.null_dereference_error(span.start));
+                }
                 let index_val = self.evaluate_expr(index, env)?;
                 let val = self.evaluate_expr(value, env)?;
                 match (target_val, index_val) {
@@ -797,7 +854,7 @@ impl Executor {
                         let idx = idx as usize;
                         let mut arr_mut = arr.borrow_mut();
                         if idx >= arr_mut.len() {
-                            return Err("Array index out of bounds".to_string());
+                            return Err(self.index_out_of_bounds_error(idx, arr_mut.len()));
                         }
                         arr_mut[idx] = val.clone();
                         Ok(val)
@@ -813,7 +870,7 @@ impl Executor {
                         let idx = idx as usize;
                         let mut arr_mut = arr.borrow_mut();
                         if idx >= arr_mut.len() {
-                            return Err("Array index out of bounds".to_string());
+                            return Err(self.index_out_of_bounds_error(idx, arr_mut.len()));
                         }
                         arr_mut[idx] = val.clone();
                         Ok(val)
@@ -1102,7 +1159,10 @@ impl Executor {
                     name, callSpan.line
                 ));
             }
-            return Err(format!("error[null]: cannot call method '{}' on null", name));
+            return Err(format!(
+                "error[null]: cannot call method '{}' on null",
+                name
+            ));
         }
         match (receiver, name) {
             (Value::Dict(d), method_name) => {
@@ -1627,7 +1687,9 @@ impl Executor {
                     Value::Float(_) => SortKind::Float,
                     Value::String(_) => SortKind::String,
                     Value::Bool(_) => SortKind::Bool,
-                    _ => return Err("Vec.sort() only supports int, float, String, bool".to_string()),
+                    _ => {
+                        return Err("Vec.sort() only supports int, float, String, bool".to_string())
+                    }
                 };
 
                 for item in v_mut.iter() {
@@ -1639,7 +1701,10 @@ impl Executor {
                         _ => false,
                     };
                     if !ok {
-                        return Err("Vec.sort() requires all elements to be the same comparable type".to_string());
+                        return Err(
+                            "Vec.sort() requires all elements to be the same comparable type"
+                                .to_string(),
+                        );
                     }
                 }
 
@@ -1649,9 +1714,9 @@ impl Executor {
                         _ => std::cmp::Ordering::Equal,
                     }),
                     SortKind::Float => v_mut.sort_by(|a, b| match (a, b) {
-                        (Value::Float(x), Value::Float(y)) => x
-                            .partial_cmp(y)
-                            .unwrap_or(std::cmp::Ordering::Equal),
+                        (Value::Float(x), Value::Float(y)) => {
+                            x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+                        }
                         _ => std::cmp::Ordering::Equal,
                     }),
                     SortKind::String => v_mut.sort_by(|a, b| match (a, b) {
@@ -2014,10 +2079,9 @@ impl Executor {
                 continue;
             }
 
-            let def = param
-                .default
-                .as_ref()
-                .ok_or_else(|| format!("Missing argument '{}' and no default provided", param.name))?;
+            let def = param.default.as_ref().ok_or_else(|| {
+                format!("Missing argument '{}' and no default provided", param.name)
+            })?;
             let val = self.evaluate_expr(def, &mut function_env)?;
             function_env.define(param.name.clone(), val);
         }
@@ -2035,8 +2099,26 @@ impl Executor {
         }
     }
 
-    fn evaluate_binary(&self, left: Value, op: &TokenKind, right: Value) -> Result<Value, String> {
+    fn evaluate_binary(
+        &self,
+        left: Value,
+        op: &TokenKind,
+        right: Value,
+        line_hint: usize,
+    ) -> Result<Value, String> {
         use TokenKind::*;
+
+        if matches!(left, Value::Null) || matches!(right, Value::Null) {
+            if matches!(op, EqualEqual | NotEqual) {
+                return Ok(Value::Bool(matches!(
+                    (&left, &right, op),
+                    (Value::Null, Value::Null, EqualEqual)
+                        | (Value::Null, _, NotEqual)
+                        | (_, Value::Null, NotEqual)
+                )));
+            }
+            return Err(self.null_dereference_error(line_hint));
+        }
 
         match (left, op, right) {
             (Value::Int(l), Plus, Value::Int(r)) => Ok(Value::Int(l + r)),
@@ -2109,10 +2191,6 @@ impl Executor {
                     Ok(Value::Float(l % (r as f64)))
                 }
             }
-            (Value::Null, EqualEqual, Value::Null) => Ok(Value::Bool(true)),
-            (Value::Null, NotEqual, Value::Null) => Ok(Value::Bool(false)),
-            (Value::Null, EqualEqual, _) | (_, EqualEqual, Value::Null) => Ok(Value::Bool(false)),
-            (Value::Null, NotEqual, _) | (_, NotEqual, Value::Null) => Ok(Value::Bool(true)),
             (Value::Int(l), EqualEqual, Value::Int(r)) => Ok(Value::Bool(l == r)),
             (Value::Int(l), NotEqual, Value::Int(r)) => Ok(Value::Bool(l != r)),
             (Value::Int(l), Less, Value::Int(r)) => Ok(Value::Bool(l < r)),
@@ -2152,6 +2230,18 @@ impl Executor {
             (Value::String(l), LessEqual, Value::String(r)) => Ok(Value::Bool(l <= r)),
             (Value::String(l), Greater, Value::String(r)) => Ok(Value::Bool(l > r)),
             (Value::String(l), GreaterEqual, Value::String(r)) => Ok(Value::Bool(l >= r)),
+            (Value::Array(a), EqualEqual, Value::Array(b)) => Ok(Value::Bool(Rc::ptr_eq(&a, &b))),
+            (Value::Array(a), NotEqual, Value::Array(b)) => Ok(Value::Bool(!Rc::ptr_eq(&a, &b))),
+            (
+                Value::StructInstance { fields: a, .. },
+                EqualEqual,
+                Value::StructInstance { fields: b, .. },
+            ) => Ok(Value::Bool(Rc::ptr_eq(&a, &b))),
+            (
+                Value::StructInstance { fields: a, .. },
+                NotEqual,
+                Value::StructInstance { fields: b, .. },
+            ) => Ok(Value::Bool(!Rc::ptr_eq(&a, &b))),
 
             (Value::Bool(l), EqualEqual, Value::Bool(r)) => Ok(Value::Bool(l == r)),
             (Value::Bool(l), NotEqual, Value::Bool(r)) => Ok(Value::Bool(l != r)),
@@ -2166,9 +2256,13 @@ impl Executor {
     // returns the list [a, b, c] if the chain starts with Variable(base_name); empty otherwise
     fn collect_string_concat_parts<'a>(expr: &'a Expr, base_name: &str) -> Vec<&'a Expr> {
         match expr {
-            Expr::Binary { left, op, right, .. } if *op == TokenKind::Plus => {
+            Expr::Binary {
+                left, op, right, ..
+            } if *op == TokenKind::Plus => {
                 let mut parts = Self::collect_string_concat_parts(left, base_name);
-                if !parts.is_empty() || matches!(left.as_ref(), Expr::Variable { name, .. } if name == base_name) {
+                if !parts.is_empty()
+                    || matches!(left.as_ref(), Expr::Variable { name, .. } if name == base_name)
+                {
                     if parts.is_empty() {
                         // left is exactly Variable(base_name), start the list
                     }
@@ -2185,12 +2279,24 @@ impl Executor {
     fn evaluate_unary(&self, op: &TokenKind, right: Value) -> Result<Value, String> {
         use TokenKind::*;
 
+        if matches!(right, Value::Null) {
+            return Err(self.null_dereference_error(line_hint));
+        }
+
         match (op, right) {
             (Minus, Value::Int(n)) => Ok(Value::Int(-n)),
             (Minus, Value::Float(n)) => Ok(Value::Float(-n)),
             (Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             _ => Err("Invalid unary operation".to_string()),
         }
+    }
+
+    fn null_dereference_error(&self, line_hint: usize) -> String {
+        format!("null dereference at line {}", line_hint + 1)
+    }
+
+    fn index_out_of_bounds_error(&self, i: usize, len: usize) -> String {
+        format!("index out of bounds (i={}, len={})", i, len)
     }
 
     pub fn execute_block(

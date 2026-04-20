@@ -26,9 +26,27 @@
 17. [Built-in Functions](#17-built-in-functions)
 18. [I/O and Process](#18-io-and-process)
 
+<<<<<<< HEAD
 ---
 
 ## 1. Lexical Structure
+=======
+Semicolons are required statement terminators.
+
+```rey
+var x = 10;
+var y: int = 20;
+const pi: float = 3.14;
+```
+
+- `var` declares a mutable variable
+- `const` declares an immutable variable (cannot be reassigned)
+- Statements must end with `;`:
+  - variable declarations
+  - assignments
+  - returns
+  - expression statements
+>>>>>>> 81dc245 (.)
 
 ### Comments
 ```rey
@@ -53,7 +71,18 @@ Convention: `camelCase` for variables and functions, `PascalCase` for types.
 | Bool | `true`, `false` |
 | Null | `null` |
 
+<<<<<<< HEAD
 String escape sequences: `\n`, `\t`, `\\`, `\"`, `\r`
+=======
+Equality semantics:
+- primitives (`int`, `float`, `bool`, `char`) use value equality
+- strings use value equality
+- arrays use reference equality
+- structs use reference equality
+
+Logical:
+- `&&`, `||`, `!`
+>>>>>>> 81dc245 (.)
 
 ### Keywords
 ```
@@ -346,7 +375,14 @@ struct Person {
 }
 ```
 
+<<<<<<< HEAD
 ### Instantiation
+=======
+Fields are private by default. Prefix a field with `pub` to allow external mutation.
+Struct field declarations are comma-separated. Trailing commas are allowed.
+
+Struct literal:
+>>>>>>> 81dc245 (.)
 
 ```rey
 var p = Point { x: 3, y: 4 };
@@ -401,6 +437,7 @@ enum Color {
 }
 ```
 
+<<<<<<< HEAD
 Accessing variants:
 ```rey
 var dir = Direction.North;
@@ -412,6 +449,11 @@ Variants are represented as integers (0-indexed in declaration order) in the nat
 ---
 
 ## 10. Pattern Matching
+=======
+Enum variants are comma-separated. Trailing commas are allowed.
+
+Match:
+>>>>>>> 81dc245 (.)
 
 ```rey
 match direction {
@@ -422,6 +464,7 @@ match direction {
 }
 ```
 
+<<<<<<< HEAD
 Wildcard:
 ```rey
 match value {
@@ -442,6 +485,33 @@ match color {
     _ => println("other"),
 }
 ```
+=======
+Match arms must be comma-separated.
+
+Pattern kinds:
+- enum variant (`Type::Variant` or unqualified `Variant`)
+- struct pattern (`StructName { field: pattern, ... }`)
+- literal (`1`, `"x"`, `true`, `null`)
+- variable binding (`n`)
+- wildcard (`_`)
+
+If no match arm applies and there is no `_` fallback arm, runtime raises:
+- `error[match]: non-exhaustive patterns`
+
+## Built-ins
+Global built-ins:
+- `print(...)`
+- `println(...)`
+- `input()` / `input(promptString)`
+- `len(value)` — works on strings, arrays, dictionaries
+- `push(array, value)`
+- `pop(array)`
+- `abs(number)`
+- `max(a, b)` — two numbers
+- `min(a, b)` — two numbers
+- `random()` — returns float in [0, 1)
+- `range(start, end)` — used inside `for` loops (see Control Flow)
+>>>>>>> 81dc245 (.)
 
 Matching structs (Rust interpreter only):
 ```rey
@@ -451,6 +521,7 @@ match point {
 }
 ```
 
+<<<<<<< HEAD
 ---
 
 ## 11. Collections — Vec
@@ -751,3 +822,10 @@ primary    = NUMBER | STRING | BOOL | "null" | IDENT | lambda | array
 - **v0.2.0** — native compiler; all features above compile to native via LLVM
 - **v0.1.0** — Rust interpreter; full feature set including struct pattern matching  
 - The type checker is a stub in v0.2.0 — type errors are caught at runtime
+=======
+Parser/lexer/import errors include file/line/column spans.
+
+Runtime safety checks:
+- null dereference raises `null dereference at line <n>`
+- array/string bounds errors raise `index out of bounds (i=..., len=...)`
+>>>>>>> 81dc245 (.)

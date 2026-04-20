@@ -1,0 +1,6 @@
+func checkArray(): Void {
+    var xs = [1, 2, 3];
+    var a = xs[4];
+}
+
+checkArray();

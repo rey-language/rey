@@ -297,7 +297,12 @@ impl Parser {
                 let ty = self
                     .parseTypeOnly()?
                     .ok_or_else(|| self.error("Expected type name for field."))?;
-                self.matchToken(&TokenKind::Comma); // optional trailing comma
+                if !self.check(&TokenKind::RightBrace) {
+                    self.consume(
+                        &TokenKind::Comma,
+                        "Expected ',' after struct field declaration.",
+                    )?;
+                }
 
                 fields.push(FieldDecl {
                     name: field_name,
@@ -482,9 +487,8 @@ impl Parser {
             };
             self.advance();
             variants.push(variant);
-
-            if !self.matchToken(&TokenKind::Comma) {
-                break;
+            if !self.check(&TokenKind::RightBrace) {
+                self.consume(&TokenKind::Comma, "Expected ',' between enum variants.")?;
             }
         }
 
@@ -520,9 +524,8 @@ impl Parser {
             };
 
             arms.push(MatchArm { pattern, body });
-
-            if !self.matchToken(&TokenKind::Comma) {
-                break;
+            if !self.check(&TokenKind::RightBrace) {
+                self.consume(&TokenKind::Comma, "Expected ',' between match arms.")?;
             }
         }
 
@@ -1545,7 +1548,11 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(self.error(message))
+            if std::mem::discriminant(kind) == std::mem::discriminant(&TokenKind::Semicolon) {
+                Err(self.error("expected ';'"))
+            } else {
+                Err(self.error(message))
+            }
         }
     }
     fn check(&self, kind: &TokenKind) -> bool {

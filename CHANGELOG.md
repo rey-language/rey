@@ -1,35 +1,23 @@
 # Changelog
 
-## [checkpoint] — 2026-04-05
-- Verified `compiler/v1` builds in release mode and all Rust tests pass (7/7).
-- Confirmed interpreter parse failure for generic type annotations like `Vec<String>` (fails at `<` in type positions); tracked to `parseTypeAtom()` not consuming generic parameter tokens.
-
-## [fix] — 2026-04-05
-- Parser now accepts generic type annotations like `Vec<Token>` / `HashMap<String, Vec<int>>` by skipping the `<...>` portion during type parsing.
-- Type checker recognizes collection type annotations (`Vec`, `HashMap`, `LinkedList`, `Stack`, `Queue`, `Option`, `Result`) as dynamically-dispatched at runtime (type params erased).
-- Added support for bare `return;` (no expression), enabling early returns from `Void` functions.
-- Method calls on `null` now error explicitly and include a line number.
-
-## [feat] — 2026-04-05
-- Added `assert(condition, message)` builtin (exits with `error[assert]`).
-- Added missing `String` methods: `trim`, `startsWith`, `endsWith`, `replace`, `slice`, `indexOf`, `repeat`, `padLeft`, `padRight`.
-- Added missing `Vec` methods: `map`, `filter`, `reduce`, `reverse`, `sort`, `slice`, `join`.
-- Added missing `HashMap` methods: `keys`, `values`, `entries`.
-- Added math builtins: `floor`, `ceil`, `round`, `sqrt`, `pow`, `log`, `sin`, `cos`, `tan`.
-- Import resolver now supports module/file lookup under a project `src/` directory, and module imports include struct/enum declarations.
-- Enums now expose a namespace dict under the enum name (enables `Enum.Variant` access) and typecheck defines enum names in scope.
-- `exec()` now returns a `Result` value instead of a raw string.
-- Added `String.len()` alias and lexicographic string comparisons (`<`, `<=`, `>`, `>=`) for bootstrap tooling.
-
-## [feat] — 2026-04-09
-- Bootstrap compiler now generates a minimal LLVM IR module and produces a working native binary end-to-end for `rey-compiler/tests/e2e/hello.rey`.
-- `compileLLVM()` writes `<outputPath>.ll`, compiles via `llc` + `clang`, and falls back to `clang -c -x ir` when `llc` is unavailable.
-- Extended bootstrap compiler parser/codegen to compile additional e2e programs end-to-end: `math.rey`, `loops.rey`, `functions.rey`, `structs.rey`, `enums.rey`, `imports.rey`.
-- Added minimal struct literals (`Point { x: 1, y: 2 }`) and field access codegen for `int` fields.
-- Added minimal enum variant codegen via `Enum.Variant` as integer tags.
-- Added minimal import loader in `rey-compiler/main.rey` that recursively merges imported programs for compilation.
-- Added `rey-compiler/tests/e2e/run.sh` plus `*.out` expected outputs, and moved native outputs to be written next to sources (no `/tmp` outputs).
-- Added repo-local `reyc` launcher script as a convenience wrapper for invoking the bootstrap compiler via the Rust interpreter.
+## [fix] — 2026-04-10
+- Parser semicolon errors are now standardized to `error[syntax]: expected ';'` with existing file/line/column reporting.
+- Enforced explicit comma separators between `match` arms (`Expected ',' between match arms.`).
+- Enforced explicit comma separators between enum variants (`Expected ',' between enum variants.`).
+- Enforced explicit comma separators for struct field declarations in `struct` bodies.
+- Runtime binary/unary ops now report null use as `null dereference at line <n>`.
+- Added array/string bounds diagnostics: `index out of bounds (i=..., len=...)`.
+- Added runtime equality support for arrays and structs with reference-equality semantics.
+- Match runtime now reports non-exhaustive branches as `error[match]: non-exhaustive patterns`.
+- Added parser regression tests:
+  - `compiler/v1/src/tests/syntax_missing_semicolon.rey`
+  - `compiler/v1/src/tests/match_missing_comma.rey`
+  - `compiler/v1/src/tests/enum_missing_comma.rey`
+  - `compiler/v1/src/tests/runtime_ref_equality.rey`
+  - `compiler/v1/src/tests/runtime_index_oob.rey`
+  - `compiler/v1/src/tests/match_non_exhaustive.rey`
+  - unit assertions in `compiler/v1/src/main.rs`
+- Updated syntax reference to explicitly state semicolon-required statements and comma separator rules for structs/enums/match.
 
 ## [release] — 2026-03-27
 - Bumped compiler crate version to `0.2.0` in `compiler/v1/Cargo.toml`.

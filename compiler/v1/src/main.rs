@@ -98,6 +98,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{Expr, Literal};
+    use crate::interpreter::environment::Environment;
+    use crate::interpreter::executor::Executor;
+    use crate::lexer::span::Span;
 
     fn runRey(rel: &str) -> Result<(), String> {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
@@ -106,6 +110,11 @@ mod tests {
         interpreter
             .interpret(&program.statements)
             .map_err(|e| e.to_string())
+    }
+
+    fn parseErr(rel: &str) -> imports::CompileError {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+        resolveEntry(&path).unwrap_err()
     }
 
     #[test]
@@ -150,5 +159,59 @@ mod tests {
     fn structFieldMutationNestedErrorsClearly() {
         let err = runRey("src/tests/struct_field_mutation_nested_error.rey").unwrap_err();
         assert!(err.contains("nested field assignment"), "got: {}", err);
+    }
+
+    #[test]
+    fn parserReportsStandardSemicolonError() {
+        let err = parseErr("src/tests/syntax_missing_semicolon.rey");
+        assert_eq!(err.title, "syntax");
+        assert_eq!(err.message, "expected ';'");
+    }
+
+    #[test]
+    fn matchArmsRequireCommaSeparator() {
+        let err = parseErr("src/tests/match_missing_comma.rey");
+        assert_eq!(err.title, "syntax");
+        assert!(err.message.contains("Expected ',' between match arms."));
+    }
+
+    #[test]
+    fn enumVariantsRequireCommaSeparator() {
+        let err = parseErr("src/tests/enum_missing_comma.rey");
+        assert_eq!(err.title, "syntax");
+        assert!(err.message.contains("Expected ',' between enum variants."));
+    }
+
+    #[test]
+    fn runtimeUsesReferenceEqualityForArrayAndStruct() {
+        runRey("src/tests/runtime_ref_equality.rey").unwrap();
+    }
+
+    #[test]
+    fn runtimeReportsNullDereference() {
+        let executor = Executor::new();
+        let mut env = Environment::new();
+        let expr = Expr::Get {
+            object: Box::new(Expr::Literal {
+                value: Literal::Null,
+                span: Span::new(0, 0),
+            }),
+            name: "field".to_string(),
+            span: Span::new(0, 0),
+        };
+        let err = executor.evaluate_expr(&expr, &mut env).unwrap_err();
+        assert!(err.contains("null dereference at line"), "got: {}", err);
+    }
+
+    #[test]
+    fn runtimeReportsIndexBoundsWithIndexAndLength() {
+        let err = runRey("src/tests/runtime_index_oob.rey").unwrap_err();
+        assert!(err.contains("index out of bounds (i=4, len=3)"), "got: {}", err);
+    }
+
+    #[test]
+    fn matchReportsNonExhaustivePatterns() {
+        let err = runRey("src/tests/match_non_exhaustive.rey").unwrap_err();
+        assert!(err.contains("error[match]: non-exhaustive patterns"), "got: {}", err);
     }
 }

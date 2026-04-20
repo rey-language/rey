@@ -1,0 +1,90 @@
+// stress_full.rey
+
+struct Node {
+    pub value: int,
+    pub next: int,
+}
+
+enum Mode {
+    Fast,
+    Slow,
+}
+
+func factorial(n: int): int {
+    if n <= 1 {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+func sumArray(xs: [int]): int {
+    var total: int = 0;
+    var i: int = 0;
+
+    while i < len(xs) {
+        total = total + xs[i];
+        i = i + 1;
+    }
+
+    return total;
+}
+
+func process(mode: Mode, x: int): int {
+    match mode {
+        Mode::Fast => {
+            return x * 2;
+        },
+        Mode::Slow => {
+            return factorial(x);
+        },
+        _ => {
+            return x;
+        },
+    }
+}
+
+func buildNodes(): int {
+    var nodes: [int] = [1, 2, 3, 4, 5];
+    var total: int = 0;
+
+    for n in nodes {
+        total = total + n;
+    }
+
+    return total;
+}
+
+func stringTest(): Void {
+    var s: String = "rey";
+    var i: int = 0;
+
+    while i < 3 {
+        println(s + " iteration " + i);
+        i = i + 1;
+    }
+}
+
+func main(): Void {
+    println("=== STRESS TEST START ===");
+
+    var arr: [int] = [1, 2, 3, 4, 5];
+
+    var sum: int = sumArray(arr);
+    println("sum = " + sum);
+
+    var f: int = factorial(5);
+    println("fact = " + f);
+
+    var fast: int = process(Mode::Fast, 10);
+    var slow: int = process(Mode::Slow, 5);
+
+    println("fast = " + fast);
+    println("slow = " + slow);
+
+    var nodeSum: int = buildNodes();
+    println("nodeSum = " + nodeSum);
+
+    stringTest();
+
+    println("=== DONE ===");
+}

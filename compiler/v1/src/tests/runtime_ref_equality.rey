@@ -1,0 +1,29 @@
+struct Item {
+    pub id: int,
+}
+
+func check(): Void {
+    var a = [1, 2];
+    var b = a;
+    var c = [1, 2];
+
+    if (!(a == b)) {
+        var fail = 1 / 0;
+    }
+    if (a == c) {
+        var fail = 1 / 0;
+    }
+
+    var s1 = Item { id: 1 };
+    var s2 = s1;
+    var s3 = Item { id: 1 };
+
+    if (!(s1 == s2)) {
+        var fail = 1 / 0;
+    }
+    if (s1 == s3) {
+        var fail = 1 / 0;
+    }
+}
+
+check();

@@ -72,6 +72,24 @@
 # Previous checkpoint
 # Date: Mar 27, 2026
 
+## UPDATE — Apr 10, 2026 (interpreter stabilization)
+
+### Phase 1 (Syntax consistency) - In Progress
+- Standardized missing-semicolon parser diagnostics to `error[syntax]: expected ';'`.
+- Enforced comma-separated `match` arms.
+- Enforced comma-separated enum variants.
+- Enforced comma-separated struct field declarations.
+- Added parser regression tests for missing semicolon and missing comma separators.
+- Updated `syntax.md` to explicitly declare semicolon-required statements and comma separator rules.
+
+### Phase 2/3 (Runtime consistency + match correctness) - In Progress
+- String concatenation with non-string RHS remains supported via runtime string conversion.
+- Added array/string index diagnostics with index + length context.
+- Added runtime null-dereference guard for expression operations.
+- Added reference-equality semantics for arrays and struct instances.
+- Updated match runtime error for no matching branch to `error[match]: non-exhaustive patterns`.
+- Added runtime regression tests for reference equality, index bounds, and non-exhaustive match.
+
 ## PHASES 0-10 COMPLETE - ALL WORK DONE ON MASTER BRANCH
 
 ### Summary:
