@@ -1,6 +1,7 @@
 // Parser Implementation for Rey
 
 import lexer;
+import ast;
 
 struct Parser {
     pub tokens: [Token],
@@ -13,54 +14,61 @@ struct ParserResult {
     pub errors: [ParseError],
 }
 
-func isAtEnd(p): bool {
+func isAtEnd(p: Parser): bool {
     if p.current >= p.tokens.length() {
         return true;
     }
-    return p.tokens[p.current].kind == "Eof";
+    var curTok: Token = p.tokens[p.current];
+    return curTok.kind == "Eof";
 }
 
-func peek(p) {
+func peek(p: Parser): Token {
     if isAtEnd(p) {
-        return p.tokens[p.tokens.length() - 1];
+        var lastTok: Token = p.tokens[p.tokens.length() - 1];
+        return lastTok;
     }
-    return p.tokens[p.current];
+    var curTok: Token = p.tokens[p.current];
+    return curTok;
 }
 
-func peekNext(p) {
+func peekNext(p: Parser): Token {
     if p.current + 1 >= p.tokens.length() {
-        return p.tokens[p.tokens.length() - 1];
+        var lastTok: Token = p.tokens[p.tokens.length() - 1];
+        return lastTok;
     }
-    return p.tokens[p.current + 1];
+    var nextTok: Token = p.tokens[p.current + 1];
+    return nextTok;
 }
 
-func advance(p) {
+func advance(p: Parser): Token {
     if isAtEnd(p) {
-        return p.tokens[p.tokens.length() - 1];
+        var lastTok: Token = p.tokens[p.tokens.length() - 1];
+        return lastTok;
     }
-    var token = p.tokens[p.current];
+    var token: Token = p.tokens[p.current];
     p.current = p.current + 1;
     return token;
 }
 
-func check(p, kind): bool {
+func check(p: Parser, kind): bool {
     if isAtEnd(p) {
         return false;
     }
     return peek(p).kind == kind;
 }
 
-func checkNext(p, kind): bool {
+func checkNext(p: Parser, kind): bool {
     if p.current + 1 >= p.tokens.length() {
         return false;
     }
     return peekNext(p).kind == kind;
 }
 
-func matchToken(p, kinds): bool {
+func matchToken(p: Parser, kinds): bool {
     var i = 0;
+    var kindsLen = kinds.length();
     loop {
-        if i >= kinds.length() {
+        if i >= kindsLen {
             break;
         }
         if check(p, kinds[i]) {
@@ -76,54 +84,75 @@ func toSpan(s) {
     return Span { start: s.start, end: s.end, line: s.line, column: s.column };
 }
 
-func consume(p, kind, message: String) {
+// Parses a type annotation: Identifier, [Identifier], or Identifier? (nullable)
+func parseTypeTag(p: Parser): String {
+    if matchToken(p, ["LeftBracket"]) {
+        var inner = consume(p, "Identifier", "array element type expected");
+        consume(p, "RightBracket", "] expected");
+        return "[" + inner.lexeme + "]";
+    }
+    var tok = consume(p, "Identifier", "type expected");
+    var tag = tok.lexeme;
+    if matchToken(p, ["Question"]) {
+        tag = tag + "?";
+    }
+    return tag;
+}
+
+func consume(p: Parser, kind, message: String): Token {
     if check(p, kind) {
         return advance(p);
     }
     var span = toSpan(peek(p).span);
     p.errors.push(ParseError { message: message, span: span });
-    return p.tokens[0];
+    var firstTok: Token = p.tokens[0];
+    return firstTok;
 }
 
-func error(p, message: String) {
-    var token = peek(p);
+func error(p: Parser, message: String) {
+    var token: Token = peek(p);
     p.errors.push(ParseError { message: message, span: toSpan(token.span) });
 }
 
-func previous(p) {
+func previous(p: Parser): Token {
     if p.current == 0 {
-        return p.tokens[0];
+        var firstTok: Token = p.tokens[0];
+        return firstTok;
     }
-    return p.tokens[p.current - 1];
+    var prevTok: Token = p.tokens[p.current - 1];
+    return prevTok;
 }
 
-func makeSpan(p, start: int, end: int) {
+func makeSpan(p: Parser, start: int, end: int) {
     if p.tokens.length() == 0 {
         return null;
     }
     var line = 1;
     var column = 0;
     if start < p.tokens.length() {
-        line = p.tokens[start].span.line;
-        column = p.tokens[start].span.column;
+        var startTok: Token = p.tokens[start];
+        line = startTok.span.line;
+        column = startTok.span.column;
     }
     return Span { start: start, end: end, line: line, column: column };
 }
 
-func parseProgram(p) {
+func parseProgram(p: Parser) {
     var statements = [];
+    var dbgCount = 0;
     loop {
         if isAtEnd(p) {
             break;
         }
         var stmt = parseStatement(p);
+        dbgCount = dbgCount + 1;
         statements.push(stmt);
     }
     var span = makeSpan(p, 0, p.tokens.length() - 1);
     return Program { statements: statements, span: span };
 }
 
-func parseStatement(p) {
+func parseStatement(p: Parser) {
     var token = peek(p);
     
     if token.kind == "Export" {
@@ -197,14 +226,13 @@ func parseStatement(p) {
     return parseExprStmt(p);
 }
 
-func parseVarDecl(p) {
+func parseVarDecl(p: Parser) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "var name expected");
     var name = nameToken.lexeme;
     var typeTag = "";
     if matchToken(p, ["Colon"]) {
-        var tt = consume(p, "Identifier", "type expected");
-        typeTag = tt.lexeme;
+        typeTag = parseTypeTag(p);
     }
     consume(p, "Equal", "= expected");
     var value = parseExpression(p);
@@ -213,14 +241,13 @@ func parseVarDecl(p) {
     return VarDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
 }
 
-func parseConstDecl(p) {
+func parseConstDecl(p: Parser) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "const name expected");
     var name = nameToken.lexeme;
     var typeTag = "";
     if matchToken(p, ["Colon"]) {
-        var tt = consume(p, "Identifier", "type expected");
-        typeTag = tt.lexeme;
+        typeTag = parseTypeTag(p);
     }
     consume(p, "Equal", "= expected");
     var value = parseExpression(p);
@@ -229,7 +256,7 @@ func parseConstDecl(p) {
     return ConstDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
 }
 
-func parseFuncDecl(p) {
+func parseFuncDecl(p: Parser) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "func name expected");
     var name = nameToken.lexeme;
@@ -238,15 +265,14 @@ func parseFuncDecl(p) {
     consume(p, "RightParen", ") expected");
     var returnType = "";
     if matchToken(p, ["Colon"]) {
-        var rt = consume(p, "Identifier", "return type expected");
-        returnType = rt.lexeme;
+        returnType = parseTypeTag(p);
     }
     var body = parseBlock(p);
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return FuncDeclStmt { name: name, params: params, returnType: returnType, body: body, span: span };
 }
 
-func parseFuncParams(p) {
+func parseFuncParams(p: Parser) {
     var params = [];
     if check(p, "RightParen") {
         return params;
@@ -256,8 +282,7 @@ func parseFuncParams(p) {
         var paramName = nameTok.lexeme;
         var typeTag = "";
         if matchToken(p, ["Colon"]) {
-            var tt = consume(p, "Identifier", "param type expected");
-            typeTag = tt.lexeme;
+            typeTag = parseTypeTag(p);
         }
         params.push(FuncParam { name: paramName, typeTag: typeTag, default: LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(nameTok.span) } });
         if check(p, "Comma") {
@@ -269,14 +294,16 @@ func parseFuncParams(p) {
     return params;
 }
 
-func parseStructDecl(p) {
+func parseStructDecl(p: Parser) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "struct name expected");
     var name = nameToken.lexeme;
     consume(p, "LeftBrace", "{ expected");
     var fields = [];
     var methods = [];
+    var loopCount = 0;
     loop {
+        loopCount = loopCount + 1;
         if check(p, "RightBrace") {
             advance(p);
             break;
@@ -290,10 +317,9 @@ func parseStructDecl(p) {
             var fieldName = fieldNameTok.lexeme;
             var fieldType = "";
             if matchToken(p, ["Colon"]) {
-                var ft = consume(p, "Identifier", "field type expected");
-                fieldType = ft.lexeme;
+                fieldType = parseTypeTag(p);
             }
-            consume(p, "Semicolon", "; expected");
+            matchToken(p, ["Semicolon", "Comma"]);
             fields.push(StructField { name: fieldName, typeTag: fieldType, isPub: isPub });
         }
     }
@@ -301,7 +327,7 @@ func parseStructDecl(p) {
     return StructDeclStmt { name: name, fields: fields, methods: methods, span: span };
 }
 
-func parseEnumDecl(p) {
+func parseEnumDecl(p: Parser) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "enum name expected");
     var name = nameToken.lexeme;
@@ -322,7 +348,7 @@ func parseEnumDecl(p) {
     return EnumDeclStmt { name: name, variants: variants, span: span };
 }
 
-func parseImport(p) {
+func parseImport(p: Parser) {
     var startToken = advance(p);
     var path = "";
     if check(p, "StringLiteral") {
@@ -337,21 +363,27 @@ func parseImport(p) {
     return ImportStmt { path: path, items: items, span: span };
 }
 
-func parseIf(p) {
+func parseIf(p: Parser) {
     var startToken = advance(p);
-    consume(p, "LeftParen", "( expected");
+    var hasParen = matchToken(p, ["LeftParen"]);
     var cond = parseExpression(p);
-    consume(p, "RightParen", ") expected");
+    if hasParen {
+        consume(p, "RightParen", ") expected");
+    }
     var thenBranch = parseBlock(p);
     var elseBranch = null;
     if matchToken(p, ["Else"]) {
-        elseBranch = parseBlock(p);
+        if check(p, "If") {
+            elseBranch = parseIf(p);
+        } else {
+            elseBranch = parseBlock(p);
+        }
     }
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return IfStmt { condition: cond, thenBranch: thenBranch, elseBranch: elseBranch, span: span };
 }
 
-func parseReturn(p) {
+func parseReturn(p: Parser) {
     var startToken = advance(p);
     var value = LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(startToken.span) };
     if !check(p, "Semicolon") {
@@ -362,7 +394,7 @@ func parseReturn(p) {
     return ReturnStmt { value: value, span: span };
 }
 
-func parseAssign(p) {
+func parseAssign(p: Parser) {
     var startTok = peek(p);
     var target = parseCall(p);
     var opTok = advance(p);
@@ -373,7 +405,7 @@ func parseAssign(p) {
     return AssignStmt { target: target, op: op, value: value, span: span };
 }
 
-func parseWhile(p) {
+func parseWhile(p: Parser) {
     var startToken = advance(p);
     consume(p, "LeftParen", "( expected");
     var cond = parseExpression(p);
@@ -383,7 +415,7 @@ func parseWhile(p) {
     return WhileStmt { condition: cond, body: body, span: span };
 }
 
-func parseFor(p) {
+func parseFor(p: Parser) {
     var startToken = advance(p);
     consume(p, "LeftParen", "( expected");
     var varTok = consume(p, "Identifier", "var expected");
@@ -396,28 +428,28 @@ func parseFor(p) {
     return ForStmt { variable: varName, iterable: iter, body: body, span: span };
 }
 
-func parseLoop(p) {
+func parseLoop(p: Parser) {
     var startToken = advance(p);
     var body = parseBlock(p);
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return LoopStmt { body: body, span: span };
 }
 
-func parseBreak(p) {
+func parseBreak(p: Parser) {
     var startToken = advance(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return BreakStmt { label: "", span: span };
 }
 
-func parseContinue(p) {
+func parseContinue(p: Parser) {
     var startToken = advance(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return ContinueStmt { label: "", span: span };
 }
 
-func parseBlock(p) {
+func parseBlock(p: Parser) {
     var startTok = consume(p, "LeftBrace", "{ expected");
     var stmts = [];
     loop {
@@ -432,24 +464,33 @@ func parseBlock(p) {
     return BlockStmt { statements: stmts, span: span };
 }
 
-func parseExprStmt(p) {
+func parseExprStmt(p: Parser) {
+    var startTok = peek(p);
     var expr = parseExpression(p);
+    if check(p, "Equal") || check(p, "PlusEqual") || check(p, "MinusEqual") || check(p, "StarEqual") || check(p, "SlashEqual") || check(p, "PercentEqual") {
+        var opTok = advance(p);
+        var value = parseExpression(p);
+        consume(p, "Semicolon", "; expected");
+        var span = makeSpan(p, startTok.span.start, previous(p).span.end);
+        return AssignStmt { target: expr, op: opTok.lexeme, value: value, span: span };
+    }
     consume(p, "Semicolon", "; expected");
     var span = expr.span;
     return ExprStmt { expr: expr, span: span };
 }
 
-func parseExpression(p) {
+func parseExpression(p: Parser) {
     return parseOr(p);
 }
 
-func parseOr(p) {
+func parseOr(p: Parser) {
+    var leftStart = p.current;
     var left = parseAnd(p);
     loop {
         if matchToken(p, ["OrOr"]) {
             var op = previous(p).lexeme;
             var right = parseAnd(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -458,13 +499,14 @@ func parseOr(p) {
     return left;
 }
 
-func parseAnd(p) {
+func parseAnd(p: Parser) {
+    var leftStart = p.current;
     var left = parseEquality(p);
     loop {
         if matchToken(p, ["AndAnd"]) {
             var op = previous(p).lexeme;
             var right = parseEquality(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -473,13 +515,14 @@ func parseAnd(p) {
     return left;
 }
 
-func parseEquality(p) {
+func parseEquality(p: Parser) {
+    var leftStart = p.current;
     var left = parseComparison(p);
     loop {
         if matchToken(p, ["EqualEqual", "NotEqual"]) {
             var op = previous(p).lexeme;
             var right = parseComparison(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -488,13 +531,18 @@ func parseEquality(p) {
     return left;
 }
 
-func parseComparison(p) {
+func parseComparison(p: Parser) {
+    var leftStart = p.current;
     var left = parseTerm(p);
     loop {
-        if matchToken(p, ["Less", "Greater", "LessEqual", "GreaterEqual"]) {
+        if matchToken(p, ["InstanceOf"]) {
+            var typeTok = consume(p, "Identifier", "type name expected after instanceof");
+            var span = makeSpan(p, leftStart, p.current - 1);
+            left = BinaryExpr { left: left, op: "instanceof", right: IdentExpr { name: typeTok.lexeme, span: toSpan(typeTok.span) }, span: span };
+        } else if matchToken(p, ["Less", "Greater", "LessEqual", "GreaterEqual"]) {
             var op = previous(p).lexeme;
             var right = parseTerm(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -503,13 +551,14 @@ func parseComparison(p) {
     return left;
 }
 
-func parseTerm(p) {
+func parseTerm(p: Parser) {
+    var leftStart = p.current;
     var left = parseFactor(p);
     loop {
         if matchToken(p, ["Plus", "Minus"]) {
             var op = previous(p).lexeme;
             var right = parseFactor(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -518,13 +567,14 @@ func parseTerm(p) {
     return left;
 }
 
-func parseFactor(p) {
+func parseFactor(p: Parser) {
+    var leftStart = p.current;
     var left = parseUnary(p);
     loop {
         if matchToken(p, ["Star", "Slash", "Percent"]) {
             var op = previous(p).lexeme;
             var right = parseUnary(p);
-            var span = makeSpan(p, left.span.start, right.span.end);
+            var span = makeSpan(p, leftStart, p.current - 1);
             left = BinaryExpr { left: left, op: op, right: right, span: span };
         } else {
             break;
@@ -533,58 +583,79 @@ func parseFactor(p) {
     return left;
 }
 
-func parseUnary(p) {
+func parseUnary(p: Parser) {
     if matchToken(p, ["Not", "Minus"]) {
         var op = previous(p).lexeme;
+        var unaryStart = p.current;
         var right = parseUnary(p);
-        var span = makeSpan(p, right.span.start, right.span.end);
+        var span = makeSpan(p, unaryStart, p.current - 1);
         return UnaryExpr { op: op, right: right, span: span };
     }
     return parseCall(p);
 }
 
-func parseCall(p) {
+func parseCall(p: Parser) {
+    var exprStart = p.current;
     var expr = parsePrimary(p);
     loop {
         if check(p, "LeftParen") {
             advance(p);
             var args = parseArgs(p);
             consume(p, "RightParen", ") expected");
-            var span = makeSpan(p, expr.span.start, previous(p).span.end);
+            var span = makeSpan(p, exprStart, previous(p).span.end);
             expr = CallExpr { callee: expr, args: args, span: span };
         } else if check(p, "LeftBrace") {
             if expr instanceof IdentExpr {
-                var startTok = advance(p);
-                var fields = [];
-                if !check(p, "RightBrace") {
-                    loop {
-                        var nameTok = consume(p, "Identifier", "field name expected");
-                        consume(p, "Colon", ": expected");
-                        var val = parseExpression(p);
-                        fields.push(StructInitField { name: nameTok.lexeme, value: val, span: toSpan(nameTok.span) });
-                        if check(p, "Comma") {
-                            advance(p);
-                        } else {
-                            break;
+                // Only parse as struct literal if { is followed by } (empty) or Identifier : (field)
+                var looksLikeStruct = false;
+                if p.current + 1 < p.tokens.length() {
+                    var afterBrace: Token = p.tokens[p.current + 1];
+                    if afterBrace.kind == "RightBrace" {
+                        looksLikeStruct = true;
+                    } else if afterBrace.kind == "Identifier" {
+                        if p.current + 2 < p.tokens.length() {
+                            var colonTok: Token = p.tokens[p.current + 2];
+                            if colonTok.kind == "Colon" {
+                                looksLikeStruct = true;
+                            }
                         }
                     }
                 }
-                consume(p, "RightBrace", "} expected");
-                var span2 = makeSpan(p, expr.span.start, previous(p).span.end);
-                expr = StructLiteralExpr { name: expr.name, fields: fields, span: span2 };
+                if looksLikeStruct {
+                    var startTok = advance(p);
+                    var fields = [];
+                    if !check(p, "RightBrace") {
+                        loop {
+                            var nameTok = consume(p, "Identifier", "field name expected");
+                            consume(p, "Colon", ": expected");
+                            var val = parseExpression(p);
+                            fields.push(StructInitField { name: nameTok.lexeme, value: val, span: toSpan(nameTok.span) });
+                            if check(p, "Comma") {
+                                advance(p);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    consume(p, "RightBrace", "} expected");
+                    var span2 = makeSpan(p, exprStart, previous(p).span.end);
+                    expr = StructLiteralExpr { name: expr.name, fields: fields, span: span2 };
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
         } else if check(p, "Dot") {
             advance(p);
             var nameTok = consume(p, "Identifier", "prop expected");
-            var span = makeSpan(p, expr.span.start, nameTok.span.end);
+            var span = makeSpan(p, exprStart, nameTok.span.end);
             expr = FieldAccessExpr { object: expr, name: nameTok.lexeme, span: span };
         } else if check(p, "LeftBracket") {
             advance(p);
             var idx = parseExpression(p);
             consume(p, "RightBracket", "] expected");
-            var span = makeSpan(p, expr.span.start, previous(p).span.end);
+            var span = makeSpan(p, exprStart, previous(p).span.end);
             expr = IndexExpr { target: expr, index: idx, span: span };
         } else {
             break;
@@ -593,7 +664,7 @@ func parseCall(p) {
     return expr;
 }
 
-func parseArgs(p) {
+func parseArgs(p: Parser) {
     var args = [];
     if check(p, "RightParen") {
         return args;
@@ -610,7 +681,7 @@ func parseArgs(p) {
     return args;
 }
 
-func parsePrimary(p) {
+func parsePrimary(p: Parser) {
     var tok = peek(p);
     if tok.kind == "True" {
         advance(p);
@@ -656,14 +727,14 @@ func parsePrimary(p) {
     return IdentExpr { name: "", span: toSpan(tok.span) };
 }
 
-func parseGrouping(p) {
+func parseGrouping(p: Parser) {
     var startTok = advance(p);
     var expr = parseExpression(p);
     consume(p, "RightParen", ") expected");
     return expr;
 }
 
-func parseArray(p) {
+func parseArray(p: Parser) {
     var startTok = consume(p, "LeftBracket", "[ expected");
     var elems = [];
     if !check(p, "RightBracket") {
@@ -682,7 +753,7 @@ func parseArray(p) {
     return ArrayExpr { elements: elems, span: span };
 }
 
-func parseDict(p) {
+func parseDict(p: Parser) {
     var startTok = consume(p, "LeftBrace", "{ expected");
     var entries = [];
     if !check(p, "RightBrace") {
@@ -703,7 +774,7 @@ func parseDict(p) {
     return DictExpr { entries: entries, span: span };
 }
 
-func parseLambda(p) {
+func parseLambda(p: Parser) {
     var startTok = advance(p);
     consume(p, "LeftParen", "( expected");
     var params = [];
@@ -724,11 +795,11 @@ func parseLambda(p) {
     return LambdaExpr { params: params, body: body, span: span };
 }
 
-export pub func newParser(tokens) {
+export pub func newParser(tokens): Parser {
     return Parser { tokens: tokens, current: 0, errors: [] };
 }
 
-export pub func parse(tokens, path: String) {
+export pub func parse(tokens, path: String): ParserResult {
     var parser = newParser(tokens);
     var program = parseProgram(parser);
     return ParserResult { program: program, errors: parser.errors };

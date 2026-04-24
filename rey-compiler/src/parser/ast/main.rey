@@ -1,11 +1,5 @@
 // AST Definitions for Rey Parser
-
-struct Span {
-    pub start: int,
-    pub end: int,
-    pub line: int,
-    pub column: int,
-}
+// Note: Span is defined in lexer/main.rey (imported via import lexer; or import "./ast.rey";)
 
 // Literals
 enum LiteralKind {
