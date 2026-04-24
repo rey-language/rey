@@ -65,6 +65,7 @@ enum TokenKind {
     AndAnd,
     OrOr,
     Not,
+    Question,
 
     Eof,
 }
@@ -145,19 +146,19 @@ func makeError(kind, message: String, span) {
     return LexError { kind: kind, message: message, span: span };
 }
 
-func addToken(lexer, kind, lexeme: String) {
+func addToken(lexer: Lexer, kind: String, lexeme: String) {
     var span = newSpan(lexer.start, lexer.pos, lexer.line, lexer.column);
     var token = makeToken(kind, lexeme, span);
     lexer.tokens.push(token);
 }
 
-func addError(lexer, kind, message: String) {
+func addError(lexer: Lexer, kind: String, message: String) {
     var span = newSpan(lexer.pos, lexer.pos + 1, lexer.line, lexer.column);
     var error = makeError(kind, message, span);
     lexer.errors.push(error);
 }
 
-func lexAdvance(lexer): String {
+func lexAdvance(lexer: Lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
@@ -172,21 +173,21 @@ func lexAdvance(lexer): String {
     return c;
 }
 
-func lexPeek(lexer): String {
+func lexPeek(lexer: Lexer): String {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos];
 }
 
-func lexPeekNext(lexer): String {
+func lexPeekNext(lexer: Lexer): String {
     if lexer.pos + 1 >= lexer.source.len() {
         return "";
     }
     return lexer.source[lexer.pos + 1];
 }
 
-func lexMatchChar(lexer, expected: String): bool {
+func lexMatchChar(lexer: Lexer, expected: String): bool {
     if lexer.pos >= lexer.source.len() {
         return false;
     }
@@ -198,7 +199,7 @@ func lexMatchChar(lexer, expected: String): bool {
     return true;
 }
 
-func skipWhitespace(lexer) {
+func skipWhitespace(lexer: Lexer) {
     loop {
         if lexer.pos >= lexer.source.len() {
             break;
@@ -246,7 +247,7 @@ func skipWhitespace(lexer) {
     }
 }
 
-func scanString(lexer): String {
+func scanString(lexer: Lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
@@ -285,7 +286,7 @@ func scanString(lexer): String {
     return result;
 }
 
-func scanChar(lexer): String {
+func scanChar(lexer: Lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
@@ -318,7 +319,7 @@ func scanChar(lexer): String {
     return result;
 }
 
-func scanNumber(lexer): String {
+func scanNumber(lexer: Lexer): String {
     var result = "";
     var hasDot = false;
     loop {
@@ -353,7 +354,7 @@ func scanNumber(lexer): String {
     return result;
 }
 
-func scanIdentifier(lexer): String {
+func scanIdentifier(lexer: Lexer): String {
     var result = "";
     loop {
         if lexer.pos >= lexer.source.len() {
@@ -396,7 +397,7 @@ func getKeyword(kind: String) {
     return "Identifier";
 }
 
-func scanToken(lexer) {
+func scanToken(lexer: Lexer) {
     lexer.start = lexer.pos;
     var c = lexAdvance(lexer);
     
@@ -461,6 +462,7 @@ func scanToken(lexer) {
         if lexMatchChar(lexer, ":") { addToken(lexer, "ColonColon", "::"); return null; }
         addToken(lexer, "Colon", ":"); return null;
     }
+    if c == "?" { addToken(lexer, "Question", "?"); return null; }
     if c == "&" {
         if lexMatchChar(lexer, "&") { addToken(lexer, "AndAnd", "&&"); return null; }
         addToken(lexer, "Identifier", "&"); return null;
@@ -502,7 +504,7 @@ func scanToken(lexer) {
     addError(lexer, "UnexpectedCharacter", "Unexpected character: " + c);
 }
 
-export pub func newLexer(source: String) {
+export pub func newLexer(source: String): Lexer {
     return Lexer {
         source: source,
         pos: 0,
@@ -514,7 +516,7 @@ export pub func newLexer(source: String) {
     };
 }
 
-export pub func tokenize(source: String, path: String) {
+export pub func tokenize(source: String, path: String): LexerResult {
     var lexer = newLexer(source);
     
     loop {

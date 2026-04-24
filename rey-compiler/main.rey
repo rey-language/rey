@@ -29,12 +29,34 @@ func dirname(path: String): String {
     return path.slice(0, idx);
 }
 
+func projectRootDir(basePath: String): String {
+    var srcIdx = basePath.indexOf("/src/");
+    if srcIdx >= 0 {
+        return basePath.slice(0, srcIdx);
+    }
+    return dirname(basePath);
+}
+
 func resolveImportPath(basePath: String, importPath: String): String {
+    var base = dirname(basePath);
     if importPath.startsWith("/") { return importPath; }
     if importPath.startsWith("./") {
-        return dirname(basePath) + "/" + importPath.slice(2, importPath.len());
+        return base + "/" + importPath.slice(2, importPath.len());
     }
-    return dirname(basePath) + "/" + importPath;
+    // Module import: search from base dir, then from project root
+    // Try direct .rey file in same directory first (matches Rust interpreter behavior)
+    var directFile = base + "/" + importPath + ".rey";
+    if fileExists(directFile) { return directFile; }
+    var srcModPath = base + "/src/" + importPath + "/main.rey";
+    if fileExists(srcModPath) { return srcModPath; }
+    var modPath = base + "/" + importPath + "/main.rey";
+    if fileExists(modPath) { return modPath; }
+    var root = projectRootDir(basePath);
+    var rootSrcPath = root + "/src/" + importPath + "/main.rey";
+    if fileExists(rootSrcPath) { return rootSrcPath; }
+    var rootModPath = root + "/" + importPath + "/main.rey";
+    if fileExists(rootModPath) { return rootModPath; }
+    return base + "/" + importPath;
 }
 
 func lastDotIndex(path: String): int {
@@ -79,6 +101,14 @@ func parseFileToProgram(path: String) {
     var parseResult = parser.parse(lexResult.tokens, path);
     if parseResult.errors.length() > 0 {
         var pe = parseResult.errors[0];
+        var ei = 0;
+        loop {
+            if ei >= 20 { break; }
+            if ei >= parseResult.errors.length() { break; }
+            var e2 = parseResult.errors[ei];
+            println("  err[" + ei.toString() + "] line " + e2.span.line.toString() + ": " + e2.message);
+            ei = ei + 1;
+        }
         return Result.Err("parse error at line " + pe.span.line.toString() + ": " + pe.message);
     }
     return Result.Ok(parseResult.program);
@@ -124,21 +154,21 @@ func loadProgramWithImports(path: String, visited, stack) {
     return Result.Ok(Program { statements: merged, span: prog.span });
 }
 
-func compileSource(source: String, path: String, cmd: String): CompileResult {
+func compileSource(source: String, path: String, cmd: String, rtDir: String): CompileResult {
     var errors = Vec.new();
-    
+
     var lexResult = lexer.tokenize(source, path);
     if lexResult.errors.length() > 0 {
         var e = lexResult.errors[0];
         return CompileResult { ok: false, errors: "lexer error at line " + e.span.line.toString() + ": " + e.message, ir: "", outputPath: "" };
     }
-    
+
     var parseResult = parser.parse(lexResult.tokens, path);
     if parseResult.errors.length() > 0 {
         var pe = parseResult.errors[0];
         return CompileResult { ok: false, errors: "parse error at line " + pe.span.line.toString() + ": " + pe.message, ir: "", outputPath: "" };
     }
-    
+
     var typeResult = typecheck.typecheck(parseResult.program);
     if !typeResult.ok {
         if typeResult.errors.length() > 0 {
@@ -147,25 +177,25 @@ func compileSource(source: String, path: String, cmd: String): CompileResult {
         }
         return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
     }
-    
+
     var ir = codegen.generateIR(parseResult.program);
-    
+
     if cmd == "build" || cmd == "run" {
         var outputPath = defaultOutputPath(path);
-        var compileRes = codegen.compileLLVM(ir, outputPath, false);
+        var compileRes = codegen.compileLLVM(ir, outputPath, false, rtDir);
         if compileRes.isErr() {
             return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
         }
         outputPath = compileRes.unwrap();
-        
+
         println("Compiled: " + path);
         return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
     }
-    
+
     return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: "a.out" };
 }
 
-func compileFile(entryPath: String, cmd: String): CompileResult {
+func compileFile(entryPath: String, cmd: String, rtDir: String): CompileResult {
     var exists = fileExists(entryPath);
     if !exists {
         return CompileResult { ok: false, errors: "file not found", ir: "", outputPath: "" };
@@ -192,12 +222,12 @@ func compileFile(entryPath: String, cmd: String): CompileResult {
 
     if cmd == "build" || cmd == "run" {
         var outputPath = defaultOutputPath(entryPath);
-        var compileRes = codegen.compileLLVM(ir, outputPath, false);
+        var compileRes = codegen.compileLLVM(ir, outputPath, false, rtDir);
         if compileRes.isErr() {
             return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
         }
         outputPath = compileRes.unwrap();
-        
+
         println("Compiled: " + entryPath);
         return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
     }
@@ -212,13 +242,22 @@ func main() {
     } else {
         var cmd = cliArgs[2];
         var path = cliArgs[3];
-        
-        var result = compileFile(path, cmd);
-        
+
+        // derive runtime dir from compiler script path (args()[1] = rey-compiler/main.rey)
+        var compilerPath = cliArgs[1];
+        var rtDir = dirname(compilerPath) + "/runtime";
+
+        var result = compileFile(path, cmd, rtDir);
+
         if result.ok {
             println("Success: " + result.outputPath);
             if cmd == "run" {
-                exec(result.outputPath);
+                var runRes = exec(result.outputPath);
+                if runRes.isOk() {
+                    print("" + runRes.unwrap());
+                } else {
+                    println("run error: " + runRes.unwrapOr("?"));
+                }
             }
         } else {
             println("Error: " + result.errors);
