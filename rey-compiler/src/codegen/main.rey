@@ -1,5 +1,36 @@
 // LLVM Codegen for Rey
 
+struct GenExprResult {
+    pub ty: String,
+    pub val: String,
+    pub code: String,
+}
+
+struct CStringInfo {
+    pub escaped: String,
+    pub len: int,
+}
+
+struct LocalVar {
+    pub ptr: String,
+    pub ty: String,
+}
+
+struct LoopInfo {
+    pub breakLabel: String,
+    pub continueLabel: String,
+}
+
+struct StructFieldDef {
+    pub name: String,
+    pub ty: String,
+}
+
+struct StructDef {
+    pub llvmName: String,
+    pub fields: Vec,
+}
+
 struct CodegenContext {
     pub moduleName: String,
     pub functions: [String],
@@ -11,6 +42,10 @@ struct CodegenContext {
     pub loopStack: Vec,
     pub structDefs: HashMap,
     pub enumDefs: HashMap,
+    pub funcSigs: HashMap,
+    pub structTags: HashMap,
+    pub nextStructTag: int,
+    pub funcAllocas: String,
 }
 
 func ctxNew(name: String) {
@@ -24,7 +59,11 @@ func ctxNew(name: String) {
         currentRetTy: "i32",
         loopStack: Vec.new(),
         structDefs: HashMap.new(),
-        enumDefs: HashMap.new()
+        enumDefs: HashMap.new(),
+        funcSigs: HashMap.new(),
+        structTags: HashMap.new(),
+        nextStructTag: 8,
+        funcAllocas: ""
     };
 }
 
@@ -68,7 +107,7 @@ func llvmCStringInfo(s: String) {
     // null terminator
     out = out + "\\00";
     n = n + 1;
-    return { escaped: out, len: n };
+    return CStringInfo { escaped: out, len: n };
 }
 
 func llvmStrGlobalName(idx: int): String {
@@ -95,11 +134,11 @@ func llvmTypeFromTagCtx(ctx, tag: String): String {
     if tag == "" { return "i64"; }
     if tag == "int" { return "i64"; }
     if tag == "float" { return "double"; }
-    if tag == "bool" { return "i1"; }
+    if tag == "bool" { return "i64"; }
     if tag == "String" { return "i8*"; }
     if tag == "Void" { return "void"; }
     if ctx.structDefs.has(tag) {
-        var def = ctx.structDefs.get(tag);
+        var def: StructDef = ctx.structDefs.get(tag);
         return def.llvmName + "*";
     }
     if ctx.enumDefs.has(tag) {
@@ -135,34 +174,42 @@ func blockEndsWithTerminator(block): bool {
 
 func genExprValue(ctx, expr) {
     if expr instanceof LiteralExpr {
-        var k = expr.kind.toString();
-        if k == "LiteralKind::String" {
-            var idx = cgInternString(ctx, expr.text);
-            var info = llvmCStringInfo(expr.text);
-            return { ty: "i8*", val: llvmStrPtr(idx, info.len), code: "" };
+        var litE: LiteralExpr = expr;
+        // kStr: Rust interpreter returns "LiteralKind::String"; native IR returns "0"/"2"/"3"/"4"/"5"
+        // (LiteralKind enum: String=0,Char=1,Int=2,Float=3,Bool=4,Null=5)
+        var kStr = litE.kind.toString();
+        if kStr == "LiteralKind::String" || kStr == "0" {
+            // intern the raw bytes as a global constant, then wrap in a ReyStr via rey_str_new
+            var idx = cgInternString(ctx, litE.text);
+            var info: CStringInfo = llvmCStringInfo(litE.text);
+            var rawPtr = llvmStrPtr(idx, info.len);
+            var slen = info.len - 1;  // exclude null terminator from ReyStr.len
+            var tmp = nextTemp(ctx);
+            var code0 = tmp + " = call i8* @rey_str_new(i8* " + rawPtr + ", i64 " + slen.toString() + ")\n";
+            return GenExprResult { ty: "i8*", val: tmp, code: code0 };
         }
-        if k == "LiteralKind::Int" {
-            return { ty: "i64", val: expr.text, code: "" };
+        if kStr == "LiteralKind::Int" || kStr == "2" {
+            return GenExprResult { ty: "i64", val: litE.text, code: "" };
         }
-        if k == "LiteralKind::Float" {
-            return { ty: "double", val: expr.text, code: "" };
+        if kStr == "LiteralKind::Float" || kStr == "3" {
+            return GenExprResult { ty: "double", val: litE.text, code: "" };
         }
-        if k == "LiteralKind::Bool" {
-            if expr.text == "true" { return { ty: "i1", val: "1", code: "" }; }
-            return { ty: "i1", val: "0", code: "" };
+        if kStr == "LiteralKind::Bool" || kStr == "4" {
+            if litE.text == "true" { return GenExprResult { ty: "i1", val: "1", code: "" }; }
+            return GenExprResult { ty: "i1", val: "0", code: "" };
         }
     }
     if expr instanceof IdentExpr {
         if ctx.locals.has(expr.name) {
-            var local = ctx.locals.get(expr.name);
+            var local: LocalVar = ctx.locals.get(expr.name);
             var tmp = nextTemp(ctx);
             var code = tmp + " = load " + local.ty + ", " + local.ty + "* " + local.ptr + "\n";
-            return { ty: local.ty, val: tmp, code: code };
+            return GenExprResult { ty: local.ty, val: tmp, code: code };
         }
-        return { ty: "i64", val: "%" + expr.name, code: "" };
+        return GenExprResult { ty: "i64", val: "%" + expr.name, code: "" };
     }
     if expr instanceof FieldAccessExpr {
-        var obj = genExprValue(ctx, expr.object);
+        var obj: GenExprResult = genExprValue(ctx, expr.object);
         var codeF = obj.code;
 
         if expr.object instanceof IdentExpr {
@@ -173,7 +220,7 @@ func genExprValue(ctx, expr) {
                 loop {
                     if i0 >= variants.length() { break; }
                     if variants[i0] == expr.name {
-                        return { ty: "i64", val: i0.toString(), code: codeF };
+                        return GenExprResult { ty: "i64", val: i0.toString(), code: codeF };
                     }
                     i0 = i0 + 1;
                 }
@@ -186,124 +233,1019 @@ func genExprValue(ctx, expr) {
         loop {
             if i >= keys.len() { break; }
             var k = keys.get(i);
-            var def = ctx.structDefs.get(k);
+            var def: StructDef = ctx.structDefs.get(k);
             if obj.ty == def.llvmName + "*" {
                 sname = k;
                 break;
             }
             i = i + 1;
         }
-        if sname == "" {
-            return { ty: "i64", val: "0", code: codeF };
+        if sname == "" && obj.ty == "i64" {
+            // struct passed as opaque i64 — find struct by field name heuristic
+            // prefer simple-typed fields (i8*, i64) over struct-pointer fields to avoid false matches
+            var snameSimple = "";
+            var snameStruct = "";
+            var ki = 0;
+            loop {
+                if ki >= keys.len() { break; }
+                var kk = keys.get(ki);
+                var deftmp: StructDef = ctx.structDefs.get(kk);
+                var flds = deftmp.fields;
+                var fi = 0;
+                loop {
+                    if fi >= flds.length() { break; }
+                    var fldItem: StructFieldDef = flds[fi];
+                    if fldItem.name == expr.name {
+                        var fty0 = fldItem.ty;
+                        if fty0 == "i8*" || fty0 == "i64" || fty0 == "i1" {
+                            if snameSimple == "" { snameSimple = kk; }
+                        } else {
+                            if snameStruct == "" { snameStruct = kk; }
+                        }
+                        break;
+                    }
+                    fi = fi + 1;
+                }
+                ki = ki + 1;
+            }
+            if snameStruct != "" {
+                sname = snameStruct;
+            } else {
+                sname = snameSimple;
+            }
+            if sname != "" {
+                // cast i64 → struct pointer before GEP
+                var castTmp = nextTemp(ctx);
+                var defForCast: StructDef = ctx.structDefs.get(sname);
+                codeF = codeF + castTmp + " = inttoptr i64 " + obj.val + " to " + defForCast.llvmName + "*\n";
+                obj = GenExprResult { ty: defForCast.llvmName + "*", val: castTmp, code: codeF };
+            }
         }
-        var def2 = ctx.structDefs.get(sname);
+        if sname == "" {
+            return GenExprResult { ty: "i64", val: "0", code: codeF };
+        }
+        var def2: StructDef = ctx.structDefs.get(sname);
         var fields = def2.fields;
         var idx = -1;
         i = 0;
         loop {
             if i >= fields.length() { break; }
-            if fields[i].name == expr.name {
+            var fi2: StructFieldDef = fields[i];
+            if fi2.name == expr.name {
                 idx = i;
                 break;
             }
             i = i + 1;
         }
         if idx < 0 {
-            return { ty: "i64", val: "0", code: codeF };
+            return GenExprResult { ty: "i64", val: "0", code: codeF };
         }
         var gep = nextTemp(ctx);
-        var fieldTy = fields[idx].ty;
+        var fldIdx: StructFieldDef = fields[idx];
+        var fieldTy = fldIdx.ty;
         codeF = codeF + gep + " = getelementptr inbounds " + def2.llvmName + ", " + def2.llvmName + "* " + obj.val + ", i32 0, i32 " + idx.toString() + "\n";
         var tmp2 = nextTemp(ctx);
         codeF = codeF + tmp2 + " = load " + fieldTy + ", " + fieldTy + "* " + gep + "\n";
-        return { ty: fieldTy, val: tmp2, code: codeF };
+        return GenExprResult { ty: fieldTy, val: tmp2, code: codeF };
     }
     if expr instanceof BinaryExpr {
-        var l = genExprValue(ctx, expr.left);
-        var r = genExprValue(ctx, expr.right);
+        // instanceof operator — handled before evaluating operands
+        if expr.op == "instanceof" {
+            // left: the object; right: an IdentExpr naming the type
+            var lo: GenExprResult = genExprValue(ctx, expr.left);
+            var typeName = "";
+            if expr.right instanceof IdentExpr { typeName = expr.right.name; }
+            var code0 = lo.code;
+            // coerce pointer to i64 if needed (typed vars load as %struct.X*)
+            var loVal = lo.val;
+            if lo.ty.endsWith("*") {
+                var tpi = nextTemp(ctx);
+                code0 = code0 + tpi + " = ptrtoint " + lo.ty + " " + lo.val + " to i64\n";
+                loVal = tpi;
+            }
+            // well-known tagged heap types via rey_instanceof_tag
+            var tagId = -1;
+            if typeName == "Vec"    { tagId = 2; }
+            if typeName == "HashMap" { tagId = 3; }
+            if typeName == "Result" { tagId = 4; }  // Ok counts; Err is 5
+            if typeName == "Option" { tagId = 6; }
+            // Result.Ok / Result.Err as separate enum variants
+            if typeName == "Ok"     { tagId = 4; }
+            if typeName == "Err"    { tagId = 5; }
+            if typeName == "Some"   { tagId = 6; }
+            if typeName == "None"   { tagId = 7; }
+            if tagId >= 0 {
+                var t0 = nextTemp(ctx);
+                code0 = code0 + t0 + " = call i64 @rey_instanceof_tag(i64 " + loVal + ", i64 " + tagId.toString() + ")\n";
+                var t1 = nextTemp(ctx);
+                code0 = code0 + t1 + " = icmp ne i64 " + t0 + ", 0\n";
+                return GenExprResult { ty: "i1", val: t1, code: code0 };
+            }
+            // user struct: tag is 16 bytes before data ptr, use rey_struct_instanceof
+            if ctx.structTags.has(typeName) {
+                var stTagId = ctx.structTags.get(typeName);
+                var t0s = nextTemp(ctx);
+                code0 = code0 + t0s + " = call i64 @rey_struct_instanceof(i64 " + loVal + ", i64 " + stTagId.toString() + ")\n";
+                var t1s = nextTemp(ctx);
+                code0 = code0 + t1s + " = icmp ne i64 " + t0s + ", 0\n";
+                return GenExprResult { ty: "i1", val: t1s, code: code0 };
+            }
+            // unknown type — fallback true
+            return GenExprResult { ty: "i1", val: "1", code: code0 };
+        }
+
+        var l: GenExprResult = genExprValue(ctx, expr.left);
+        var r: GenExprResult = genExprValue(ctx, expr.right);
         var code = l.code + r.code;
-        if expr.op == "+" || expr.op == "-" || expr.op == "*" || expr.op == "/" || expr.op == "%" {
-            var tmp = nextTemp(ctx);
-            var inst = "add";
-            if expr.op == "-" { inst = "sub"; }
+        var isStrOp = (l.ty == "i8*" || r.ty == "i8*");
+
+        if expr.op == "+" {
+            if isStrOp {
+                var tmp = nextTemp(ctx);
+                // coerce integer to string if needed
+                var lv = l.val;
+                var rv = r.val;
+                if l.ty != "i8*" {
+                    var lt = nextTemp(ctx);
+                    var lcast = l.val;
+                    if l.ty.endsWith("*") {
+                        var lp = nextTemp(ctx);
+                        code = code + lp + " = ptrtoint " + l.ty + " " + l.val + " to i64\n";
+                        lcast = lp;
+                    }
+                    code = code + lt + " = call i8* @rey_val_to_str(i64 " + lcast + ")\n";
+                    lv = lt;
+                }
+                if r.ty != "i8*" {
+                    var rt = nextTemp(ctx);
+                    var rcast = r.val;
+                    if r.ty.endsWith("*") {
+                        var rp = nextTemp(ctx);
+                        code = code + rp + " = ptrtoint " + r.ty + " " + r.val + " to i64\n";
+                        rcast = rp;
+                    }
+                    code = code + rt + " = call i8* @rey_val_to_str(i64 " + rcast + ")\n";
+                    rv = rt;
+                }
+                code = code + tmp + " = call i8* @rey_str_concat(i8* " + lv + ", i8* " + rv + ")\n";
+                return GenExprResult { ty: "i8*", val: tmp, code: code };
+            }
+            var tmp2 = nextTemp(ctx);
+            code = code + tmp2 + " = add i64 " + l.val + ", " + r.val + "\n";
+            return GenExprResult { ty: "i64", val: tmp2, code: code };
+        }
+        if expr.op == "-" || expr.op == "*" || expr.op == "/" || expr.op == "%" {
+            var tmp3 = nextTemp(ctx);
+            var inst = "sub";
             if expr.op == "*" { inst = "mul"; }
             if expr.op == "/" { inst = "sdiv"; }
             if expr.op == "%" { inst = "srem"; }
-            code = code + tmp + " = " + inst + " i64 " + l.val + ", " + r.val + "\n";
-            return { ty: "i64", val: tmp, code: code };
+            code = code + tmp3 + " = " + inst + " i64 " + l.val + ", " + r.val + "\n";
+            return GenExprResult { ty: "i64", val: tmp3, code: code };
         }
-        if expr.op == "==" || expr.op == "!=" || expr.op == "<" || expr.op == ">" || expr.op == "<=" || expr.op == ">=" {
+        if expr.op == "==" || expr.op == "!=" {
+            if isStrOp {
+                var lv3 = l.val;
+                var rv3 = r.val;
+                if l.ty != "i8*" {
+                    var lt3 = nextTemp(ctx);
+                    if l.ty.endsWith("*") {
+                        code = code + lt3 + " = bitcast " + l.ty + " " + l.val + " to i8*\n";
+                    } else {
+                        code = code + lt3 + " = inttoptr i64 " + l.val + " to i8*\n";
+                    }
+                    lv3 = lt3;
+                }
+                if r.ty != "i8*" {
+                    var rt3 = nextTemp(ctx);
+                    if r.ty.endsWith("*") {
+                        code = code + rt3 + " = bitcast " + r.ty + " " + r.val + " to i8*\n";
+                    } else {
+                        code = code + rt3 + " = inttoptr i64 " + r.val + " to i8*\n";
+                    }
+                    rv3 = rt3;
+                }
+                var eq = nextTemp(ctx);
+                code = code + eq + " = call i64 @rey_str_eq(i8* " + lv3 + ", i8* " + rv3 + ")\n";
+                var b = nextTemp(ctx);
+                if expr.op == "==" {
+                    code = code + b + " = icmp ne i64 " + eq + ", 0\n";
+                } else {
+                    code = code + b + " = icmp eq i64 " + eq + ", 0\n";
+                }
+                return GenExprResult { ty: "i1", val: b, code: code };
+            }
             var pred = "eq";
             if expr.op == "!=" { pred = "ne"; }
-            if expr.op == "<" { pred = "slt"; }
-            if expr.op == ">" { pred = "sgt"; }
-            if expr.op == "<=" { pred = "sle"; }
-            if expr.op == ">=" { pred = "sge"; }
-            var tmp2 = nextTemp(ctx);
-            code = code + tmp2 + " = icmp " + pred + " i64 " + l.val + ", " + r.val + "\n";
-            return { ty: "i1", val: tmp2, code: code };
+            var lv4 = l.val;
+            var rv4 = r.val;
+            if l.ty.endsWith("*") {
+                var lp4 = nextTemp(ctx);
+                code = code + lp4 + " = ptrtoint " + l.ty + " " + l.val + " to i64\n";
+                lv4 = lp4;
+            }
+            if r.ty.endsWith("*") {
+                var rp4 = nextTemp(ctx);
+                code = code + rp4 + " = ptrtoint " + r.ty + " " + r.val + " to i64\n";
+                rv4 = rp4;
+            }
+            var tmp4 = nextTemp(ctx);
+            code = code + tmp4 + " = icmp " + pred + " i64 " + lv4 + ", " + rv4 + "\n";
+            return GenExprResult { ty: "i1", val: tmp4, code: code };
+        }
+        if expr.op == "<" || expr.op == ">" || expr.op == "<=" || expr.op == ">=" {
+            var pred2 = "slt";
+            if expr.op == ">" { pred2 = "sgt"; }
+            if expr.op == "<=" { pred2 = "sle"; }
+            if expr.op == ">=" { pred2 = "sge"; }
+            var tmp5 = nextTemp(ctx);
+            if l.ty == "i8*" {
+                // string comparison via strcmp
+                var cmpTmp = nextTemp(ctx);
+                code = code + cmpTmp + " = call i32 @strcmp(i8* " + l.val + ", i8* " + r.val + ")\n";
+                code = code + tmp5 + " = icmp " + pred2 + " i32 " + cmpTmp + ", 0\n";
+            } else {
+                var lv5 = l.val;
+                var rv5 = r.val;
+                if l.ty.endsWith("*") {
+                    var lp5 = nextTemp(ctx);
+                    code = code + lp5 + " = ptrtoint " + l.ty + " " + l.val + " to i64\n";
+                    lv5 = lp5;
+                }
+                if r.ty.endsWith("*") {
+                    var rp5 = nextTemp(ctx);
+                    code = code + rp5 + " = ptrtoint " + r.ty + " " + r.val + " to i64\n";
+                    rv5 = rp5;
+                }
+                code = code + tmp5 + " = icmp " + pred2 + " i64 " + lv5 + ", " + rv5 + "\n";
+            }
+            return GenExprResult { ty: "i1", val: tmp5, code: code };
         }
         if expr.op == "&&" || expr.op == "||" {
-            var tmp3 = nextTemp(ctx);
+            var lc = l.val;
+            var rc = r.val;
+            if l.ty == "i64" {
+                var lt2 = nextTemp(ctx);
+                code = code + lt2 + " = icmp ne i64 " + l.val + ", 0\n";
+                lc = lt2;
+            }
+            if r.ty == "i64" {
+                var rt2 = nextTemp(ctx);
+                code = code + rt2 + " = icmp ne i64 " + r.val + ", 0\n";
+                rc = rt2;
+            }
+            var tmp6 = nextTemp(ctx);
             var inst2 = "and";
             if expr.op == "||" { inst2 = "or"; }
-            code = code + tmp3 + " = " + inst2 + " i1 " + l.val + ", " + r.val + "\n";
-            return { ty: "i1", val: tmp3, code: code };
+            code = code + tmp6 + " = " + inst2 + " i1 " + lc + ", " + rc + "\n";
+            return GenExprResult { ty: "i1", val: tmp6, code: code };
         }
     }
     if expr instanceof UnaryExpr {
-        var rv = genExprValue(ctx, expr.right);
-        var code2 = rv.code;
+        var rvU: GenExprResult = genExprValue(ctx, expr.right);
+        var code2 = rvU.code;
         if expr.op == "!" {
+            var boolVal = rvU.val;
+            if rvU.ty == "i64" {
+                var trunc4 = nextTemp(ctx);
+                code2 = code2 + trunc4 + " = trunc i64 " + rvU.val + " to i1\n";
+                boolVal = trunc4;
+            }
             var tmp4 = nextTemp(ctx);
-            code2 = code2 + tmp4 + " = xor i1 " + rv.val + ", true\n";
-            return { ty: "i1", val: tmp4, code: code2 };
+            code2 = code2 + tmp4 + " = xor i1 " + boolVal + ", true\n";
+            return GenExprResult { ty: "i1", val: tmp4, code: code2 };
         }
         if expr.op == "-" {
             var tmp5 = nextTemp(ctx);
-            code2 = code2 + tmp5 + " = sub i64 0, " + rv.val + "\n";
-            return { ty: "i64", val: tmp5, code: code2 };
+            code2 = code2 + tmp5 + " = sub i64 0, " + rvU.val + "\n";
+            return GenExprResult { ty: "i64", val: tmp5, code: code2 };
         }
     }
     if expr instanceof CallExpr {
         if expr.callee instanceof IdentExpr {
             var name = expr.callee.name;
-            var retTy = "i64";
+            // builtin constructors
+            if name == "Vec.new"    { var t = nextTemp(ctx); return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_vec_new()\n" }; }
+            if name == "HashMap.new" { var t = nextTemp(ctx); return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_hm_new()\n" }; }
+            // Result/Option constructors
+            if name == "Result.Ok" || name == "Ok" {
+                if expr.args.length() == 1 {
+                    var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                    var t = nextTemp(ctx);
+                    if av.ty == "i8*" {
+                        return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_ok_str(i8* " + av.val + ")\n" };
+                    }
+                    var avVal = av.val;
+                    var avCode = av.code;
+                    if av.ty.endsWith("*") && av.ty != "i8*" {
+                        var cast = nextTemp(ctx);
+                        avCode = avCode + cast + " = ptrtoint " + av.ty + " " + av.val + " to i64\n";
+                        avVal = cast;
+                    }
+                    return GenExprResult { ty: "i64", val: t, code: avCode + t + " = call i64 @rey_ok(i64 " + avVal + ")\n" };
+                }
+            }
+            if name == "Result.Err" || name == "Err" {
+                if expr.args.length() == 1 {
+                    var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                    var t = nextTemp(ctx);
+                    if av.ty == "i8*" {
+                        return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_err_str(i8* " + av.val + ")\n" };
+                    }
+                    var avVal2 = av.val;
+                    var avCode2 = av.code;
+                    if av.ty.endsWith("*") && av.ty != "i8*" {
+                        var cast2 = nextTemp(ctx);
+                        avCode2 = avCode2 + cast2 + " = ptrtoint " + av.ty + " " + av.val + " to i64\n";
+                        avVal2 = cast2;
+                    }
+                    return GenExprResult { ty: "i64", val: t, code: avCode2 + t + " = call i64 @rey_err(i64 " + avVal2 + ")\n" };
+                }
+            }
+            if name == "Option.Some" || name == "Some" {
+                if expr.args.length() == 1 {
+                    var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                    var t = nextTemp(ctx);
+                    return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_some(i64 " + av.val + ")\n" };
+                }
+            }
+            if name == "Option.None" || name == "None" {
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_none()\n" };
+            }
+            // builtins: readFile, writeFile, fileExists, etc.
+            if name == "readFile" && expr.args.length() == 1 {
+                var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                var t = nextTemp(ctx);
+                var ap = av.val; if av.ty != "i8*" { ap = "null"; }
+                return GenExprResult { ty: "i8*", val: t, code: av.code + t + " = call i8* @rey_read_file(i8* " + ap + ")\n" };
+            }
+            if name == "writeFile" && expr.args.length() == 2 {
+                var a0 = genExprValue(ctx, expr.args[0]);
+                var a1 = genExprValue(ctx, expr.args[1]);
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: a0.code + a1.code + "call void @rey_write_file(i8* " + a0.val + ", i8* " + a1.val + ")\n" + t + " = add i64 0, 0\n" };
+            }
+            if name == "appendFile" && expr.args.length() == 2 {
+                var a0 = genExprValue(ctx, expr.args[0]);
+                var a1 = genExprValue(ctx, expr.args[1]);
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: a0.code + a1.code + "call void @rey_append_file(i8* " + a0.val + ", i8* " + a1.val + ")\n" + t + " = add i64 0, 0\n" };
+            }
+            if name == "fileExists" && expr.args.length() == 1 {
+                var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_file_exists(i8* " + av.val + ")\n" };
+            }
+            if name == "deleteFile" && expr.args.length() == 1 {
+                var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: av.code + "call void @rey_delete_file(i8* " + av.val + ")\n" + t + " = add i64 0, 0\n" };
+            }
+            if name == "exec" && expr.args.length() == 1 {
+                var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_exec_cmd(i8* " + av.val + ")\n" };
+            }
+            if name == "args" && expr.args.length() == 0 {
+                var t = nextTemp(ctx);
+                return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_args()\n" };
+            }
 
+            var retTy = "i64";
+            var retKey = name + ":ret";
+            if ctx.funcSigs.has(retKey) {
+                retTy = ctx.funcSigs.get(retKey);
+            }
             var codeC = "";
             var argsOut = "";
             var i = 0;
             loop {
                 if i >= expr.args.length() { break; }
-                var av = genExprValue(ctx, expr.args[i]);
+                var av: GenExprResult = genExprValue(ctx, expr.args[i]);
                 codeC = codeC + av.code;
+                var argVal = av.val;
+                var argTy = av.ty;
+                var sigKey = name + ":" + i.toString();
+                if ctx.funcSigs.has(sigKey) {
+                    var expectedTy = ctx.funcSigs.get(sigKey);
+                    if expectedTy != argTy {
+                        if expectedTy == "i64" && argTy.endsWith("*") {
+                            var castC = nextTemp(ctx);
+                            codeC = codeC + castC + " = ptrtoint " + argTy + " " + argVal + " to i64\n";
+                            argVal = castC;
+                            argTy = "i64";
+                        } else if expectedTy.endsWith("*") && argTy == "i64" {
+                            var castC = nextTemp(ctx);
+                            codeC = codeC + castC + " = inttoptr i64 " + argVal + " to " + expectedTy + "\n";
+                            argVal = castC;
+                            argTy = expectedTy;
+                        }
+                    }
+                }
                 if i > 0 { argsOut = argsOut + ", "; }
-                argsOut = argsOut + av.ty + " " + av.val;
+                argsOut = argsOut + argTy + " " + argVal;
                 i = i + 1;
             }
 
             var tmp = nextTemp(ctx);
+            if retTy == "void" {
+                codeC = codeC + "call void @" + name + "(" + argsOut + ")\n";
+                return GenExprResult { ty: "void", val: "0", code: codeC };
+            }
             codeC = codeC + tmp + " = call " + retTy + " @" + name + "(" + argsOut + ")\n";
-            return { ty: retTy, val: tmp, code: codeC };
+            return GenExprResult { ty: retTy, val: tmp, code: codeC };
         }
+
+        // method call: expr.callee is a FieldAccessExpr
+        if expr.callee instanceof FieldAccessExpr {
+            var fa = expr.callee;
+            var method = fa.name;
+            var obj: GenExprResult = genExprValue(ctx, fa.object);
+            var codeM = obj.code;
+
+            // --- Vec static constructors accessed via FieldAccess (Vec.new) ---
+            if fa.object instanceof IdentExpr {
+                var objName = fa.object.name;
+                if objName == "Vec" && method == "new" {
+                    var t = nextTemp(ctx);
+                    return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_vec_new()\n" };
+                }
+                if objName == "HashMap" && method == "new" {
+                    var t = nextTemp(ctx);
+                    return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_hm_new()\n" };
+                }
+                if objName == "Result" && method == "Ok" {
+                    if expr.args.length() == 1 {
+                        var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                        var t = nextTemp(ctx);
+                        if av.ty == "i8*" {
+                            return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_ok_str(i8* " + av.val + ")\n" };
+                        }
+                        var avValOk = av.val;
+                        var avCodeOk = av.code;
+                        if av.ty.endsWith("*") && av.ty != "i8*" {
+                            var castOk = nextTemp(ctx);
+                            avCodeOk = avCodeOk + castOk + " = ptrtoint " + av.ty + " " + av.val + " to i64\n";
+                            avValOk = castOk;
+                        }
+                        return GenExprResult { ty: "i64", val: t, code: avCodeOk + t + " = call i64 @rey_ok(i64 " + avValOk + ")\n" };
+                    }
+                }
+                if objName == "Result" && method == "Err" {
+                    if expr.args.length() == 1 {
+                        var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                        var t = nextTemp(ctx);
+                        if av.ty == "i8*" {
+                            return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_err_str(i8* " + av.val + ")\n" };
+                        }
+                        var avValErr = av.val;
+                        var avCodeErr = av.code;
+                        if av.ty.endsWith("*") && av.ty != "i8*" {
+                            var castErr = nextTemp(ctx);
+                            avCodeErr = avCodeErr + castErr + " = ptrtoint " + av.ty + " " + av.val + " to i64\n";
+                            avValErr = castErr;
+                        }
+                        return GenExprResult { ty: "i64", val: t, code: avCodeErr + t + " = call i64 @rey_err(i64 " + avValErr + ")\n" };
+                    }
+                }
+                if objName == "Option" && method == "Some" {
+                    if expr.args.length() == 1 {
+                        var av: GenExprResult = genExprValue(ctx, expr.args[0]);
+                        var t = nextTemp(ctx);
+                        return GenExprResult { ty: "i64", val: t, code: av.code + t + " = call i64 @rey_some(i64 " + av.val + ")\n" };
+                    }
+                }
+                if objName == "Option" && method == "None" {
+                    var t = nextTemp(ctx);
+                    return GenExprResult { ty: "i64", val: t, code: t + " = call i64 @rey_none()\n" };
+                }
+            }
+
+            // --- collect call args ---
+            var argVals = [];
+            var iM = 0;
+            loop {
+                if iM >= expr.args.length() { break; }
+                var av: GenExprResult = genExprValue(ctx, expr.args[iM]);
+                codeM = codeM + av.code;
+                argVals.push(av);
+                iM = iM + 1;
+            }
+
+            // --- String methods (obj.ty == "i8*") ---
+            if obj.ty == "i8*" {
+                if method == "len" || method == "length" {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_str_len(i8* " + obj.val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "slice" && argVals.length() == 2 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_slice(i8* " + obj.val + ", i64 " + argVals[0].val + ", i64 " + argVals[1].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "startsWith" && argVals.length() == 1 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_str_starts_with(i8* " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "endsWith" && argVals.length() == 1 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_str_ends_with(i8* " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "indexOf" && argVals.length() == 1 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_str_index_of(i8* " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "trim" && argVals.length() == 0 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_trim(i8* " + obj.val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "replace" && argVals.length() == 2 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_replace(i8* " + obj.val + ", i8* " + argVals[0].val + ", i8* " + argVals[1].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "repeat" && argVals.length() == 1 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_repeat(i8* " + obj.val + ", i64 " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "split" && argVals.length() == 1 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_str_split(i8* " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "toUpper" && argVals.length() == 0 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_to_upper(i8* " + obj.val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "toLower" && argVals.length() == 0 {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i8* @rey_str_to_lower(i8* " + obj.val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "toString" { return GenExprResult { ty: "i8*", val: obj.val, code: codeM }; }
+            }
+
+            // --- toString on int/bool (obj.ty == "i64" or "i1") ---
+            if method == "toString" {
+                var t = nextTemp(ctx);
+                if obj.ty == "i1" {
+                    var ext = nextTemp(ctx);
+                    codeM = codeM + ext + " = zext i1 " + obj.val + " to i64\n";
+                    codeM = codeM + t + " = call i8* @rey_bool_to_str(i64 " + ext + ")\n";
+                } else if obj.ty == "i8*" {
+                    // already a string, toString is identity
+                    return GenExprResult { ty: "i8*", val: obj.val, code: codeM };
+                } else {
+                    // i64: may be a plain int or an opaque heap pointer; rey_val_to_str handles both
+                    codeM = codeM + t + " = call i8* @rey_val_to_str(i64 " + obj.val + ")\n";
+                }
+                return GenExprResult { ty: "i8*", val: t, code: codeM };
+            }
+
+            // --- Vec methods (obj.ty == "i64", method name dispatch) ---
+            if method == "push" && argVals.length() == 1 {
+                var av0 = argVals[0];
+                var itemV = av0.val;
+                if av0.ty.endsWith("*") {
+                    var pt = nextTemp(ctx);
+                    codeM = codeM + pt + " = ptrtoint " + av0.ty + " " + av0.val + " to i64\n";
+                    itemV = pt;
+                }
+                var t = nextTemp(ctx);
+                codeM = codeM + "call void @rey_vec_push(i64 " + obj.val + ", i64 " + itemV + ")\n";
+                codeM = codeM + t + " = add i64 0, 0\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "pop" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_vec_pop(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "length" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                if obj.ty == "i8*" {
+                    codeM = codeM + t + " = call i64 @rey_str_len(i8* " + obj.val + ")\n";
+                } else if obj.ty.endsWith("*") {
+                    var sc = nextTemp(ctx);
+                    codeM = codeM + sc + " = bitcast " + obj.ty + " " + obj.val + " to i8*\n";
+                    codeM = codeM + t + " = call i64 @rey_str_len(i8* " + sc + ")\n";
+                } else {
+                    codeM = codeM + t + " = call i64 @rey_vec_len(i64 " + obj.val + ")\n";
+                }
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "len" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                if obj.ty == "i8*" {
+                    codeM = codeM + t + " = call i64 @rey_str_len(i8* " + obj.val + ")\n";
+                } else if obj.ty.endsWith("*") {
+                    var sc = nextTemp(ctx);
+                    codeM = codeM + sc + " = bitcast " + obj.ty + " " + obj.val + " to i8*\n";
+                    codeM = codeM + t + " = call i64 @rey_str_len(i8* " + sc + ")\n";
+                } else {
+                    codeM = codeM + t + " = call i64 @rey_vec_len(i64 " + obj.val + ")\n";
+                }
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "get" && argVals.length() == 1 {
+                if argVals[0].ty == "i64" {
+                    var t = nextTemp(ctx);
+                    codeM = codeM + t + " = call i64 @rey_vec_get(i64 " + obj.val + ", i64 " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+            }
+            if method == "set" && argVals.length() == 2 {
+                if argVals[0].ty == "i64" {
+                    var vv = argVals[1].val;
+                    if argVals[1].ty == "i8*" {
+                        var pt = nextTemp(ctx);
+                        codeM = codeM + pt + " = ptrtoint i8* " + argVals[1].val + " to i64\n";
+                        vv = pt;
+                    }
+                    var t = nextTemp(ctx);
+                    codeM = codeM + "call void @rey_vec_set(i64 " + obj.val + ", i64 " + argVals[0].val + ", i64 " + vv + ")\n";
+                    codeM = codeM + t + " = add i64 0, 0\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+            }
+            if method == "contains" && argVals.length() == 1 {
+                // return i64 (0/1) to match interpreter's int representation
+                var t = nextTemp(ctx);
+                if obj.ty == "i8*" {
+                    var argStr = argVals[0].val;
+                    if argVals[0].ty != "i8*" {
+                        var ac = nextTemp(ctx);
+                        codeM = codeM + ac + " = inttoptr i64 " + argVals[0].val + " to i8*\n";
+                        argStr = ac;
+                    }
+                    var idx = nextTemp(ctx);
+                    var cmpR = nextTemp(ctx);
+                    codeM = codeM + idx + " = call i64 @rey_str_index_of(i8* " + obj.val + ", i8* " + argStr + ")\n";
+                    codeM = codeM + cmpR + " = icmp sge i64 " + idx + ", 0\n";
+                    codeM = codeM + t + " = zext i1 " + cmpR + " to i64\n";
+                } else if argVals[0].ty == "i8*" {
+                    codeM = codeM + t + " = call i64 @rey_vec_str_contains(i64 " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                } else {
+                    codeM = codeM + t + " = call i64 @rey_vec_contains(i64 " + obj.val + ", i64 " + argVals[0].val + ")\n";
+                }
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "join" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i8* @rey_vec_join(i64 " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                return GenExprResult { ty: "i8*", val: t, code: codeM };
+            }
+            if method == "reverse" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_vec_reverse(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "slice" && argVals.length() == 2 {
+                var t = nextTemp(ctx);
+                if obj.ty == "i8*" {
+                    codeM = codeM + t + " = call i8* @rey_str_slice(i8* " + obj.val + ", i64 " + argVals[0].val + ", i64 " + argVals[1].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                } else if obj.ty.endsWith("*") {
+                    var sc2 = nextTemp(ctx);
+                    codeM = codeM + sc2 + " = bitcast " + obj.ty + " " + obj.val + " to i8*\n";
+                    codeM = codeM + t + " = call i8* @rey_str_slice(i8* " + sc2 + ", i64 " + argVals[0].val + ", i64 " + argVals[1].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                codeM = codeM + t + " = call i64 @rey_vec_slice_v(i64 " + obj.val + ", i64 " + argVals[0].val + ", i64 " + argVals[1].val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+
+            // --- HashMap methods ---
+            if method == "has" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                var hmKeyV = argVals[0].val;
+                if argVals[0].ty != "i8*" {
+                    var kc = nextTemp(ctx);
+                    if argVals[0].ty.endsWith("*") {
+                        codeM = codeM + kc + " = bitcast " + argVals[0].ty + " " + hmKeyV + " to i8*\n";
+                    } else {
+                        codeM = codeM + kc + " = inttoptr i64 " + hmKeyV + " to i8*\n";
+                    }
+                    hmKeyV = kc;
+                }
+                codeM = codeM + t + " = call i64 @rey_hm_has(i64 " + obj.val + ", i8* " + hmKeyV + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "set" && argVals.length() == 2 {
+                var hmSetKey = argVals[0].val;
+                if argVals[0].ty != "i8*" {
+                    var kcs = nextTemp(ctx);
+                    if argVals[0].ty.endsWith("*") {
+                        codeM = codeM + kcs + " = bitcast " + argVals[0].ty + " " + hmSetKey + " to i8*\n";
+                    } else {
+                        codeM = codeM + kcs + " = inttoptr i64 " + hmSetKey + " to i8*\n";
+                    }
+                    hmSetKey = kcs;
+                }
+                var vv2 = argVals[1].val;
+                if argVals[1].ty.endsWith("*") {
+                    var pt = nextTemp(ctx);
+                    codeM = codeM + pt + " = ptrtoint " + argVals[1].ty + " " + argVals[1].val + " to i64\n";
+                    vv2 = pt;
+                }
+                var t = nextTemp(ctx);
+                codeM = codeM + "call void @rey_hm_set(i64 " + obj.val + ", i8* " + hmSetKey + ", i64 " + vv2 + ")\n";
+                codeM = codeM + t + " = add i64 0, 0\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "get" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                var hmGetKey = argVals[0].val;
+                if argVals[0].ty != "i8*" {
+                    var kc2 = nextTemp(ctx);
+                    if argVals[0].ty.endsWith("*") {
+                        codeM = codeM + kc2 + " = bitcast " + argVals[0].ty + " " + hmGetKey + " to i8*\n";
+                    } else {
+                        codeM = codeM + kc2 + " = inttoptr i64 " + hmGetKey + " to i8*\n";
+                    }
+                    hmGetKey = kc2;
+                }
+                codeM = codeM + t + " = call i64 @rey_hm_get(i64 " + obj.val + ", i8* " + hmGetKey + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "delete" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                var hmDelKey = argVals[0].val;
+                if argVals[0].ty != "i8*" {
+                    var kc3 = nextTemp(ctx);
+                    if argVals[0].ty.endsWith("*") {
+                        codeM = codeM + kc3 + " = bitcast " + argVals[0].ty + " " + hmDelKey + " to i8*\n";
+                    } else {
+                        codeM = codeM + kc3 + " = inttoptr i64 " + hmDelKey + " to i8*\n";
+                    }
+                    hmDelKey = kc3;
+                }
+                codeM = codeM + "call void @rey_hm_delete(i64 " + obj.val + ", i8* " + hmDelKey + ")\n";
+                codeM = codeM + t + " = add i64 0, 0\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "keys" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_hm_keys(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "values" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_hm_values(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+
+            // --- Result methods ---
+            if method == "isOk" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_result_is_ok(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "isErr" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_result_is_err(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "unwrap" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i64 @rey_result_unwrap(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            if method == "unwrapOr" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                if argVals[0].ty == "i8*" {
+                    // string default → use unwrap_or_str
+                    codeM = codeM + t + " = call i8* @rey_result_unwrap_or_str(i64 " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                codeM = codeM + t + " = call i64 @rey_result_unwrap_or(i64 " + obj.val + ", i64 " + argVals[0].val + ")\n";
+                return GenExprResult { ty: "i64", val: t, code: codeM };
+            }
+            // unwrap when payload is known to be a string
+            if method == "unwrapStr" && argVals.length() == 0 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i8* @rey_result_unwrap_str(i64 " + obj.val + ")\n";
+                return GenExprResult { ty: "i8*", val: t, code: codeM };
+            }
+            if method == "unwrapOrStr" && argVals.length() == 1 {
+                var t = nextTemp(ctx);
+                codeM = codeM + t + " = call i8* @rey_result_unwrap_or_str(i64 " + obj.val + ", i8* " + argVals[0].val + ")\n";
+                return GenExprResult { ty: "i8*", val: t, code: codeM };
+            }
+
+            // catch-all for string methods when obj type was misidentified
+            if method == "endsWith" || method == "startsWith" || method == "indexOf" || method == "len" || method == "length" || method == "slice" || method == "trim" || method == "replace" || method == "repeat" || method == "toString" {
+                var strObj = obj.val;
+                if obj.ty != "i8*" {
+                    var sc = nextTemp(ctx);
+                    if obj.ty.endsWith("*") {
+                        codeM = codeM + sc + " = bitcast " + obj.ty + " " + obj.val + " to i8*\n";
+                    } else {
+                        codeM = codeM + sc + " = inttoptr i64 " + obj.val + " to i8*\n";
+                    }
+                    strObj = sc;
+                }
+                var t = nextTemp(ctx);
+                if method == "endsWith" && argVals.length() == 1 {
+                    var aStr = argVals[0].val;
+                    if argVals[0].ty != "i8*" { var ac = nextTemp(ctx); codeM = codeM + ac + " = inttoptr i64 " + aStr + " to i8*\n"; aStr = ac; }
+                    codeM = codeM + t + " = call i64 @rey_str_ends_with(i8* " + strObj + ", i8* " + aStr + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "startsWith" && argVals.length() == 1 {
+                    var aStr = argVals[0].val;
+                    if argVals[0].ty != "i8*" { var ac = nextTemp(ctx); codeM = codeM + ac + " = inttoptr i64 " + aStr + " to i8*\n"; aStr = ac; }
+                    codeM = codeM + t + " = call i64 @rey_str_starts_with(i8* " + strObj + ", i8* " + aStr + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "indexOf" && argVals.length() == 1 {
+                    var aStr = argVals[0].val;
+                    if argVals[0].ty != "i8*" { var ac = nextTemp(ctx); codeM = codeM + ac + " = inttoptr i64 " + aStr + " to i8*\n"; aStr = ac; }
+                    codeM = codeM + t + " = call i64 @rey_str_index_of(i8* " + strObj + ", i8* " + aStr + ")\n";
+                    return GenExprResult { ty: "i64", val: t, code: codeM };
+                }
+                if method == "len" || method == "length" {
+                    if argVals.length() == 0 {
+                        codeM = codeM + t + " = call i64 @rey_str_len(i8* " + strObj + ")\n";
+                        return GenExprResult { ty: "i64", val: t, code: codeM };
+                    }
+                }
+                if method == "slice" && argVals.length() == 2 {
+                    codeM = codeM + t + " = call i8* @rey_str_slice(i8* " + strObj + ", i64 " + argVals[0].val + ", i64 " + argVals[1].val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "trim" && argVals.length() == 0 {
+                    codeM = codeM + t + " = call i8* @rey_str_trim(i8* " + strObj + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+                if method == "toString" && argVals.length() == 0 {
+                    codeM = codeM + t + " = call i8* @rey_val_to_str(i64 " + obj.val + ")\n";
+                    return GenExprResult { ty: "i8*", val: t, code: codeM };
+                }
+            }
+
+            // module.func(args) — when obj is an unresolved ident (not a local/param), treat as direct call
+            var isModuleCall = false;
+            if fa.object instanceof IdentExpr {
+                var objIdent = fa.object.name;
+                if !ctx.locals.has(objIdent) {
+                    isModuleCall = true;
+                }
+            }
+            if isModuleCall {
+                var t = nextTemp(ctx);
+                var argStrM = "";
+                var iFM = 0;
+                loop {
+                    if iFM >= argVals.length() { break; }
+                    var avM = argVals[iFM];
+                    var avMval = avM.val;
+                    var avMty = avM.ty;
+                    var sigKeyM = method + ":" + iFM.toString();
+                    if ctx.funcSigs.has(sigKeyM) {
+                        var expM = ctx.funcSigs.get(sigKeyM);
+                        if expM != avMty {
+                            if expM == "i64" && avMty.endsWith("*") {
+                                var ccM = nextTemp(ctx);
+                                codeM = codeM + ccM + " = ptrtoint " + avMty + " " + avMval + " to i64\n";
+                                avMval = ccM;
+                                avMty = "i64";
+                            } else if expM.endsWith("*") && avMty == "i64" {
+                                var ccM = nextTemp(ctx);
+                                codeM = codeM + ccM + " = inttoptr i64 " + avMval + " to " + expM + "\n";
+                                avMval = ccM;
+                                avMty = expM;
+                            }
+                        }
+                    }
+                    if iFM > 0 { argStrM = argStrM + ", "; }
+                    argStrM = argStrM + avMty + " " + avMval;
+                    iFM = iFM + 1;
+                }
+                var retTyM = "i64";
+                var retKeyM = method + ":ret";
+                if ctx.funcSigs.has(retKeyM) {
+                    retTyM = ctx.funcSigs.get(retKeyM);
+                }
+                if retTyM == "void" {
+                    codeM = codeM + "call void @" + method + "(" + argStrM + ")\n";
+                    codeM = codeM + t + " = add i64 0, 0\n";
+                    return GenExprResult { ty: "void", val: t, code: codeM };
+                }
+                codeM = codeM + t + " = call " + retTyM + " @" + method + "(" + argStrM + ")\n";
+                return GenExprResult { ty: retTyM, val: t, code: codeM };
+            }
+
+            // fallback: call as @obj_method(obj, args...)
+            var t = nextTemp(ctx);
+            var argStr = obj.ty + " " + obj.val;
+            var iF = 0;
+            loop {
+                if iF >= argVals.length() { break; }
+                argStr = argStr + ", " + argVals[iF].ty + " " + argVals[iF].val;
+                iF = iF + 1;
+            }
+            var retTyFB = "i64";
+            var retKeyFB = method + ":ret";
+            if ctx.funcSigs.has(retKeyFB) {
+                retTyFB = ctx.funcSigs.get(retKeyFB);
+            }
+            if retTyFB == "void" {
+                codeM = codeM + "call void @" + method + "(" + argStr + ")\n";
+                codeM = codeM + t + " = add i64 0, 0\n";
+                return GenExprResult { ty: "void", val: t, code: codeM };
+            }
+            codeM = codeM + t + " = call " + retTyFB + " @" + method + "(" + argStr + ")\n";
+            return GenExprResult { ty: retTyFB, val: t, code: codeM };
+        }
+    }
+
+    // IndexExpr: target[index]
+    if expr instanceof IndexExpr {
+        var objI: GenExprResult = genExprValue(ctx, expr.target);
+        var idxI: GenExprResult = genExprValue(ctx, expr.index);
+        var codeI = objI.code + idxI.code;
+        if objI.ty == "i8*" {
+            // string[i] → char_at
+            var t = nextTemp(ctx);
+            codeI = codeI + t + " = call i8* @rey_str_char_at(i8* " + objI.val + ", i64 " + idxI.val + ")\n";
+            return GenExprResult { ty: "i8*", val: t, code: codeI };
+        }
+        // Vec[i] or HashMap[i] — both are i64
+        var t = nextTemp(ctx);
+        codeI = codeI + t + " = call i64 @rey_vec_get(i64 " + objI.val + ", i64 " + idxI.val + ")\n";
+        return GenExprResult { ty: "i64", val: t, code: codeI };
+    }
+
+    // ArrayExpr: [a, b, c] → Vec
+    if expr instanceof ArrayExpr {
+        var t = nextTemp(ctx);
+        var codeA = t + " = call i64 @rey_vec_new()\n";
+        var iA = 0;
+        loop {
+            if iA >= expr.elements.length() { break; }
+            var el: GenExprResult = genExprValue(ctx, expr.elements[iA]);
+            codeA = codeA + el.code;
+            var elV = el.val;
+            if el.ty.endsWith("*") {
+                var pt = nextTemp(ctx);
+                codeA = codeA + pt + " = ptrtoint " + el.ty + " " + el.val + " to i64\n";
+                elV = pt;
+            }
+            codeA = codeA + "call void @rey_vec_push(i64 " + t + ", i64 " + elV + ")\n";
+            iA = iA + 1;
+        }
+        return GenExprResult { ty: "i64", val: t, code: codeA };
     }
     if expr instanceof StructLiteralExpr {
         if !ctx.structDefs.has(expr.name) {
-            return { ty: "i8*", val: "null", code: "" };
+            return GenExprResult { ty: "i8*", val: "null", code: "" };
         }
-        var def = ctx.structDefs.get(expr.name);
+        var def: StructDef = ctx.structDefs.get(expr.name);
         var ptr = nextTemp(ctx);
-        var codeS = ptr + " = alloca " + def.llvmName + ", align 8\n";
+        // heap-allocate struct with a 16-byte header (tag byte at offset 0) for instanceof checks
+        // sizeof trick: GEP null ptr by 1 element gives byte offset = sizeof(struct)
+        var szNull = nextTemp(ctx);
+        var szPtr = nextTemp(ctx);
+        var szVal = nextTemp(ctx);
+        var szFull = nextTemp(ctx);
+        var rawPtr = nextTemp(ctx);
+        var dataPtr = nextTemp(ctx);
+        var codeS = szNull + " = bitcast i8* null to " + def.llvmName + "*\n";
+        codeS = codeS + szPtr + " = getelementptr " + def.llvmName + ", " + def.llvmName + "* " + szNull + ", i64 1\n";
+        codeS = codeS + szVal + " = ptrtoint " + def.llvmName + "* " + szPtr + " to i64\n";
+        codeS = codeS + szFull + " = add i64 " + szVal + ", 16\n";
+        codeS = codeS + rawPtr + " = call i8* @rey_alloc(i64 " + szFull + ")\n";
+        // set tag byte
+        var tagId = 0;
+        if ctx.structTags.has(expr.name) { tagId = ctx.structTags.get(expr.name); }
+        codeS = codeS + "store i8 " + tagId.toString() + ", i8* " + rawPtr + "\n";
+        // struct data starts 16 bytes after header
+        codeS = codeS + dataPtr + " = getelementptr i8, i8* " + rawPtr + ", i64 16\n";
+        codeS = codeS + ptr + " = bitcast i8* " + dataPtr + " to " + def.llvmName + "*\n";
 
         var fields = def.fields;
         var i = 0;
         loop {
             if i >= fields.length() { break; }
-            var fty = fields[i].ty;
+            var fldI: StructFieldDef = fields[i];
+            var fty = fldI.ty;
             var gep0 = nextTemp(ctx);
             codeS = codeS + gep0 + " = getelementptr inbounds " + def.llvmName + ", " + def.llvmName + "* " + ptr + ", i32 0, i32 " + i.toString() + "\n";
             if fty == "i64" || fty == "i32" || fty == "i1" {
                 codeS = codeS + "store " + fty + " 0, " + fty + "* " + gep0 + "\n";
+            } else if fty == "i8*" {
+                codeS = codeS + "store i8* null, i8** " + gep0 + "\n";
+            } else if fty.endsWith("*") {
+                codeS = codeS + "store " + fty + " null, " + fty + "* " + gep0 + "\n";
             }
             i = i + 1;
         }
@@ -311,105 +1253,212 @@ func genExprValue(ctx, expr) {
         i = 0;
         loop {
             if i >= expr.fields.length() { break; }
-            var init = expr.fields[i];
+            var initF: StructInitField = expr.fields[i];
             var idx = -1;
             var j = 0;
             loop {
                 if j >= fields.length() { break; }
-                if fields[j].name == init.name { idx = j; break; }
+                var fldJ: StructFieldDef = fields[j];
+                if fldJ.name == initF.name { idx = j; break; }
                 j = j + 1;
             }
             if idx >= 0 {
-                var val = genExprValue(ctx, init.value);
+                var val: GenExprResult = genExprValue(ctx, initF.value);
                 codeS = codeS + val.code;
                 var gep = nextTemp(ctx);
-                var fty2 = fields[idx].ty;
+                var fldAt: StructFieldDef = fields[idx];
+                var fty2 = fldAt.ty;
+                var storeVal = val.val;
+                if fty2 != val.ty {
+                    if fty2.endsWith("*") && val.ty == "i64" {
+                        var cast = nextTemp(ctx);
+                        codeS = codeS + cast + " = inttoptr i64 " + val.val + " to " + fty2 + "\n";
+                        storeVal = cast;
+                    } else if fty2 == "i64" && val.ty.endsWith("*") {
+                        var cast = nextTemp(ctx);
+                        codeS = codeS + cast + " = ptrtoint " + val.ty + " " + val.val + " to i64\n";
+                        storeVal = cast;
+                    }
+                }
                 codeS = codeS + gep + " = getelementptr inbounds " + def.llvmName + ", " + def.llvmName + "* " + ptr + ", i32 0, i32 " + idx.toString() + "\n";
-                codeS = codeS + "store " + fty2 + " " + val.val + ", " + fty2 + "* " + gep + "\n";
+                codeS = codeS + "store " + fty2 + " " + storeVal + ", " + fty2 + "* " + gep + "\n";
             }
             i = i + 1;
         }
-        return { ty: def.llvmName + "*", val: ptr, code: codeS };
+        return GenExprResult { ty: def.llvmName + "*", val: ptr, code: codeS };
     }
-    return { ty: "i64", val: "0", code: "" };
+    return GenExprResult { ty: "i64", val: "0", code: "" };
 }
 
 func genStmt2(ctx, stmt): String {
     if stmt instanceof VarDeclStmt {
-        var init = genExprValue(ctx, stmt.value);
-        var ty = llvmTypeFromTagCtx(ctx, stmt.typeTag);
-        if stmt.typeTag == "" {
+        var stmtVD: VarDeclStmt = stmt;
+        var init: GenExprResult = genExprValue(ctx, stmtVD.value);
+        var ty = llvmTypeFromTagCtx(ctx, stmtVD.typeTag);
+        if stmtVD.typeTag == "" {
             ty = init.ty;
         }
-        var ptr = "%" + stmt.name + ".addr";
         var code0 = init.code;
-        code0 = code0 + ptr + " = alloca " + ty + ", align 8\n";
-        code0 = code0 + "store " + ty + " " + init.val + ", " + ty + "* " + ptr + "\n";
-        ctx.locals.set(stmt.name, { ptr: ptr, ty: ty });
+        if ctx.locals.has(stmtVD.name) {
+            var existing: LocalVar = ctx.locals.get(stmtVD.name);
+            var storeV = init.val;
+            // coerce init to existing slot type regardless of declared ty
+            if existing.ty.endsWith("*") && init.ty == "i64" {
+                var cv = nextTemp(ctx);
+                code0 = code0 + cv + " = inttoptr i64 " + init.val + " to " + existing.ty + "\n";
+                storeV = cv;
+            } else if existing.ty == "i64" && init.ty.endsWith("*") {
+                var cv = nextTemp(ctx);
+                code0 = code0 + cv + " = ptrtoint " + init.ty + " " + init.val + " to i64\n";
+                storeV = cv;
+            } else if existing.ty == "i8*" && init.ty == "i64" {
+                var cv = nextTemp(ctx);
+                code0 = code0 + cv + " = inttoptr i64 " + init.val + " to i8*\n";
+                storeV = cv;
+            }
+            code0 = code0 + "store " + existing.ty + " " + storeV + ", " + existing.ty + "* " + existing.ptr + "\n";
+            return code0;
+        }
+        var ptr = "%" + stmtVD.name + ".addr";
+        // hoist alloca to function entry block
+        ctx.funcAllocas = ctx.funcAllocas + ptr + " = alloca " + ty + ", align 8\n";
+        var storeVal = init.val;
+        // coerce init value to declared type if mismatch
+        if ty.endsWith("*") && init.ty == "i64" {
+            var cv = nextTemp(ctx);
+            code0 = code0 + cv + " = inttoptr i64 " + init.val + " to " + ty + "\n";
+            storeVal = cv;
+        } else if ty == "i64" && init.ty.endsWith("*") {
+            var cv = nextTemp(ctx);
+            code0 = code0 + cv + " = ptrtoint " + init.ty + " " + init.val + " to i64\n";
+            storeVal = cv;
+        } else if ty == "i8*" && init.ty == "i64" {
+            var cv = nextTemp(ctx);
+            code0 = code0 + cv + " = inttoptr i64 " + init.val + " to i8*\n";
+            storeVal = cv;
+        }
+        code0 = code0 + "store " + ty + " " + storeVal + ", " + ty + "* " + ptr + "\n";
+        ctx.locals.set(stmtVD.name, LocalVar { ptr: ptr, ty: ty });
         return code0;
     }
     if stmt instanceof ConstDeclStmt {
-        var init2 = genExprValue(ctx, stmt.value);
-        var ty2 = llvmTypeFromTagCtx(ctx, stmt.typeTag);
-        if stmt.typeTag == "" {
+        var stmtCD: ConstDeclStmt = stmt;
+        var init2: GenExprResult = genExprValue(ctx, stmtCD.value);
+        var ty2 = llvmTypeFromTagCtx(ctx, stmtCD.typeTag);
+        if stmtCD.typeTag == "" {
             ty2 = init2.ty;
         }
-        var ptr2 = "%" + stmt.name + ".addr";
+        var ptr2 = "%" + stmtCD.name + ".addr";
         var codeC = init2.code;
-        codeC = codeC + ptr2 + " = alloca " + ty2 + ", align 8\n";
+        // hoist alloca to function entry block
+        ctx.funcAllocas = ctx.funcAllocas + ptr2 + " = alloca " + ty2 + ", align 8\n";
         codeC = codeC + "store " + ty2 + " " + init2.val + ", " + ty2 + "* " + ptr2 + "\n";
-        ctx.locals.set(stmt.name, { ptr: ptr2, ty: ty2 });
+        ctx.locals.set(stmtCD.name, LocalVar { ptr: ptr2, ty: ty2 });
         return codeC;
     }
     if stmt instanceof ExprStmt {
-        var e = stmt.expr;
+        var stmtES: ExprStmt = stmt;
+        var e = stmtES.expr;
         if e instanceof CallExpr {
-            var callee = e.callee;
-            if callee instanceof IdentExpr && callee.name == "println" {
-                if e.args.length() != 1 {
+            var callE: CallExpr = e;
+            var callee = callE.callee;
+            if callee instanceof IdentExpr {
+                var calleeId: IdentExpr = callee;
+                var cname = calleeId.name;
+                if cname == "println" || cname == "print" {
+                    if callE.args.length() == 1 {
+                        var arg: GenExprResult = genExprValue(ctx, callE.args[0]);
+                        var code = arg.code;
+                        var s = arg.val;
+                        if arg.ty != "i8*" {
+                            // coerce int/bool to string
+                            var st = nextTemp(ctx);
+                            if arg.ty == "i1" {
+                                var ext = nextTemp(ctx);
+                                code = code + ext + " = zext i1 " + arg.val + " to i64\n";
+                                code = code + st + " = call i8* @rey_bool_to_str(i64 " + ext + ")\n";
+                            } else {
+                                code = code + st + " = call i8* @rey_int_to_str(i64 " + arg.val + ")\n";
+                            }
+                            s = st;
+                        }
+                        if cname == "println" {
+                            code = code + "call void @rey_println(i8* " + s + ")\n";
+                        } else {
+                            code = code + "call void @rey_print(i8* " + s + ")\n";
+                        }
+                        return code;
+                    }
                     return "";
                 }
-                var arg = genExprValue(ctx, e.args[0]);
-                var code = arg.code;
-                // format strings
-                if arg.ty == "i8*" {
-                    var fmtIdx = cgInternString(ctx, "%s\n");
-                    var fmtInfo = llvmCStringInfo("%s\n");
-                    var fmtPtr = llvmStrPtr(fmtIdx, fmtInfo.len);
-                    code = code + "call i32 (i8*, ...) @printf(i8* " + fmtPtr + ", i8* " + arg.val + ")\n";
-                    return code;
+                // writeFile / appendFile / deleteFile / mkdir as statements
+                if cname == "writeFile" && callE.args.length() == 2 {
+                    var a0: GenExprResult = genExprValue(ctx, callE.args[0]);
+                    var a1: GenExprResult = genExprValue(ctx, callE.args[1]);
+                    return a0.code + a1.code + "call void @rey_write_file(i8* " + a0.val + ", i8* " + a1.val + ")\n";
                 }
-                if arg.ty == "i64" {
-                    var fmtIdx2 = cgInternString(ctx, "%ld\n");
-                    var fmtInfo2 = llvmCStringInfo("%ld\n");
-                    var fmtPtr2 = llvmStrPtr(fmtIdx2, fmtInfo2.len);
-                    code = code + "call i32 (i8*, ...) @printf(i8* " + fmtPtr2 + ", i64 " + arg.val + ")\n";
-                    return code;
+                if cname == "appendFile" && callE.args.length() == 2 {
+                    var a0: GenExprResult = genExprValue(ctx, callE.args[0]);
+                    var a1: GenExprResult = genExprValue(ctx, callE.args[1]);
+                    return a0.code + a1.code + "call void @rey_append_file(i8* " + a0.val + ", i8* " + a1.val + ")\n";
+                }
+                if cname == "deleteFile" && callE.args.length() == 1 {
+                    var a0: GenExprResult = genExprValue(ctx, callE.args[0]);
+                    return a0.code + "call void @rey_delete_file(i8* " + a0.val + ")\n";
+                }
+                if cname == "mkdir" && callE.args.length() == 1 {
+                    var a0: GenExprResult = genExprValue(ctx, callE.args[0]);
+                    return a0.code + "call void @rey_mkdir(i8* " + a0.val + ")\n";
+                }
+            }
+            // method call statements (e.g. vec.push(x), hm.set(k,v)) — route through genExprValue
+            if callE.callee instanceof FieldAccessExpr {
+                var faES: FieldAccessExpr = callE.callee;
+                var method = faES.name;
+                // detect void-returning methods and emit call without result capture
+                if method == "push" || method == "pop" || method == "set" || method == "delete" {
+                    var res: GenExprResult = genExprValue(ctx, callE);
+                    return res.code;
                 }
             }
         }
-        var ignored = genExprValue(ctx, e);
+        var ignored: GenExprResult = genExprValue(ctx, e);
         return ignored.code;
     }
     if stmt instanceof AssignStmt {
-        if stmt.target instanceof IdentExpr {
-            var name = stmt.target.name;
-            var rhs = genExprValue(ctx, stmt.value);
+        var stmtA: AssignStmt = stmt;
+        if stmtA.target instanceof IdentExpr {
+            var targetId: IdentExpr = stmtA.target;
+            var name = targetId.name;
+            var rhs: GenExprResult = genExprValue(ctx, stmtA.value);
             var tyA = rhs.ty;
             if ctx.locals.has(name) {
-                tyA = ctx.locals.get(name).ty;
+                var getA: LocalVar = ctx.locals.get(name);
+                tyA = getA.ty;
             } else {
                 var ptrNew = "%" + name + ".addr";
-                var codeNew = rhs.code + ptrNew + " = alloca " + tyA + ", align 8\n";
-                codeNew = codeNew + "store " + tyA + " " + rhs.val + ", " + tyA + "* " + ptrNew + "\n";
-                ctx.locals.set(name, { ptr: ptrNew, ty: tyA });
+                ctx.funcAllocas = ctx.funcAllocas + ptrNew + " = alloca " + tyA + ", align 8\n";
+                var codeNew = rhs.code + "store " + tyA + " " + rhs.val + ", " + tyA + "* " + ptrNew + "\n";
+                ctx.locals.set(name, LocalVar { ptr: ptrNew, ty: tyA });
                 return codeNew;
             }
 
-            var localA = ctx.locals.get(name);
+            var localA: LocalVar = ctx.locals.get(name);
             var codeA = rhs.code;
-            if stmt.op == "=" {
-                codeA = codeA + "store " + localA.ty + " " + rhs.val + ", " + localA.ty + "* " + localA.ptr + "\n";
+            if stmtA.op == "=" {
+                var storeValA = rhs.val;
+                if localA.ty != rhs.ty {
+                    if localA.ty == "i64" && rhs.ty.endsWith("*") {
+                        var castA = nextTemp(ctx);
+                        codeA = codeA + castA + " = ptrtoint " + rhs.ty + " " + rhs.val + " to i64\n";
+                        storeValA = castA;
+                    } else if localA.ty.endsWith("*") && rhs.ty == "i64" {
+                        var castA = nextTemp(ctx);
+                        codeA = codeA + castA + " = inttoptr i64 " + rhs.val + " to " + localA.ty + "\n";
+                        storeValA = castA;
+                    }
+                }
+                codeA = codeA + "store " + localA.ty + " " + storeValA + ", " + localA.ty + "* " + localA.ptr + "\n";
                 return codeA;
             }
 
@@ -417,34 +1466,116 @@ func genStmt2(ctx, stmt): String {
             codeA = codeA + cur + " = load " + localA.ty + ", " + localA.ty + "* " + localA.ptr + "\n";
             var tmp = nextTemp(ctx);
             var inst = "add";
-            if stmt.op == "-=" { inst = "sub"; }
-            if stmt.op == "*=" { inst = "mul"; }
-            if stmt.op == "/=" { inst = "sdiv"; }
-            if stmt.op == "%=" { inst = "srem"; }
+            if stmtA.op == "-=" { inst = "sub"; }
+            if stmtA.op == "*=" { inst = "mul"; }
+            if stmtA.op == "/=" { inst = "sdiv"; }
+            if stmtA.op == "%=" { inst = "srem"; }
             codeA = codeA + tmp + " = " + inst + " " + localA.ty + " " + cur + ", " + rhs.val + "\n";
             codeA = codeA + "store " + localA.ty + " " + tmp + ", " + localA.ty + "* " + localA.ptr + "\n";
             return codeA;
         }
+        if stmtA.target instanceof FieldAccessExpr {
+            var fa2: FieldAccessExpr = stmtA.target;
+            var objFA: GenExprResult = genExprValue(ctx, fa2.object);
+            var rhs2: GenExprResult = genExprValue(ctx, stmtA.value);
+            var codeFA = objFA.code + rhs2.code;
+            // resolve struct type from obj
+            var sname2 = "";
+            if objFA.ty.endsWith("*") && objFA.ty != "i8*" {
+                sname2 = objFA.ty.slice(8, objFA.ty.len() - 1);
+            }
+            if sname2 == "" {
+                // field-by-name heuristic
+                var keys2 = ctx.structDefs.keys();
+                var ki2 = 0;
+                loop {
+                    if ki2 >= keys2.len() { break; }
+                    var kk2 = keys2.get(ki2);
+                    var deftmp2: StructDef = ctx.structDefs.get(kk2);
+                    var flds2 = deftmp2.fields;
+                    var fi2 = 0;
+                    loop {
+                        if fi2 >= flds2.length() { break; }
+                        var fld2item: StructFieldDef = flds2[fi2];
+                        if fld2item.name == fa2.name {
+                            sname2 = kk2;
+                            break;
+                        }
+                        fi2 = fi2 + 1;
+                    }
+                    if sname2 != "" { break; }
+                    ki2 = ki2 + 1;
+                }
+            }
+            if sname2 != "" && ctx.structDefs.has(sname2) {
+                var def2FA: StructDef = ctx.structDefs.get(sname2);
+                var objPtr2 = objFA.val;
+                if objFA.ty == "i64" {
+                    var castObj2 = nextTemp(ctx);
+                    codeFA = codeFA + castObj2 + " = inttoptr i64 " + objFA.val + " to " + def2FA.llvmName + "*\n";
+                    objPtr2 = castObj2;
+                } else if objFA.ty != def2FA.llvmName + "*" {
+                    var castObj2 = nextTemp(ctx);
+                    codeFA = codeFA + castObj2 + " = bitcast " + objFA.ty + " " + objFA.val + " to " + def2FA.llvmName + "*\n";
+                    objPtr2 = castObj2;
+                }
+                var flds2FA = def2FA.fields;
+                var idx2 = -1;
+                var fi3 = 0;
+                loop {
+                    if fi3 >= flds2FA.length() { break; }
+                    var fld3item: StructFieldDef = flds2FA[fi3];
+                    if fld3item.name == fa2.name { idx2 = fi3; break; }
+                    fi3 = fi3 + 1;
+                }
+                if idx2 >= 0 {
+                    var fld3at: StructFieldDef = flds2FA[idx2];
+                    var fty3 = fld3at.ty;
+                    var gep3 = nextTemp(ctx);
+                    codeFA = codeFA + gep3 + " = getelementptr inbounds " + def2FA.llvmName + ", " + def2FA.llvmName + "* " + objPtr2 + ", i32 0, i32 " + idx2.toString() + "\n";
+                    var storeVal2 = rhs2.val;
+                    if fty3 != rhs2.ty {
+                        if fty3 == "i64" && rhs2.ty.endsWith("*") {
+                            var castF = nextTemp(ctx);
+                            codeFA = codeFA + castF + " = ptrtoint " + rhs2.ty + " " + rhs2.val + " to i64\n";
+                            storeVal2 = castF;
+                        } else if fty3.endsWith("*") && rhs2.ty == "i64" {
+                            var castF = nextTemp(ctx);
+                            codeFA = codeFA + castF + " = inttoptr i64 " + rhs2.val + " to " + fty3 + "\n";
+                            storeVal2 = castF;
+                        } else if fty3 == "i1" && rhs2.ty == "i64" {
+                            var castF = nextTemp(ctx);
+                            codeFA = codeFA + castF + " = trunc i64 " + rhs2.val + " to i1\n";
+                            storeVal2 = castF;
+                        }
+                    }
+                    codeFA = codeFA + "store " + fty3 + " " + storeVal2 + ", " + fty3 + "* " + gep3 + "\n";
+                    return codeFA;
+                }
+            }
+            return rhs2.code;
+        }
         return "";
     }
     if stmt instanceof IfStmt {
-        var condv = genExprValue(ctx, stmt.condition);
-        var codeIf = condv.code;
-        var condVal = condv.val;
-        if condv.ty == "i64" {
+        var stmtIF: IfStmt = stmt;
+        var condvIf: GenExprResult = genExprValue(ctx, stmtIF.condition);
+        var codeIf = condvIf.code;
+        var condVal = condvIf.val;
+        if condvIf.ty == "i64" {
             var tmpc = nextTemp(ctx);
-            codeIf = codeIf + tmpc + " = icmp ne i64 " + condv.val + ", 0\n";
+            codeIf = codeIf + tmpc + " = icmp ne i64 " + condvIf.val + ", 0\n";
             condVal = tmpc;
         }
         var thenLabel = nextLabel(ctx, "then");
         var elseLabel = nextLabel(ctx, "else");
         var endLabel = nextLabel(ctx, "endif");
 
-        if stmt.elseBranch == null {
+        if stmtIF.elseBranch == null {
             codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + endLabel + "\n";
             codeIf = codeIf + thenLabel + ":\n";
-            codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
-            if !blockEndsWithTerminator(stmt.thenBranch) {
+            codeIf = codeIf + genStmt2(ctx, stmtIF.thenBranch);
+            if !blockEndsWithTerminator(stmtIF.thenBranch) {
                 codeIf = codeIf + "br label %" + endLabel + "\n";
             }
             codeIf = codeIf + endLabel + ":\n";
@@ -453,13 +1584,13 @@ func genStmt2(ctx, stmt): String {
 
         codeIf = codeIf + "br i1 " + condVal + ", label %" + thenLabel + ", label %" + elseLabel + "\n";
         codeIf = codeIf + thenLabel + ":\n";
-        codeIf = codeIf + genStmt2(ctx, stmt.thenBranch);
-        if !blockEndsWithTerminator(stmt.thenBranch) {
+        codeIf = codeIf + genStmt2(ctx, stmtIF.thenBranch);
+        if !blockEndsWithTerminator(stmtIF.thenBranch) {
             codeIf = codeIf + "br label %" + endLabel + "\n";
         }
         codeIf = codeIf + elseLabel + ":\n";
-        codeIf = codeIf + genStmt2(ctx, stmt.elseBranch);
-        if !blockEndsWithTerminator(stmt.elseBranch) {
+        codeIf = codeIf + genStmt2(ctx, stmtIF.elseBranch);
+        if !blockEndsWithTerminator(stmtIF.elseBranch) {
             codeIf = codeIf + "br label %" + endLabel + "\n";
         }
         codeIf = codeIf + endLabel + ":\n";
@@ -467,75 +1598,80 @@ func genStmt2(ctx, stmt): String {
     }
     if stmt instanceof BreakStmt {
         if ctx.loopStack.len() == 0 { return ""; }
-        var top = ctx.loopStack.get(ctx.loopStack.len() - 1);
+        var top: LoopInfo = ctx.loopStack.get(ctx.loopStack.len() - 1);
         return "br label %" + top.breakLabel + "\n";
     }
     if stmt instanceof ContinueStmt {
         if ctx.loopStack.len() == 0 { return ""; }
-        var top2 = ctx.loopStack.get(ctx.loopStack.len() - 1);
+        var top2: LoopInfo = ctx.loopStack.get(ctx.loopStack.len() - 1);
         return "br label %" + top2.continueLabel + "\n";
     }
     if stmt instanceof WhileStmt {
+        var stmtW: WhileStmt = stmt;
         var condLabel = nextLabel(ctx, "while.cond");
         var bodyLabel = nextLabel(ctx, "while.body");
         var endLabel = nextLabel(ctx, "while.end");
 
         var codeW = "br label %" + condLabel + "\n";
         codeW = codeW + condLabel + ":\n";
-        var condv = genExprValue(ctx, stmt.condition);
-        codeW = codeW + condv.code;
-        var condVal = condv.val;
-        if condv.ty == "i64" {
+        var condvW: GenExprResult = genExprValue(ctx, stmtW.condition);
+        codeW = codeW + condvW.code;
+        var condVal = condvW.val;
+        if condvW.ty == "i64" {
             var tmpc = nextTemp(ctx);
-            codeW = codeW + tmpc + " = icmp ne i64 " + condv.val + ", 0\n";
+            codeW = codeW + tmpc + " = icmp ne i64 " + condvW.val + ", 0\n";
             condVal = tmpc;
         }
         codeW = codeW + "br i1 " + condVal + ", label %" + bodyLabel + ", label %" + endLabel + "\n";
         codeW = codeW + bodyLabel + ":\n";
-        ctx.loopStack.push({ breakLabel: endLabel, continueLabel: condLabel });
-        codeW = codeW + genStmt2(ctx, stmt.body);
+        ctx.loopStack.push(LoopInfo { breakLabel: endLabel, continueLabel: condLabel });
+        codeW = codeW + genStmt2(ctx, stmtW.body);
         ctx.loopStack.pop();
-        if !(stmt.body instanceof BlockStmt) || !blockEndsWithTerminator(stmt.body) {
+        if !(stmtW.body instanceof BlockStmt) || !blockEndsWithTerminator(stmtW.body) {
             codeW = codeW + "br label %" + condLabel + "\n";
         }
         codeW = codeW + endLabel + ":\n";
         return codeW;
     }
     if stmt instanceof LoopStmt {
+        var stmtL: LoopStmt = stmt;
         var bodyLabel2 = nextLabel(ctx, "loop.body");
         var endLabel2 = nextLabel(ctx, "loop.end");
         var codeL = "br label %" + bodyLabel2 + "\n";
         codeL = codeL + bodyLabel2 + ":\n";
-        ctx.loopStack.push({ breakLabel: endLabel2, continueLabel: bodyLabel2 });
-        codeL = codeL + genStmt2(ctx, stmt.body);
+        ctx.loopStack.push(LoopInfo { breakLabel: endLabel2, continueLabel: bodyLabel2 });
+        codeL = codeL + genStmt2(ctx, stmtL.body);
         ctx.loopStack.pop();
-        if !(stmt.body instanceof BlockStmt) || !blockEndsWithTerminator(stmt.body) {
+        if !(stmtL.body instanceof BlockStmt) || !blockEndsWithTerminator(stmtL.body) {
             codeL = codeL + "br label %" + bodyLabel2 + "\n";
         }
         codeL = codeL + endLabel2 + ":\n";
         return codeL;
     }
     if stmt instanceof ForStmt {
-        if stmt.iterable instanceof ArrayExpr {
+        var stmtF: ForStmt = stmt;
+        if stmtF.iterable instanceof ArrayExpr {
+            var arrF: ArrayExpr = stmtF.iterable;
             var outF = "";
-            var nameF = stmt.variable;
+            var nameF = stmtF.variable;
             var ptrF = "%" + nameF + ".addr";
             var tyF = "i64";
             if !ctx.locals.has(nameF) {
-                outF = outF + ptrF + " = alloca " + tyF + ", align 8\n";
-                ctx.locals.set(nameF, { ptr: ptrF, ty: tyF });
+                ctx.funcAllocas = ctx.funcAllocas + ptrF + " = alloca " + tyF + ", align 8\n";
+                ctx.locals.set(nameF, LocalVar { ptr: ptrF, ty: tyF });
             } else {
-                ptrF = ctx.locals.get(nameF).ptr;
-                tyF = ctx.locals.get(nameF).ty;
+                var getF: LocalVar = ctx.locals.get(nameF);
+                ptrF = getF.ptr;
+                tyF = getF.ty;
             }
 
             var iF = 0;
             loop {
-                if iF >= stmt.iterable.elements.length() { break; }
-                var ev = genExprValue(ctx, stmt.iterable.elements[iF]);
+                if iF >= arrF.elements.length() { break; }
+                var ev: GenExprResult = genExprValue(ctx, arrF.elements[iF]);
                 outF = outF + ev.code;
                 outF = outF + "store " + tyF + " " + ev.val + ", " + tyF + "* " + ptrF + "\n";
-                outF = outF + genStmt2(ctx, stmt.body);
+                outF = outF + genStmt2(ctx, stmtF.body);
                 iF = iF + 1;
             }
             return outF;
@@ -543,28 +1679,59 @@ func genStmt2(ctx, stmt): String {
         return "";
     }
     if stmt instanceof ReturnStmt {
+        var stmtRS: ReturnStmt = stmt;
         if ctx.currentRetTy == "void" {
             return "ret void\n";
         }
-        if stmt.value instanceof LiteralExpr {
-            if stmt.value.kind.toString() == "LiteralKind::Null" {
+        if stmtRS.value instanceof LiteralExpr {
+            var retLit: LiteralExpr = stmtRS.value;
+            var retKStr = retLit.kind.toString();
+            if retKStr == "LiteralKind::Null" || retKStr == "5" {
                 if ctx.currentRetTy == "i32" {
                     return "ret i32 0\n";
                 }
                 if ctx.currentRetTy == "i64" {
                     return "ret i64 0\n";
                 }
+                if ctx.currentRetTy == "i8*" {
+                    return "ret i8* null\n";
+                }
+                if ctx.currentRetTy.endsWith("*") {
+                    return "ret " + ctx.currentRetTy + " null\n";
+                }
             }
         }
-        var rv = genExprValue(ctx, stmt.value);
-        return rv.code + "ret " + ctx.currentRetTy + " " + rv.val + "\n";
+        var rvR: GenExprResult = genExprValue(ctx, stmtRS.value);
+        var retCode = rvR.code;
+        var retVal = rvR.val;
+        if ctx.currentRetTy == "i64" {
+            if rvR.ty == "i1" {
+                var ext = nextTemp(ctx);
+                retCode = retCode + ext + " = zext i1 " + retVal + " to i64\n";
+                retVal = ext;
+            } else if rvR.ty != "i64" {
+                if rvR.ty.endsWith("*") {
+                    var ext = nextTemp(ctx);
+                    retCode = retCode + ext + " = ptrtoint " + rvR.ty + " " + retVal + " to i64\n";
+                    retVal = ext;
+                }
+            }
+        } else if ctx.currentRetTy.endsWith("*") {
+            if rvR.ty == "i64" {
+                var ext = nextTemp(ctx);
+                retCode = retCode + ext + " = inttoptr i64 " + retVal + " to " + ctx.currentRetTy + "\n";
+                retVal = ext;
+            }
+        }
+        return retCode + "ret " + ctx.currentRetTy + " " + retVal + "\n";
     }
     if stmt instanceof BlockStmt {
+        var stmtBS: BlockStmt = stmt;
         var out = "";
         var i = 0;
         loop {
-            if i >= stmt.statements.length() { break; }
-            var st = stmt.statements[i];
+            if i >= stmtBS.statements.length() { break; }
+            var st = stmtBS.statements[i];
             out = out + genStmt2(ctx, st);
             if stmtIsTerminator(st) {
                 break;
@@ -578,49 +1745,60 @@ func genStmt2(ctx, stmt): String {
 
 func genFunc2(ctx, f): String {
     ctx.blockId = 0;
-    var fnName = f.name;
+    var fDecl: FuncDeclStmt = f;
+    var fnName = fDecl.name;
     ctx.locals = HashMap.new();
     ctx.loopStack = Vec.new();
+    ctx.funcAllocas = "";  // reset per-function alloca accumulator
     var retTy = "i64";
     if fnName == "main" {
-        retTy = "i32";
+        retTy = "void";
+        fnName = "_rey_main";
     } else {
-        retTy = llvmTypeFromTagCtx(ctx, f.returnType);
+        retTy = llvmTypeFromTagCtx(ctx, fDecl.returnType);
     }
     ctx.currentRetTy = retTy;
 
     var params = "";
     var i = 0;
     loop {
-        if i >= f.params.length() { break; }
+        if i >= fDecl.params.length() { break; }
         if i > 0 { params = params + ", "; }
-        var p = f.params[i];
+        var p: FuncParam = fDecl.params[i];
         var pty = llvmTypeFromTagCtx(ctx, p.typeTag);
         params = params + pty + " %" + p.name;
         i = i + 1;
     }
 
-    var code = "define " + retTy + " @" + fnName + "(" + params + ") {\n";
-    code = code + "entry:\n";
+    // Build header with param allocas/stores
+    var header = "define " + retTy + " @" + fnName + "(" + params + ") {\n";
+    header = header + "entry:\n";
 
     i = 0;
     loop {
-        if i >= f.params.length() { break; }
-        var p2 = f.params[i];
+        if i >= fDecl.params.length() { break; }
+        var p2: FuncParam = fDecl.params[i];
         var pty2 = llvmTypeFromTagCtx(ctx, p2.typeTag);
         var ptrp = "%" + p2.name + ".addr";
-        code = code + ptrp + " = alloca " + pty2 + ", align 8\n";
-        code = code + "store " + pty2 + " %" + p2.name + ", " + pty2 + "* " + ptrp + "\n";
-        ctx.locals.set(p2.name, { ptr: ptrp, ty: pty2 });
+        header = header + ptrp + " = alloca " + pty2 + ", align 8\n";
+        header = header + "store " + pty2 + " %" + p2.name + ", " + pty2 + "* " + ptrp + "\n";
+        ctx.locals.set(p2.name, LocalVar { ptr: ptrp, ty: pty2 });
         i = i + 1;
     }
 
-    // body is a BlockStmt
-    code = code + genStmt2(ctx, f.body);
+    // Generate body — var allocas go to ctx.funcAllocas, stores remain inline
+    var bodyCode = genStmt2(ctx, fDecl.body);
+
+    // Assemble: header + hoisted var allocas + body
+    var code = header + ctx.funcAllocas + bodyCode;
     if retTy == "i32" {
         code = code + "ret i32 0\n";
     } else if retTy == "void" {
         code = code + "ret void\n";
+    } else if retTy == "i8*" {
+        code = code + "ret i8* null\n";
+    } else if retTy.endsWith("*") {
+        code = code + "ret " + retTy + " null\n";
     } else {
         code = code + "ret i64 0\n";
     }
@@ -630,26 +1808,55 @@ func genFunc2(ctx, f): String {
 
 func codegenProgram2(program): String {
     var ctx = ctxNew("rey");
-    var bodies = [];
+    var bodies = "";
 
     var i = 0;
     loop {
         if i >= program.statements.length() { break; }
         var st0 = program.statements[i];
         if st0 instanceof StructDeclStmt {
-            var llvmName = "%struct." + st0.name;
+            var sDcl: StructDeclStmt = st0;
+            var llvmName = "%struct." + sDcl.name;
             var fields = [];
             var j = 0;
             loop {
-                if j >= st0.fields.length() { break; }
-                var f = st0.fields[j];
-                fields.push({ name: f.name, ty: llvmTypeFromTagCtx(ctx, f.typeTag) });
+                if j >= sDcl.fields.length() { break; }
+                var f: StructField = sDcl.fields[j];
+                fields.push(StructFieldDef { name: f.name, ty: llvmTypeFromTagCtx(ctx, f.typeTag) });
                 j = j + 1;
             }
-            ctx.structDefs.set(st0.name, { llvmName: llvmName, fields: fields });
+            ctx.structDefs.set(sDcl.name, StructDef { llvmName: llvmName, fields: fields });
+            if !ctx.structTags.has(sDcl.name) {
+                ctx.structTags.set(sDcl.name, ctx.nextStructTag);
+                ctx.nextStructTag = ctx.nextStructTag + 1;
+            }
         }
         if st0 instanceof EnumDeclStmt {
-            ctx.enumDefs.set(st0.name, st0.variants);
+            var eDcl: EnumDeclStmt = st0;
+            ctx.enumDefs.set(eDcl.name, eDcl.variants);
+        }
+        i = i + 1;
+    }
+
+    // pre-pass: collect function signatures for call-site coercion
+    // stored as funcname:N -> paramType; funcname:ret -> returnType
+    i = 0;
+    loop {
+        if i >= program.statements.length() { break; }
+        var st = program.statements[i];
+        if st instanceof FuncDeclStmt {
+            var fSt: FuncDeclStmt = st;
+            var pi = 0;
+            loop {
+                if pi >= fSt.params.length() { break; }
+                var fParam: FuncParam = fSt.params[pi];
+                var pTy = llvmTypeFromTagCtx(ctx, fParam.typeTag);
+                ctx.funcSigs.set(fSt.name + ":" + pi.toString(), pTy);
+                pi = pi + 1;
+            }
+            var retTySig = llvmTypeFromTagCtx(ctx, fSt.returnType);
+            if fSt.name == "main" { retTySig = "void"; }
+            ctx.funcSigs.set(fSt.name + ":ret", retTySig);
         }
         i = i + 1;
     }
@@ -659,7 +1866,8 @@ func codegenProgram2(program): String {
         if i >= program.statements.length() { break; }
         var st = program.statements[i];
         if st instanceof FuncDeclStmt {
-            bodies.push(genFunc2(ctx, st));
+            var fSt2: FuncDeclStmt = st;
+            bodies = bodies + genFunc2(ctx, fSt2);
         }
         i = i + 1;
     }
@@ -667,20 +1875,97 @@ func codegenProgram2(program): String {
     var code = "; Module: " + ctx.moduleName + "\n";
     code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
     code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
-    code = code + "declare i32 @printf(i8*, ...)\n\n";
+    code = code + "declare i32 @printf(i8*, ...)\n";
+    code = code + "declare i32 @strcmp(i8*, i8*)\n";
+    // --- rey runtime extern declarations (strings: i8* ABI; vec/map/result: i64 ABI) ---
+    code = code + "declare i8*  @rey_str_new(i8*, i64)\n";
+    code = code + "declare i8*  @rey_str_cstr(i8*)\n";
+    code = code + "declare i8*  @rey_str_empty()\n";
+    code = code + "declare i64  @rey_str_len(i8*)\n";
+    code = code + "declare i8*  @rey_str_concat(i8*, i8*)\n";
+    code = code + "declare i8*  @rey_str_slice(i8*, i64, i64)\n";
+    code = code + "declare i8*  @rey_str_char_at(i8*, i64)\n";
+    code = code + "declare i64  @rey_str_index_of(i8*, i8*)\n";
+    code = code + "declare i64  @rey_str_starts_with(i8*, i8*)\n";
+    code = code + "declare i64  @rey_str_ends_with(i8*, i8*)\n";
+    code = code + "declare i8*  @rey_str_trim(i8*)\n";
+    code = code + "declare i8*  @rey_str_replace(i8*, i8*, i8*)\n";
+    code = code + "declare i8*  @rey_str_repeat(i8*, i64)\n";
+    code = code + "declare i8*  @rey_str_to_upper(i8*)\n";
+    code = code + "declare i8*  @rey_str_to_lower(i8*)\n";
+    code = code + "declare i64  @rey_str_eq(i8*, i8*)\n";
+    code = code + "declare i64  @rey_str_split(i8*, i8*)\n";
+    code = code + "declare i8*  @rey_int_to_str(i64)\n";
+    code = code + "declare i8*  @rey_val_to_str(i64)\n";
+    code = code + "declare i8*  @rey_float_to_str(double)\n";
+    code = code + "declare i8*  @rey_bool_to_str(i64)\n";
+    code = code + "declare void @rey_print(i8*)\n";
+    code = code + "declare void @rey_println(i8*)\n";
+    code = code + "declare i64  @rey_vec_new()\n";
+    code = code + "declare void @rey_vec_push(i64, i64)\n";
+    code = code + "declare i64  @rey_vec_pop(i64)\n";
+    code = code + "declare i64  @rey_vec_len(i64)\n";
+    code = code + "declare i64  @rey_vec_get(i64, i64)\n";
+    code = code + "declare void @rey_vec_set(i64, i64, i64)\n";
+    code = code + "declare i64  @rey_vec_contains(i64, i64)\n";
+    code = code + "declare i64  @rey_vec_str_contains(i64, i8*)\n";
+    code = code + "declare i8*  @rey_vec_join(i64, i8*)\n";
+    code = code + "declare i64  @rey_vec_slice_v(i64, i64, i64)\n";
+    code = code + "declare i64  @rey_vec_reverse(i64)\n";
+    code = code + "declare i64  @rey_vec_map(i64, i64)\n";
+    code = code + "declare i64  @rey_vec_filter(i64, i64)\n";
+    code = code + "declare i64  @rey_hm_new()\n";
+    code = code + "declare void @rey_hm_set(i64, i8*, i64)\n";
+    code = code + "declare i64  @rey_hm_get(i64, i8*)\n";
+    code = code + "declare i64  @rey_hm_has(i64, i8*)\n";
+    code = code + "declare void @rey_hm_delete(i64, i8*)\n";
+    code = code + "declare i64  @rey_hm_keys(i64)\n";
+    code = code + "declare i64  @rey_hm_values(i64)\n";
+    code = code + "declare i64  @rey_ok(i64)\n";
+    code = code + "declare i64  @rey_err(i64)\n";
+    code = code + "declare i64  @rey_ok_str(i8*)\n";
+    code = code + "declare i64  @rey_err_str(i8*)\n";
+    code = code + "declare i64  @rey_result_is_ok(i64)\n";
+    code = code + "declare i64  @rey_result_is_err(i64)\n";
+    code = code + "declare i64  @rey_result_unwrap(i64)\n";
+    code = code + "declare i64  @rey_result_unwrap_or(i64, i64)\n";
+    code = code + "declare i8*  @rey_result_unwrap_str(i64)\n";
+    code = code + "declare i8*  @rey_result_unwrap_or_str(i64, i8*)\n";
+    code = code + "declare i64  @rey_some(i64)\n";
+    code = code + "declare i64  @rey_none()\n";
+    code = code + "declare i64  @rey_option_is_some(i64)\n";
+    code = code + "declare i64  @rey_option_unwrap(i64)\n";
+    code = code + "declare i64  @rey_instanceof_tag(i64, i64)\n";
+    code = code + "declare i64  @rey_struct_instanceof(i64, i64)\n";
+    code = code + "declare i8*  @rey_read_file(i8*)\n";
+    code = code + "declare void @rey_write_file(i8*, i8*)\n";
+    code = code + "declare void @rey_append_file(i8*, i8*)\n";
+    code = code + "declare i64  @rey_file_exists(i8*)\n";
+    code = code + "declare void @rey_delete_file(i8*)\n";
+    code = code + "declare void @rey_mkdir(i8*)\n";
+    code = code + "declare i64  @rey_list_dir(i8*)\n";
+    code = code + "declare i64  @rey_exec_cmd(i8*)\n";
+    code = code + "declare void @rey_exit(i64)\n";
+    code = code + "declare i8*  @rey_get_env(i8*)\n";
+    code = code + "declare void @rey_init(i32, i8**)\n";
+    code = code + "declare i64  @rey_args()\n";
+    code = code + "declare void @rey_panic(i8*)\n";
+    code = code + "declare i8*  @rey_alloc(i64)\n";
+    code = code + "\n";
 
     var keys = ctx.structDefs.keys();
     i = 0;
     loop {
         if i >= keys.len() { break; }
         var name = keys.get(i);
-        var def = ctx.structDefs.get(name);
+        var def: StructDef = ctx.structDefs.get(name);
         var line = def.llvmName + " = type { ";
         var j = 0;
         loop {
             if j >= def.fields.length() { break; }
+            var defFld: StructFieldDef = def.fields[j];
             if j > 0 { line = line + ", "; }
-            line = line + def.fields[j].ty;
+            line = line + defFld.ty;
             j = j + 1;
         }
         line = line + " }\n";
@@ -697,7 +1982,7 @@ func codegenProgram2(program): String {
         if i >= ctx.strings.length() { break; }
         var s = ctx.strings[i];
         // interpret stored strings: if they already contain \\0A, decode for length via llvmCStringInfo on decoded form
-        var info = llvmCStringInfo(s);
+        var info: CStringInfo = llvmCStringInfo(s);
         code = code + llvmStrGlobalName(i) + " = private unnamed_addr constant [" + info.len.toString() + " x i8] c\"" + info.escaped + "\", align 1\n";
         i = i + 1;
     }
@@ -705,12 +1990,16 @@ func codegenProgram2(program): String {
         code = code + "\n";
     }
 
-    i = 0;
-    loop {
-        if i >= bodies.length() { break; }
-        code = code + bodies[i];
-        i = i + 1;
-    }
+    code = code + bodies;
+
+    // C entry point: calls rey_init(argc, argv) then _rey_main()
+    code = code + "define i32 @main(i32 %argc, i8** %argv) {\n";
+    code = code + "entry:\n";
+    code = code + "  call void @rey_init(i32 %argc, i8** %argv)\n";
+    code = code + "  call void @_rey_main()\n";
+    code = code + "  ret i32 0\n";
+    code = code + "}\n";
+
     return code;
 }
 
@@ -757,196 +2046,55 @@ func genLit(lit): String {
     }
     return "undef";
 }
-
-func genExpr(ctx, expr, env): String {
-    if expr.kind == ExprKind.Literal {
-        var le = expr;
-        return genLit(le);
-    }
-    if expr.kind == ExprKind.Identifier {
-        var ie = expr;
-        return "%" + ie.name;
-    }
-    if expr.kind == ExprKind.Binary {
-        var be = expr;
-        var left = genExpr(ctx, be.left, env);
-        var right = genExpr(ctx, be.right, env);
-        var op = "+";
-        if be.op == "-" { op = "-"; }
-        if be.op == "*" { op = "*"; }
-        if be.op == "/" { op = "sitofp"; }
-        if be.op == "==" { op = "icmp eq"; }
-        if be.op == "!=" { op = "icmp ne"; }
-        if be.op == "<" { op = "icmp slt"; }
-        if be.op == ">" { op = "icmp sgt"; }
-        if be.op == "<=" { op = "icmp sle"; }
-        if be.op == ">=" { op = "icmp sge"; }
-        return left + " " + op + " " + right;
-    }
-    if expr.kind == ExprKind.Call {
-        var ce = expr;
-        var callee = genExpr(ctx, ce.callee, env);
-        var args = "";
-        var i = 0;
-        loop {
-            if i >= ce.args.length() {
-                break;
-            }
-            if i > 0 { args = args + ", "; }
-            args = args + genExpr(ctx, ce.args[i], env);
-            i = i + 1;
-        }
-        return callee + "(" + args + ")";
-    }
-    if expr.kind == ExprKind.FieldAccess {
-        var fae = expr;
-        var obj = genExpr(ctx, fae.object, env);
-        return obj + "." + fae.name;
-    }
-    if expr.kind == ExprKind.Index {
-        var iexpr = expr;
-        var target = genExpr(ctx, iexpr.target, env);
-        var index = genExpr(ctx, iexpr.index, env);
-        return target + "[" + index + "]";
-    }
-    if expr.kind == ExprKind.Lambda {
-        return "lambda";
-    }
-    return "undef";
-}
-
-func genStmt(ctx, stmt, env): String {
-    var code = "";
-    
-    if stmt.kind == StmtKind.VarDecl {
-        var vds = stmt;
-        var value = genExpr(ctx, vds.value, env);
-        code = "%" + vds.name + " = alloca i64, align 8\n";
-        code = code + "store i64 " + value + ", i64* %" + vds.name + "\n";
-    }
-    
-    if stmt.kind == StmtKind.ConstDecl {
-        var cds = stmt;
-        var value = genExpr(ctx, cds.value, env);
-        code = "%" + cds.name + " = alloca i64, align 8\n";
-        code = code + "store i64 " + value + ", i64* %" + cds.name + "\n";
-    }
-    
-    if stmt.kind == StmtKind.FuncDecl {
-        var fds = stmt;
-        ctx.currentFunc = fds.name;
-        ctx.blockId = 0;
-        
-        var retTy = "i64";
-        var params = "";
-        var i = 0;
-        loop {
-            if i >= fds.params.length() {
-                break;
-            }
-            if i > 0 { params = params + ", "; }
-            params = params + "i64 %" + fds.params[i].name;
-            i = i + 1;
-        }
-        
-        code = "define " + retTy + " @" + fds.name + "(" + params + ") {\n";
-        code = code + "entry:\n";
-        
-        i = 0;
-        loop {
-            if i >= fds.params.length() {
-                break;
-            }
-            var pname = fds.params[i].name;
-            code = code + "%" + pname + "_addr = alloca i64, align 8\n";
-            code = code + "store i64 %" + pname + ", i64* %" + pname + "_addr\n";
-            i = i + 1;
-        }
-        
-        var j = 0;
-        loop {
-            if j >= fds.body.length() {
-                break;
-            }
-            code = code + genStmt(ctx, fds.body[j], env);
-            j = j + 1;
-        }
-        
-        code = code + "ret i64 0\n";
-        code = code + "}\n";
-    }
-    
-    if stmt.kind == StmtKind.Return {
-        var rs = stmt;
-        var value = genExpr(ctx, rs.value, env);
-        code = "ret i64 " + value + "\n";
-    }
-    
-    if stmt.kind == StmtKind.ExprStmt {
-        var es = stmt;
-        code = genExpr(ctx, es.expr, env) + "\n";
-    }
-    
-    return code;
-}
-
-func codegenProgram(ctx, program): String {
-    var code = "; Module: " + ctx.moduleName + "\n";
-    code = code + "target datalayout = \"e-m:e-i64:64-f80:128-n8:16:32:64-S128\"\n";
-    code = code + "target triple = \"aarch64-apple-darwin\"\n\n";
-    
-    code = code + "define void @println(i8*) {\n";
-    code = code + "  %call = call i32 (i8*, ...) @printf(i8* %0)\n";
-    code = code + "  ret void\n";
-    code = code + "}\n\n";
-    
-    code = code + "declare i32 @printf(i8*, ...)\n\n";
-    
-    var i = 0;
-    loop {
-        if i >= program.statements.length() {
-            break;
-        }
-        code = code + genStmt(ctx, program.statements[i], envNew());
-        i = i + 1;
-    }
-    
-    return code;
-}
-
 export pub func generateIR(program): String {
     return codegenProgram2(program);
 }
 
-export pub func compileLLVM(ir: String, outputPath: String, release: bool) {
+export pub func compileLLVM(ir: String, outputPath: String, release: bool, rtDir: String) {
     var llPath = outputPath + ".ll";
     var objPath = outputPath + ".o";
 
     writeFile(llPath, ir);
-    
-    var opt = "-O2";
-    if release { opt = "-O3"; }
-    
+
+    var opt = "-O0";
+    if release { opt = "-O2"; }
+
+    // ensure runtime is built
+    var libPath = rtDir + "/librey_rt.a";
+    if !fileExists(libPath) {
+        var makeCmd = "make -C \"" + rtDir + "\"";
+        var makeRes = exec(makeCmd);
+        if makeRes.isErr() {
+            return Result.Err("failed to build rey runtime: " + makeRes.unwrapOr("make failed"));
+        }
+    }
+
     var llcCmd = "llc " + opt + " -filetype=obj \"" + llPath + "\" -o \"" + objPath + "\"";
+    println("DEBUG llc: " + llcCmd);
     var llcResult = exec(llcCmd);
     if llcResult.isErr() {
+        println("DEBUG llc failed: " + llcResult.unwrapOr("?"));
         // fallback: clang can compile LLVM IR directly (useful when llc isn't installed)
         var clangObjCmd = "clang " + opt + " -c -x ir \"" + llPath + "\" -o \"" + objPath + "\"";
+        println("DEBUG clang obj: " + clangObjCmd);
         var clangObjResult = exec(clangObjCmd);
         if clangObjResult.isErr() {
+            println("DEBUG clang obj failed: " + clangObjResult.unwrapOr("?"));
             return Result.Err(clangObjResult.unwrapOr(llcResult.unwrapOr("llc failed")));
         }
     }
-    
-    var clangCmd = "clang \"" + objPath + "\" -o \"" + outputPath + "\"";
+
+    var clangCmd = "clang \"" + objPath + "\" -L\"" + rtDir + "\" -lrey_rt -o \"" + outputPath + "\"";
+    println("DEBUG clang link: " + clangCmd);
     var clangResult = exec(clangCmd);
     if clangResult.isErr() {
+        println("DEBUG clang link failed: " + clangResult.unwrapOr("?"));
         return Result.Err(clangResult.unwrapOr("clang failed"));
     }
 
-    // best-effort cleanup
-    deleteFile(llPath);
-    deleteFile(objPath);
-    
+    // best-effort cleanup (temporarily disabled for debugging)
+    // deleteFile(llPath);
+    // deleteFile(objPath);
+
     return Result.Ok(outputPath);
 }
