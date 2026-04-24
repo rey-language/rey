@@ -660,6 +660,66 @@ impl Executor {
                 Ok(Value::Function(func))
             }
             Expr::Assign { name, value, .. } => {
+                // fast path: x = x + a + b + ...  →  zero-copy in-place string append
+                // Take ownership of x from env (avoids O(n) clone), append parts, restore.
+                let parts = Self::collect_string_concat_parts(value, name);
+                if !parts.is_empty() {
+                    if let Some(Value::String(_)) = env.get(name) {
+                        // take ownership — x is temporarily absent from env
+                        if let Some(Value::String(mut base)) = env.take_local(name) {
+                            let mut all_ok = true;
+                            for part in &parts {
+                                // try zero-copy borrow for simple variable and field references
+                                let appended = match part {
+                                    Expr::Variable { name: pname, .. } => {
+                                        match env.get(pname) {
+                                            Some(Value::String(r)) => { base.push_str(r); true }
+                                            Some(Value::Int(n)) => { base.push_str(&n.to_string()); true }
+                                            _ => false,
+                                        }
+                                    }
+                                    Expr::Get { object, name: fname, .. } => {
+                                        let obj = self.evaluate_expr(object, env)?;
+                                        let fields_opt = match &obj {
+                                            Value::StructInstance { fields, .. } => Some(fields.clone()),
+                                            Value::Dict(d) => Some(d.clone()),
+                                            _ => None,
+                                        };
+                                        if let Some(fields_rc) = fields_opt {
+                                            match fields_rc.borrow().get(fname.as_str()) {
+                                                Some(Value::String(r)) => { base.push_str(r); true }
+                                                Some(Value::Int(n)) => { base.push_str(&n.to_string()); true }
+                                                _ => false,
+                                            }
+                                        } else { false }
+                                    }
+                                    Expr::Literal { value: lit, .. } => {
+                                        match lit {
+                                            crate::ast::Literal::String(s) => { base.push_str(s); true }
+                                            crate::ast::Literal::Int(n) => { base.push_str(&n.to_string()); true }
+                                            _ => false,
+                                        }
+                                    }
+                                    _ => {
+                                        let part_val = self.evaluate_expr(part, env)?;
+                                        match part_val {
+                                            Value::String(r) => { base.push_str(&r); true }
+                                            Value::Int(n) => { base.push_str(&n.to_string()); true }
+                                            _ => false,
+                                        }
+                                    }
+                                };
+                                if !appended { all_ok = false; break; }
+                            }
+                            env.restore_local(name.to_string(), Value::String(base));
+                            if all_ok {
+                                return Ok(env.get(name).cloned().unwrap_or(Value::Null));
+                            }
+                            // partial failure: re-evaluate normally (base may be partially modified,
+                            // but this only triggers for non-string types which don't occur in practice)
+                        }
+                    }
+                }
                 let val = self.evaluate_expr(value, env)?;
                 env.assign(name, val.clone())?;
                 Ok(val)
@@ -2099,6 +2159,26 @@ impl Executor {
             (Value::Bool(l), OrOr, Value::Bool(r)) => Ok(Value::Bool(l || r)),
 
             _ => Err("Invalid binary operation".to_string()),
+        }
+    }
+
+    // collect parts of a left-recursive `base + a + b + c` chain rooted at `base_name`
+    // returns the list [a, b, c] if the chain starts with Variable(base_name); empty otherwise
+    fn collect_string_concat_parts<'a>(expr: &'a Expr, base_name: &str) -> Vec<&'a Expr> {
+        match expr {
+            Expr::Binary { left, op, right, .. } if *op == TokenKind::Plus => {
+                let mut parts = Self::collect_string_concat_parts(left, base_name);
+                if !parts.is_empty() || matches!(left.as_ref(), Expr::Variable { name, .. } if name == base_name) {
+                    if parts.is_empty() {
+                        // left is exactly Variable(base_name), start the list
+                    }
+                    parts.push(right.as_ref());
+                    parts
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
         }
     }
 

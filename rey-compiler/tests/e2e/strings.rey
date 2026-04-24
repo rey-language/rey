@@ -1,0 +1,25 @@
+func main() {
+    var a = "hello";
+    var b = " world";
+    var c = a + b;
+    println(c);
+
+    println(a.len().toString());
+    println(a.startsWith("hel").toString());
+    println(a.endsWith("llo").toString());
+    println(c.indexOf("world").toString());
+    println(c.slice(6, 11));
+    println(a[1]);
+    println("  hi  ".trim());
+    println(42.toString());
+    println(true.toString());
+    println(false.toString());
+    var eq = a == "hello";
+    println(eq.toString());
+    var neq = a == "other";
+    println(neq.toString());
+    var rep = "ab".repeat(3);
+    println(rep);
+    var replaced = "hello world".replace("world", "Rey");
+    println(replaced);
+}

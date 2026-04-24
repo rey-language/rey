@@ -1,0 +1,28 @@
+func main() {
+    var v = Vec.new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    println(v.length().toString());
+    println(v.get(0).toString());
+    println(v.get(2).toString());
+    println(v.pop().toString());
+    println(v.length().toString());
+    v.set(0, 99);
+    println(v.get(0).toString());
+
+    // string vec
+    var sv = Vec.new();
+    sv.push("foo");
+    sv.push("bar");
+    sv.push("baz");
+    println(sv.join(", "));
+    println(sv.contains("bar").toString());
+    println(sv.contains("qux").toString());
+    println(sv.length().toString());
+
+    // array literal → vec
+    var arr = [1, 2, 3, 4, 5];
+    println(arr.length().toString());
+    println(arr.get(4).toString());
+}

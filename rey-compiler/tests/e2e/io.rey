@@ -1,0 +1,12 @@
+func main() {
+    var path = "/tmp/rey_io_test.txt";
+    writeFile(path, "hello from rey\n");
+    println(fileExists(path).toString());
+    var content = readFile(path);
+    // trim trailing newline before printing
+    println(content.trim());
+    writeFile(path, "overwritten\n");
+    println(readFile(path).trim());
+    deleteFile(path);
+    println(fileExists(path).toString());
+}

@@ -14,6 +14,10 @@ tests=(
   structs
   enums
   imports
+  strings
+  vec
+  collections
+  io
 )
 
 pushd "$dir" >/dev/null

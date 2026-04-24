@@ -1,0 +1,32 @@
+func main() {
+    // HashMap
+    var hm = HashMap.new();
+    hm.set("name", "Alice");
+    hm.set("lang", "Rey");
+    println(hm.has("name").toString());
+    println(hm.has("missing").toString());
+    // get returns i64 (pointer cast); cast back to string for println
+    var name = hm.get("name");
+    println(name.toString());
+    hm.set("name", "Bob");
+    println(hm.get("name").toString());
+
+    // Result
+    var ok = Result.Ok(42);
+    var err = Result.Err("oops");
+    println(ok.isOk().toString());
+    println(err.isOk().toString());
+    println(err.isErr().toString());
+    println(ok.unwrap().toString());
+    println(ok.unwrapOr(99).toString());
+    println(err.unwrapOr(99).toString());
+
+    // Vec of ints, pop, length
+    var v = Vec.new();
+    v.push(100);
+    v.push(200);
+    v.push(300);
+    println(v.length().toString());
+    println(v.pop().toString());
+    println(v.length().toString());
+}

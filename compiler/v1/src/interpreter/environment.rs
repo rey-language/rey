@@ -33,8 +33,8 @@ impl Environment {
     pub fn with_parent(parent: Environment) -> Self {
         Self {
             values: HashMap::new(),
-            struct_defs: parent.struct_defs.clone(),
-            enum_defs: parent.enum_defs.clone(),
+            struct_defs: HashMap::new(),  // look up via parent chain, avoid cloning AST
+            enum_defs: HashMap::new(),
             parent: Some(Rc::new(parent)),
         }
     }
@@ -51,6 +51,21 @@ impl Environment {
         } else {
             None
         }
+    }
+
+    // mutable access to a local-scope variable (parent scope is immutable via Rc)
+    pub fn get_mut_local(&mut self, name: &str) -> Option<&mut Value> {
+        self.values.get_mut(name)
+    }
+
+    // take ownership of a local-scope value (removes from env); caller must put it back
+    pub fn take_local(&mut self, name: &str) -> Option<Value> {
+        self.values.remove(name)
+    }
+
+    // restore a previously taken local value
+    pub fn restore_local(&mut self, name: String, value: Value) {
+        self.values.insert(name, value);
     }
 
     pub fn assign(&mut self, name: &str, value: Value) -> Result<(), String> {
@@ -85,6 +100,12 @@ impl Environment {
     }
 
     pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
-        self.struct_defs.get(name)
+        if let Some(def) = self.struct_defs.get(name) {
+            Some(def)
+        } else if let Some(parent) = &self.parent {
+            parent.get_struct(name)
+        } else {
+            None
+        }
     }
 }
