@@ -1,21 +1,44 @@
+# Rust build artifacts
 target/
-.DS_Store
 *.lock
+
+# macOS
+.DS_Store
+
+# LLVM intermediate files
 *.ll
 *.o
 
+# Compiled binaries (built from source, not committed)
+# Exception: releases/ holds pre-built release binaries
+rey-compiler/main
+rey-compiler/main.bin
+rey-compiler/runtime/*.o
+rey-compiler/runtime/librey_rt.a
 
+# Test build outputs
+rey-compiler/tests/e2e/*.ll
+rey-compiler/tests/e2e/*.o
+rey-compiler/tests/e2e/*.bin
+rey-compiler/tests/e2e/*.bin.ll
+rey-compiler/tests/e2e/*.bin.o
+
+# Test binaries (no-extension compiled outputs next to source)
+rey-compiler/tests/e2e/hello
+rey-compiler/tests/e2e/math
+rey-compiler/tests/e2e/loops
+rey-compiler/tests/e2e/functions
+rey-compiler/tests/e2e/structs
+rey-compiler/tests/e2e/enums
+rey-compiler/tests/e2e/strings
+rey-compiler/tests/e2e/vec
+rey-compiler/tests/e2e/collections
+rey-compiler/tests/e2e/io
+rey-compiler/tests/e2e/imports
+
+# Scratch / temporary
 resumes.txt
 test_all.rey
 projects/bank/
 projects/bank-project/
 compmaster
-
-# bootstrap compiler e2e outputs (native binaries next to sources)
-rey-compiler/tests/e2e/*
-!rey-compiler/tests/e2e/*.rey
-!rey-compiler/tests/e2e/*.out
-!rey-compiler/tests/e2e/run.sh
-!rey-compiler/tests/e2e/imports/
-!rey-compiler/tests/e2e/imports/**/*.rey
-!rey-compiler/tests/e2e/imports/**/*.out
