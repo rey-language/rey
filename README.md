@@ -1,155 +1,216 @@
-# Rey
+# Rey Programming Language
 
-> Rust power without Rust complexity.
-
-Rey is a fast, modern programming language designed to be powerful without being painful. Write clean, readable code that compiles to blazing-fast native binaries — without fighting a borrow checker or managing memory manually.
-
----
-
-## Why Rey?
-
-Every language makes a tradeoff:
-
-- **Python** — readable and simple, but slow
-- **Rust** — incredibly fast and safe, but complex
-- **Go** — simple and fast, but limited
-- **C** — bare metal speed, but dangerous at scale
-
-Rey bets that you shouldn't have to choose. The compiler handles the hard parts so you don't have to.
-
----
-
-## What it looks like
+**Rey** is a statically-typed, compiled programming language with clean syntax, built for clarity and hackability. The compiler is written in Rey itself — it bootstraps from a Rust reference interpreter and emits LLVM IR compiled to native binaries via `clang`.
 
 ```rey
-struct Player {
-    health: int,
-    name: String,
-
-    pub func create(n: String, h: int): Player {
-        return Player { name: n, health: h };
-    }
-
-    pub func takeDamage(amount: int): Void {
-        health -= amount;
-        println("{name} took {amount} damage. HP: {health}");
-    }
-
-    pub func isAlive(): bool {
-        return health > 0;
-    }
+func greet(name: String): String {
+    return "Hello, " + name + "!";
 }
 
 func main(): Void {
-    var p = Player.create("Misbah", 100);
-    p.takeDamage(30);
-    println(p.isAlive());
+    println(greet("Rey"));
 }
 ```
-
----
-
-## Features
-
-- **Clean syntax** — readable, minimal ceremony
-- **Strong type system** — optional annotations, enforced when specified
-- **Structs with methods** — data and behavior together, no inheritance complexity
-- **Smart memory** — the compiler manages memory, you don't
-- **Multidomain** — one language for web, CLI, games, AI, systems
-- **Bootstrap compiler (experimental)** — early LLVM backend work lives in `rey-compiler/`
 
 ---
 
 ## Status
 
-Rey is under active development. Current interpreter version: **v0.2.0** (`compiler/v1`).
+| Component | State |
+|-----------|-------|
+| Lexer | ✅ Complete |
+| Parser | ✅ Complete |
+| Type checker | 🚧 Stub (inference only) |
+| LLVM backend | ✅ Complete |
+| C runtime library | ✅ Complete |
+| Self-hosting | ✅ Phase H — native compiler passes all e2e tests |
 
-| Feature | Status |
-|---------|--------|
-| Variables & types | ✅ Done |
-| Control flow | ✅ Done |
-| Functions | ✅ Done |
-| Arrays & Dicts | ✅ Done |
-| Structs | ✅ Done |
-| String interpolation | ✅ Done |
-| Error messages | ✅ Done |
-| Import system | ✅ Done |
-| Standard library | ✅ Done (bootstrap-focused) |
-| LLVM backend | 🔨 In progress (bootstrap subset) |
-| Self-hosting compiler | 🔨 In progress |
+The native compiler (`rey-compiler/main.rey`) compiles to a standalone binary using `clang`. No Rust is required at runtime.
 
 ---
 
-## Getting started
+## Quick Start
 
-### Install
+### Prerequisites
 
-Download the latest binary from [releases](./releases):
+- macOS arm64 (other platforms: build from source)
+- `clang` on `PATH`
 
-**macOS (Apple Silicon)**
-```bash
-curl -L https://github.com/rey-language/rey/releases/latest/download/rey-v0-macos-arm64 -o rey
-chmod +x rey
-sudo mv rey /usr/local/bin/rey
+### Pre-built binary (macOS arm64)
+
+```sh
+# Use the pre-built binary from releases/
+chmod +x releases/0.2.0/rey-macos-arm64
+
+# Compile a program
+./releases/0.2.0/rey-macos-arm64 rey-compiler/main.rey build examples/basic/hello.rey
+
+# Run a program
+./releases/0.2.0/rey-macos-arm64 rey-compiler/main.rey run examples/basic/hello.rey
 ```
 
-**Windows (x86_64)**
-Download `rey-v0-windows-x86_64.exe` from releases and add to PATH.
+### Build from source
 
-### Run a file
+```sh
+# 1. Build the Rust bootstrap interpreter
+cd compiler/v1 && cargo build --release && cd ../..
 
-```bash
-rey hello.rey
+# 2. Compile the Rey compiler using the bootstrap
+./compiler/v1/target/release/rey-v0 rey-compiler/main.rey build rey-compiler/main.rey
+
+# 3. Sign the output (macOS)
+codesign -s - rey-compiler/main.bin
+
+# 4. Run a Rey program with the native compiler
+./rey-compiler/main.bin rey-compiler/main.rey run examples/basic/hello.rey
 ```
 
-### Build a native binary (experimental)
-The experimental bootstrap compiler lives in `rey-compiler/` and currently supports a limited subset of the language (see `syntax.md`).
+---
 
-From this repo:
-```bash
-cd compiler/v1
-cargo build --release
-./target/release/rey-v0 ../rey-compiler/main.rey build ../rey-compiler/tests/e2e/hello.rey
-../rey-compiler/tests/e2e/hello
-```
+## Language Features
 
-### Write your first program
+### Variables and constants
 
 ```rey
-func main(): Void {
-    println("hello from rey!");
+var x = 42;
+var name: String = "Rey";
+const PI: float = 3.14159;
+```
+
+### Functions and lambdas
+
+```rey
+func add(a: int, b: int): int {
+    return a + b;
+}
+
+var double = (x: int) => x * 2;
+```
+
+### Control flow
+
+```rey
+if x > 0 { println("positive"); } else { println("non-positive"); }
+
+while i < 10 { i = i + 1; }
+
+loop { if done { break; } }
+
+for item in [1, 2, 3] { println(item.toString()); }
+```
+
+### Structs
+
+```rey
+struct Point {
+    pub x: int,
+    pub y: int,
+}
+
+var p = Point { x: 3, y: 4 };
+```
+
+### Enums and match
+
+```rey
+enum Color { Red, Green, Blue }
+
+match color {
+    Color.Red   => println("red"),
+    Color.Green => println("green"),
+    _           => println("other"),
 }
 ```
 
----
+### Collections
 
-## Building from source
+```rey
+var v = Vec.new();
+v.push("a");
+v.push("b");
+println(v.join(", "));   // a, b
 
-Requires Rust and Cargo.
+var m = HashMap.new();
+m.set("count", 42);
+println(m.get("count").toString());
+```
 
-```bash
-git clone https://github.com/rey-language/rey.git
-cd rey/compiler/v1
-cargo build --release
-./target/release/rey-v0 <file>.rey
+### Result and Option
+
+```rey
+var r = readFile("data.txt");
+if r.isOk() {
+    println(r.unwrap());
+} else {
+    println("error: " + r.unwrapOr("unknown"));
+}
+```
+
+### Imports
+
+```rey
+import lexer;
+import parser;
+
+var tokens = lexer.tokenize(source, "file.rey");
+var ast    = parser.parse(tokens, "file.rey");
 ```
 
 ---
 
-## Contributing
+## Repository Layout
 
-Rey is open source and contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+```
+rey-lang/
+├── compiler/v1/          # Rust bootstrap interpreter (not needed at runtime)
+│   └── src/              # Lexer, parser, tree-walk interpreter
+├── rey-compiler/         # Self-hosted LLVM compiler (written in Rey)
+│   ├── main.rey          # Compiler entry point and pipeline
+│   ├── src/
+│   │   ├── lexer/        # Tokenizer
+│   │   ├── parser/       # Recursive-descent parser + AST definitions
+│   │   ├── typecheck/    # Type checker (stub)
+│   │   └── codegen/      # LLVM IR emitter
+│   ├── runtime/          # C runtime library (librey_rt)
+│   │   ├── rey_rt.h      # Public ABI header
+│   │   ├── string.c      # String operations
+│   │   ├── vec.c         # Dynamic arrays
+│   │   ├── hashmap.c     # Hash maps
+│   │   ├── result.c      # Result/Option/instanceof
+│   │   ├── io.c          # File I/O and process
+│   │   └── mem.c         # Allocator
+│   └── tests/e2e/        # End-to-end test suite
+├── releases/             # Pre-built binaries (by version)
+├── examples/             # Example Rey programs
+├── spec/                 # Language specification
+└── tests/                # Interpreter-level test fixtures
+```
 
-- Found a bug? Open an issue.
-- Want to add a feature? Open a PR to the `contri` branch.
-- Want to discuss the language design? Start a discussion.
+---
+
+## Testing
+
+```sh
+# Build runtime first (only needed once)
+make -C rey-compiler/runtime
+
+# Run all e2e tests with the native compiler
+bash rey-compiler/tests/e2e/run.sh
+```
+
+Expected output: `OK`
+
+---
+
+## Docs
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — compiler pipeline and design
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — style guide and how to extend the language
+- [`ROADMAP.md`](ROADMAP.md) — future directions and known limitations
+- [`releases/0.2.0/RELEASE.md`](releases/0.2.0/RELEASE.md) — v0.2.0 release notes
 
 ---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
-
----
-
-*Built by [@IMisbahk](https://github.com/IMisbahk) and contributors.*
+MIT — see [`LICENSE`](LICENSE).

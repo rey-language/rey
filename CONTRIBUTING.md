@@ -1,206 +1,172 @@
 # Contributing to Rey
 
-Rey is an open, ambitious project. We're building a language from scratch — the compiler, the toolchain, the stdlib, the ecosystem. Everything. If that sounds exciting, you're in the right place.
-
-This isn't a finished project looking for minor fixes. It's a living language actively being designed and built. Your contributions don't just fix bugs — they shape what Rey becomes.
+The Rey compiler is a research project and learning environment. Contributions are welcome — whether fixes, new language features, tests, documentation, or runtime improvements.
 
 ---
 
-## The vision
+## Getting Started
 
-> Rust power without Rust complexity.
+```sh
+# Clone and build the bootstrap interpreter
+git clone https://github.com/rey-language/rey-lang
+cd rey-lang
+cd compiler/v1 && cargo build --release && cd ../..
 
-Rey is designed to be the language that doesn't make you choose between fast and simple. The compiler handles the hard parts. You write clean code. Read `VISION.md` before anything else — it's the north star for every decision in this project.
+# Build the native compiler
+./compiler/v1/target/release/rey-v0 rey-compiler/main.rey build rey-compiler/main.rey
+codesign -s - rey-compiler/main.bin
 
----
-
-## Who we're looking for
-
-Anyone who is:
-
-- Excited about language design and compiler engineering
-- Willing to learn (you don't need to be an expert)
-- Opinionated about how programming should feel
-- Able to write clean, reasoned code
-- Interested in building something real from the ground up
-
-We don't care about your resume. We care about your ideas and your work.
-
----
-
-## What needs to be built
-
-Rey is early. Almost everything is fair game. Here's where the work is:
-
-### Compiler (Rust)
-The heart of Rey. Written in Rust, lives in `compiler/v1/`.
-
-- **Bug fixes** — see the issue tracker, there's always something broken
-- **New syntax** — enums, match, generics, closures, traits
-- **Import system** — the module resolution and import pipeline
-- **LLVM backend** — the big one. Turn AST → LLVM IR → native binary
-- **Error messages** — make them better, clearer, more helpful
-- **Type system** — generics, union types, type inference improvements
-
-### Standard Library (Rey)
-Lives in `rey-language/std`. Written in Rey itself (once the import system lands).
-
-- `std::fs` — file I/O
-- `std::process` — args, exit, env
-- `std::math` — math functions
-- `std::http` — HTTP client/server
-- `std::json` — JSON parsing
-- anything else the language needs
-
-### reyc (Rey)
-The package manager and toolchain. Think cargo for Rey.
-
-- `reyc run` — compile and run
-- `reyc init` — scaffold a project
-- `reyc build` — compile to binary
-- `reyc add` — install a package
-- `reyc publish` — publish to reyc.io
-
-### Tooling
-- **VSCode extension** — lives in `rey-language/rey-vscode`. Syntax highlighting is done, LSP is next.
-- **rey-website** — rey-lang.com. Docs, playground, getting started.
-- **reyc.io** — the package registry website.
-
-### Language design
-Not all contributions are code. If you have strong opinions about:
-- How memory should work in Rey
-- What the import syntax should look like
-- How enums and match should behave
-- What belongs in the standard library
-
-Open a discussion. Language design decisions matter more than any single implementation.
-
----
-
-## How to contribute
-
-### 1. Read first
-- `README.md` — what Rey is
-- `VISION.md` — where Rey is going
-- `syntax.md` — what the language looks like today
-- `primer.md` — current state of the project
-
-### 2. Find something to work on
-- Check the issue tracker for open issues
-- Look at the bug/feature list in `primer.md`
-- Have an idea? Open a discussion first
-
-### 3. Branch discipline
-- `master` — stable, owned by the core team
-- `claude` — Claude's branch (AI contributor)
-- `codex` — Codex's branch (AI contributor)
-- your contributions → open a PR to `master`
-
-Create your branch off master:
-```bash
-git checkout master
-git checkout -b your-name/feature-name
-```
-
-### 4. Make your changes
-- Small, focused commits
-- Conventional commit messages: `feat(lexer): add comment tokenization`
-- Test your changes — run the test files in `compiler/v1/src/tests/`
-- Don't break existing tests
-
-### 5. Open a PR
-- Clear title and description
-- Explain what you changed and WHY
-- Reference related issues
-- If it's a language change, update `syntax.md`
-- If it's a big change, discuss it first
-
----
-
-## Commit style
-
-We use conventional commits:
-
-```
-feat(scope): what you added
-fix(scope): what you fixed
-chore(scope): maintenance, cleanup
-docs(scope): documentation
-test(scope): tests
-refactor(scope): refactor without behavior change
-```
-
-Examples:
-```
-feat(structs): implement method overloading
-fix(parser): handle empty array literal
-chore(release): bump to v0.0.7-pre
-docs(syntax): add enum documentation
+# Run the test suite
+make -C rey-compiler/runtime
+bash rey-compiler/tests/e2e/run.sh
 ```
 
 ---
 
-## Running the compiler
+## Code Style
 
-```bash
-cd compiler/v1
-cargo build --release
-./target/release/rey-v0 your-file.rey
+### Rey source code
+
+- **camelCase** for all identifiers (variables, functions, struct fields, enum variants)
+- **PascalCase** for struct and enum type names
+- Compact formatting — no excessive blank lines
+- Comments only when the *why* is non-obvious (not the *what*)
+- Avoid comments that just restate the code name
+
+```rey
+// good: explains non-obvious constraint
+var slen = info.len - 1;  // ReyStr.len excludes null terminator
+
+// bad: restates the obvious
+var result = add(a, b);   // add a and b
 ```
 
-Run all tests:
-```bash
-for f in src/tests/*.rey; do
-    echo "Testing $f..."
-    ./target/release/rey-v0 $f
-done
+### C runtime code
+
+- Follow C99 style
+- `snake_case` for all identifiers
+- Functions named `rey_<module>_<operation>`: `rey_str_concat`, `rey_vec_push`
+- Every function documented in `rey_rt.h` with input/output types
+
+---
+
+## Repository Layout
+
+Before adding files, understand the layout:
+
+```
+rey-compiler/src/lexer/main.rey      — tokenizer
+rey-compiler/src/parser/main.rey     — parser and AST definition
+rey-compiler/src/parser/ast/main.rey — AST node struct declarations
+rey-compiler/src/typecheck/main.rey  — type checker (stub)
+rey-compiler/src/codegen/main.rey    — LLVM IR emitter
+rey-compiler/runtime/rey_rt.h        — C runtime ABI
+rey-compiler/runtime/*.c             — C runtime implementation
+rey-compiler/tests/e2e/              — end-to-end test fixtures
 ```
 
 ---
 
-## The AI contributors
+## Adding a New Language Feature
 
-Rey has two autonomous AI contributors — `claude` and `codex` — each with their own git branch. They commit real code, open real PRs, and are treated as contributors.
+### 1. Parser change
 
-This is an experiment in human-AI collaborative development. If you want to set up a similar workflow, read `CLAUDE.md` and `AGENTS.md`.
+Add the new AST node to `src/parser/ast/main.rey`:
+
+```rey
+struct NewExprType {
+    pub field1: String,
+    pub field2: int,
+    pub span: Span,
+}
+```
+
+Add parsing in `src/parser/main.rey`. Follow the existing recursive-descent style. Always record spans.
+
+### 2. Codegen support
+
+Add IR emission in `src/codegen/main.rey` inside `genExprValue` or `genStmt2`.
+
+**Critical rules for codegen:**
+
+- **Always use typed variables** when accessing struct fields:
+  ```rey
+  // WRONG — heuristic may pick wrong struct
+  var name = expr.name;
+
+  // CORRECT — explicit type forces correct field offset
+  var identE: IdentExpr = expr;
+  var name = identE.name;
+  ```
+
+- **All allocas must be in the entry block** — add new variables to `ctx.funcAllocas`, never emit `alloca` inline in conditional branches.
+
+- **New struct types** used as return values or stored in collections must be declared as named `struct` in the codegen source (not as anonymous `{ field: value }` literals, which compile to null in native code).
+
+- **Use `GenExprResult { ty, val, code }`** as the standard return type from expression emitter functions.
+
+### 3. Runtime function (if needed)
+
+Add the C function to the appropriate `runtime/*.c` file, declare it in `rey_rt.h`, and add a `declare` line in `codegenProgram2` in `codegen/main.rey`.
+
+### 4. Test
+
+Add a fixture to `rey-compiler/tests/e2e/`:
+- `newfeature.rey` — the test program
+- `newfeature.out` — expected stdout
+
+Run the suite: `bash rey-compiler/tests/e2e/run.sh`
+
+### 5. Rebuild and verify
+
+```sh
+./compiler/v1/target/release/rey-v0 rey-compiler/main.rey build rey-compiler/main.rey
+codesign -s - rey-compiler/main.bin
+mv rey-compiler/main.bin rey-compiler/main
+bash rey-compiler/tests/e2e/run.sh
+```
 
 ---
 
-## What we value
+## Testing Philosophy
 
-**Simplicity** — if it's complex, it needs to justify itself  
-**Clarity** — code and decisions should be easy to reason about  
-**Boldness** — Rey is making big bets. Don't be afraid to propose big ideas  
-**Honesty** — if something is broken or wrong, say so  
-**Craft** — care about the details. Languages are used by people.
-
----
-
-## What we don't want
-
-- Vague PRs with no explanation
-- Changes that break existing behavior without discussion
-- Overengineered solutions to simple problems
-- Ego. Critique ideas, not people.
+- **e2e tests are the source of truth** — if the output matches, the feature works
+- Tests should be deterministic — same input, same output every time
+- Test fixtures cover: basic syntax, control flow, collections, structs, enums, strings, I/O, imports
+- Each fixture has a `.rey` source and a `.out` expected-output file
 
 ---
 
-## Communication
+## Commits
 
-- **Issues** — bugs, feature requests, questions
-- **Discussions** — language design, big ideas, proposals
-- **PRs** — concrete changes with clear rationale
+Write commits like a professional engineer:
 
-We're a small team. Response times vary. Be patient.
+```
+fix: resolve struct field heuristic for untyped FieldAccess in codegen
+feat(lexer): add character literal support
+docs: expand ARCHITECTURE.md with memory model details
+chore: remove build artifacts from e2e test directories
+test: add edge-case fixture for nested struct access
+```
+
+- One logical change per commit
+- Present tense, imperative mood
+- Reference what changed and why in the body if non-obvious
 
 ---
 
-## License
+## Architecture Constraints
 
-By contributing, you agree your contributions will be licensed under the MIT license.
+Do not violate these invariants:
+
+1. **The Rust interpreter is the semantic reference** — native compiler must produce identical results for all e2e fixtures
+2. **No GC** — all allocations use `rey_alloc` (malloc); no freeing until process exit
+3. **i64 ABI** — all Rey values passed between functions as `i64` (scalars direct, heap values as pointer-as-integer)
+4. **Struct header at ptr-16** — `instanceof` reads the tag byte 16 bytes before the data pointer
+5. **Allocas in entry block** — LLVM requirement; use `ctx.funcAllocas` accumulator
 
 ---
 
-Rey is early. The decisions made now will define what this language becomes. If you want to be part of that — welcome.
+## Questions
 
-https://github.com/rey-language/rey
+Open an issue or look at the existing source — the codegen is the most complex part, but it's all plain Rey code.
