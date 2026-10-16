@@ -1,0 +1,16 @@
+rey-compiler/src/parser/ast.rey
+  h_90c9c948bf5ad1 1,3,18-330,332-333,336-340
+rey-compiler/src/parser/main.rey
+  h_90c9c948bf5ad1 1-3,6,8-568,571-587,590-608,611-629,632-633,636-640
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b352fd1dff66057d4212aa3209289271cbf036a",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
