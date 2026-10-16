@@ -1,0 +1,18 @@
+compiler/v1/src/interpreter/environment.rs
+  h_90c9c948bf5ad1 1,8,16,26,32,60-62,64-67
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 4,42,47-59,89,119,194-216,229-242,245-328,424-496,499-500,727,736-772
+compiler/v1/src/interpreter/value.rs
+  h_90c9c948bf5ad1 4,6,9-16,26-29,33-72,113-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e887724d222720d90944cb3a941a1dd6b2a01e9c",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
