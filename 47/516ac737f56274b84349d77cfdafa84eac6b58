@@ -1,0 +1,20 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-14
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 375-381,521,525-530
+primer.md
+  h_90c9c948bf5ad1 42,52,55,57,64
+syntax.md
+  h_90c9c948bf5ad1 16-18,303-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47516ac737f56274b84349d77cfdafa84eac6b58",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
