@@ -1,0 +1,22 @@
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 1184-1188,1200-1298
+rey-compiler/main.rey
+  h_90c9c948bf5ad1 15-94,141-173
+rey-compiler/src/parser/main.rey
+  h_90c9c948bf5ad1 129-147,327-333
+rey-compiler/tests/e2e/imports.rey
+  h_90c9c948bf5ad1 1-6
+rey-compiler/tests/e2e/imports/util.rey
+  h_90c9c948bf5ad1 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a9db77eb4f687d7d0ef035d1f2f5bc42c7d458af",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
