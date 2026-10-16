@@ -1,0 +1,18 @@
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 1184,1192
+rey-compiler/main.rey
+  h_90c9c948bf5ad1 38-41
+rey-compiler/src/codegen/main.rey
+  h_90c9c948bf5ad1 21-227,429,441-446,452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "943131de4954fa8a6c28cc5e563d1c5b90d7f52c",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
