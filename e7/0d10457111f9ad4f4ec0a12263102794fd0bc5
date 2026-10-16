@@ -1,0 +1,26 @@
+compiler/v1/src/ast/mod.rs
+  h_90c9c948bf5ad1 8
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 2,10-23,34,39-42
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 36-40,126
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 339-341
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 47-49
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 10,48-59,61,102,148,155-232,820-834
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 186,268,364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e70d10457111f9ad4f4ec0a12263102794fd0bc5",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
