@@ -1,0 +1,16 @@
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 347-349
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 58-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a8e331facf54fe901a8800074028b0c7f0778d6",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
