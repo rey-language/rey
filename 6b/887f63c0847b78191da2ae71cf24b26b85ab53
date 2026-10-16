@@ -1,0 +1,22 @@
+rey-compiler/main.rey
+  h_90c9c948bf5ad1 3-6,10,15,20,25,30,35-40,43,46,49,53,56,59-62,64,66-67,69,71-72
+rey-compiler/src/codegen/main.rey
+  h_90c9c948bf5ad1 227-246
+rey-compiler/src/main.rey
+  h_90c9c948bf5ad1 1-75
+rey-compiler/tests/e2e/hello.rey
+  h_90c9c948bf5ad1 1-3
+session-ses_2d3d.md
+  h_90c9c948bf5ad1 1-4323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6b887f63c0847b78191da2ae71cf24b26b85ab53",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
