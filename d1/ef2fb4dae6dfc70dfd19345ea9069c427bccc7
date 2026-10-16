@@ -1,0 +1,28 @@
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 38,40-46
+compiler/v1/src/imports.rs
+  h_90c9c948bf5ad1 159,164-165,168,175,178,188,191,201,204,296,301-302,309,312,315,328,332
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 120-137
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 311,322,332,343,349,356,362,373,379
+tests/imports/errors/group_missing_symbol.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/nested_resolution.rey
+  h_90c9c948bf5ad1 1-8
+tests/imports/success/nestedmod/helper.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/nestedmod/main.rey
+  h_90c9c948bf5ad1 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d1ef2fb4dae6dfc70dfd19345ea9069c427bccc7",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
