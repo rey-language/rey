@@ -1,0 +1,19 @@
+.gitignore
+  s_39ac3c5937447b::t_931b12952423d6 1,4-8,12-17,19-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d92d763f8f2721448edbe2bf8253c24bc25c0c34",
+  "prompts": {},
+  "sessions": {
+    "s_39ac3c5937447b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a62ed834-5c5a-4e66-9b2f-a789e796ec38",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
