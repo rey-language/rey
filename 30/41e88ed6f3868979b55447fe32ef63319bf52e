@@ -1,0 +1,16 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-34
+primer.md
+  h_90c9c948bf5ad1 2,5,10-14,16,18-49,51-59,61-65,67-69,71-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3041e88ed6f3868979b55447fe32ef63319bf52e",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
