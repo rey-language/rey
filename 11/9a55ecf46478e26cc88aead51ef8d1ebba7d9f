@@ -1,0 +1,20 @@
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 108
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 181-184,646
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 519,691-694,697
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 631-643,645,647-658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "119a55ecf46478e26cc88aead51ef8d1ebba7d9f",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
