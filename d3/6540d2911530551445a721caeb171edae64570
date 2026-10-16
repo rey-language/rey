@@ -1,0 +1,16 @@
+rey-compiler/src/lexer/main.rey
+  h_90c9c948bf5ad1 4,7-8,11-60,63-75,78-416,419-449
+rey-compiler/tests/lexer_test.rey
+  h_90c9c948bf5ad1 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d36540d2911530551445a721caeb171edae64570",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
