@@ -1,0 +1,18 @@
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 4-6,8-9,150-213,384-543
+compiler/v1/src/tests/test_fs_builtins.rey
+  h_90c9c948bf5ad1 1-24
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 245-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0c106be924c5840f4bc23e3834a3bfe3697dd5e6",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
