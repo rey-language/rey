@@ -1,0 +1,44 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-21
+CHECKPOINT.md
+  h_90c9c948bf5ad1 4-21,60
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 209,300-303,307,331-335,338-340,348-349,352,363-364,367,380,383,395,398,404-408,410-412,458,461-463,637,639,682,691-693,740,743-745,757,773,1491-1497,1500-1511,1618-1629,1640,1643-1646,1655-1662
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 101-104,115-119,163-216
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 300-305,490-491,527-528,1517-1521
+compiler/v1/src/tests/enum_missing_comma.rey
+  h_90c9c948bf5ad1 1-4
+compiler/v1/src/tests/match_missing_comma.rey
+  h_90c9c948bf5ad1 1-15
+compiler/v1/src/tests/match_non_exhaustive.rey
+  h_90c9c948bf5ad1 1-13
+compiler/v1/src/tests/runtime_index_oob.rey
+  h_90c9c948bf5ad1 1-6
+compiler/v1/src/tests/runtime_null_deref.rey
+  h_90c9c948bf5ad1 1-6
+compiler/v1/src/tests/runtime_ref_equality.rey
+  h_90c9c948bf5ad1 1-29
+compiler/v1/src/tests/syntax_missing_semicolon.rey
+  h_90c9c948bf5ad1 1-2
+primer.md
+  h_90c9c948bf5ad1 2,5-61
+rey-compiler/tests/e2e/imports.ll
+  h_90c9c948bf5ad1 1-28
+spec/main.rey
+  h_90c9c948bf5ad1 1-90
+syntax.md
+  h_90c9c948bf5ad1 21-22,31-35,80-85,288,320-321,332-333,341-343,366-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81dc245473d099ce32adf6be7eb94589bb42d936",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
