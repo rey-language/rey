@@ -1,0 +1,16 @@
+CHECKPOINT.md
+  h_90c9c948bf5ad1 4,6,8-16,18-19,21-22,24-25,27-34
+primer.md
+  h_90c9c948bf5ad1 7-41,44,48,50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76be0049d7338cdf0bb012b9a9b4d24d3f30100a",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
