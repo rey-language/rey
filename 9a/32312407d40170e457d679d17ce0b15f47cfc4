@@ -1,0 +1,16 @@
+.gitignore
+  h_90c9c948bf5ad1 8-9
+compiler/v1/src/imports.rs
+  h_90c9c948bf5ad1 381-383,448,450,454,459-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9a32312407d40170e457d679d17ce0b15f47cfc4",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
