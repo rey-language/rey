@@ -1,0 +1,14 @@
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 1485-1644,1863-1922
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d59459fe5eaff5518cf786a740a7e44c3ca34a59",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
