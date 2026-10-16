@@ -1,0 +1,22 @@
+compiler/v1/src/ast/expr.rs
+  h_90c9c948bf5ad1 11,17,21,25,30,35,41,46,52,57,63,70
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 424,756,799,821,836,854,873,940,959
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 368-369,387,392,439-440
+projects/fake-cli/cli.rey
+  h_90c9c948bf5ad1 1-126
+test.rey
+  h_90c9c948bf5ad1 81-115,121,126,139-141,171-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9d2c2de143dc4634d7f269c892876080c0199aa4",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
