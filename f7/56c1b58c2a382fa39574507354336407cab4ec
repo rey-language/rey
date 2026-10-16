@@ -1,0 +1,16 @@
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 808,815-839
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 177-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f756c1b58c2a382fa39574507354336407cab4ec",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
