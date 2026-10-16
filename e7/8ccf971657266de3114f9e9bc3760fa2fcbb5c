@@ -1,0 +1,16 @@
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 222-232
+compiler/v1/src/tests/structs.rey
+  h_90c9c948bf5ad1 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e78ccf971657266de3114f9e9bc3760fa2fcbb5c",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
