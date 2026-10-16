@@ -1,0 +1,30 @@
+.gitignore
+  h_90c9c948bf5ad1 4-5,12-20
+rey-compiler/tests/e2e/enums.out
+  h_90c9c948bf5ad1 1
+rey-compiler/tests/e2e/functions.out
+  h_90c9c948bf5ad1 1
+rey-compiler/tests/e2e/hello.out
+  h_90c9c948bf5ad1 1
+rey-compiler/tests/e2e/imports.out
+  h_90c9c948bf5ad1 1
+rey-compiler/tests/e2e/loops.out
+  h_90c9c948bf5ad1 1-8
+rey-compiler/tests/e2e/math.out
+  h_90c9c948bf5ad1 1-2
+rey-compiler/tests/e2e/run.sh
+  h_90c9c948bf5ad1 1-47
+rey-compiler/tests/e2e/structs.out
+  h_90c9c948bf5ad1 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "645e44f138119948f8642b6d6e307e085d059ab5",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
