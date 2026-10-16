@@ -1,0 +1,14 @@
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 646-658,660-662
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a17e9b98d74477cafc054bcad40d7d20c8aff3d1",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
