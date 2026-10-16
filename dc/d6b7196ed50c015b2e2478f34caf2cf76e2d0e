@@ -1,0 +1,22 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-15
+compiler/README.md
+  h_90c9c948bf5ad1 1-17
+compiler/v1/Cargo.toml
+  h_90c9c948bf5ad1 3
+primer.md
+  h_90c9c948bf5ad1 2,5,8-28,31-32,35-36
+syntax.md
+  h_90c9c948bf5ad1 1,27-29,48-52,66-69,197-199,209-211,223-227,270-274,304-305,315,319-321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dcd6b7196ed50c015b2e2478f34caf2cf76e2d0e",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
