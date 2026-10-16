@@ -1,0 +1,30 @@
+rey-compiler/README.md
+  h_90c9c948bf5ad1 1-19
+rey-compiler/main.rey
+  h_90c9c948bf5ad1 1-46
+rey-compiler/src/codegen/main.rey
+  h_90c9c948bf5ad1 1-40
+rey-compiler/src/diagnostics/main.rey
+  h_90c9c948bf5ad1 1-40
+rey-compiler/src/lexer/main.rey
+  h_90c9c948bf5ad1 1-19
+rey-compiler/src/lexer/token.rey
+  h_90c9c948bf5ad1 1-87
+rey-compiler/src/parser/ast.rey
+  h_90c9c948bf5ad1 1-42
+rey-compiler/src/parser/main.rey
+  h_90c9c948bf5ad1 1-31
+rey-compiler/src/typecheck/main.rey
+  h_90c9c948bf5ad1 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f0ab8ead958e1272718e4c4e0867efe940ecc91b",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
