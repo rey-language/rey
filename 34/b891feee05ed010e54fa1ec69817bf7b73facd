@@ -1,0 +1,38 @@
+rey-compiler/main.bin.ll
+  h_90c9c948bf5ad1 1-24409
+rey-compiler/src/lexer/main.ll
+  h_90c9c948bf5ad1 1-2132
+rey-compiler/tests/e2e/collections.ll
+  h_90c9c948bf5ad1 1-198
+rey-compiler/tests/e2e/enums.ll
+  h_90c9c948bf5ad1 1-108
+rey-compiler/tests/e2e/functions.ll
+  h_90c9c948bf5ad1 1-116
+rey-compiler/tests/e2e/hello.ll
+  h_90c9c948bf5ad1 1-95
+rey-compiler/tests/e2e/imports.bin.ll
+  h_90c9c948bf5ad1 1-107
+rey-compiler/tests/e2e/io.ll
+  h_90c9c948bf5ad1 1-125
+rey-compiler/tests/e2e/loops.ll
+  h_90c9c948bf5ad1 1-144
+rey-compiler/tests/e2e/math.ll
+  h_90c9c948bf5ad1 1-119
+rey-compiler/tests/e2e/strings.ll
+  h_90c9c948bf5ad1 1-185
+rey-compiler/tests/e2e/structs.ll
+  h_90c9c948bf5ad1 1-120
+rey-compiler/tests/e2e/vec.ll
+  h_90c9c948bf5ad1 1-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "34b891feee05ed010e54fa1ec69817bf7b73facd",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
