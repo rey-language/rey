@@ -1,0 +1,14 @@
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 10,50-51,144-244,495-510,563-602
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3f13f00c11ace9620ade73b8de58134eb9819f08",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
