@@ -1,0 +1,21 @@
+rey-compiler/main.rey
+  s_39ac3c5937447b::t_c58de61a4e8247 32-39,41,44,46-59,104-111,157,159,165,171,180,182,185,190,194,198,225,230,245-251,255-260
+rey-compiler/src/lexer/main.rey
+  s_39ac3c5937447b::t_c456937b744104 68,149,155,161,176,183,190,202,250,289,322,357,400,465,507,519
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "68dbebbc6031415f61b4a0b6f61ad4405ea98f5b",
+  "prompts": {},
+  "sessions": {
+    "s_39ac3c5937447b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a62ed834-5c5a-4e66-9b2f-a789e796ec38",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
