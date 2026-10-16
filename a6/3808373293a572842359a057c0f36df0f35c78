@@ -1,0 +1,18 @@
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 240-256,261-262
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 198-201,220,347-393,395,397
+compiler/v1/src/tests/struct_advanced.rey
+  h_90c9c948bf5ad1 1-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a63808373293a572842359a057c0f36df0f35c78",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
