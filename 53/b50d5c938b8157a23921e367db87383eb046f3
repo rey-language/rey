@@ -1,0 +1,44 @@
+tests/imports/README.md
+  h_90c9c948bf5ad1 1-13
+tests/imports/errors/actuator.rey
+  h_90c9c948bf5ad1 1-7
+tests/imports/errors/circular/cycle_a.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/errors/circular/cycle_b.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/errors/circular/cycle_entry.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/errors/duplicate_import.rey
+  h_90c9c948bf5ad1 1-4
+tests/imports/errors/file_not_found.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/errors/folder_missing_main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/errors/function_not_found.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/errors/missingmod/walk.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/errors/pub_not_export.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/action/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/action/run.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/action/walk.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/actuator.rey
+  h_90c9c948bf5ad1 1-15
+tests/imports/success/main.rey
+  h_90c9c948bf5ad1 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "53b50d5c938b8157a23921e367db87383eb046f3",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
