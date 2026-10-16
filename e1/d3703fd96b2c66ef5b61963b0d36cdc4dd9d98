@@ -1,0 +1,26 @@
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 46-51,445,466,652-657,1010,1013-1021
+compiler/v1/src/interpreter/interpreter.rs
+  h_90c9c948bf5ad1 62-79
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 22,31,40,49,58,67
+compiler/v1/src/lexer/cursor.rs
+  h_90c9c948bf5ad1 5-6,14-15,30-35,42-49
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 30-31,40,49,51,54,56,58-64,75,88,99,124,133,135,142,145,148,157,165,170,178,183,196,204,212,220,238,244,257-262,279,285,293,297-302,316,323,327-332,337,347,364,368,371,375-381,423,427,430
+compiler/v1/src/lexer/span.rs
+  h_90c9c948bf5ad1 8-9,14-28
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 404-409,657-662
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e1d3703fd96b2c66ef5b61963b0d36cdc4dd9d98",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
