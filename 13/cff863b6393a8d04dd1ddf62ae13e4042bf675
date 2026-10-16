@@ -1,0 +1,16 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 14-20
+CHECKPOINT.md
+  h_90c9c948bf5ad1 30-36,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "13cff863b6393a8d04dd1ddf62ae13e4042bf675",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
