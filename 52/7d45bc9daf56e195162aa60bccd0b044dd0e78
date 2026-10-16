@@ -1,0 +1,22 @@
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 498-564,807-850,1162-1446
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 67-144,378-420
+compiler/v1/src/interpreter/value.rs
+  h_90c9c948bf5ad1 37-43,89-125,177-228
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 857,867
+compiler/v1/src/tests/test_new_types.rey
+  h_90c9c948bf5ad1 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "527d45bc9daf56e195162aa60bccd0b044dd0e78",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
