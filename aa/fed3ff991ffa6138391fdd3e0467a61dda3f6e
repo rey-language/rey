@@ -1,0 +1,14 @@
+syntax.md
+  h_90c9c948bf5ad1 17-20,389-483,560,562-563,565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "aafed3ff991ffa6138391fdd3e0467a61dda3f6e",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
