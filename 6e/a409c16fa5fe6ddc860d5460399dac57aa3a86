@@ -1,0 +1,14 @@
+rey-compiler/tests/e2e/enums.rey
+  h_90c9c948bf5ad1 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6ea409c16fa5fe6ddc860d5460399dac57aa3a86",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
