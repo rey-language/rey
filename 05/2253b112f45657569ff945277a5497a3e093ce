@@ -1,0 +1,14 @@
+.vscode/tasks.json
+  h_90c9c948bf5ad1 26-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "052253b112f45657569ff945277a5497a3e093ce",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
