@@ -1,0 +1,16 @@
+.gitmodules
+  h_90c9c948bf5ad1 1-3
+rey-vscode
+  h_90c9c948bf5ad1 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ca39c19cfef583554a1300258367cbb0b660f0be",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
