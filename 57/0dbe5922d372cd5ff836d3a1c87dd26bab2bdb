@@ -1,0 +1,24 @@
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 61,69-74
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 108,111-115,117-124,126-127,129-153
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 349-350,359-361,364,366-368,370-378,380,386
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 418,421-458
+tests/for_in_array.rey
+  h_90c9c948bf5ad1 1-16
+tests/tuples.rey
+  h_90c9c948bf5ad1 2-5,7-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "570dbe5922d372cd5ff836d3a1c87dd26bab2bdb",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
