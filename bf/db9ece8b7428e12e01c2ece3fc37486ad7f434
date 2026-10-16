@@ -1,0 +1,16 @@
+CHECKPOINT.md
+  h_90c9c948bf5ad1 4-42
+rey-compiler/tests/simple.rey
+  h_90c9c948bf5ad1 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfdb9ece8b7428e12e01c2ece3fc37486ad7f434",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
