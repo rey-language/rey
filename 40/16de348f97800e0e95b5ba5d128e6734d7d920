@@ -1,0 +1,34 @@
+compiler/v1/Cargo.toml
+  h_90c9c948bf5ad1 3
+compiler/v1/src/ast/mod.rs
+  h_90c9c948bf5ad1 8
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 38-48
+compiler/v1/src/imports.rs
+  h_90c9c948bf5ad1 315-320,333-336
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 148-150,165-167,232-238,245-254,270-279,299-301,362-387,587-592,606-609,613-619,636-639,642-647,688-690,705-709,719-723,784-785,791
+compiler/v1/src/interpreter/function.rs
+  h_90c9c948bf5ad1 1,54
+compiler/v1/src/interpreter/interpreter.rs
+  h_90c9c948bf5ad1 4-6,58-59
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 107-126,135-154
+compiler/v1/src/interpreter/value.rs
+  h_90c9c948bf5ad1 24-27,93-94,96-106
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 11-12,59-61,66-68,117-120,276-278,297-299,369-373,399-402,501-504,556-558,561-564,572-575,1110-1115,1256-1259,1305-1310,1363-1369,1371-1375,1387-1393,1395-1399
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 3,52-55,263-264,551-552,588-589,677-682,739-743,835-846,849,863-865,871-872,888-889,993-994,1011-1016,1027,1060,1090,1120-1124,1217-1219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4016de348f97800e0e95b5ba5d128e6734d7d920",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
