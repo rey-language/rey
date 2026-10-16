@@ -1,0 +1,16 @@
+compiler/v1/src/imports.rs
+  h_90c9c948bf5ad1 1-304
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 4,10,13,15-21,49,76-78,80,86-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d8966f3c066fca7f7c7596b06e6cc647e3011ef7",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
