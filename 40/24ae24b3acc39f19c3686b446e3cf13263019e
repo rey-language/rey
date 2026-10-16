@@ -1,0 +1,39 @@
+compiler/v1/src/interpreter/environment.rs
+  s_39ac3c5937447b::t_8541f71504c0b5 36-37,56-70,103-109
+compiler/v1/src/interpreter/executor.rs
+  s_39ac3c5937447b::t_d7a0cb0409351a 663-722,2165-2184
+rey-compiler/tests/e2e/collections.out
+  s_39ac3c5937447b::t_81c608b39f2e9c 1-13
+rey-compiler/tests/e2e/collections.rey
+  s_39ac3c5937447b::t_e9cbac03d1e27c 1-32
+rey-compiler/tests/e2e/io.out
+  s_39ac3c5937447b::t_15727f7d2539f6 1-4
+rey-compiler/tests/e2e/io.rey
+  s_39ac3c5937447b::t_0c9ae64253dd6b 1-12
+rey-compiler/tests/e2e/run.sh
+  s_39ac3c5937447b::t_2ac7c7d786472e 17-20
+rey-compiler/tests/e2e/strings.out
+  s_39ac3c5937447b::t_42ebf8ac53b1e4 1-15
+rey-compiler/tests/e2e/strings.rey
+  s_39ac3c5937447b::t_15fbaef56d7986 1-25
+rey-compiler/tests/e2e/vec.out
+  s_39ac3c5937447b::t_a1dc3596035c12 1-12
+rey-compiler/tests/e2e/vec.rey
+  s_39ac3c5937447b::t_5a7930b8839dcb 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4024ae24b3acc39f19c3686b446e3cf13263019e",
+  "prompts": {},
+  "sessions": {
+    "s_39ac3c5937447b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a62ed834-5c5a-4e66-9b2f-a789e796ec38",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
