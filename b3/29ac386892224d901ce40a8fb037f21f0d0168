@@ -1,0 +1,36 @@
+compiler/v1/src/ast/literal.rs
+  h_90c9c948bf5ad1 5-6
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 122-128,132-138,143,303-314,502-507,534-539,548-562,581-594,623-645,854,863,867-873,877,879,883-889,899,920,983-984,993-1014,1018,1021,1025-1060,1067-1092,1116-1117
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 97-98,107-110,119-122,140,147-149,213-214
+compiler/v1/src/interpreter/value.rs
+  h_90c9c948bf5ad1 21-22,41-42,88-90,131-132
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 235
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 75
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 138-153
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 569,571-576,770,832-833,837,1005-1016
+compiler/v1/src/tests/integer_division.rey
+  h_90c9c948bf5ad1 1-16
+compiler/v1/src/tests/struct_field_mutation.rey
+  h_90c9c948bf5ad1 1-13
+compiler/v1/src/tests/struct_field_mutation_nested_error.rey
+  h_90c9c948bf5ad1 1-12
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 576-577,617-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b329ac386892224d901ce40a8fb037f21f0d0168",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
