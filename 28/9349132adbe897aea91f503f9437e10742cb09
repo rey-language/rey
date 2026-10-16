@@ -1,0 +1,19 @@
+releases/0.2.0/RELEASE.md
+  s_39ac3c5937447b::t_1df00d4f4906ac 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "289349132adbe897aea91f503f9437e10742cb09",
+  "prompts": {},
+  "sessions": {
+    "s_39ac3c5937447b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a62ed834-5c5a-4e66-9b2f-a789e796ec38",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
