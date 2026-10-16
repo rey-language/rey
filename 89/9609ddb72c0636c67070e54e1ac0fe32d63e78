@@ -1,0 +1,144 @@
+.vscode/tasks.json
+  h_90c9c948bf5ad1 1-29
+compiler/v1/Cargo.lock
+  h_90c9c948bf5ad1 1-7
+compiler/v1/Cargo.toml
+  h_90c9c948bf5ad1 1-10
+compiler/v1/README.md
+  h_90c9c948bf5ad1 1-32
+compiler/v1/src/ast/expr.rs
+  h_90c9c948bf5ad1 1-30
+compiler/v1/src/ast/literal.rs
+  h_90c9c948bf5ad1 1-7
+compiler/v1/src/ast/mod.rs
+  h_90c9c948bf5ad1 1-9
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 1-41
+compiler/v1/src/ast/ty.rs
+  h_90c9c948bf5ad1 1-4
+compiler/v1/src/interpreter/control_flow.rs
+  h_90c9c948bf5ad1 1-33
+compiler/v1/src/interpreter/environment.rs
+  h_90c9c948bf5ad1 1-59
+compiler/v1/src/interpreter/evaluator.rs
+  h_90c9c948bf5ad1 1-86
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 1-284
+compiler/v1/src/interpreter/function.rs
+  h_90c9c948bf5ad1 1-25
+compiler/v1/src/interpreter/interpreter.rs
+  h_90c9c948bf5ad1 1-30
+compiler/v1/src/interpreter/mod.rs
+  h_90c9c948bf5ad1 1-17
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 1-44
+compiler/v1/src/interpreter/value.rs
+  h_90c9c948bf5ad1 1-22
+compiler/v1/src/lexer/cursor.rs
+  h_90c9c948bf5ad1 1-32
+compiler/v1/src/lexer/error.rs
+  h_90c9c948bf5ad1 1-16
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 1-188
+compiler/v1/src/lexer/mod.rs
+  h_90c9c948bf5ad1 1-8
+compiler/v1/src/lexer/span.rs
+  h_90c9c948bf5ad1 1-14
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 1-76
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 1-64
+compiler/v1/src/parser/error.rs
+  h_90c9c948bf5ad1 1-26
+compiler/v1/src/parser/mod.rs
+  h_90c9c948bf5ad1 1-5
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 1-517
+compiler/v1/src/tests/arrays.rey
+  h_90c9c948bf5ad1 1-11
+compiler/v1/src/tests/compute.rey
+  h_90c9c948bf5ad1 1-14
+compiler/v1/src/tests/datatypes.rey
+  h_90c9c948bf5ad1 1-13
+compiler/v1/src/tests/dictionaries.rey
+  h_90c9c948bf5ad1 1-12
+compiler/v1/src/tests/full_demo.rey
+  h_90c9c948bf5ad1 1-44
+compiler/v1/src/tests/functions.rey
+  h_90c9c948bf5ad1 1-14
+compiler/v1/src/tests/io.rey
+  h_90c9c948bf5ad1 1-7
+compiler/v1/src/tests/math.rey
+  h_90c9c948bf5ad1 1-16
+compiler/v1/src/tests/stdlib.rey
+  h_90c9c948bf5ad1 1-11
+compiler/v1/src/tests/strings.rey
+  h_90c9c948bf5ad1 1-7
+compiler/v1/src/tests/variables.rey
+  h_90c9c948bf5ad1 1-16
+compiler/v1/target/.rustc_info.json
+  h_90c9c948bf5ad1 1
+compiler/v1/target/CACHEDIR.TAG
+  h_90c9c948bf5ad1 1-3
+compiler/v1/target/debug/.fingerprint/rey-v0-8a01152016acc683/invoked.timestamp
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-8a01152016acc683/output-test-bin-rey-v0
+  h_90c9c948bf5ad1 1-24
+compiler/v1/target/debug/.fingerprint/rey-v0-8a01152016acc683/test-bin-rey-v0
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-8a01152016acc683/test-bin-rey-v0.json
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-d926bd9887d32e18/bin-rey-v0
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-d926bd9887d32e18/bin-rey-v0.json
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-d926bd9887d32e18/invoked.timestamp
+  h_90c9c948bf5ad1 1
+compiler/v1/target/debug/.fingerprint/rey-v0-d926bd9887d32e18/output-bin-rey-v0
+  h_90c9c948bf5ad1 1-24
+compiler/v1/target/debug/deps/rey_v0-8a01152016acc683.d
+  h_90c9c948bf5ad1 1-28
+compiler/v1/target/debug/deps/rey_v0-d926bd9887d32e18.d
+  h_90c9c948bf5ad1 1-28
+compiler/v1/target/flycheck0/stderr
+  h_90c9c948bf5ad1 1
+compiler/v1/target/flycheck0/stdout
+  h_90c9c948bf5ad1 1-49
+compiler/v1/target/release/.fingerprint/rey-v0-86989ccf4b693bf5/bin-rey-v0
+  h_90c9c948bf5ad1 1
+compiler/v1/target/release/.fingerprint/rey-v0-86989ccf4b693bf5/bin-rey-v0.json
+  h_90c9c948bf5ad1 1
+compiler/v1/target/release/.fingerprint/rey-v0-86989ccf4b693bf5/invoked.timestamp
+  h_90c9c948bf5ad1 1
+compiler/v1/target/release/.fingerprint/rey-v0-86989ccf4b693bf5/output-bin-rey-v0
+  h_90c9c948bf5ad1 1-24
+compiler/v1/target/release/deps/rey_v0-86989ccf4b693bf5.d
+  h_90c9c948bf5ad1 1-28
+compiler/v1/target/release/rey-v0.d
+  h_90c9c948bf5ad1 1
+compiler/v1/target/x86_64-pc-windows-gnu/CACHEDIR.TAG
+  h_90c9c948bf5ad1 1-3
+compiler/v1/target/x86_64-pc-windows-gnu/release/.fingerprint/rey-v0-88454539be79ccfc/bin-rey-v0
+  h_90c9c948bf5ad1 1
+compiler/v1/target/x86_64-pc-windows-gnu/release/.fingerprint/rey-v0-88454539be79ccfc/bin-rey-v0.json
+  h_90c9c948bf5ad1 1
+compiler/v1/target/x86_64-pc-windows-gnu/release/.fingerprint/rey-v0-88454539be79ccfc/invoked.timestamp
+  h_90c9c948bf5ad1 1
+compiler/v1/target/x86_64-pc-windows-gnu/release/.fingerprint/rey-v0-88454539be79ccfc/output-bin-rey-v0
+  h_90c9c948bf5ad1 1-24
+compiler/v1/target/x86_64-pc-windows-gnu/release/deps/rey_v0-88454539be79ccfc.d
+  h_90c9c948bf5ad1 1-28
+compiler/v1/target/x86_64-pc-windows-gnu/release/rey-v0.d
+  h_90c9c948bf5ad1 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "899609ddb72c0636c67070e54e1ac0fe32d63e78",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
