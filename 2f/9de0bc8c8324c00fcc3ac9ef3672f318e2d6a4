@@ -1,0 +1,30 @@
+CHECKPOINT.md
+  h_90c9c948bf5ad1 1-42
+examples/advanced/self_cure_stub.rey
+  h_90c9c948bf5ad1 1-8,11-13,15-16,19-20,25-43,45
+examples/basic/functions.rey
+  h_90c9c948bf5ad1 1-24
+examples/basic/hello.rey
+  h_90c9c948bf5ad1 1-5
+examples/basic/variables.rey
+  h_90c9c948bf5ad1 1-26
+primer.md
+  h_90c9c948bf5ad1 2,5,8-30,33-39,41
+rey-compiler/README.md
+  h_90c9c948bf5ad1 3,5,7-9,11,13-81
+syntax.md
+  h_90c9c948bf5ad1 199-201,212-213,226-232,246,251,261-262,274-275,288,292,335
+tests/imports/success/nested_resolution.rey
+  h_90c9c948bf5ad1 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f9de0bc8c8324c00fcc3ac9ef3672f318e2d6a4",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
