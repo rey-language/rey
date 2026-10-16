@@ -1,0 +1,48 @@
+compiler/v1/src/ast/expr.rs
+  h_90c9c948bf5ad1 2,66-77,84-97,122-123,125-126
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 7-8
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 43,354-382,388-437,460-463,465,469-471,473-490,493-511,514-520,523-530,532-533,535,771-778
+compiler/v1/src/interpreter/function.rs
+  h_90c9c948bf5ad1 3,5,11-31,35-41,47
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 18,27,31-37,40-46,49-55,63
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 127-138,172-173,182-183,375
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 22,34,57,74
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 110-131,136-137,199-221,225-226,288-294,302,323-329,415-430,735,737-789,957-974,1007-1034,1105-1115
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 22-28,34-41,95-96,127,129,136,138,145,147,154,156,163,165,172,174,181,183,190,192,199,201,208,210,245-246,248-249,251-264,275,277,330-338,367-379,521-547,550-552,556-564,566-568,572,581-593,596-599,684-689,845-853,855,857-858,862,871-881,1010-1046
+test.rey
+  h_90c9c948bf5ad1 1-190
+tests/array_index_assign.rey
+  h_90c9c948bf5ad1 1-7
+tests/default_params.rey
+  h_90c9c948bf5ad1 1-8
+tests/field_assign.rey
+  h_90c9c948bf5ad1 1-7
+tests/instanceof.rey
+  h_90c9c948bf5ad1 1-14
+tests/int_div.rey
+  h_90c9c948bf5ad1 1-14
+tests/lambdas.rey
+  h_90c9c948bf5ad1 1-11
+tests/union_types.rey
+  h_90c9c948bf5ad1 1-7
+tests/variadic.rey
+  h_90c9c948bf5ad1 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "375a7d5b4a38fd49f3db97b0b68dedb473df4a54",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
