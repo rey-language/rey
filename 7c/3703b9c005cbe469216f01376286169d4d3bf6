@@ -1,0 +1,35 @@
+rey-compiler/runtime/Makefile
+  s_39ac3c5937447b::t_7b3b38caab21e4 1-25
+rey-compiler/runtime/hashmap.c
+  s_39ac3c5937447b::t_b0e5126d0dc61f 1-113
+rey-compiler/runtime/io.c
+  s_39ac3c5937447b::t_0bac910934a2af 1-103
+rey-compiler/runtime/mem.c
+  s_39ac3c5937447b::t_70c87bc005b1a8 1-11
+rey-compiler/runtime/result.c
+  s_39ac3c5937447b::t_d0bdd56a5c9b46 1-73
+rey-compiler/runtime/rey_rt.h
+  s_39ac3c5937447b::t_752c9cc3a51266 1-123
+rey-compiler/runtime/string.c
+  s_39ac3c5937447b::t_0e07960317c407 1-262
+rey-compiler/runtime/test_rt.c
+  s_39ac3c5937447b::t_acd8e251396332 1-112
+rey-compiler/runtime/vec.c
+  s_39ac3c5937447b::t_6e27a86637d5c4 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7c3703b9c005cbe469216f01376286169d4d3bf6",
+  "prompts": {},
+  "sessions": {
+    "s_39ac3c5937447b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a62ed834-5c5a-4e66-9b2f-a789e796ec38",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
