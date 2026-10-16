@@ -1,0 +1,54 @@
+.vscode/tasks.json
+  h_90c9c948bf5ad1 3-26,28-30,32
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-11
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 12
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 5-7,9,21-26,35-37,47-51,57-58,64-65,81-86,116-117,189-193,239-241,309-314,316-354,357-361,367-371,378-382,388-392,398-402,408-412,421-425,484-489,512-516,519-521,525-529
+compiler/v1/src/interpreter/std.rs
+  h_90c9c948bf5ad1 2,21-45,61-117,155-158,185
+compiler/v1/src/lexer/error.rs
+  h_90c9c948bf5ad1 12-31
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 290-295,337,345-346
+compiler/v1/src/lexer/token.rs
+  h_90c9c948bf5ad1 45
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 15-55,63,65-67,70-76,90-91,95,100-102,106-107
+compiler/v1/src/parser/error.rs
+  h_90c9c948bf5ad1 5-19
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 18,45-47,66,82-87,176,267-270,350-353,388-391,447,449-454,494-497,514-518,528-531,538-602,605,608,615,648,653-663,666-677,679-694,697-712,753-757,772-776,780,783-786,790-794
+compiler/v1/src/tests/test_features.rey
+  h_90c9c948bf5ad1 1-28
+compiler/v1/src/tests/test_rand.rey
+  h_90c9c948bf5ad1 1-7
+compiler/v1/src/tests/test_syntax.rey
+  h_90c9c948bf5ad1 13
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 63-65,96,114-148,233,253-254,258,278,300-303,322-325,343-346,349-352,355,381,384-391,399-414,481-484,490-493,497-501,508-511,514-518,526-545,595-598,603,612-615,623-626,639-642,656,663-666,671,729-747,750,763-769,781-786,857,859,863,865-866,870
+compiler/v1/test_const.rey
+  h_90c9c948bf5ad1 1-4
+compiler/v1/test_dynamic.rey
+  h_90c9c948bf5ad1 1-9
+primer.md
+  h_90c9c948bf5ad1 2,28-29,35,39-40,44,51,54
+projects/text-rpg/rpg.rey
+  h_90c9c948bf5ad1 1-96
+releases/0.0.5-pre/RELEASE.md
+  h_90c9c948bf5ad1 1-55
+syntax.md
+  h_90c9c948bf5ad1 1,3,9-10,14-17,21,25-26,33,35-36,38,40,43-54,57-62,65-67,70,72,74,76,78-80,82-84,86-88,90,92,94,96,98-105,107,109,111-118,124-125,128,130-133,135,139,141,145-147,151,153,156-157,163-164,166-168,170-171,173,181,184-186,189-191,195-196,202,204,206,209-210,212,214-216,219,221,224-225,227-228,233,235-236,239-243,246-247,250-251,253-254,256-257,260-261,264,266-270,275,277,279-298,302,304,306,308-313,315-319
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f90ab1dd5d03a66e62bb721760c3fcae600cff66",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
