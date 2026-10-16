@@ -1,0 +1,22 @@
+rey-compiler/main.rey
+  h_90c9c948bf5ad1 20-21,26-27,32-35
+rey-compiler/src/codegen/main.rey
+  h_90c9c948bf5ad1 9-10,19-21,82-104,125-130,137,143,147-178,184-209,237-276,279-289,291,309-314,316,318-329,331-343,348-349
+rey-compiler/src/parser/ast.rey
+  h_90c9c948bf5ad1 158-159,286-301
+rey-compiler/src/parser/main.rey
+  h_90c9c948bf5ad1 135-137,171-176,190,206,316-329,332-335,341-351
+rey-compiler/tests/e2e/math.rey
+  h_90c9c948bf5ad1 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7b83804e582951517cb13e0cead5593ea5e352cb",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
