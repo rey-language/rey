@@ -1,0 +1,26 @@
+compiler/v1/src/ast/stmt.rs
+  h_90c9c948bf5ad1 107-110
+compiler/v1/src/interpreter/executor.rs
+  h_90c9c948bf5ad1 176-178,199-252
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 97-120
+compiler/v1/src/parser/parser.rs
+  h_90c9c948bf5ad1 517-548
+compiler/v1/src/tests/match_enum.rey
+  h_90c9c948bf5ad1 1-27
+compiler/v1/src/tests/match_struct.rey
+  h_90c9c948bf5ad1 1-21
+compiler/v1/src/typecheck.rs
+  h_90c9c948bf5ad1 558-568,590-592,596-599
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8a34cf62ffa8d764052739fef22fad1d98922f0",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
