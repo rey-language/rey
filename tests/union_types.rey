@@ -1,7 +1,7 @@
 func main() {
-  var a: int | String = "hey";
+  var a: int | string = "hey";
   println(a);
 
-  var b: int | String = 123;
+  var b: int | string = 123;
   println(b);
 }

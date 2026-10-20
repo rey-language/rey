@@ -1,3 +1,4 @@
+// v0.3 negative: captured bindings are immutable
 func main() {
   var factor = 3;
   var mul = (x: int) => x * factor;

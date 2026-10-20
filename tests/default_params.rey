@@ -1,4 +1,4 @@
-func greet(name: String, greeting: String = "Hello") {
+func greet(name: string, greeting: string = "Hello") {
   println(greeting + ", " + name);
 }
 

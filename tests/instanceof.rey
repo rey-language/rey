@@ -1,7 +1,7 @@
 func main() {
-  var x: int | String = "hey";
+  var x: int | string = "hey";
 
-  if x instanceof String {
+  if x instanceof string {
     println("string");
   } else {
     println("not string");

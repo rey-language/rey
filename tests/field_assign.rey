@@ -1,5 +1,10 @@
-// Test field assignment bug
-var obj = {"name": "test", "value": 10};
+// Test struct field assignment
+struct Item {
+  name: string,
+  value: int,
+}
+
+var obj = Item { name: "test", value: 10 };
 
 // Try to assign to a field
 obj.name = "updated";
