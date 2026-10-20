@@ -93,37 +93,39 @@ log_info "Detected system: $PLATFORM ($TARGET_ARCH)"
 
 # 2. Prepare installation directory
 mkdir -p "$BIN_DIR"
+mkdir -p "$BIN_DIR/runtime"
 mkdir -p "$STD_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
-INSTALLED_BIN=""
 
 # 3. Check for local release archive or build binary first
 LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.tar.gz"
+LOCAL_NATIVE_BIN="$SCRIPT_DIR/build/rey"
+LOCAL_RUNTIME_LIB="$SCRIPT_DIR/build/runtime/librey_rt.a"
 LOCAL_BUILD_BIN="$SCRIPT_DIR/compiler/v1/target/release/rey-v0"
 
-if [ -f "$LOCAL_ARCHIVE" ]; then
+if [ -f "$LOCAL_NATIVE_BIN" ]; then
+    log_info "Installing native Rey compiler from $LOCAL_NATIVE_BIN..."
+    cp "$LOCAL_NATIVE_BIN" "$BIN_DIR/rey"
+    [ -f "$LOCAL_BUILD_BIN" ] && cp "$LOCAL_BUILD_BIN" "$BIN_DIR/rey-v0"
+    [ -f "$LOCAL_RUNTIME_LIB" ] && cp "$LOCAL_RUNTIME_LIB" "$BIN_DIR/runtime/"
+    rm -rf "$STD_DIR/src"
+    mkdir -p "$STD_DIR"
+    if [ -d "$SCRIPT_DIR/std/src" ]; then
+        cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
+    elif [ -d "$SCRIPT_DIR/../std/src" ]; then
+        cp -R "$SCRIPT_DIR/../std/src" "$STD_DIR/src"
+    fi
+elif [ -f "$LOCAL_ARCHIVE" ]; then
     log_info "Found local release package: $LOCAL_ARCHIVE"
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
     tar -xzf "$LOCAL_ARCHIVE" -C "$TMP_EXTRACT"
     SOURCE_DIR="$TMP_EXTRACT/rey-v0.3.0-${TARGET}"
-    cp "$SOURCE_DIR/bin/"* "$BIN_DIR/"
+    cp -R "$SOURCE_DIR/bin/"* "$BIN_DIR/"
     rm -rf "$STD_DIR/src"
     mkdir -p "$STD_DIR"
     cp -R "$SOURCE_DIR/std/src" "$STD_DIR/src"
     rm -rf "$TMP_EXTRACT"
-    INSTALLED_BIN="$BIN_DIR/rey"
-elif [ -f "$SCRIPT_DIR/bin/rey" ] && [ -d "$SCRIPT_DIR/std/src" ]; then
-    # Running directly from an extracted release folder
-    log_info "Installing from extracted release bundle..."
-    cp "$SCRIPT_DIR/bin/"* "$BIN_DIR/"
-    rm -rf "$STD_DIR/src"
-    cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
-    INSTALLED_BIN="$BIN_DIR/rey"
-elif [ -f "$LOCAL_BUILD_BIN" ]; then
-    log_info "Found locally compiled binary: $LOCAL_BUILD_BIN"
-    cp "$LOCAL_BUILD_BIN" "$BIN_DIR/rey"
-    INSTALLED_BIN="$BIN_DIR/rey"
 else
     # Remote download from GitHub Releases
     DOWNLOAD_URL="${REPO_URL}/releases/download/${VERSION}/rey-${VERSION}-${TARGET}.tar.gz"
@@ -141,21 +143,21 @@ else
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
     tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT"
     SOURCE_DIR="$TMP_EXTRACT/rey-${VERSION}-${TARGET}"
-    cp "$SOURCE_DIR/bin/"* "$BIN_DIR/"
+    cp -R "$SOURCE_DIR/bin/"* "$BIN_DIR/"
     rm -rf "$STD_DIR/src"
     mkdir -p "$STD_DIR"
     cp -R "$SOURCE_DIR/std/src" "$STD_DIR/src"
     rm -rf "$TMP_ARCHIVE" "$TMP_EXTRACT"
-    INSTALLED_BIN="$BIN_DIR/rey"
 fi
 
 chmod +x "$BIN_DIR/rey" 2>/dev/null || true
+[ -f "$BIN_DIR/rey-v0" ] && chmod +x "$BIN_DIR/rey-v0" 2>/dev/null || true
 
-# 4. Create convenience symlinks (rey-v0, reyc)
+# 4. Create convenience symlinks
 (
     cd "$BIN_DIR"
-    ln -sf rey rey-v0
     ln -sf rey reyc
+    [ ! -f rey-v0 ] && ln -sf rey rey-v0 || true
 )
 
 # 5. Link standard library
@@ -169,64 +171,4 @@ if [ ! -d "$STD_DIR/src" ] || [ -z "$(ls -A "$STD_DIR/src" 2>/dev/null)" ]; then
         rm -rf "$STD_DIR/src"
         cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
     elif command -v git >/dev/null 2>&1; then
-        log_info "Fetching Standard Library from ${STD_REPO_URL}..."
-        git clone --depth 1 "$STD_REPO_URL" "$STD_DIR" 2>/dev/null || true
-    fi
-fi
-
-# Ensure ~/.capy/std points to ~/.rey/std as well
-CAPY_DIR="$HOME/.capy"
-mkdir -p "$CAPY_DIR"
-ln -sf "$STD_DIR" "$CAPY_DIR/std" 2>/dev/null || true
-
-log_success "Rey compiler and Standard Library installed into: $INSTALL_DIR"
-
-# 6. Add to shell configuration profile
-add_to_shell() {
-    PROFILE_FILE="$1"
-    LINE_COMMENT="# Rey Language Environment"
-    LINE_HOME="export REY_HOME=\"$INSTALL_DIR\""
-    LINE_STD="export REY_STD_PATH=\"$STD_DIR/src\""
-    LINE_PATH="export PATH=\"\$REY_HOME/bin:\$PATH\""
-
-    if [ -f "$PROFILE_FILE" ]; then
-        if ! grep -q "REY_HOME" "$PROFILE_FILE" 2>/dev/null; then
-            printf "\n%s\n%s\n%s\n%s\n" "$LINE_COMMENT" "$LINE_HOME" "$LINE_STD" "$LINE_PATH" >> "$PROFILE_FILE"
-            log_info "Added Rey to $PROFILE_FILE"
-        fi
-    fi
-}
-
-add_to_shell "$HOME/.zshrc"
-add_to_shell "$HOME/.bashrc"
-add_to_shell "$HOME/.bash_profile"
-add_to_shell "$HOME/.profile"
-
-# Fish shell support
-FISH_CONFIG="$HOME/.config/fish/config.fish"
-if [ -f "$FISH_CONFIG" ]; then
-    if ! grep -q "REY_HOME" "$FISH_CONFIG" 2>/dev/null; then
-        printf "\n# Rey Language Environment\nset -gx REY_HOME \"%s\"\nset -gx REY_STD_PATH \"%s/src\"\nfish_add_path \$REY_HOME/bin\n" "$INSTALL_DIR" "$STD_DIR" >> "$FISH_CONFIG"
-        log_info "Added Rey to $FISH_CONFIG"
-    fi
-fi
-
-# 7. Verification
-export PATH="$BIN_DIR:$PATH"
-export REY_STD_PATH="$STD_DIR/src"
-
-log_info "Verifying installation..."
-if "$BIN_DIR/rey" --version >/dev/null 2>&1; then
-    REY_VER="$("$BIN_DIR/rey" --version 2>&1)"
-    log_success "Verification passed: $REY_VER"
-else
-    log_success "Rey binary is ready at $BIN_DIR/rey"
-fi
-
-printf "\n${GREEN}${BOLD}Installation complete!${RESET}\n"
-printf "To get started in your current terminal session, run:\n\n"
-printf "    ${BOLD}export REY_HOME=\"%s\"${RESET}\n" "$INSTALL_DIR"
-printf "    ${BOLD}export REY_STD_PATH=\"%s/src\"${RESET}\n" "$STD_DIR"
-printf "    ${BOLD}export PATH=\"\$REY_HOME/bin:\$PATH\"${RESET}\n\n"
-printf "Then create and run your first Rey file:\n\n"
-printf "    ${CYAN}rey run main.rey${RESET}\n\n"
+        log_info "Fetching Standard Library from ${STD_REPO_URL}...\"\n        git clone --depth 1 \"$STD_REPO_URL\" \"$STD_DIR\" 2>/dev/null || true\n    fi\nfi\n\n# Clean up any accidental circular symlinks\nrm -f \"$STD_DIR/std\" 2>/dev/null || true\n\n# Ensure ~/.capy/std points to ~/.rey/std without nested self-links\nCAPY_DIR=\"$HOME/.capy\"\nmkdir -p \"$CAPY_DIR\"\nrm -f \"$CAPY_DIR/std\" 2>/dev/null || true\nln -sfn \"$STD_DIR\" \"$CAPY_DIR/std\" 2>/dev/null || true\n\nlog_success \"Rey compiler and Standard Library installed into: $INSTALL_DIR\"\n\n# 6. Add to shell configuration profile\nadd_to_shell() {\n    PROFILE_FILE=\"$1\"\n    LINE_COMMENT=\"# Rey Language Environment\"\n    LINE_HOME=\"export REY_HOME=\\\"$INSTALL_DIR\\\"\"\n    LINE_STD=\"export REY_STD_PATH=\\\"$STD_DIR/src\\\"\"\n    LINE_PATH=\"export PATH=\\\"\\\$REY_HOME/bin:\\\$PATH\\\"\"\n\n    if [ -f \"$PROFILE_FILE\" ]; then\n        if ! grep -q \"REY_HOME\" \"$PROFILE_FILE\" 2>/dev/null; then\n            printf \"\\n%s\\n%s\\n%s\\n%s\\n\" \"$LINE_COMMENT\" \"$LINE_HOME\" \"$LINE_STD\" \"$LINE_PATH\" >> \"$PROFILE_FILE\"\n            log_info \"Added Rey to $PROFILE_FILE\"\n        fi\n    fi\n}\n\nadd_to_shell \"$HOME/.zshrc\"\nadd_to_shell \"$HOME/.bashrc\"\nadd_to_shell \"$HOME/.bash_profile\"\nadd_to_shell \"$HOME/.profile\"\n\n# Fish shell support\nFISH_CONFIG=\"$HOME/.config/fish/config.fish\"\nif [ -f \"$FISH_CONFIG\" ]; then\n    if ! grep -q \"REY_HOME\" \"$FISH_CONFIG\" 2>/dev/null; then\n        printf \"\\n# Rey Language Environment\\nset -gx REY_HOME \\\"%s\\\"\\nset -gx REY_STD_PATH \\\"%s/src\\\"\\nfish_add_path \\$REY_HOME/bin\\n\" \"$INSTALL_DIR\" \"$STD_DIR\" >> \"$FISH_CONFIG\"\n        log_info \"Added Rey to $FISH_CONFIG\"\n    fi\nfi\n\n# 7. Verification\nexport PATH=\"$BIN_DIR:$PATH\"\nexport REY_STD_PATH=\"$STD_DIR/src\"\n\nlog_info \"Verifying installation...\"\nif \"$BIN_DIR/rey\" --version >/dev/null 2>&1; then\n    REY_VER=\"$(\"$BIN_DIR/rey\" --version 2>&1)\"\n    log_success \"Verification passed: $REY_VER\"\nelse\n    log_success \"Rey binary is ready at $BIN_DIR/rey\"\nfi\n\nprintf \"\\n${GREEN}${BOLD}Installation complete!${RESET}\\n\"\nprintf \"To get started in your current terminal session, run:\\n\\n\"\nprintf \"    ${BOLD}export REY_HOME=\\\"%s\\\"${RESET}\\n\" \"$INSTALL_DIR\"\nprintf \"    ${BOLD}export REY_STD_PATH=\\\"%s/src\\\"${RESET}\\n\" \"$STD_DIR\"\nprintf \"    ${BOLD}export PATH=\\\"\\\$REY_HOME/bin:\\\$PATH\\\"${RESET}\\n\\n\"\nprintf \"Commands available:\\n\"\nprintf \"    ${CYAN}rey build <file>${RESET}     Compile Rey source to native machine executable\\n\"\nprintf \"    ${CYAN}rey run <file>${RESET}       Compile and execute immediately\\n\"\nprintf \"    ${CYAN}rey check <file>${RESET}     Typecheck source without compiling\\n\"\nprintf \"    ${CYAN}rey-v0 <file>${RESET}       Run via Rust reference bootstrap engine\\n\\n\"\n
