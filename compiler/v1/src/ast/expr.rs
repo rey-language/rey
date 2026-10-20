@@ -36,6 +36,10 @@ pub enum Expr {
         entries: Vec<(String, Expr)>,
         span: Span,
     },
+    DictByteLiteral {
+        entries: Vec<(Vec<u8>, Expr)>,
+        span: Span,
+    },
     Index {
         target: Box<Expr>,
         index: Box<Expr>,
@@ -60,6 +64,12 @@ pub enum Expr {
     StaticCall {
         struct_name: String,
         method: String,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    EnumVariant {
+        enum_name: Option<String>,
+        variant: String,
         args: Vec<Expr>,
         span: Span,
     },
@@ -107,6 +117,12 @@ pub enum Expr {
         prefix: bool,
         span: Span,
     },
+    UpdateLValue {
+        target: Box<Expr>,
+        op: TokenKind,
+        prefix: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -119,11 +135,13 @@ impl Expr {
             Expr::Call { span, .. } => *span,
             Expr::ArrayLiteral { span, .. } => *span,
             Expr::DictLiteral { span, .. } => *span,
+            Expr::DictByteLiteral { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Get { span, .. } => *span,
             Expr::MethodCall { span, .. } => *span,
             Expr::StructLiteral { span, .. } => *span,
             Expr::StaticCall { span, .. } => *span,
+            Expr::EnumVariant { span, .. } => *span,
             Expr::Unary { span, .. } => *span,
             Expr::InstanceOf { span, .. } => *span,
             Expr::Lambda { span, .. } => *span,
@@ -131,6 +149,7 @@ impl Expr {
             Expr::Set { span, .. } => *span,
             Expr::IndexSet { span, .. } => *span,
             Expr::Update { span, .. } => *span,
+            Expr::UpdateLValue { span, .. } => *span,
         }
     }
 }
