@@ -1,0 +1,19 @@
+compiler/v1/src/interpreter/function.rs
+  s_9e2420774b8c0d::t_e6852ae2f6485d 4,12,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cbe18bec2b41758e7948bec7a125fe081d912eae",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
