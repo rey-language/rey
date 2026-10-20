@@ -1,0 +1,20 @@
+import std::time;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("format short milliseconds", time.formatDurationMs(250) == "250 ms");
+check("format one second", time.formatDurationMs(1000) == "1.000 s");
+check("format seconds and milliseconds", time.formatDurationMs(1234) == "1.234 s");
+check("format padded milliseconds", time.formatDurationMs(2005) == "2.005 s");
+check("format seconds", time.formatDurationSeconds(1.5) == "1.5 s");
+check("format zero seconds", time.formatDurationSeconds(0.0) == "0 s");
+
+time.sleep(1);
+println("time: all tests passed");

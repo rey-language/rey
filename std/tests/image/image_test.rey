@@ -1,0 +1,30 @@
+import std::fs;
+import std::image;
+import std::process;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+var img = image.createImage(2, 1);
+check("image dimensions", img.width == 2 && img.height == 1 && img.pixels.len() == 2);
+image.setPixel(img, 0, 0, 255, 0, 7);
+image.setPixel(img, 1, 0, 1, 2, 3);
+var firstPixel = image.getPixel(img, 0, 0);
+check("set and get RGB pixel", firstPixel.len() == 3 && firstPixel[0] == 255 && firstPixel[1] == 0 && firstPixel[2] == 7);
+check("PPM serialization", image.toPpm(img) == "P3\n2 1\n255\n255 0 7 1 2 3\n");
+
+var testDir = fs.join(process.tempDir(), "rey_std_image_test");
+if fs.exists(testDir) { fs.removeDirAll(testDir); }
+fs.mkdirAll(testDir);
+var path = fs.join(testDir, "sample.ppm");
+check("writePpm succeeds", image.writePpm(img, path));
+check("written PPM matches serialization", fs.read(path) == image.toPpm(img));
+fs.removeDirAll(testDir);
+
+println("image: all tests passed");

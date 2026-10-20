@@ -1,0 +1,95 @@
+// String run-length encoding and host gzip/tar command wrappers.
+
+import std::process;
+
+func shellQuote(value: string): string {
+    var result = "\"";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = value[i];
+        if c == '\\' || c == '"' || c == '$' || c == '`' {
+            result = result + "\\";
+        }
+        result = result + c.toString();
+        i = i + 1;
+    }
+    return result + "\"";
+}
+
+func runCommand(command: string): bool {
+    if process.isWindows() { return false; }
+    var result = process.runDetailed(command);
+    return result.code == 0;
+}
+
+pub func rleCompress(data: string): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= data.len() { break; }
+        var character = data.slice(i, i + 1);
+        var count = 1;
+        var next = i + 1;
+        loop {
+            if next >= data.len() || data.slice(next, next + 1) != character { break; }
+            count = count + 1;
+            next = next + 1;
+        }
+        result = result + count.toString() + ":" + character;
+        i = next;
+    }
+    return result;
+}
+
+pub func rleDecompress(compressed: string): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= compressed.len() { break; }
+        var count = 0;
+        var digits = 0;
+        loop {
+            if i >= compressed.len() || compressed[i] < '0' || compressed[i] > '9' { break; }
+            count = count * 10 + (int(compressed[i]) - 48);
+            digits = digits + 1;
+            i = i + 1;
+        }
+        assert(digits > 0 && i < compressed.len() && compressed[i] == ':', "invalid RLE run header");
+        assert(count > 0 && i + 1 < compressed.len(), "invalid RLE run length or missing character");
+        i = i + 1;
+        var character = compressed.slice(i, i + 1);
+        var repeated = 0;
+        loop {
+            if repeated >= count { break; }
+            result = result + character;
+            repeated = repeated + 1;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// These wrappers require a POSIX shell and the corresponding system command.
+pub func gzip(inputPath: string, outputPath: string): bool {
+    return runCommand("gzip < " + shellQuote(inputPath) + " > " + shellQuote(outputPath));
+}
+
+pub func gunzip(inputPath: string, outputPath: string): bool {
+    return runCommand("gunzip < " + shellQuote(inputPath) + " > " + shellQuote(outputPath));
+}
+
+pub func tarCreate(archivePath: string, files: Vec<string>): bool {
+    var command = "tar -cf " + shellQuote(archivePath) + " --";
+    var i = 0;
+    loop {
+        if i >= files.len() { break; }
+        command = command + " " + shellQuote(files[i]);
+        i = i + 1;
+    }
+    return runCommand(command);
+}
+
+pub func tarExtract(archivePath: string, destDir: string): bool {
+    return runCommand("tar -xf " + shellQuote(archivePath) + " -C " + shellQuote(destDir));
+}

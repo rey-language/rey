@@ -1,0 +1,32 @@
+import std::regex;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("literal full fragment is found", regex.isMatch("rey", "hello rey!"));
+check("dot matches one character", regex.isMatch("r.y", "ray"));
+check("start anchor", regex.isMatch("^hello", "hello world"));
+check("start anchor rejects later occurrence", !regex.isMatch("^world", "hello world"));
+check("end anchor", regex.isMatch("world$", "hello world"));
+check("star accepts zero repetitions", regex.isMatch("ab*c", "ac"));
+check("star accepts repetitions", regex.isMatch("ab*c", "abbbc"));
+check("plus requires a repetition", !regex.isMatch("ab+c", "ac"));
+check("plus accepts repetitions", regex.isMatch("ab+c", "abbc"));
+check("question accepts zero or one", regex.isMatch("colou?r", "color") && regex.isMatch("colou?r", "colour"));
+check("question rejects two", !regex.isMatch("colou?r", "colouur"));
+check("character set", regex.isMatch("[abc]at", "bat"));
+check("character range", regex.isMatch("[a-z]+", "rey"));
+check("range rejects outside character", !regex.isMatch("[a-c]", "z"));
+check("find returns first matched substring", regex.find("[0-9]+", "id42x7") == Option.Some("42"));
+check("find returns None", regex.find("z+", "abc") == Option.None());
+check("empty pattern finds empty match", regex.find("", "abc") == Option.Some(""));
+check("replace replaces all matches", regex.replace("[0-9]+", "a12b3", "#") == "a#b#");
+check("replace handles zero-width pattern", regex.replace("^", "abc", "!") == "!abc");
+
+println("regex: all tests passed");

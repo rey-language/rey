@@ -1,0 +1,34 @@
+// Core diagnostics and helpers for built-in Option and Result values.
+
+pub func panic(msg: string): void {
+    eprintln("panic: " + msg);
+    nativeExit(1);
+}
+
+pub func todo(msg: string): void {
+    panic("TODO: " + msg);
+}
+
+pub func unreachable(msg: string): void {
+    panic("unreachable: " + msg);
+}
+
+pub func unwrapOr(opt: any, defaultValue: any): any {
+    return opt.unwrapOr(defaultValue);
+}
+
+pub func isSome(opt: any): bool {
+    return opt.isSome();
+}
+
+pub func isNone(opt: any): bool {
+    return opt.isNone();
+}
+
+pub func isOk(res: any): bool {
+    return res.isOk();
+}
+
+pub func isErr(res: any): bool {
+    return res.isErr();
+}

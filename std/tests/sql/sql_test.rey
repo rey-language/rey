@@ -1,0 +1,65 @@
+import std::sql;
+import std::process;
+import std::fs;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("SQL string escaping doubles single quotes", sql.escapeString("Rey's") == "Rey''s");
+
+var databasePath = fs.join(process.tempDir(), "rey_sql_test's.db");
+if fs.exists(databasePath) {
+    fs.remove(databasePath);
+}
+var memoryConn = sql.connect(":memory:");
+if memoryConn.driver == "sqlite3-memory" {
+    var memoryCreate = sql.execute(memoryConn, "CREATE TABLE values_table (value TEXT)");
+    var memoryInsert = sql.execute(memoryConn, "INSERT INTO values_table VALUES ('kept')");
+    var memorySelect = sql.query(memoryConn, "SELECT value FROM values_table");
+    check("memory connection keeps data across CLI calls", memoryCreate.ok && memoryInsert.ok && memorySelect.rows.len() == 1 && memorySelect.rows[0][0] == "kept");
+    var temporaryPath = memoryConn.path;
+    sql.close(memoryConn);
+    check("close removes memory connection backing file", !fs.exists(temporaryPath));
+} else {
+    check("memory fallback accepts calls", sql.execute(memoryConn, "SELECT value").ok);
+    sql.close(memoryConn);
+}
+
+var conn = sql.connect(databasePath);
+check("connection chooses an available driver", conn.driver == "sqlite3" || conn.driver == "memory");
+
+var create = sql.execute(conn, "CREATE TABLE people (name TEXT, age INTEGER)");
+check("create statement succeeds", create.ok);
+
+var insert = sql.execute(conn, "INSERT INTO people (name, age) VALUES ('Ada', 37)");
+check("insert statement succeeds", insert.ok);
+if conn.driver == "sqlite3" {
+    check("insert reports one changed row", insert.changes == 1);
+}
+
+var selected = sql.query(conn, "SELECT name, age FROM people");
+check("select succeeds", selected.ok);
+if conn.driver == "sqlite3" {
+    check("select returns column names", selected.columns.len() == 2 && selected.columns[0] == "name" && selected.columns[1] == "age");
+    check("select returns row values", selected.rows.len() == 1 && selected.rows[0][0] == "Ada" && selected.rows[0][1] == "37");
+}
+
+var invalid = sql.execute(conn, "SELECT * FROM table_that_does_not_exist");
+if conn.driver == "sqlite3" {
+    check("invalid SQL reports an error", !invalid.ok && invalid.error.len() > 0);
+} else {
+    check("memory mock accepts calls", invalid.ok);
+}
+
+sql.close(conn);
+if fs.exists(databasePath) {
+    fs.remove(databasePath);
+}
+
+println("sql: all tests passed");

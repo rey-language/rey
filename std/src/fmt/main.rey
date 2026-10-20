@@ -1,0 +1,107 @@
+// Small string formatting and integer radix helpers.
+
+pub func format(template: string, args: Vec<any>): string {
+    var output = "";
+    var index = 0;
+    var nextAutomatic = 0;
+
+    loop {
+        if index >= template.len() { break; }
+        if template[index] != '{' {
+            output = output + template[index].toString();
+            index = index + 1;
+            continue;
+        }
+
+        var close = index + 1;
+        loop {
+            if close >= template.len() || template[close] == '}' { break; }
+            close = close + 1;
+        }
+        if close >= template.len() {
+            output = output + template[index].toString();
+            index = index + 1;
+            continue;
+        }
+
+        var token = template.slice(index + 1, close);
+        var argumentIndex = -1;
+        if token.len() == 0 {
+            argumentIndex = nextAutomatic;
+            nextAutomatic = nextAutomatic + 1;
+        } else {
+            var parsedIndex = 0;
+            var validIndex = true;
+            var digitIndex = 0;
+            loop {
+                if digitIndex >= token.len() { break; }
+                var digit = int(token[digitIndex]) - 48;
+                if digit < 0 || digit > 9 {
+                    validIndex = false;
+                    break;
+                }
+                if validIndex {
+                    if parsedIndex > args.len() / 10 || (parsedIndex == args.len() / 10 && digit > args.len() % 10) {
+                        validIndex = false;
+                    } else {
+                        parsedIndex = parsedIndex * 10 + digit;
+                    }
+                }
+                digitIndex = digitIndex + 1;
+            }
+            if validIndex { argumentIndex = parsedIndex; }
+        }
+
+        if argumentIndex >= 0 && argumentIndex < args.len() {
+            var rendered: string = args[argumentIndex].toString();
+            output = output + rendered;
+        } else {
+            output = output + template.slice(index, close + 1);
+        }
+        index = close + 1;
+    }
+
+    return output;
+}
+
+pub func padLeft(s: string, width: int, pad: string): string {
+    if width <= s.len() || pad.len() == 0 { return s; }
+    var needed = width - s.len();
+    return pad.repeat(needed).slice(0, needed) + s;
+}
+
+pub func padRight(s: string, width: int, pad: string): string {
+    if width <= s.len() || pad.len() == 0 { return s; }
+    var needed = width - s.len();
+    return s + pad.repeat(needed).slice(0, needed);
+}
+
+func toRadix(value: int, radix: int): string {
+    var digits = "0123456789abcdef";
+    if value == 0 { return "0"; }
+
+    var negative = value < 0;
+    var remaining = value;
+    var output = "";
+    loop {
+        if remaining == 0 { break; }
+        var digit = remaining % radix;
+        if digit < 0 { digit = -digit; }
+        output = digits[digit].toString() + output;
+        remaining = remaining / radix;
+    }
+    if negative { return "-" + output; }
+    return output;
+}
+
+pub func toHex(val: int): string {
+    return toRadix(val, 16);
+}
+
+pub func toBin(val: int): string {
+    return toRadix(val, 2);
+}
+
+pub func toOct(val: int): string {
+    return toRadix(val, 8);
+}

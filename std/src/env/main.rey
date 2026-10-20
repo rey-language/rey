@@ -1,0 +1,31 @@
+// Convenience accessors for the process environment.
+
+pub func get(key: string): any {
+    return getEnv(key);
+}
+
+pub func getOr(key: string, defaultVal: string): string {
+    var value: Option<string> = getEnv(key);
+    if value.isSome() {
+        return value.unwrap();
+    }
+    return defaultVal;
+}
+
+pub func set(key: string, value: string): void {
+    nativeSetEnv(key, value);
+}
+
+pub func remove(key: string): void {
+    nativeUnsetEnv(key);
+}
+
+pub func has(key: string): bool {
+    var value: Option<string> = getEnv(key);
+    return value.isSome();
+}
+
+pub func all(): any {
+    var values: HashMap<string, string> = nativeEnvAll();
+    return values;
+}

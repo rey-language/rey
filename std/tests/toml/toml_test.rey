@@ -1,0 +1,27 @@
+import std::toml;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+var source = "# app config\nname = \"rey\" # inline comment\nport = 8080\nenabled = true\n[server]\nhost = \"localhost\"\nworkers = 4\n# disabled = false\n";
+var config = toml.parse(source);
+check("parse quoted string and inline comment", toml.getString(config, "name", "missing") == "rey");
+check("parse integer", toml.getInt(config, "port", 80) == 8080);
+check("parse boolean", toml.getBool(config, "enabled", false));
+check("parse section values as dotted keys", toml.getString(config, "server.host", "missing") == "localhost" && toml.getInt(config, "server.workers", 1) == 4);
+check("defaults for missing and wrong types", toml.getString(config, "port", "fallback") == "fallback" && toml.getInt(config, "missing", 9) == 9 && toml.getBool(config, "missing", true));
+
+var escaped = toml.parse("message = \"say \\\"hello\\\"\\nnext\"\n");
+check("decode basic TOML string escapes", toml.getString(escaped, "message", "") == "say \"hello\"\nnext");
+
+var output = toml.stringify(config);
+var roundTrip = toml.parse(output);
+check("stringify and parse preserve common config types", toml.getString(roundTrip, "name", "") == "rey" && toml.getInt(roundTrip, "port", 0) == 8080 && toml.getBool(roundTrip, "enabled", false) && toml.getInt(roundTrip, "server.workers", 0) == 4);
+
+println("toml: all tests passed");

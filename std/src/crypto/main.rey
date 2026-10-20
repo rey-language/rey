@@ -1,0 +1,191 @@
+// Non-cryptographic hashes are implemented in Rey; cryptographic operations
+// use host-provided command-line tools.
+
+func shellQuote(value: string): string {
+    var out = "'";
+    var i = 0;
+    loop {
+        if i >= value.len() {
+            break;
+        }
+        var c = value[i];
+        if int(c) == 39 {
+            out = out + "'\\''";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out + "'";
+}
+
+func hexValue(c: char): int {
+    var code = int(c);
+    if code >= 48 && code <= 57 {
+        return code - 48;
+    }
+    if code >= 97 && code <= 102 {
+        return code - 87;
+    }
+    return -1;
+}
+
+func prefix(value: string, length: int): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= length || i >= value.len() {
+            break;
+        }
+        out = out + value[i].toString();
+        i = i + 1;
+    }
+    return out;
+}
+
+func xor32(left: int, right: int): int {
+    var a = left;
+    var b = right;
+    var result = 0;
+    var place = 1;
+    var i = 0;
+    loop {
+        if i >= 32 {
+            break;
+        }
+        if a % 2 != b % 2 {
+            result = result + place;
+        }
+        a = a / 2;
+        b = b / 2;
+        place = place * 2;
+        i = i + 1;
+    }
+    return result;
+}
+
+func fnvByte(hash: int, value: int): int {
+    return (xor32(hash, value) * 16777619) % 4294967296;
+}
+
+func djbByte(hash: int, value: int): int {
+    return (hash * 33 + value) % 4294967296;
+}
+
+pub func fnv1a(data: string): int {
+    var hash = 2166136261;
+    var i = 0;
+    loop {
+        if i >= data.len() {
+            break;
+        }
+        hash = fnvByte(hash, int(data[i]));
+        i = i + 1;
+    }
+    return hash;
+}
+
+pub func djb2(data: string): int {
+    var hash = 5381;
+    var i = 0;
+    loop {
+        if i >= data.len() {
+            break;
+        }
+        hash = djbByte(hash, int(data[i]));
+        i = i + 1;
+    }
+    return hash;
+}
+
+pub func md5(data: string): string {
+    var input = "printf '%s' " + shellQuote(data);
+    var macResult: Result<string, string> = exec(input + " | md5 -q");
+    if macResult.isOk() {
+        var digest = macResult.unwrap().trim().toLower();
+        if digest.len() == 32 {
+            return digest;
+        }
+    }
+
+    var linuxResult: Result<string, string> = exec(input + " | md5sum");
+    if linuxResult.isOk() {
+        var digest = linuxResult.unwrap().trim().toLower();
+        if digest.len() >= 32 {
+            return prefix(digest, 32);
+        }
+    }
+    return "";
+}
+
+pub func sha256(data: string): string {
+    var input = "printf '%s' " + shellQuote(data);
+    var shasumResult: Result<string, string> = exec(input + " | shasum -a 256");
+    if shasumResult.isOk() {
+        var digest = shasumResult.unwrap().trim().toLower();
+        if digest.len() >= 64 {
+            return prefix(digest, 64);
+        }
+    }
+
+    var linuxResult: Result<string, string> = exec(input + " | sha256sum");
+    if linuxResult.isOk() {
+        var digest = linuxResult.unwrap().trim().toLower();
+        if digest.len() >= 64 {
+            return prefix(digest, 64);
+        }
+    }
+    return "";
+}
+
+pub func randomBytes(n: int): Vec<int> {
+    var bytes: Vec<int> = Vec.new();
+    if n <= 0 {
+        return bytes;
+    }
+
+    var generated: Result<string, string> = exec("openssl rand -hex " + n.toString());
+    var hex = "";
+    if generated.isOk() {
+        hex = generated.unwrap().trim().toLower();
+    }
+    if hex.len() / 2 < n {
+        generated = exec("od -An -N" + n.toString() + " -v -tx1 /dev/urandom | tr -d '[:space:]'");
+        if generated.isOk() {
+            hex = generated.unwrap().trim().toLower();
+        }
+    }
+
+    if hex.len() / 2 < n {
+        return bytes;
+    }
+    var i = 0;
+    loop {
+        if i >= n {
+            break;
+        }
+        var high = hexValue(hex[i * 2]);
+        var low = hexValue(hex[i * 2 + 1]);
+        if high < 0 || low < 0 {
+            return Vec.new();
+        }
+        bytes.push(high * 16 + low);
+        i = i + 1;
+    }
+    return bytes;
+}
+
+pub func toHex(bytes: Vec<int>): string {
+    var digits = "0123456789abcdef";
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= bytes.len() {
+            break;
+        }
+        var value = ((bytes[i] % 256) + 256) % 256;
+        out = out + digits[value / 16].toString() + digits[value % 16].toString();
+        i = i + 1;
+    }
+    return out;
+}

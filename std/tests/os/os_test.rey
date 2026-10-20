@@ -1,0 +1,18 @@
+import std::os;
+
+func check(label: string, ok: bool): void {
+    if !ok {
+        assert(false, label);
+    }
+    println("PASS:", label);
+}
+
+var osName = os.name();
+check("name is a documented value", osName == "macos" || osName == "linux" || osName == "windows" || osName == "unknown");
+check("architecture is available", os.arch() != "");
+check("line ending follows the OS", (osName == "windows" && os.eol() == "\r\n") || (osName != "windows" && os.eol() == "\n"));
+check("hostname is available", os.hostname() != "");
+check("home directory is available", os.homedir() != "");
+check("temporary directory is available", os.tempDir() != "");
+
+println("os: all tests passed");

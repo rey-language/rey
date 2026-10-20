@@ -1,0 +1,29 @@
+import std::env;
+
+func check(label: string, ok: bool): void {
+    if !ok {
+        assert(false, label);
+    }
+    println("PASS:", label);
+}
+
+var key = "REY_STD_ENV_TEST_SECTOR_D";
+env.remove(key);
+var missing: Option<string> = env.get(key);
+check("missing value returns none", missing.isNone());
+check("getOr returns its default", env.getOr(key, "fallback") == "fallback");
+check("has reports missing value", !env.has(key));
+
+env.set(key, "rey-value");
+var present: Option<string> = env.get(key);
+check("get returns the set value", present.unwrap() == "rey-value");
+check("getOr returns the set value", env.getOr(key, "fallback") == "rey-value");
+check("has reports present value", env.has(key));
+var allValues: HashMap<string, string> = env.all();
+check("all includes the set value", allValues.has(key));
+
+env.remove(key);
+check("remove clears the value", !env.has(key));
+check("getOr falls back after removal", env.getOr(key, "fallback") == "fallback");
+
+println("env: all tests passed");

@@ -1,0 +1,11 @@
+[package]
+name = "std"
+version = "0.3.0"
+description = "The official standard library for the Rey programming language"
+authors = ["Rey Language Contributors"]
+license = "MIT"
+repository = "https://github.com/rey-language/std.git"
+
+[lib]
+type = "std"
+entry = "src"

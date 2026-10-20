@@ -1,0 +1,32 @@
+import std::sync;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+var counter = sync.atomicInt(10);
+check("atomic get", sync.atomicGet(counter) == 10);
+check("atomic add returns updated value", sync.atomicAdd(counter, 5) == 15 && sync.atomicGet(counter) == 15);
+check("atomic sub returns updated value", sync.atomicSub(counter, 3) == 12 && sync.atomicGet(counter) == 12);
+sync.atomicSet(counter, -4);
+check("atomic set", sync.atomicGet(counter) == -4);
+
+var guard = sync.mutex();
+check("mutex starts unlocked", !guard.locked);
+check("mutex first try-lock succeeds", sync.lock(guard));
+check("mutex second try-lock fails", !sync.lock(guard));
+sync.unlock(guard);
+check("mutex unlock permits another try-lock", sync.lock(guard));
+
+var messages = sync.channel();
+sync.send(messages, "first");
+sync.send(messages, 2);
+check("channel receives FIFO", sync.recv(messages) == "first" && sync.recv(messages) == 2);
+check("empty channel returns null", sync.recv(messages) == null);
+
+println("sync: all tests passed");

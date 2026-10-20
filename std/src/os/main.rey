@@ -1,0 +1,109 @@
+// Operating-system details backed by the host environment and standard commands.
+
+func unameValue(): string {
+    var result: Result<string, string> = exec("uname -s");
+    if result.isOk() {
+        return result.unwrap().trim();
+    }
+    return "";
+}
+
+pub func name(): string {
+    var os: Option<string> = getEnv("OS");
+    if os.isSome() && os.unwrap().toLower() == "windows_nt" {
+        return "windows";
+    }
+
+    var value = unameValue();
+    if value == "Darwin" {
+        return "macos";
+    }
+    if value == "Linux" {
+        return "linux";
+    }
+    if value == "Windows" || value == "MINGW" || value == "MSYS" {
+        return "windows";
+    }
+    return "unknown";
+}
+
+pub func arch(): string {
+    var value = "";
+    var architecture: Option<string> = getEnv("PROCESSOR_ARCHITEW6432");
+    if architecture.isSome() {
+        value = architecture.unwrap();
+    } else {
+        architecture = getEnv("PROCESSOR_ARCHITECTURE");
+        if architecture.isSome() {
+            value = architecture.unwrap();
+        }
+    }
+
+    if value == "" {
+        var result: Result<string, string> = exec("uname -m");
+        if result.isOk() {
+            value = result.unwrap().trim();
+        }
+    }
+
+    value = value.toLower();
+    if value == "aarch64" || value == "arm64" {
+        return "arm64";
+    }
+    if value == "amd64" || value == "x64" || value == "x86_64" {
+        return "x86_64";
+    }
+    if value == "i386" || value == "i686" || value == "x86" {
+        return "x86";
+    }
+    return value;
+}
+
+pub func eol(): string {
+    if name() == "windows" {
+        return "\r\n";
+    }
+    return "\n";
+}
+
+pub func hostname(): string {
+    var result: Result<string, string> = exec("hostname");
+    if result.isOk() {
+        var value = result.unwrap().trim();
+        if value != "" {
+            return value;
+        }
+    }
+
+    var host: Option<string> = getEnv("HOSTNAME");
+    if host.isSome() {
+        return host.unwrap();
+    }
+    host = getEnv("COMPUTERNAME");
+    if host.isSome() {
+        return host.unwrap();
+    }
+    return "";
+}
+
+pub func homedir(): string {
+    var home: Option<string> = getEnv("HOME");
+    if home.isSome() {
+        return home.unwrap();
+    }
+    home = getEnv("USERPROFILE");
+    if home.isSome() {
+        return home.unwrap();
+    }
+
+    var drive: Option<string> = getEnv("HOMEDRIVE");
+    var path: Option<string> = getEnv("HOMEPATH");
+    if drive.isSome() && path.isSome() {
+        return drive.unwrap() + path.unwrap();
+    }
+    return "";
+}
+
+pub func tempDir(): string {
+    return nativeTempDir();
+}

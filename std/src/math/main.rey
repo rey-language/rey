@@ -1,0 +1,299 @@
+// Math Module
+// Standard math functions, constants, trigonometry, and statistical utilities
+
+pub func pi(): float {
+    return 3.141592653589793;
+}
+
+pub func e(): float {
+    return 2.718281828459045;
+}
+
+pub func tau(): float {
+    return 6.283185307179586;
+}
+
+pub func clamp(value, minVal, maxVal) {
+    if value < minVal { return minVal; }
+    if value > maxVal { return maxVal; }
+    return value;
+}
+
+pub func sign(n) {
+    if n > 0 { return 1; }
+    if n < 0 { return -1; }
+    return 0;
+}
+
+pub func floor(n) {
+    var i = 0;
+    if n >= 0 {
+        while i + 1 <= n {
+            i = i + 1;
+        }
+        return i;
+    }
+    while i > n {
+        i = i - 1;
+    }
+    return i;
+}
+
+pub func ceil(n) {
+    return -floor(-n);
+}
+
+pub func round(n) {
+    if n >= 0 {
+        return floor(n + 0.5);
+    }
+    return ceil(n - 0.5);
+}
+
+pub func toRadians(deg: float): float {
+    return deg * 3.141592653589793 / 180.0;
+}
+
+pub func toDegrees(rad: float): float {
+    return rad * 180.0 / 3.141592653589793;
+}
+
+func normalizeRadians(x: float): float {
+    var result = x;
+    var twoPi = 6.283185307179586;
+    while result > 3.141592653589793 {
+        result -= twoPi;
+    }
+    while result < -3.141592653589793 {
+        result += twoPi;
+    }
+    return result;
+}
+
+pub func sin(x: float): float {
+    var y = normalizeRadians(x);
+    var term = y;
+    var result = y;
+
+    term = term * (-1.0) * y * y / (2.0 * 3.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (4.0 * 5.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (6.0 * 7.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (8.0 * 9.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (10.0 * 11.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (12.0 * 13.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (14.0 * 15.0);
+    result = result + term;
+
+    return result;
+}
+
+pub func cos(x: float): float {
+    var y = normalizeRadians(x);
+    var term = 1.0;
+    var result = 1.0;
+
+    term = term * (-1.0) * y * y / (1.0 * 2.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (3.0 * 4.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (5.0 * 6.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (7.0 * 8.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (9.0 * 10.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (11.0 * 12.0);
+    result = result + term;
+
+    term = term * (-1.0) * y * y / (13.0 * 14.0);
+    result = result + term;
+
+    return result;
+}
+
+pub func tan(x: float): float {
+    return sin(x) / cos(x);
+}
+
+pub func sum(nums: ...int): int {
+    var total = 0;
+    for n in nums {
+        total = total + n;
+    }
+    return total;
+}
+
+pub func mean(nums: ...int): int {
+    if nums.len() == 0 {
+        return 0;
+    }
+    var total = 0;
+    for n in nums {
+        total = total + n;
+    }
+    return total / nums.len();
+}
+
+pub func max(a, b) {
+    if a > b { return a; }
+    return b;
+}
+
+pub func min(a, b) {
+    if a < b { return a; }
+    return b;
+}
+
+pub func abs(n) {
+    if n < 0 { return -n; }
+    return n;
+}
+
+pub func sqrt(x: float): float {
+    return nativeSqrt(x);
+}
+
+pub func pow(base, exp) {
+    return nativePow(base, exp);
+}
+
+pub func log(x: float): float {
+    return nativeLog(x);
+}
+
+pub func random(): float {
+    return nativeRandom();
+}
+
+pub func lerp(a: float, b: float, t: float): float {
+    return a + (b - a) * t;
+}
+
+pub func hypot(a: float, b: float): float {
+    return sqrt(a * a + b * b);
+}
+
+func valueAtRank(nums: Vec<int>, target: int): int {
+    var i = 0;
+    while i < nums.len() {
+        var rank = 0;
+        var j = 0;
+        while j < nums.len() {
+            if nums[j] < nums[i] || (nums[j] == nums[i] && j < i) {
+                rank = rank + 1;
+            }
+            j = j + 1;
+        }
+        if rank == target {
+            return nums[i];
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+pub func median(nums: Vec<int>): float {
+    var length = nums.len();
+    if length == 0 {
+        return 0.0;
+    }
+
+    var middle = length / 2;
+    if length % 2 == 1 {
+        return float(valueAtRank(nums, middle));
+    }
+    return (float(valueAtRank(nums, middle - 1)) + float(valueAtRank(nums, middle))) / 2.0;
+}
+
+pub func variance(nums: Vec<int>): float {
+    var length = nums.len();
+    if length == 0 {
+        return 0.0;
+    }
+
+    var total = 0.0;
+    var i = 0;
+    while i < length {
+        total = total + float(nums[i]);
+        i = i + 1;
+    }
+    var average = total / float(length);
+
+    var squaredDifferences = 0.0;
+    i = 0;
+    while i < length {
+        var difference = float(nums[i]) - average;
+        squaredDifferences = squaredDifferences + difference * difference;
+        i = i + 1;
+    }
+    return squaredDifferences / float(length);
+}
+
+pub func stdDev(nums: Vec<int>): float {
+    return sqrt(variance(nums));
+}
+
+pub func gcd(a: int, b: int): int {
+    var left = abs(a);
+    var right = abs(b);
+    while right != 0 {
+        var remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    return left;
+}
+
+pub func lcm(a: int, b: int): int {
+    if a == 0 || b == 0 {
+        return 0;
+    }
+    return abs((a / gcd(a, b)) * b);
+}
+
+pub func factorial(n: int): int {
+    assert(n >= 0, "factorial requires a non-negative integer");
+    var result = 1;
+    var i = 2;
+    while i <= n {
+        result = result * i;
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func degToRad(deg: float): float {
+    return deg * 3.141592653589793 / 180.0;
+}
+
+pub func radToDeg(rad: float): float {
+    return rad * 180.0 / 3.141592653589793;
+}
+
+pub func trunc(x: float): int {
+    if x >= 0.0 {
+        return floor(x);
+    }
+    return ceil(x);
+}
+
+pub func fract(x: float): float {
+    return x - float(floor(x));
+}

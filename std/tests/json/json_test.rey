@@ -1,0 +1,38 @@
+import std::json;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("escape quotes and backslashes", json.escapeString("say \"hi\" \\") == "say \\\"hi\\\" \\\\");
+check("escape common controls", json.escapeString("line\nreturn\rtab\t") == "line\\nreturn\\rtab\\t");
+check("escape other control bytes", json.escapeString("\x01") == "\\u0001");
+check("stringify string", json.stringifyString("rey") == "\"rey\"");
+check("stringify int", json.stringifyInt(-42) == "-42");
+check("stringify float", json.stringifyFloat(1.25) == "1.25");
+check("stringify true", json.stringifyBool(true) == "true");
+check("stringify false", json.stringifyBool(false) == "false");
+
+var items: Vec<string> = Vec.new();
+items.push(json.stringifyInt(7));
+items.push(json.stringifyString("two"));
+items.push(json.stringifyBool(false));
+check("stringify array", json.stringifyArray(items) == "[7,\"two\",false]");
+
+var nameEntry: Vec<string> = Vec.new();
+nameEntry.push("name");
+nameEntry.push(json.stringifyString("rey"));
+var countEntry: Vec<string> = Vec.new();
+countEntry.push("count");
+countEntry.push(json.stringifyInt(2));
+var entries: Vec<Vec<string>> = Vec.new();
+entries.push(nameEntry);
+entries.push(countEntry);
+check("stringify object", json.stringifyObject(entries) == "{{\"name\":\"rey\",\"count\":2}}");
+
+println("json: all tests passed");

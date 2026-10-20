@@ -1,0 +1,27 @@
+import std::mem;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("primitive sizes", mem.sizeOfInt() == 8 && mem.sizeOfFloat() == 8 && mem.sizeOfBool() == 1 && mem.sizeOfChar() == 4);
+
+var values: Vec<any> = Vec.new();
+values.push("a");
+values.push(2);
+values.push(true);
+values.push("d");
+var span = mem.makeSpan(values, 1, 2);
+check("span reads at offset", mem.spanGet(span, 0) == 2 && mem.spanGet(span, 1) == true);
+var sliced = mem.spanSlice(span, 1, 2);
+check("span slice keeps backing vector", sliced.length == 1 && mem.spanGet(sliced, 0) == true);
+
+mem.copy(values, 1, values, 0, 3);
+check("copy supports overlapping ranges", values[0] == "a" && values[1] == "a" && values[2] == 2 && values[3] == true);
+
+println("mem: all tests passed");

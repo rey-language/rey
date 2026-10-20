@@ -1,0 +1,10 @@
+import std::test;
+
+test.assertEq("rey", "rey", "assertEq accepts matching strings");
+test.assertNotEq("rey", "standard library", "assertNotEq accepts different strings");
+test.assertTrue(4 > 2, "assertTrue accepts true");
+test.assertFalse(4 < 2, "assertFalse accepts false");
+test.assertApprox(3.14159, 3.14, 0.01, "assertApprox accepts values within epsilon");
+test.pass("pass reporter runs");
+
+println("test: all tests passed");

@@ -1,0 +1,56 @@
+import std::linalg;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+func checkClose(label: string, actual: float, expected: float): void {
+    var difference = actual - expected;
+    if difference < 0.0 { difference = difference * -1.0; }
+    check(label, difference < 0.00001);
+}
+
+var a2 = linalg.vec2(3.0, 4.0);
+var b2 = linalg.vec2(1.0, 2.0);
+check("vec2 constructor", a2.x == 3.0 && a2.y == 4.0);
+var sum2 = linalg.vec2Add(a2, b2);
+check("vec2 add", sum2.x == 4.0 && sum2.y == 6.0);
+var difference2 = linalg.vec2Sub(a2, b2);
+check("vec2 subtract", difference2.x == 2.0 && difference2.y == 2.0);
+var scaled2 = linalg.vec2Scale(a2, 2.0);
+check("vec2 scale", scaled2.x == 6.0 && scaled2.y == 8.0);
+checkClose("vec2 dot", linalg.vec2Dot(a2, b2), 11.0);
+checkClose("vec2 length", linalg.vec2Length(a2), 5.0);
+checkClose("vec2 distance", linalg.vec2Distance(a2, b2), nativeSqrt(8.0));
+var unit2 = linalg.vec2Normalize(a2);
+checkClose("vec2 normalize x", unit2.x, 0.6);
+checkClose("vec2 normalize y", unit2.y, 0.8);
+var zero2 = linalg.vec2Normalize(linalg.vec2(0.0, 0.0));
+check("vec2 normalize zero", zero2.x == 0.0 && zero2.y == 0.0);
+
+var a3 = linalg.vec3(1.0, 2.0, 3.0);
+var b3 = linalg.vec3(4.0, 5.0, 6.0);
+check("vec3 constructor", a3.x == 1.0 && a3.y == 2.0 && a3.z == 3.0);
+var sum3 = linalg.vec3Add(a3, b3);
+check("vec3 add", sum3.x == 5.0 && sum3.y == 7.0 && sum3.z == 9.0);
+var difference3 = linalg.vec3Sub(a3, b3);
+check("vec3 subtract", difference3.x == -3.0 && difference3.y == -3.0 && difference3.z == -3.0);
+var scaled3 = linalg.vec3Scale(a3, 2.0);
+check("vec3 scale", scaled3.x == 2.0 && scaled3.y == 4.0 && scaled3.z == 6.0);
+checkClose("vec3 dot", linalg.vec3Dot(a3, b3), 32.0);
+var cross3 = linalg.vec3Cross(a3, b3);
+check("vec3 cross", cross3.x == -3.0 && cross3.y == 6.0 && cross3.z == -3.0);
+checkClose("vec3 length", linalg.vec3Length(a3), nativeSqrt(14.0));
+var unit3 = linalg.vec3Normalize(linalg.vec3(0.0, 3.0, 4.0));
+checkClose("vec3 normalize x", unit3.x, 0.0);
+checkClose("vec3 normalize y", unit3.y, 0.6);
+checkClose("vec3 normalize z", unit3.z, 0.8);
+var zero3 = linalg.vec3Normalize(linalg.vec3(0.0, 0.0, 0.0));
+check("vec3 normalize zero", zero3.x == 0.0 && zero3.y == 0.0 && zero3.z == 0.0);
+
+println("linalg: all tests passed");

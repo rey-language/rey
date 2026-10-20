@@ -1,0 +1,109 @@
+// Little- and big-endian unsigned integer byte conversions and hexadecimal text.
+
+func checkByte(bytes: Vec<int>, index: int): int {
+    assert(index >= 0 && index < bytes.len(), "std::binary byte offset is out of range");
+    var value = bytes[index];
+    assert(value >= 0 && value <= 255, "std::binary byte values must be in 0..255");
+    return value;
+}
+
+func hexDigit(value: int): string {
+    return "0123456789abcdef"[value].toString();
+}
+
+func hexValue(value: char): int {
+    var code = int(value);
+    if code >= 48 && code <= 57 { return code - 48; }
+    if code >= 65 && code <= 70 { return code - 55; }
+    if code >= 97 && code <= 102 { return code - 87; }
+    return -1;
+}
+
+pub func packU16Le(val: int): Vec<int> {
+    assert(val >= 0 && val <= 65535, "packU16Le expects a value in 0..65535");
+    var bytes: Vec<int> = Vec.new();
+    bytes.push(val % 256);
+    bytes.push((val / 256) % 256);
+    return bytes;
+}
+
+pub func unpackU16Le(bytes: Vec<int>, offset: int): int {
+    assert(offset >= 0 && offset + 2 <= bytes.len(), "unpackU16Le requires two bytes at offset");
+    return checkByte(bytes, offset) + checkByte(bytes, offset + 1) * 256;
+}
+
+pub func packU32Le(val: int): Vec<int> {
+    assert(val >= 0 && val <= 4294967295, "packU32Le expects a value in 0..4294967295");
+    var bytes: Vec<int> = Vec.new();
+    bytes.push(val % 256);
+    bytes.push((val / 256) % 256);
+    bytes.push((val / 65536) % 256);
+    bytes.push((val / 16777216) % 256);
+    return bytes;
+}
+
+pub func unpackU32Le(bytes: Vec<int>, offset: int): int {
+    assert(offset >= 0 && offset + 4 <= bytes.len(), "unpackU32Le requires four bytes at offset");
+    return checkByte(bytes, offset)
+        + checkByte(bytes, offset + 1) * 256
+        + checkByte(bytes, offset + 2) * 65536
+        + checkByte(bytes, offset + 3) * 16777216;
+}
+
+pub func packU16Be(val: int): Vec<int> {
+    assert(val >= 0 && val <= 65535, "packU16Be expects a value in 0..65535");
+    var bytes: Vec<int> = Vec.new();
+    bytes.push((val / 256) % 256);
+    bytes.push(val % 256);
+    return bytes;
+}
+
+pub func unpackU16Be(bytes: Vec<int>, offset: int): int {
+    assert(offset >= 0 && offset + 2 <= bytes.len(), "unpackU16Be requires two bytes at offset");
+    return checkByte(bytes, offset) * 256 + checkByte(bytes, offset + 1);
+}
+
+pub func packU32Be(val: int): Vec<int> {
+    assert(val >= 0 && val <= 4294967295, "packU32Be expects a value in 0..4294967295");
+    var bytes: Vec<int> = Vec.new();
+    bytes.push((val / 16777216) % 256);
+    bytes.push((val / 65536) % 256);
+    bytes.push((val / 256) % 256);
+    bytes.push(val % 256);
+    return bytes;
+}
+
+pub func unpackU32Be(bytes: Vec<int>, offset: int): int {
+    assert(offset >= 0 && offset + 4 <= bytes.len(), "unpackU32Be requires four bytes at offset");
+    return checkByte(bytes, offset) * 16777216
+        + checkByte(bytes, offset + 1) * 65536
+        + checkByte(bytes, offset + 2) * 256
+        + checkByte(bytes, offset + 3);
+}
+
+pub func toHex(bytes: Vec<int>): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= bytes.len() { break; }
+        var value = checkByte(bytes, i);
+        result = result + hexDigit(value / 16) + hexDigit(value % 16);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func fromHex(hex: string): Vec<int> {
+    assert(hex.len() % 2 == 0, "fromHex requires an even number of hexadecimal characters");
+    var bytes: Vec<int> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= hex.len() { break; }
+        var high = hexValue(hex[i]);
+        var low = hexValue(hex[i + 1]);
+        assert(high >= 0 && low >= 0, "fromHex accepts only hexadecimal characters");
+        bytes.push(high * 16 + low);
+        i = i + 2;
+    }
+    return bytes;
+}

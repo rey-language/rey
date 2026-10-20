@@ -1,0 +1,155 @@
+// SQLite CLI-backed SQL helpers with a no-op memory mock when sqlite3 is absent.
+
+import std::process;
+
+pub struct Connection {
+    pub path: string,
+    pub driver: string,
+}
+
+pub struct QueryResult {
+    pub columns: Vec<string>,
+    pub rows: Vec<Vec<string>>,
+    pub changes: int,
+    pub ok: bool,
+    pub error: string,
+}
+
+func shellQuote(value: string): string {
+    var out = "'";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = value[i];
+        if int(c) == 39 {
+            out = out + "'\\''";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out + "'";
+}
+
+func emptyResult(ok: bool, error: string): QueryResult {
+    return QueryResult {
+        columns: Vec.new(),
+        rows: Vec.new(),
+        changes: 0,
+        ok: ok,
+        error: error,
+    };
+}
+
+func parseChanges(value: string): int {
+    var result = 0;
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var digit = int(value[i]) - 48;
+        if digit < 0 || digit > 9 { return 0; }
+        result = result * 10 + digit;
+        i = i + 1;
+    }
+    return result;
+}
+
+func parseOutput(output: string): QueryResult {
+    var lines = output.split("\n");
+    var lineCount = lines.len();
+    if lineCount > 0 && lines[lineCount - 1] == "" {
+        lineCount = lineCount - 1;
+    }
+
+    var changes = 0;
+    if lineCount >= 2 && lines[lineCount - 2] == "__rey_changes" {
+        changes = parseChanges(lines[lineCount - 1]);
+        lineCount = lineCount - 2;
+    }
+
+    var columns: Vec<string> = Vec.new();
+    var rows: Vec<Vec<string>> = Vec.new();
+    if lineCount == 0 {
+        var result = emptyResult(true, "");
+        result.changes = changes;
+        return result;
+    }
+
+    columns = lines[0].split("|");
+    var rowIndex = 1;
+    loop {
+        if rowIndex >= lineCount { break; }
+        rows.push(lines[rowIndex].split("|"));
+        rowIndex = rowIndex + 1;
+    }
+
+    return QueryResult {
+        columns: columns,
+        rows: rows,
+        changes: changes,
+        ok: true,
+        error: "",
+    };
+}
+
+pub func connect(path: string): Connection {
+    var sqlite = process.which("sqlite3");
+    if sqlite.isNone() {
+        return Connection { path: path, driver: "memory" };
+    }
+
+    // sqlite3 starts a new process for each call, so use a temporary file to
+    // preserve state for connections requested as :memory:.
+    if path == ":memory:" {
+        var temporaryPath = process.tempDir() + "/rey_sql_" + nativeRandom().toString() + ".db";
+        return Connection { path: temporaryPath, driver: "sqlite3-memory" };
+    }
+    return Connection { path: path, driver: "sqlite3" };
+}
+
+pub func execute(conn: Connection, sql: string): QueryResult {
+    if conn.driver == "memory" {
+        // The fallback intentionally provides a predictable empty mock only.
+        return emptyResult(true, "");
+    }
+
+    var script = sql + "\n;\nSELECT changes() AS __rey_changes;";
+    var input = "printf '%s\\n' " + shellQuote(script);
+    var command = input + " | sqlite3 -header -separator '|' -- " + shellQuote(conn.path);
+    var result = process.runDetailed(command);
+    if result.code != 0 {
+        var error = result.stderr.trim();
+        if error.len() == 0 {
+            error = "sqlite3 exited with code " + result.code.toString();
+        }
+        return emptyResult(false, error);
+    }
+
+    return parseOutput(result.stdout);
+}
+
+pub func query(conn: Connection, sql: string): QueryResult {
+    return execute(conn, sql);
+}
+
+pub func escapeString(val: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= val.len() { break; }
+        var c = val[i];
+        if c == '\'' {
+            out = out + "''";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub func close(conn: Connection): void {
+    if conn.driver == "sqlite3-memory" && fileExists(conn.path) {
+        deleteFile(conn.path);
+    }
+}

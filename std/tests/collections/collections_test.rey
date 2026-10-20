@@ -1,0 +1,121 @@
+import std::collections;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+var ascending = collections.range(1, 6);
+check("range default step", ascending.len() == 5 && ascending[0] == 1 && ascending[4] == 5);
+var stepped = collections.range(0, 10, 3);
+check("range custom step", stepped.len() == 4 && stepped[3] == 9);
+var descending = collections.range(5, 0, -2);
+check("range descending", descending.len() == 3 && descending[0] == 5 && descending[2] == 1);
+check("range zero step is empty", collections.range(1, 5, 0).len() == 0);
+check("range wrong direction is empty", collections.range(5, 1, 1).len() == 0);
+
+var left: Vec<any> = Vec.new();
+left.push("a");
+left.push("b");
+left.push("c");
+var right: Vec<any> = Vec.new();
+right.push(1);
+right.push(2);
+var zipped = collections.zip(left, right);
+check("zip stops at shorter input", zipped.len() == 2 && zipped[1][0] == "b" && zipped[1][1] == 2);
+
+var nested: Vec<Vec<any>> = Vec.new();
+var first: Vec<any> = Vec.new();
+first.push(1);
+first.push(2);
+var second: Vec<any> = Vec.new();
+second.push(3);
+nested.push(first);
+nested.push(Vec.new());
+nested.push(second);
+var flat = collections.flatten(nested);
+check("flatten one level", flat.len() == 3 && flat[0] == 1 && flat[2] == 3);
+
+var repeated: Vec<any> = Vec.new();
+repeated.push(2);
+repeated.push(1);
+repeated.push(2);
+repeated.push(3);
+repeated.push(1);
+var distinct = collections.unique(repeated);
+check("unique preserves first-seen order", distinct.len() == 3 && distinct[0] == 2 && distinct[2] == 3);
+var mixedValues: Vec<any> = Vec.new();
+mixedValues.push("1");
+mixedValues.push(1);
+mixedValues.push("1");
+mixedValues.push(1);
+var mixedUnique = collections.unique(mixedValues);
+check("unique handles mixed primitive types", mixedUnique.len() == 2 && mixedUnique[0] == "1" && mixedUnique[1] == 1);
+check("contains handles mixed primitive types", collections.contains(mixedValues, 1) && collections.contains(mixedValues, "1"));
+
+var grouped = collections.groupBy(repeated, (value: any) => value % 2);
+check("groupBy coerces keys to strings", grouped.get("0").len() == 2 && grouped.get("1").len() == 3);
+
+var chunks = collections.chunk(repeated, 2);
+check("chunk includes final partial group", chunks.len() == 3 && chunks[0].len() == 2 && chunks[2].len() == 1);
+check("chunk non-positive size is empty", collections.chunk(repeated, 0).len() == 0);
+
+var splitParts = collections.partition(repeated, (value: any) => value % 2 == 0);
+check("partition keeps matching then remaining", splitParts[0].len() == 2 && splitParts[1].len() == 3 && splitParts[0][0] == 2);
+check("find returns Option.Some", collections.find(repeated, (value: any) => value == 3) == Option.Some(3));
+check("find returns None when absent", collections.find(repeated, (value: any) => value == 9) == Option.None());
+check("findIndex found", collections.findIndex(repeated, (value: any) => value == 3) == 3);
+check("findIndex absent", collections.findIndex(repeated, (value: any) => value == 9) == -1);
+check("every true", collections.every(repeated, (value: any) => value > 0));
+check("every false", !collections.every(repeated, (value: any) => value < 3));
+check("some true", collections.some(repeated, (value: any) => value == 3));
+check("some false", !collections.some(repeated, (value: any) => value == 9));
+check("count matching", collections.count(repeated, (value: any) => value == 2) == 2);
+check("every empty input is true", collections.every(Vec.new(), (value: any) => value > 0));
+check("some empty input is false", !collections.some(Vec.new(), (value: any) => value > 0));
+
+var scores: Vec<any> = Vec.new();
+scores.push(4);
+scores.push(9);
+scores.push(2);
+check("maxBy returns item in Option", collections.maxBy(scores, (value: any) => value) == Option.Some(9));
+check("minBy returns item in Option", collections.minBy(scores, (value: any) => value) == Option.Some(2));
+check("maxBy empty returns None", collections.maxBy(Vec.new(), (value: any) => value) == Option.None());
+check("sum", collections.sum(scores) == 15);
+check("sum empty", collections.sum(Vec.new()) == 0);
+check("sumBy", collections.sumBy(scores, (value: any) => value * 2) == 30);
+
+var counts = collections.frequency(repeated);
+check("frequency counts display keys", counts.get("1") == 2 && counts.get("2") == 2 && counts.get("3") == 1);
+check("take", collections.take(scores, 2).len() == 2 && collections.take(scores, 2)[1] == 9);
+check("take clamps length", collections.take(scores, 20).len() == 3);
+check("drop", collections.drop(scores, 1).len() == 2 && collections.drop(scores, 1)[0] == 9);
+check("drop clamps length", collections.drop(scores, 20).len() == 0);
+var combined = collections.concat(left, right);
+check("concat copies both inputs in order", combined.len() == 5 && combined[2] == "c" && combined[4] == 2);
+
+var loose: Vec<any> = Vec.new();
+loose.push(null);
+loose.push(false);
+loose.push(0);
+loose.push(0.0);
+loose.push("");
+loose.push(Option.None());
+loose.push("false");
+loose.push("null");
+loose.push("None");
+loose.push(5);
+var compacted = collections.compact(loose);
+check("compact removes empty values and preserves similar strings", compacted.len() == 4 && compacted[0] == "false" && compacted[2] == "None" && compacted[3] == 5);
+
+check("map retained", collections.map(scores, (value: any) => value + 1)[0] == 5);
+check("filter retained", collections.filter(scores, (value: any) => value > 4).len() == 1);
+check("reduce retained", collections.reduce(scores, (acc: any, value: any) => acc + value, 0) == 15);
+check("reverse retained", collections.reverse(scores)[0] == 2);
+check("contains retained", collections.contains(scores, 9) && !collections.contains(scores, 7));
+
+println("collections: all tests passed");

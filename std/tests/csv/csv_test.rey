@@ -1,0 +1,37 @@
+import std::csv;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+var basic = csv.parse("name,age\r\nRey,3\n");
+check("parse CRLF and LF records", basic.len() == 2 && basic[0][0] == "name" && basic[1][1] == "3");
+var quoted = csv.parse("a,\"hello, world\",\"say \"\"hi\"\"\"\r\n");
+check("parse quoted commas and escaped quotes", quoted.len() == 1 && quoted[0][1] == "hello, world" && quoted[0][2] == "say \"hi\"");
+var multiline = csv.parse("\"one\r\ntwo\",x\n");
+check("preserve newlines inside quoted fields", multiline[0][0] == "one\r\ntwo" && multiline[0][1] == "x");
+check("empty input has no records", csv.parse("").len() == 0);
+check("trailing record break adds no empty record", csv.parse("a,b\r\n").len() == 1);
+
+var semicolon = csv.parseWithDelimiter("left;right\n1;2", ";");
+check("parse custom delimiter", semicolon.len() == 2 && semicolon[1][1] == "2");
+
+var rows: Vec<Vec<string>> = Vec.new();
+var row: Vec<string> = Vec.new();
+row.push("plain");
+row.push("with,comma");
+row.push("say \"hello\"");
+row.push("line\nnext");
+rows.push(row);
+var serialized = csv.stringify(rows);
+var restored = csv.parse(serialized);
+check("stringify escapes and parse restores fields", restored.len() == 1 && restored[0].len() == 4 && restored[0][1] == "with,comma" && restored[0][2] == "say \"hello\"" && restored[0][3] == "line\nnext");
+check("stringify uses CRLF between records", csv.stringify(basic).indexOf("\r\n") >= 0);
+check("custom delimiter round trip", csv.parseWithDelimiter(csv.stringifyWithDelimiter(rows, ";"), ";")[0][1] == "with,comma");
+
+println("csv: all tests passed");

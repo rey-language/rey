@@ -1,0 +1,90 @@
+// Address helpers and a process-backed ping check.
+
+import std::process;
+
+pub struct SocketAddr {
+    pub host: string,
+    pub port: int,
+}
+
+pub func socketAddr(host: string, port: int): SocketAddr {
+    return SocketAddr { host: host, port: port };
+}
+
+pub func formatAddr(addr: SocketAddr): string {
+    if addr.host.contains(":") {
+        return "[" + addr.host + "]:" + addr.port.toString();
+    }
+    return addr.host + ":" + addr.port.toString();
+}
+
+pub func isLoopback(addr: SocketAddr): bool {
+    var host = addr.host.toLower();
+    if host == "localhost" || host == "::1" || host == "[::1]" { return true; }
+    var octets = parseIpv4(host);
+    return octets.len() == 4 && octets[0] == 127;
+}
+
+pub func parseIpv4(host: string): Vec<int> {
+    var octets: Vec<int> = Vec.new();
+    if host.len() == 0 { return octets; }
+
+    var value = 0;
+    var digits = 0;
+    var i = 0;
+    loop {
+        if i >= host.len() { break; }
+        var ch = host[i];
+        if ch == '.' {
+            if digits == 0 || digits > 3 || value > 255 || octets.len() >= 3 {
+                return Vec.new();
+            }
+            octets.push(value);
+            value = 0;
+            digits = 0;
+        } else {
+            if ch < '0' || ch > '9' { return Vec.new(); }
+            value = value * 10 + int(ch) - 48;
+            digits = digits + 1;
+            if digits > 3 || value > 255 { return Vec.new(); }
+        }
+        i = i + 1;
+    }
+
+    if digits == 0 || digits > 3 || octets.len() != 3 || value > 255 {
+        return Vec.new();
+    }
+    octets.push(value);
+    return octets;
+}
+
+pub func isIpv4(host: string): bool {
+    return parseIpv4(host).len() == 4;
+}
+
+func isPingHost(host: string): bool {
+    if host.len() == 0 { return false; }
+    var first = host[0];
+    if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || (first >= '0' && first <= '9')) {
+        return false;
+    }
+
+    var i = 0;
+    loop {
+        if i >= host.len() { break; }
+        var ch = host[i];
+        var allowed = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == ':' || ch == '_';
+        if !allowed { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func pingHost(host: string): bool {
+    if !isPingHost(host) { return false; }
+    var command = "ping -c 1 " + host;
+    if process.isWindows() {
+        command = "ping -n 1 " + host;
+    }
+    return process.runDetailed(command).code == 0;
+}

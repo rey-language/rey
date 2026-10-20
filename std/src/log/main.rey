@@ -1,0 +1,72 @@
+// Leveled logging. The selected threshold is stored in this process environment.
+
+import std::string;
+
+func logAt(level: int, name: string, msg: string): void {
+    if getLogLevel() <= level {
+        println(formatLog(name, msg));
+    }
+}
+
+pub func levelTrace(): int {
+    return 0;
+}
+
+pub func levelDebug(): int {
+    return 1;
+}
+
+pub func levelInfo(): int {
+    return 2;
+}
+
+pub func levelWarn(): int {
+    return 3;
+}
+
+pub func levelError(): int {
+    return 4;
+}
+
+pub func setLogLevel(level: int): void {
+    assert(level >= levelTrace() && level <= levelError(), "log level must be between 0 and 4");
+    nativeSetEnv("REY_STD_LOG_LEVEL", level.toString());
+}
+
+pub func getLogLevel(): int {
+    var stored: Option<string> = getEnv("REY_STD_LOG_LEVEL");
+    if stored.isSome() {
+        var parsed: Option<int> = string.parseInt(stored.unwrap());
+        if parsed.isSome() {
+            var value = parsed.unwrap();
+            if value >= levelTrace() && value <= levelError() {
+                return value;
+            }
+        }
+    }
+    return levelInfo();
+}
+
+pub func trace(msg: string): void {
+    logAt(levelTrace(), "TRACE", msg);
+}
+
+pub func debug(msg: string): void {
+    logAt(levelDebug(), "DEBUG", msg);
+}
+
+pub func info(msg: string): void {
+    logAt(levelInfo(), "INFO", msg);
+}
+
+pub func warn(msg: string): void {
+    logAt(levelWarn(), "WARN", msg);
+}
+
+pub func error(msg: string): void {
+    logAt(levelError(), "ERROR", msg);
+}
+
+pub func formatLog(level: string, msg: string): string {
+    return "[" + level + "] " + msg;
+}

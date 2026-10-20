@@ -1,0 +1,38 @@
+pub func clamp(value, min, max) {
+    if value < min { return min; }
+    if value > max { return max; }
+    return value;
+}
+
+pub func sign(n) {
+    if n > 0 { return 1; }
+    if n < 0 { return -1; }
+    return 0;
+}
+
+pub func floor(n) {
+    var i = 0;
+    if n >= 0 {
+        while i + 1 <= n {
+            i = i + 1;
+        }
+        return i;
+    }
+
+    while i > n {
+        i = i - 1;
+    }
+
+    return i;
+}
+
+pub func ceil(n) {
+    return -floor(-n);
+}
+
+pub func round(n) {
+    if n >= 0 {
+        return floor(n + 0.5);
+    }
+    return ceil(n - 0.5);
+}

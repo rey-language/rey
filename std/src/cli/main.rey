@@ -1,0 +1,101 @@
+// Command-line argument parsing and help text helpers.
+
+import std::string;
+
+func normalizeName(name: string): string {
+    var start = 0;
+    loop {
+        if start >= name.len() || name[start] != '-' { break; }
+        start = start + 1;
+    }
+    return string.slice(name, start, name.len());
+}
+
+pub func parseArgs(args: Vec<string>): any {
+    var parsed: HashMap<string, any> = HashMap.new();
+    var flags: HashMap<string, bool> = HashMap.new();
+    var options: HashMap<string, string> = HashMap.new();
+    var positionals: Vec<string> = Vec.new();
+    var positionalMode = false;
+    var i = 0;
+
+    loop {
+        if i >= args.len() { break; }
+        var arg = args[i];
+
+        if positionalMode {
+            positionals.push(arg);
+        } else if arg == "--" {
+            positionalMode = true;
+        } else if arg.len() > 2 && string.startsWith(arg, "--") {
+            var body = string.slice(arg, 2, arg.len());
+            var equalsAt = string.indexOf(body, "=");
+            if equalsAt >= 0 {
+                var name = string.slice(body, 0, equalsAt);
+                var value = string.slice(body, equalsAt + 1, body.len());
+                options.set(name, value);
+            } else if i + 1 < args.len() && !string.startsWith(args[i + 1], "-") {
+                options.set(body, args[i + 1]);
+                i = i + 1;
+            } else {
+                flags.set(body, true);
+            }
+        } else if arg.len() > 1 && arg[0] == '-' {
+            // Short switches are flags. Compact forms such as -abc set a, b, and c.
+            var j = 1;
+            loop {
+                if j >= arg.len() { break; }
+                flags.set(arg[j].toString(), true);
+                j = j + 1;
+            }
+        } else {
+            positionals.push(arg);
+        }
+
+        i = i + 1;
+    }
+
+    parsed.set("flags", flags);
+    parsed.set("options", options);
+    parsed.set("positionals", positionals);
+    return parsed;
+}
+
+pub func hasFlag(parsed: any, flagName: string): bool {
+    var flags: HashMap<string, bool> = parsed.get("flags");
+    return flags.has(normalizeName(flagName));
+}
+
+pub func getOption(parsed: any, optName: string, defaultValue: string): string {
+    var options: HashMap<string, string> = parsed.get("options");
+    var name = normalizeName(optName);
+    if options.has(name) {
+        return options.get(name);
+    }
+    return defaultValue;
+}
+
+pub func getPositionals(parsed: any): Vec<string> {
+    var positionals: Vec<string> = parsed.get("positionals");
+    return positionals;
+}
+
+pub func renderHelp(appName: string, desc: string, flags: Vec<Vec<string>>): string {
+    var output = appName + "\n" + desc + "\n\nUsage: " + appName + " [options] [arguments]";
+    if flags.len() == 0 { return output; }
+
+    output = output + "\n\nOptions:";
+    var i = 0;
+    loop {
+        if i >= flags.len() { break; }
+        var row = flags[i];
+        if row.len() > 0 {
+            output = output + "\n  " + row[0];
+            if row.len() > 1 {
+                output = output + "  " + row[1];
+            }
+        }
+        i = i + 1;
+    }
+    return output;
+}

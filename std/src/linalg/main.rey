@@ -1,0 +1,88 @@
+// Small, immutable-by-convention 2D and 3D vector primitives.
+
+pub struct Vec2 {
+    pub x: float,
+    pub y: float,
+}
+
+pub struct Vec3 {
+    pub x: float,
+    pub y: float,
+    pub z: float,
+}
+
+pub func vec2(x: float, y: float): Vec2 {
+    return Vec2 { x: x, y: y };
+}
+
+pub func vec2Add(a: Vec2, b: Vec2): Vec2 {
+    return vec2(a.x + b.x, a.y + b.y);
+}
+
+pub func vec2Sub(a: Vec2, b: Vec2): Vec2 {
+    return vec2(a.x - b.x, a.y - b.y);
+}
+
+pub func vec2Scale(v: Vec2, s: float): Vec2 {
+    return vec2(v.x * s, v.y * s);
+}
+
+pub func vec2Dot(a: Vec2, b: Vec2): float {
+    return a.x * b.x + a.y * b.y;
+}
+
+pub func vec2Length(v: Vec2): float {
+    return nativeSqrt(vec2Dot(v, v));
+}
+
+pub func vec2Distance(a: Vec2, b: Vec2): float {
+    return vec2Length(vec2Sub(a, b));
+}
+
+pub func vec2Normalize(v: Vec2): Vec2 {
+    var length = vec2Length(v);
+    if length == 0.0 {
+        return vec2(0.0, 0.0);
+    }
+    return vec2Scale(v, 1.0 / length);
+}
+
+pub func vec3(x: float, y: float, z: float): Vec3 {
+    return Vec3 { x: x, y: y, z: z };
+}
+
+pub func vec3Add(a: Vec3, b: Vec3): Vec3 {
+    return vec3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+pub func vec3Sub(a: Vec3, b: Vec3): Vec3 {
+    return vec3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+pub func vec3Scale(v: Vec3, s: float): Vec3 {
+    return vec3(v.x * s, v.y * s, v.z * s);
+}
+
+pub func vec3Dot(a: Vec3, b: Vec3): float {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+pub func vec3Cross(a: Vec3, b: Vec3): Vec3 {
+    return vec3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    );
+}
+
+pub func vec3Length(v: Vec3): float {
+    return nativeSqrt(vec3Dot(v, v));
+}
+
+pub func vec3Normalize(v: Vec3): Vec3 {
+    var length = vec3Length(v);
+    if length == 0.0 {
+        return vec3(0.0, 0.0, 0.0);
+    }
+    return vec3Scale(v, 1.0 / length);
+}

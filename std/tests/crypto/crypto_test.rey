@@ -1,0 +1,30 @@
+import std::crypto;
+
+func check(label: string, ok: bool): void {
+    if !ok {
+        assert(false, label);
+    }
+    println("PASS:", label);
+}
+
+check("FNV-1a hashes empty input", crypto.fnv1a("") == 2166136261);
+check("FNV-1a hashes hello", crypto.fnv1a("hello") == 1335831723);
+check("FNV-1a hashes UTF-8 bytes", crypto.fnv1a("é") == 513665217);
+check("djb2 hashes empty input", crypto.djb2("") == 5381);
+check("djb2 hashes hello", crypto.djb2("hello") == 261238937);
+check("djb2 hashes UTF-8 bytes", crypto.djb2("é") == 5866513);
+check("MD5 hashes abc", crypto.md5("abc") == "900150983cd24fb0d6963f7d28e17f72");
+check("SHA-256 hashes abc", crypto.sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+check("shell quoting preserves a single quote", crypto.sha256("it's ok") == "e1d73d76b620b5f0c04a9307301c15ced68e9da7f3c6529af3929ef04a3b17d4");
+
+var sample: Vec<int> = [0, 15, 16, 255, -1];
+check("toHex encodes low byte values", crypto.toHex(sample) == "000f10ffff");
+check("toHex handles empty input", crypto.toHex(Vec.new()) == "");
+
+var random = crypto.randomBytes(32);
+check("randomBytes returns requested count", random.len() == 32);
+check("randomBytes values are bytes", random.len() == 0 || (random[0] >= 0 && random[0] <= 255));
+check("randomBytes handles zero length", crypto.randomBytes(0).len() == 0);
+check("randomBytes handles negative length", crypto.randomBytes(-1).len() == 0);
+
+println("crypto: all tests passed");

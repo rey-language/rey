@@ -1,0 +1,206 @@
+// Filesystem helpers built on the compiler's native filesystem operations.
+
+pub func read(path: string): string {
+    return readFile(path);
+}
+
+pub func write(path: string, content: string): void {
+    writeFile(path, content);
+}
+
+pub func append(path: string, content: string): void {
+    appendFile(path, content);
+}
+
+pub func exists(path: string): bool {
+    return fileExists(path);
+}
+
+pub func remove(path: string): void {
+    deleteFile(path);
+}
+
+pub func mkdir(path: string): void {
+    nativeMkdir(path);
+}
+
+pub func mkdirAll(path: string): void {
+    nativeMkdirAll(path);
+}
+
+pub func removeDir(path: string): void {
+    nativeRemoveDir(path);
+}
+
+pub func removeDirAll(path: string): void {
+    nativeRemoveDirAll(path);
+}
+
+pub func isFile(path: string): bool {
+    return nativeIsFile(path);
+}
+
+pub func isDir(path: string): bool {
+    return nativeIsDir(path);
+}
+
+// list returns entry names (not full paths)
+pub func list(path: string): Vec<string> {
+    return listDir(path);
+}
+
+// listPaths returns full paths for entries
+pub func listPaths(path: string): Vec<string> {
+    return nativeListDirPaths(path);
+}
+
+pub func join(a: string, b: string): string {
+    return nativePathJoin(a, b);
+}
+
+pub func basename(path: string): string {
+    return nativeBasename(path);
+}
+
+pub func dirname(path: string): string {
+    return nativeDirname(path);
+}
+
+// extname returns the extension without a leading dot, or "".
+pub func extname(path: string): string {
+    return nativeExtname(path);
+}
+
+pub func copy(src: string, dst: string): void {
+    nativeCopyFile(src, dst);
+}
+
+pub func move(src: string, dst: string): void {
+    nativeMoveFile(src, dst);
+}
+
+// Creates an empty file when path does not already exist. Existing files are
+// left untouched, including their contents.
+pub func touch(path: string): void {
+    if !exists(path) {
+        write(path, "");
+    }
+}
+
+// Reads newline-delimited text. A final line feed does not create an extra
+// empty item, and CRLF line endings are returned without the carriage return.
+pub func readLines(path: string): Vec<string> {
+    var contents = read(path);
+    var lines: Vec<string> = Vec.new();
+    if contents == "" {
+        return lines;
+    }
+    var splitLines = contents.split("\n");
+    var i = 0;
+    loop {
+        if i >= splitLines.len() {
+            break;
+        }
+        // A final delimiter terminates the preceding line; it is not a line.
+        if i == splitLines.len() - 1 && splitLines[i] == "" && contents.endsWith("\n") {
+            break;
+        }
+        var line = splitLines[i];
+        if line.endsWith("\r") {
+            line = line.slice(0, line.len() - 1);
+        }
+        lines.push(line);
+        i = i + 1;
+    }
+    return lines;
+}
+
+// Writes one line per item, with a trailing line feed when the vector is
+// non-empty. An empty vector creates an empty file.
+pub func writeLines(path: string, lines: Vec<string>): void {
+    var contents = "";
+    var i = 0;
+    loop {
+        if i >= lines.len() {
+            break;
+        }
+        contents = contents + lines[i] + "\n";
+        i = i + 1;
+    }
+    write(path, contents);
+}
+
+// Creates path and any missing parent directories.
+pub func ensureDir(path: string): void {
+    if !isDir(path) {
+        mkdirAll(path);
+    }
+}
+
+// Normalizes separators and dot segments without resolving the path against
+// the filesystem. The result uses forward slashes on every platform.
+pub func cleanPath(path: string): string {
+    var normalized = path.replace("\\", "/");
+    var absolute = normalized.startsWith("/");
+    var unc = normalized.startsWith("//");
+    var outputParts: Vec<string> = Vec.new();
+    var drive = "";
+    var pathBody = normalized;
+    if normalized.len() >= 2 && normalized.slice(1, 2) == ":" {
+        drive = normalized.slice(0, 2);
+        pathBody = normalized.slice(2, normalized.len());
+        if pathBody.startsWith("/") {
+            absolute = true;
+        }
+    }
+    var inputParts = pathBody.split("/");
+
+    var i = 0;
+    loop {
+        if i >= inputParts.len() {
+            break;
+        }
+        var part = inputParts[i];
+        if part == "" || part == "." {
+            // Ignore empty and current-directory segments.
+        } else if part == ".." {
+            if outputParts.len() > 0 && outputParts[outputParts.len() - 1] != ".." {
+                outputParts.pop();
+            } else if !absolute {
+                outputParts.push(part);
+            }
+        } else {
+            outputParts.push(part);
+        }
+        i = i + 1;
+    }
+
+    var result = "";
+    if drive != "" {
+        result = drive;
+        if absolute {
+            result = result + "/";
+        }
+    } else if unc {
+        result = "//";
+    } else if absolute {
+        result = "/";
+    }
+
+    var j = 0;
+    loop {
+        if j >= outputParts.len() {
+            break;
+        }
+        if result != "" && !result.endsWith("/") && !(drive != "" && !absolute && j == 0) {
+            result = result + "/";
+        }
+        result = result + outputParts[j];
+        j = j + 1;
+    }
+
+    if result == "" {
+        return ".";
+    }
+    return result;
+}

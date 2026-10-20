@@ -1,0 +1,479 @@
+// String helpers implemented with Rey's built-in string operations.
+
+func isWhitespace(c: string): bool {
+    return c == " " || c == "\n" || c == "\t" || c == "\r";
+}
+
+func isAsciiLetter(c: string): bool {
+    var code = c.hash();
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+func isAsciiDigit(c: string): bool {
+    var code = c.hash();
+    return code >= 48 && code <= 57;
+}
+
+pub func trimStart(s: string): string {
+    var start = 0;
+    loop {
+        if start >= s.len() || !isWhitespace(slice(s, start, start + 1)) { break; }
+        start = start + 1;
+    }
+    return slice(s, start, s.len());
+}
+
+pub func trimEnd(s: string): string {
+    var end = s.len();
+    loop {
+        if end <= 0 || !isWhitespace(slice(s, end - 1, end)) { break; }
+        end = end - 1;
+    }
+    return slice(s, 0, end);
+}
+
+pub func trim(s: string): string {
+    return trimEnd(trimStart(s));
+}
+
+pub func startsWith(s: string, prefix: string): bool {
+    if prefix.len() > s.len() { return false; }
+    var i = 0;
+    loop {
+        if i >= prefix.len() { break; }
+        if s[i] != prefix[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func endsWith(s: string, suffix: string): bool {
+    if suffix.len() > s.len() { return false; }
+    var offset = s.len() - suffix.len();
+    var i = 0;
+    loop {
+        if i >= suffix.len() { break; }
+        if s[offset + i] != suffix[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func indexOf(s: string, sub: string): int {
+    if sub.len() == 0 { return 0; }
+    if sub.len() > s.len() { return -1; }
+    var i = 0;
+    loop {
+        if i + sub.len() > s.len() { break; }
+        var found = true;
+        var j = 0;
+        loop {
+            if j >= sub.len() { break; }
+            if s[i + j] != sub[j] { found = false; break; }
+            j = j + 1;
+        }
+        if found { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub func lastIndexOf(s: string, sub: string, fromIndex: int = -1): int {
+    var start = fromIndex;
+    if start == -1 { start = s.len() - sub.len(); }
+    if start < 0 { return -1; }
+    if start > s.len() - sub.len() { start = s.len() - sub.len(); }
+    if start < 0 { return -1; }
+    if sub.len() == 0 { return start; }
+    var i = start;
+    loop {
+        if i < 0 { break; }
+        var found = true;
+        var j = 0;
+        loop {
+            if j >= sub.len() { break; }
+            if s[i + j] != sub[j] { found = false; break; }
+            j = j + 1;
+        }
+        if found { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+pub func contains(s: string, sub: string): bool {
+    return indexOf(s, sub) >= 0;
+}
+
+pub func replace(s: string, from: string, to: string): string {
+    if from.len() == 0 { return s; }
+    var at = indexOf(s, from);
+    if at < 0 { return s; }
+    return slice(s, 0, at) + to + slice(s, at + from.len(), s.len());
+}
+
+pub func replaceAll(s: string, from: string, to: string): string {
+    if from.len() == 0 { return s; }
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var found = true;
+        var j = 0;
+        loop {
+            if j >= from.len() { break; }
+            if i + j >= s.len() || s[i + j] != from[j] { found = false; break; }
+            j = j + 1;
+        }
+        if found {
+            result = result + to;
+            i = i + from.len();
+        } else {
+            result = result + slice(s, i, i + 1);
+            i = i + 1;
+        }
+    }
+    return result;
+}
+
+pub func slice(s: string, start: int, end: int): string {
+    var first = start;
+    var last = end;
+    if first < 0 { first = s.len() + first; }
+    if last < 0 { last = s.len() + last; }
+    if first < 0 { first = 0; }
+    if last < 0 { last = 0; }
+    if first > s.len() { first = s.len(); }
+    if last > s.len() { last = s.len(); }
+    if last <= first { return ""; }
+    var result = "";
+    var i = first;
+    loop {
+        if i >= last { break; }
+        result = result + s.slice(i, i + 1);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func substring(s: string, start: int, end: int): string {
+    var first = start;
+    var last = end;
+    if first < 0 { first = 0; }
+    if last < 0 { last = 0; }
+    if first > s.len() { first = s.len(); }
+    if last > s.len() { last = s.len(); }
+    if first > last {
+        var temp = first;
+        first = last;
+        last = temp;
+    }
+    return slice(s, first, last);
+}
+
+pub func padLeft(s: string, width: int, fill: string = " "): string {
+    if width <= s.len() || fill.len() == 0 { return s; }
+    var needed = width - s.len();
+    return slice(repeat(fill, needed), 0, needed) + s;
+}
+
+pub func padRight(s: string, width: int, fill: string = " "): string {
+    if width <= s.len() || fill.len() == 0 { return s; }
+    var needed = width - s.len();
+    return s + slice(repeat(fill, needed), 0, needed);
+}
+
+pub func repeat(s: string, n: int): string {
+    if n <= 0 { return ""; }
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= n { break; }
+        result = result + s;
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func split(s: string, sep: string): Vec<string> {
+    var result: Vec<string> = Vec.new();
+    if sep.len() == 0 {
+        var i = 0;
+        loop {
+            if i >= s.len() { break; }
+            result.push(slice(s, i, i + 1));
+            i = i + 1;
+        }
+        return result;
+    }
+    var partStart = 0;
+    var i = 0;
+    loop {
+        if i + sep.len() > s.len() { break; }
+        var found = true;
+        var j = 0;
+        loop {
+            if j >= sep.len() { break; }
+            if s[i + j] != sep[j] { found = false; break; }
+            j = j + 1;
+        }
+        if found {
+            result.push(slice(s, partStart, i));
+            i = i + sep.len();
+            partStart = i;
+        } else {
+            i = i + 1;
+        }
+    }
+    result.push(slice(s, partStart, s.len()));
+    return result;
+}
+
+pub func join(parts: Vec<string>, sep: string): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= parts.len() { break; }
+        if i > 0 { result = result + sep; }
+        result = result + parts[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func toLowerCase(s: string): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var code = slice(s, i, i + 1).hash();
+        if code >= 65 && code <= 90 {
+            result = result + slice("abcdefghijklmnopqrstuvwxyz", code - 65, code - 64);
+        } else {
+            result = result + slice(s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func toUpperCase(s: string): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var code = slice(s, i, i + 1).hash();
+        if code >= 97 && code <= 122 {
+            result = result + slice("ABCDEFGHIJKLMNOPQRSTUVWXYZ", code - 97, code - 96);
+        } else {
+            result = result + slice(s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func capitalize(s: string): string {
+    if s.len() == 0 { return s; }
+    return toUpperCase(slice(s, 0, 1)) + toLowerCase(slice(s, 1, s.len()));
+}
+
+pub func reverse(s: string): string {
+    var result = "";
+    var i = s.len() - 1;
+    loop {
+        if i < 0 { break; }
+        result = result + slice(s, i, i + 1);
+        i = i - 1;
+    }
+    return result;
+}
+
+pub func lines(s: string): Vec<string> {
+    var result: Vec<string> = Vec.new();
+    if s.len() == 0 { return result; }
+    var parts = split(s, "\n");
+    var limit = parts.len();
+    if endsWith(s, "\n") { limit = limit - 1; }
+    var i = 0;
+    loop {
+        if i >= limit { break; }
+        var line = parts[i];
+        if endsWith(line, "\r") { line = slice(line, 0, line.len() - 1); }
+        result.push(line);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func words(s: string): Vec<string> {
+    var result: Vec<string> = Vec.new();
+    var current = "";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        if isWhitespace(slice(s, i, i + 1)) {
+            if current.len() > 0 { result.push(current); current = ""; }
+        } else {
+            current = current + slice(s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    if current.len() > 0 { result.push(current); }
+    return result;
+}
+
+pub func truncate(s: string, maxLength: int, suffix: string = "..."): string {
+    if maxLength <= 0 { return ""; }
+    if s.len() <= maxLength { return s; }
+    if suffix.len() >= maxLength { return slice(suffix, 0, maxLength); }
+    return slice(s, 0, maxLength - suffix.len()) + suffix;
+}
+
+pub func count(s: string, sub: string): int {
+    if sub.len() == 0 { return 0; }
+    var total = 0;
+    var i = 0;
+    loop {
+        if i + sub.len() > s.len() { break; }
+        var found = true;
+        var j = 0;
+        loop {
+            if j >= sub.len() { break; }
+            if s[i + j] != sub[j] { found = false; break; }
+            j = j + 1;
+        }
+        if found {
+            total = total + 1;
+            i = i + sub.len();
+        } else {
+            i = i + 1;
+        }
+    }
+    return total;
+}
+
+pub func isNumeric(s: string): bool {
+    var value = trim(s);
+    if value.len() == 0 { return false; }
+    var i = 0;
+    if slice(value, 0, 1) == "+" || slice(value, 0, 1) == "-" { i = 1; }
+    if i >= value.len() { return false; }
+    var seenDigit = false;
+    var seenDot = false;
+    loop {
+        if i >= value.len() { break; }
+        var c = slice(value, i, i + 1);
+        if isAsciiDigit(slice(value, i, i + 1)) {
+            seenDigit = true;
+        } else if c == "." && !seenDot {
+            seenDot = true;
+        } else {
+            return false;
+        }
+        i = i + 1;
+    }
+    return seenDigit;
+}
+
+pub func isAlpha(s: string): bool {
+    if s.len() == 0 { return false; }
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        if !isAsciiLetter(slice(s, i, i + 1)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func isAlphanumeric(s: string): bool {
+    if s.len() == 0 { return false; }
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        if !isAsciiLetter(slice(s, i, i + 1)) && !isAsciiDigit(slice(s, i, i + 1)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func parseInt(s: string): any {
+    var value = trim(s);
+    if value.len() == 0 { return Option.None(); }
+    var i = 0;
+    var negative = false;
+    if slice(value, 0, 1) == "-" || slice(value, 0, 1) == "+" {
+        negative = slice(value, 0, 1) == "-";
+        i = 1;
+    }
+    if i >= value.len() { return Option.None(); }
+    var result = 0;
+    loop {
+        if i >= value.len() { break; }
+        if !isAsciiDigit(slice(value, i, i + 1)) { return Option.None(); }
+        result = result * 10 + (slice(value, i, i + 1).hash() - 48);
+        i = i + 1;
+    }
+    if negative { return Option.Some(0 - result); }
+    return Option.Some(result);
+}
+
+pub func parseFloat(s: string): any {
+    var value = trim(s);
+    if value.len() == 0 { return Option.None(); }
+    var i = 0;
+    var negative = false;
+    if slice(value, 0, 1) == "-" || slice(value, 0, 1) == "+" {
+        negative = slice(value, 0, 1) == "-";
+        i = 1;
+    }
+    if i >= value.len() { return Option.None(); }
+    var whole = 0;
+    var fraction = 0.0;
+    var divisor = 10.0;
+    var seenDigit = false;
+    var seenDot = false;
+    loop {
+        if i >= value.len() { break; }
+        var c = slice(value, i, i + 1);
+        if isAsciiDigit(c) {
+            seenDigit = true;
+            if seenDot {
+                fraction = fraction + ((c.hash() - 48) * 1.0) / divisor;
+                divisor = divisor * 10.0;
+            } else {
+                whole = whole * 10 + (c.hash() - 48);
+            }
+        } else if c == "." && !seenDot {
+            seenDot = true;
+        } else {
+            return Option.None();
+        }
+        i = i + 1;
+    }
+    if !seenDigit { return Option.None(); }
+    var result = (whole * 1.0) + fraction;
+    if negative { result = 0.0 - result; }
+    return Option.Some(result);
+}
+
+pub func slugify(s: string): string {
+    var value = toLowerCase(trim(s));
+    var result = "";
+    var pendingDash = false;
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = slice(value, i, i + 1);
+        if isAsciiLetter(c) || isAsciiDigit(c) {
+            if pendingDash && result.len() > 0 { result = result + "-"; }
+            result = result + c;
+            pendingDash = false;
+        } else {
+            pendingDash = true;
+        }
+        i = i + 1;
+    }
+    return result;
+}

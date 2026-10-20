@@ -1,0 +1,38 @@
+import std::compress;
+import std::fs;
+import std::process;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("RLE compresses repeated runs", compress.rleCompress("aaabbc") == "3:a2:b1:c");
+check("RLE preserves digits and delimiters", compress.rleDecompress(compress.rleCompress("11::aa")) == "11::aa");
+check("RLE empty round trip", compress.rleDecompress(compress.rleCompress("")) == "");
+
+var previousDir = process.cwd();
+var testDir = fs.join(process.tempDir(), "rey_std_compress_test");
+if fs.exists(testDir) { fs.removeDirAll(testDir); }
+fs.mkdirAll(testDir);
+process.chdir(testDir);
+fs.write("source file.txt", "compression fixture\n");
+
+check("gzip succeeds", compress.gzip("source file.txt", "source file.gz"));
+check("gunzip succeeds", compress.gunzip("source file.gz", "restored file.txt"));
+check("gzip round trip", fs.read("restored file.txt") == "compression fixture\n");
+
+var files: Vec<string> = Vec.new();
+files.push("source file.txt");
+check("tar create succeeds", compress.tarCreate("archive file.tar", files));
+fs.mkdirAll("extracted");
+check("tar extract succeeds", compress.tarExtract("archive file.tar", "extracted"));
+check("tar round trip", fs.read("extracted/source file.txt") == "compression fixture\n");
+
+process.chdir(previousDir);
+fs.removeDirAll(testDir);
+println("compress: all tests passed");

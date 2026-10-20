@@ -1,0 +1,49 @@
+import std::process;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+println("args:", process.args());
+println("cwd:", process.cwd());
+println("tempDir:", process.tempDir());
+
+var before = process.cwd();
+process.chdir(process.tempDir());
+check("chdir changed cwd", process.cwd() != before);
+process.chdir(before);
+check("chdir restored cwd", process.cwd() == before);
+
+process.setEnv("REY_STD_TEST", "ok");
+var value: Option<string> = process.env("REY_STD_TEST");
+check("setEnv and env", value.isSome() && value.unwrap() == "ok");
+var envMap: HashMap<string, string> = process.envAll();
+check("envAll contains set variable", envMap.has("REY_STD_TEST"));
+process.unsetEnv("REY_STD_TEST");
+var unsetValue: Option<string> = process.env("REY_STD_TEST");
+check("unsetEnv removes variable", unsetValue.isNone());
+
+var all = process.envAll();
+println("envAll size:", all.len());
+
+println("which(sh):", process.which("sh"));
+var runResult: Result<string, string> = process.run("echo rey");
+check("run returns command output", runResult.isOk() && runResult.unwrap().trim() == "rey");
+var detailed = process.runDetailed("echo rey");
+println("runDetailed(echo rey):", detailed);
+check("runDetailed returns command output", detailed.code == 0 && detailed.stdout.trim() == "rey");
+
+var windows = process.isWindows();
+var mac = process.isMac();
+var linux = process.isLinux();
+check("platform helpers identify exactly one supported OS", (windows && !mac && !linux) || (!windows && mac && !linux) || (!windows && !mac && linux));
+
+process.sleepMs(5);
+println("sleepMs: ok");
+
+println("process: all tests passed");

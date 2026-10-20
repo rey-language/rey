@@ -1,0 +1,26 @@
+import std::core;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+var someValue = Option::Some(7);
+var noValue = Option::None();
+var okValue = Result::Ok("ready");
+var errValue = Result::Err("failed");
+
+check("isSome recognizes Some", core.isSome(someValue));
+check("isNone recognizes None", core.isNone(noValue));
+check("unwrapOr returns Some payload", core.unwrapOr(someValue, 9) == 7);
+check("unwrapOr returns None default", core.unwrapOr(noValue, 9) == 9);
+check("isOk recognizes Ok", core.isOk(okValue));
+check("isErr recognizes Err", core.isErr(errValue));
+check("unwrapOr returns Result success", core.unwrapOr(okValue, "fallback") == "ready");
+check("unwrapOr returns Result fallback", core.unwrapOr(errValue, "fallback") == "fallback");
+
+println("core: all tests passed");

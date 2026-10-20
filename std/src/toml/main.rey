@@ -1,0 +1,210 @@
+// A small TOML reader and writer for common configuration values.
+// Section keys are represented as dotted keys, such as "server.port".
+
+func trim(s: string): string {
+    return s.trim();
+}
+
+func stripComment(line: string): string {
+    var inQuotes = false;
+    var escaped = false;
+    var i = 0;
+    loop {
+        if i >= line.len() { break; }
+        var c = line[i];
+        if inQuotes {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                inQuotes = false;
+            }
+        } else if c == '"' {
+            inQuotes = true;
+        } else if c == '#' {
+            return line.slice(0, i);
+        }
+        i = i + 1;
+    }
+    return line;
+}
+
+func findUnquotedEquals(line: string): int {
+    var inQuotes = false;
+    var escaped = false;
+    var i = 0;
+    loop {
+        if i >= line.len() { break; }
+        var c = line[i];
+        if inQuotes {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                inQuotes = false;
+            }
+        } else if c == '"' {
+            inQuotes = true;
+        } else if c == '=' {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func decodeString(value: string): string {
+    var result = "";
+    var i = 1;
+    var end = value.len() - 1;
+    loop {
+        if i >= end { break; }
+        var c = value[i];
+        if c == '\\' && i + 1 < end {
+            var next = value[i + 1];
+            if next == 'n' {
+                result = result + "\n";
+            } else if next == 'r' {
+                result = result + "\r";
+            } else if next == 't' {
+                result = result + "\t";
+            } else if next == '"' || next == '\\' {
+                result = result + next.toString();
+            } else {
+                result = result + "\\" + next.toString();
+            }
+            i = i + 2;
+        } else {
+            result = result + c.toString();
+            i = i + 1;
+        }
+    }
+    return result;
+}
+
+func isInteger(value: string): bool {
+    var s = trim(value);
+    if s.len() == 0 { return false; }
+    var i = 0;
+    if s[0] == '-' || s[0] == '+' {
+        i = 1;
+    }
+    if i >= s.len() { return false; }
+    loop {
+        if i >= s.len() { break; }
+        var c = s[i];
+        if c < '0' || c > '9' { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func parseValue(value: string): any {
+    var s = trim(value);
+    if s.len() >= 2 && s[0] == '"' && s[s.len() - 1] == '"' {
+        return decodeString(s);
+    }
+    if s == "true" { return true; }
+    if s == "false" { return false; }
+    if isInteger(s) { return s.toInt(); }
+    // Bare values are kept as strings so unsupported TOML value forms remain readable.
+    return s;
+}
+
+pub func parse(text: string): HashMap<string, any> {
+    var table: HashMap<string, any> = HashMap.new();
+    var section = "";
+    var lines = text.split("\n");
+    var i = 0;
+    loop {
+        if i >= lines.len() { break; }
+        var line = trim(stripComment(lines[i]));
+        if line.len() > 0 {
+            if line[0] == '[' && line[line.len() - 1] == ']' {
+                section = trim(line.slice(1, line.len() - 1));
+            } else {
+                var equals = findUnquotedEquals(line);
+                if equals >= 0 {
+                    var key = trim(line.slice(0, equals));
+                    var fullKey = key;
+                    if section.len() > 0 { fullKey = section + "." + key; }
+                    table.set(fullKey, parseValue(line.slice(equals + 1, line.len())));
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return table;
+}
+
+pub func getString(table: HashMap<string, any>, key: string, defaultVal: string): string {
+    if !table.has(key) { return defaultVal; }
+    var value = table.get(key);
+    if value instanceof string { return value; }
+    return defaultVal;
+}
+
+pub func getInt(table: HashMap<string, any>, key: string, defaultVal: int): int {
+    if !table.has(key) { return defaultVal; }
+    var value = table.get(key);
+    if value instanceof int { return value; }
+    return defaultVal;
+}
+
+pub func getBool(table: HashMap<string, any>, key: string, defaultVal: bool): bool {
+    if !table.has(key) { return defaultVal; }
+    var value = table.get(key);
+    if value instanceof bool { return value; }
+    return defaultVal;
+}
+
+func escapeString(value: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = value[i];
+        if c == '"' {
+            out = out + "\\\"";
+        } else if c == '\\' {
+            out = out + "\\\\";
+        } else if c == '\n' {
+            out = out + "\\n";
+        } else if c == '\r' {
+            out = out + "\\r";
+        } else if c == '\t' {
+            out = out + "\\t";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+func serializeValue(value: any): string {
+    if value instanceof string { return "\"" + escapeString(value) + "\""; }
+    if value instanceof bool {
+        if value { return "true"; }
+        return "false";
+    }
+    if value instanceof int { return value.toString(); }
+    if value instanceof float { return value.toString(); }
+    return "\"" + escapeString(value.toString()) + "\"";
+}
+
+pub func stringify(table: HashMap<string, any>): string {
+    var out = "";
+    var keys = table.keys();
+    var i = 0;
+    loop {
+        if i >= keys.len() { break; }
+        if i > 0 { out = out + "\n"; }
+        var key = keys[i];
+        out = out + key + " = " + serializeValue(table.get(key));
+        i = i + 1;
+    }
+    return out;
+}

@@ -1,0 +1,43 @@
+import std::binary;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+var u16le = binary.packU16Le(4660);
+check("pack u16 little endian", u16le.len() == 2 && u16le[0] == 52 && u16le[1] == 18);
+check("unpack u16 little endian", binary.unpackU16Le(u16le, 0) == 4660);
+var u16be = binary.packU16Be(4660);
+check("pack u16 big endian", u16be.len() == 2 && u16be[0] == 18 && u16be[1] == 52);
+check("unpack u16 big endian", binary.unpackU16Be(u16be, 0) == 4660);
+
+var u32le = binary.packU32Le(305419896);
+check("pack u32 little endian", u32le.len() == 4 && u32le[0] == 120 && u32le[1] == 86 && u32le[2] == 52 && u32le[3] == 18);
+check("unpack u32 little endian", binary.unpackU32Le(u32le, 0) == 305419896);
+var u32be = binary.packU32Be(305419896);
+check("pack u32 big endian", u32be.len() == 4 && u32be[0] == 18 && u32be[1] == 52 && u32be[2] == 86 && u32be[3] == 120);
+check("unpack u32 big endian", binary.unpackU32Be(u32be, 0) == 305419896);
+
+var maxU16 = binary.packU16Be(65535);
+check("u16 max value", binary.unpackU16Be(maxU16, 0) == 65535);
+var maxU32 = binary.packU32Le(4294967295);
+check("u32 max value", binary.unpackU32Le(maxU32, 0) == 4294967295);
+
+var withPrefix: Vec<int> = Vec.new();
+withPrefix.push(255);
+withPrefix.push(52);
+withPrefix.push(18);
+check("unpack offset", binary.unpackU16Le(withPrefix, 1) == 4660);
+check("hex lowercase", binary.toHex(u32be) == "12345678");
+var parsed = binary.fromHex("00aBff");
+check("from hex mixed case", parsed.len() == 3 && parsed[0] == 0 && parsed[1] == 171 && parsed[2] == 255);
+check("hex round trip", binary.toHex(binary.fromHex("deadBEEF")) == "deadbeef");
+var empty: Vec<int> = Vec.new();
+check("empty hex conversion", binary.toHex(empty) == "" && binary.fromHex("").len() == 0);
+
+println("binary: all tests passed");

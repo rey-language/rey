@@ -1,0 +1,122 @@
+// RFC 4180 style CSV parsing and serialization.
+
+pub func parse(text: string): Vec<Vec<string>> {
+    return parseWithDelimiter(text, ",");
+}
+
+pub func parseWithDelimiter(text: string, delim: string): Vec<Vec<string>> {
+    assert(delim.len() == 1, "CSV delimiter must be exactly one character");
+
+    var rows: Vec<Vec<string>> = Vec.new();
+    if text.len() == 0 { return rows; }
+
+    var row: Vec<string> = Vec.new();
+    var field = "";
+    var inQuotes = false;
+    var endedWithRecordBreak = false;
+    var i = 0;
+    loop {
+        if i >= text.len() { break; }
+        var c = text[i];
+
+        if inQuotes {
+            if c == '"' {
+                if i + 1 < text.len() && text[i + 1] == '"' {
+                    field = field + "\"";
+                    i = i + 2;
+                } else {
+                    inQuotes = false;
+                    i = i + 1;
+                }
+            } else {
+                field = field + c.toString();
+                i = i + 1;
+            }
+            endedWithRecordBreak = false;
+        } else if c == '"' && field.len() == 0 {
+            inQuotes = true;
+            endedWithRecordBreak = false;
+            i = i + 1;
+        } else if c == delim[0] {
+            row.push(field);
+            field = "";
+            endedWithRecordBreak = false;
+            i = i + 1;
+        } else if c == '\n' {
+            row.push(field);
+            rows.push(row);
+            row = Vec.new();
+            field = "";
+            endedWithRecordBreak = true;
+            i = i + 1;
+        } else if c == '\r' && i + 1 < text.len() && text[i + 1] == '\n' {
+            row.push(field);
+            rows.push(row);
+            row = Vec.new();
+            field = "";
+            endedWithRecordBreak = true;
+            i = i + 2;
+        } else {
+            field = field + c.toString();
+            endedWithRecordBreak = false;
+            i = i + 1;
+        }
+    }
+
+    // A final line break already completed its record; do not add a phantom row.
+    if !endedWithRecordBreak {
+        row.push(field);
+        rows.push(row);
+    }
+    return rows;
+}
+
+pub func stringify(rows: Vec<Vec<string>>): string {
+    return stringifyWithDelimiter(rows, ",");
+}
+
+pub func stringifyWithDelimiter(rows: Vec<Vec<string>>, delim: string): string {
+    assert(delim.len() == 1, "CSV delimiter must be exactly one character");
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= rows.len() { break; }
+        if i > 0 { out = out + "\r\n"; }
+        var row = rows[i];
+        var j = 0;
+        loop {
+            if j >= row.len() { break; }
+            if j > 0 { out = out + delim; }
+            var value = row[j];
+            var needsQuotes = false;
+            var k = 0;
+            loop {
+                if k >= value.len() { break; }
+                if value[k] == delim[0] || value[k] == '"' || value[k] == '\r' || value[k] == '\n' {
+                    needsQuotes = true;
+                    break;
+                }
+                k = k + 1;
+            }
+            if needsQuotes {
+                var escaped = "\"";
+                k = 0;
+                loop {
+                    if k >= value.len() { break; }
+                    if value[k] == '"' {
+                        escaped = escaped + "\"\"";
+                    } else {
+                        escaped = escaped + value[k].toString();
+                    }
+                    k = k + 1;
+                }
+                out = out + escaped + "\"";
+            } else {
+                out = out + value;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}

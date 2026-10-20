@@ -1,0 +1,73 @@
+// Synchronous state helpers. These do not provide cross-thread synchronization.
+
+pub struct AtomicInt {
+    pub val: int,
+}
+
+pub func atomicInt(initial: int): AtomicInt {
+    return AtomicInt { val: initial };
+}
+
+pub func atomicGet(a: AtomicInt): int {
+    return a.val;
+}
+
+pub func atomicSet(a: AtomicInt, v: int): void {
+    a.val = v;
+}
+
+pub func atomicAdd(a: AtomicInt, delta: int): int {
+    a.val = a.val + delta;
+    return a.val;
+}
+
+pub func atomicSub(a: AtomicInt, delta: int): int {
+    a.val = a.val - delta;
+    return a.val;
+}
+
+pub struct Mutex {
+    pub locked: bool,
+}
+
+pub func mutex(): Mutex {
+    return Mutex { locked: false };
+}
+
+// lock is a nonblocking try-lock: it returns false when already locked.
+pub func lock(m: Mutex): bool {
+    if m.locked { return false; }
+    m.locked = true;
+    return true;
+}
+
+pub func unlock(m: Mutex): void {
+    m.locked = false;
+}
+
+pub struct Channel {
+    pub queue: Vec<any>,
+}
+
+pub func channel(): Channel {
+    return Channel { queue: Vec.new() };
+}
+
+pub func send(ch: Channel, val: any): void {
+    ch.queue.push(val);
+}
+
+// recv removes the oldest queued value, or returns null when the queue is empty.
+pub func recv(ch: Channel): any {
+    if ch.queue.len() == 0 { return null; }
+    var value = ch.queue[0];
+    var remaining: Vec<any> = Vec.new();
+    var i = 1;
+    loop {
+        if i >= ch.queue.len() { break; }
+        remaining.push(ch.queue[i]);
+        i = i + 1;
+    }
+    ch.queue = remaining;
+    return value;
+}

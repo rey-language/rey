@@ -1,0 +1,30 @@
+import std::log;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+nativeUnsetEnv("REY_STD_LOG_LEVEL");
+check("level values are ordered", log.levelTrace() == 0 && log.levelDebug() == 1 && log.levelInfo() == 2 && log.levelWarn() == 3 && log.levelError() == 4);
+check("default level is info", log.getLogLevel() == log.levelInfo());
+check("formatLog formats severity and message", log.formatLog("WARN", "disk is full") == "[WARN] disk is full");
+
+log.setLogLevel(log.levelDebug());
+check("setLogLevel updates threshold", log.getLogLevel() == log.levelDebug());
+log.trace("hidden trace message");
+log.debug("visible debug message");
+log.info("visible info message");
+log.warn("visible warning message");
+log.error("visible error message");
+
+log.setLogLevel(log.levelError());
+check("error threshold stored", log.getLogLevel() == log.levelError());
+log.info("hidden info message");
+log.error("visible error at error threshold");
+
+println("log: all tests passed");

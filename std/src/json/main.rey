@@ -1,0 +1,85 @@
+// JSON string escaping and small JSON serialization helpers.
+
+func hexDigit(value: int): string {
+    return "0123456789abcdef"[value].toString();
+}
+
+pub func escapeString(s: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var c = s[i];
+        if c == '"' {
+            out = out + "\\\"";
+        } else if c == '\\' {
+            out = out + "\\\\";
+        } else if c == '\n' {
+            out = out + "\\n";
+        } else if c == '\r' {
+            out = out + "\\r";
+        } else if c == '\t' {
+            out = out + "\\t";
+        } else {
+            var code = int(c);
+            if code < 32 {
+                out = out + "\\u00" + hexDigit(code / 16) + hexDigit(code % 16);
+            } else {
+                out = out + c.toString();
+            }
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub func stringifyString(s: string): string {
+    return "\"" + escapeString(s) + "\"";
+}
+
+pub func stringifyInt(n: int): string {
+    return n.toString();
+}
+
+pub func stringifyFloat(f: float): string {
+    return f.toString();
+}
+
+pub func stringifyBool(b: bool): string {
+    if b {
+        return "true";
+    }
+    return "false";
+}
+
+// Array entries are already-serialized JSON values, which allows nesting.
+pub func stringifyArray(items: Vec<string>): string {
+    var out = "[";
+    var i = 0;
+    loop {
+        if i >= items.len() { break; }
+        if i > 0 {
+            out = out + ",";
+        }
+        out = out + items[i];
+        i = i + 1;
+    }
+    return out + "]";
+}
+
+// Each object entry is [plain string key, serialized JSON value].
+pub func stringifyObject(entries: Vec<Vec<string>>): string {
+    var out = "{{";
+    var i = 0;
+    loop {
+        if i >= entries.len() { break; }
+        if i > 0 {
+            out = out + ",";
+        }
+        var entry = entries[i];
+        assert(entry.len() == 2, "std::json.stringifyObject expects [key, value] entries");
+        out = out + stringifyString(entry[0]) + ":" + entry[1];
+        i = i + 1;
+    }
+    return out + "}}";
+}

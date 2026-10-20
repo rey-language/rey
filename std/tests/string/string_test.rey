@@ -1,0 +1,90 @@
+import std::string;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+check("trim spaces", string.trim("  hello world  ") == "hello world");
+check("trim line whitespace", string.trim("\t\n rey \r\n") == "rey");
+check("trim all whitespace", string.trim(" \t\n\r") == "");
+check("trimStart", string.trimStart(" \t hello ") == "hello ");
+check("trimEnd", string.trimEnd(" hello \r\t") == " hello");
+check("startsWith true", string.startsWith("hello rey", "hello"));
+check("startsWith empty", string.startsWith("hello", ""));
+check("startsWith false", !string.startsWith("hello rey", "world"));
+check("endsWith true", string.endsWith("hello rey", "rey"));
+check("endsWith empty", string.endsWith("hello", ""));
+check("endsWith false", !string.endsWith("hello rey", "hello"));
+check("replace first occurrence", string.replace("foo foo foo", "foo", "bar") == "bar foo foo");
+check("replace no match", string.replace("abc", "x", "y") == "abc");
+check("replace empty needle is safe", string.replace("abc", "", "x") == "abc");
+check("replaceAll occurrences", string.replaceAll("foo foo foo", "foo", "bar") == "bar bar bar");
+check("replaceAll empty needle is safe", string.replaceAll("abc", "", "x") == "abc");
+check("slice range", string.slice("abcdef", 1, 4) == "bcd");
+check("slice negative bounds", string.slice("abcdef", -3, -1) == "de");
+check("slice clamps bounds", string.slice("abc", -20, 20) == "abc");
+check("substring swaps bounds", string.substring("abcdef", 4, 1) == "bcd");
+check("substring clamps negative", string.substring("abcdef", -4, 2) == "ab");
+check("padLeft custom", string.padLeft("42", 5, "0") == "00042");
+check("padLeft default", string.padLeft("x", 3) == "  x");
+check("padLeft multi-character fill clips", string.padLeft("x", 4, "ab") == "abax");
+check("padRight custom", string.padRight("42", 5, " ") == "42   ");
+check("padRight multi-character fill clips", string.padRight("x", 4, "ab") == "xaba");
+check("repeat", string.repeat("ab", 3) == "ababab");
+check("repeat non-positive", string.repeat("ab", 0) == "");
+check("indexOf found", string.indexOf("hello world", "world") == 6);
+check("indexOf empty needle", string.indexOf("hello", "") == 0);
+check("indexOf missing", string.indexOf("hello world", "xyz") == -1);
+check("lastIndexOf found", string.lastIndexOf("one two one", "one") == 8);
+check("lastIndexOf from index", string.lastIndexOf("one two one", "one", 4) == 0);
+check("lastIndexOf missing", string.lastIndexOf("hello", "z") == -1);
+check("lastIndexOf negative index", string.lastIndexOf("one", "one", -2) == -1);
+check("contains true", string.contains("hello world", "lo wo"));
+check("contains empty", string.contains("hello", ""));
+check("contains false", !string.contains("hello world", "abc"));
+var parts = string.split("a,b,,c,", ",");
+check("split keeps empty parts", parts.len() == 5 && parts[2] == "" && parts[4] == "");
+check("split empty separator", string.split("rey", "").len() == 3);
+check("join", string.join(string.split("a,b,c", ","), "-") == "a-b-c");
+check("join empty", string.join(Vec.new(), ",") == "");
+check("toLowerCase", string.toLowerCase("HeLLo ReY") == "hello rey");
+check("toUpperCase", string.toUpperCase("hello rey") == "HELLO REY");
+check("capitalize", string.capitalize("hELLO wORLD") == "Hello world");
+check("capitalize empty", string.capitalize("") == "");
+check("reverse", string.reverse("rey!") == "!yer");
+var lineParts = string.lines("one\r\ntwo\n");
+check("lines strips CRLF and final newline", lineParts.len() == 2 && lineParts[0] == "one" && lineParts[1] == "two");
+check("lines preserves interior blank lines", string.lines("a\n\nb").len() == 3);
+check("lines empty input", string.lines("").len() == 0);
+var wordParts = string.words("  one\t two\nthree  ");
+check("words splits whitespace runs", wordParts.len() == 3 && wordParts[0] == "one" && wordParts[2] == "three");
+check("truncate with suffix", string.truncate("abcdefgh", 6) == "abc...");
+check("truncate unchanged", string.truncate("abc", 5) == "abc");
+check("truncate custom suffix", string.truncate("abcdefgh", 5, "~") == "abcd~");
+check("truncate short limit", string.truncate("abcdef", 2, "...") == "..");
+check("count non-overlapping", string.count("aaaa", "aa") == 2);
+check("count empty needle", string.count("abc", "") == 0);
+check("isNumeric integer", string.isNumeric("-42"));
+check("isNumeric decimal", string.isNumeric(" +12.50 "));
+check("isNumeric invalid", !string.isNumeric("12x"));
+check("isNumeric sign only", !string.isNumeric("+"));
+check("isAlpha", string.isAlpha("Rey"));
+check("isAlpha rejects empty", !string.isAlpha(""));
+check("isAlpha rejects punctuation", !string.isAlpha("rey-1"));
+check("isAlphanumeric", string.isAlphanumeric("Rey42"));
+check("isAlphanumeric rejects whitespace", !string.isAlphanumeric("Rey 42"));
+check("parseInt positive", string.parseInt("12345") == Option.Some(12345));
+check("parseInt negative and spaces", string.parseInt(" -42 ") == Option.Some(-42));
+check("parseInt rejects trailing text", string.parseInt("12x") == Option.None());
+check("parseFloat decimal", string.parseFloat("-12.5") == Option.Some(-12.5));
+check("parseFloat leading decimal", string.parseFloat(".25") == Option.Some(0.25));
+check("parseFloat rejects malformed", string.parseFloat("1.2.3") == Option.None());
+check("slugify", string.slugify("  Hello, Rey Language! ") == "hello-rey-language");
+check("slugify collapses separators", string.slugify("A---B__C") == "a-b-c");
+
+println("string: all tests passed");

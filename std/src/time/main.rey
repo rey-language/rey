@@ -1,0 +1,28 @@
+// Time and simple duration formatting utilities.
+
+pub func sleep(ms: int): void {
+    nativeSleepMs(ms);
+}
+
+// Format short durations in milliseconds and longer durations in seconds with
+// millisecond precision. This formatter is intended for nonnegative timings.
+pub func formatDurationMs(ms: int): string {
+    if ms < 1000 {
+        return ms.toString() + " ms";
+    }
+
+    var seconds = ms / 1000;
+    var remainingMs = ms % 1000;
+    var fraction = remainingMs.toString();
+    if remainingMs < 10 {
+        fraction = "00" + fraction;
+    } else if remainingMs < 100 {
+        fraction = "0" + fraction;
+    }
+    return seconds.toString() + "." + fraction + " s";
+}
+
+// Add an `s` unit to Rey's standard float representation.
+pub func formatDurationSeconds(sec: float): string {
+    return sec.toString() + " s";
+}

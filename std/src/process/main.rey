@@ -1,0 +1,78 @@
+// Process Module
+// Pure Rey wrapper around native process builtins
+
+pub func args(): Vec<string> {
+    return nativeArgs();
+}
+
+pub func exit(code: int): void {
+    nativeExit(code);
+}
+
+pub func env(key: string): Option<string> {
+    return getEnv(key);
+}
+
+pub func setEnv(key: string, value: string): void {
+    nativeSetEnv(key, value);
+}
+
+pub func unsetEnv(key: string): void {
+    nativeUnsetEnv(key);
+}
+
+pub func envAll(): HashMap<string, string> {
+    return nativeEnvAll();
+}
+
+pub func cwd(): string {
+    return nativeCwd();
+}
+
+pub func chdir(path: string): void {
+    nativeChdir(path);
+}
+
+pub func tempDir(): string {
+    return nativeTempDir();
+}
+
+pub func sleepMs(ms: int): void {
+    nativeSleepMs(ms);
+}
+
+pub func which(name: string): Option<string> {
+    return nativeWhich(name);
+}
+
+// run executes a shell command and returns Result<string, string>
+pub func run(cmd: string): Result<string, string> {
+    return exec(cmd);
+}
+
+// runDetailed executes a shell command and returns {code, stdout, stderr}
+pub func runDetailed(cmd: string): any {
+    return nativeExecDetailed(cmd);
+}
+
+// Windows sets OS=Windows_NT for normal user processes. The case-insensitive
+// comparison also accepts compatible environments that vary the casing.
+pub func isWindows(): bool {
+    var os: Option<string> = getEnv("OS");
+    if os.isSome() {
+        return os.unwrap().toLower() == "windows_nt";
+    }
+    return false;
+}
+
+// `uname` is provided by macOS and Linux. On Windows, this command normally
+// exits unsuccessfully and both helpers return false.
+pub func isMac(): bool {
+    var result = nativeExecDetailed("uname -s");
+    return result.code == 0 && result.stdout.trim() == "Darwin";
+}
+
+pub func isLinux(): bool {
+    var result = nativeExecDetailed("uname -s");
+    return result.code == 0 && result.stdout.trim() == "Linux";
+}

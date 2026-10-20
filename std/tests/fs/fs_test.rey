@@ -1,0 +1,109 @@
+import std::fs;
+import std::process;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+func hasString(values: Vec<string>, target: string): bool {
+    var i = 0;
+    loop {
+        if i >= values.len() {
+            break;
+        }
+        if values[i] == target {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+var base = fs.join(process.tempDir(), "rey_std_fs_test");
+if fs.exists(base) {
+    fs.removeDirAll(base);
+}
+fs.mkdirAll(base);
+check("mkdirAll created dir", fs.isDir(base));
+
+var a = fs.join(base, "a.txt");
+fs.write(a, "hello");
+fs.append(a, " world");
+check("read after append", fs.read(a) == "hello world");
+check("basename", fs.basename(a) == "a.txt");
+check("extname", fs.extname(a) == "txt");
+
+fs.touch(a);
+check("touch preserves existing file", fs.read(a) == "hello world");
+var touched = fs.join(base, "touched.txt");
+fs.touch(touched);
+check("touch creates empty file", fs.exists(touched) && fs.read(touched) == "");
+check("readLines handles an empty file", fs.readLines(touched).len() == 0);
+
+var linesPath = fs.join(base, "lines.txt");
+var expectedLines: Vec<string> = ["first", "", "third"];
+fs.writeLines(linesPath, expectedLines);
+var actualLines = fs.readLines(linesPath);
+check("writeLines writes newline-delimited text", fs.read(linesPath) == "first\n\nthird\n");
+check("readLines round trips empty lines", actualLines.len() == 3 && actualLines[0] == "first" && actualLines[1] == "" && actualLines[2] == "third");
+
+var crlfPath = fs.join(base, "crlf.txt");
+fs.write(crlfPath, "alpha\r\nbeta\r\n");
+var crlfLines = fs.readLines(crlfPath);
+check("readLines strips CRLF carriage returns", crlfLines.len() == 2 && crlfLines[0] == "alpha" && crlfLines[1] == "beta");
+var emptyLinesPath = fs.join(base, "empty-lines.txt");
+var noLines: Vec<string> = Vec.new();
+fs.writeLines(emptyLinesPath, noLines);
+check("writeLines handles an empty vector", fs.exists(emptyLinesPath) && fs.read(emptyLinesPath) == "");
+
+var nested = fs.join(base, "one/two/three");
+fs.ensureDir(nested);
+check("ensureDir creates nested directories", fs.isDir(nested));
+fs.ensureDir(nested);
+check("ensureDir is safe for existing directories", fs.isDir(nested));
+
+check("cleanPath removes duplicate and dot segments", fs.cleanPath("a//b/./c/../d") == "a/b/d");
+check("cleanPath bounds parent segments at root", fs.cleanPath("/a/../../b") == "/b");
+check("cleanPath normalizes backslash separators", fs.cleanPath("a\\b\\..\\c") == "a/c");
+check("cleanPath preserves drive-relative paths", fs.cleanPath("C:folder\\..\\file") == "C:file");
+check("cleanPath preserves drive-root paths", fs.cleanPath("C:\\folder\\..\\file") == "C:/file");
+
+var singleDir = fs.join(base, "single");
+fs.mkdir(singleDir);
+check("mkdir creates one directory", fs.isDir(singleDir));
+fs.removeDir(singleDir);
+check("removeDir removes an empty directory", !fs.exists(singleDir));
+
+var b = fs.join(base, "b.txt");
+fs.copy(a, b);
+check("copy creates dst with contents", fs.exists(b) && fs.isFile(b) && fs.read(b) == "hello world");
+
+var names = fs.list(base);
+var paths = fs.listPaths(base);
+check("list returns entry names", hasString(names, "a.txt"));
+check("listPaths returns full paths", hasString(paths, a));
+check("dirname returns parent path", fs.cleanPath(fs.dirname(a)) == fs.cleanPath(base));
+
+var c = fs.join(base, "c.txt");
+fs.move(b, c);
+check("move removes src", !fs.exists(b));
+check("move creates dst", fs.exists(c));
+
+println("list:", fs.list(base));
+println("listPaths:", fs.listPaths(base));
+
+fs.remove(a);
+fs.remove(c);
+fs.remove(touched);
+fs.remove(linesPath);
+fs.remove(crlfPath);
+fs.remove(emptyLinesPath);
+fs.removeDirAll(base);
+check("cleanup removed dir", !fs.exists(base));
+
+println("fs: all tests passed");

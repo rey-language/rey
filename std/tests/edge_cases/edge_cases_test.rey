@@ -1,0 +1,188 @@
+import std::math;
+import std::string;
+import std::collections;
+import std::linalg;
+import std::binary;
+import std::csv;
+import std::toml;
+import std::regex;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+func checkClose(label: string, actual: float, expected: float): void {
+    var difference = actual - expected;
+    if difference < 0.0 {
+        difference = difference * -1.0;
+    }
+    check(label, difference < 0.001);
+}
+
+// Math boundaries.
+check("clamp equal bounds", math.clamp(7, 4, 4) == 4);
+check("clamp out-of-order bounds favor lower check", math.clamp(5, 10, 0) == 10);
+check("sign positive zero", math.sign(0.0) == 0);
+check("sign negative zero", math.sign(-0.0) == 0);
+check("gcd of two zeros", math.gcd(0, 0) == 0);
+check("gcd normalizes negative input", math.gcd(-12, 18) == 6);
+check("lcm with zero", math.lcm(0, 5) == 0);
+check("factorial zero", math.factorial(0) == 1);
+check("factorial one", math.factorial(1) == 1);
+check("factorial twelve", math.factorial(12) == 479001600);
+checkClose("median empty", math.median([]), 0.0);
+checkClose("median one element", math.median([9]), 9.0);
+checkClose("median two elements", math.median([2, 8]), 5.0);
+checkClose("median duplicate elements", math.median([4, 4, 4, 4]), 4.0);
+checkClose("lerp at zero", math.lerp(2.0, 10.0, 0.0), 2.0);
+checkClose("lerp at one", math.lerp(2.0, 10.0, 1.0), 10.0);
+checkClose("lerp at midpoint", math.lerp(2.0, 10.0, 0.5), 6.0);
+checkClose("lerp extrapolates below zero", math.lerp(2.0, 10.0, -1.0), -6.0);
+checkClose("lerp extrapolates above one", math.lerp(2.0, 10.0, 2.0), 18.0);
+var pi = math.pi();
+checkClose("sin zero", math.sin(0.0), 0.0);
+checkClose("sin pi over two", math.sin(pi / 2.0), 1.0);
+checkClose("sin pi", math.sin(pi), 0.0);
+checkClose("sin negative pi over two", math.sin(-pi / 2.0), -1.0);
+checkClose("sin two pi", math.sin(2.0 * pi), 0.0);
+checkClose("cos zero", math.cos(0.0), 1.0);
+checkClose("cos pi over two", math.cos(pi / 2.0), 0.0);
+checkClose("cos pi", math.cos(pi), -1.0);
+checkClose("cos negative pi over two", math.cos(-pi / 2.0), 0.0);
+checkClose("cos two pi", math.cos(2.0 * pi), 1.0);
+
+// Empty strings, delimiters, bounds, Unicode, and parsing.
+check("trim empty", string.trim("") == "");
+check("split empty input", string.split("", ",").len() == 1 && string.split("", ",")[0] == "");
+check("lines empty", string.lines("").len() == 0);
+check("words empty", string.words("").len() == 0);
+check("reverse empty", string.reverse("") == "");
+check("slugify empty", string.slugify("") == "");
+check("capitalize empty", string.capitalize("") == "");
+check("slice negative bounds", string.slice("hello", -3, -1) == "ll");
+check("substring swaps bounds", string.substring("hello", 4, 1) == "ell");
+check("replace with empty needle is unchanged", string.replace("abc", "", "x") == "abc");
+check("replaceAll with empty needle is unchanged", string.replaceAll("abc", "", "x") == "abc");
+var consecutiveParts = string.split("a,,,b,,", ",");
+check("split preserves consecutive and trailing empty fields", consecutiveParts.len() == 6 && consecutiveParts[0] == "a" && consecutiveParts[1] == "" && consecutiveParts[2] == "" && consecutiveParts[3] == "b" && consecutiveParts[4] == "" && consecutiveParts[5] == "");
+var multiParts = string.split("red<->green<->blue", "<->");
+check("split uses multi-character delimiter", multiParts.len() == 3 && multiParts[0] == "red" && multiParts[2] == "blue");
+check("join uses multi-character delimiter", string.join(multiParts, "::") == "red::green::blue");
+var unicodeText = "a🙂b";
+// The current runtime counts UTF-8 bytes; this checks slicing inside the emoji is bounded.
+check("Unicode length reports UTF-8 bytes", unicodeText.len() == 6);
+check("Unicode slice at emoji offset is non-empty", string.slice(unicodeText, 1, 2) != "");
+check("parseInt negative number", string.parseInt("-42") == Option.Some(-42));
+check("parseInt leading zeros", string.parseInt("00042") == Option.Some(42));
+check("parseInt trims surrounding whitespace", string.parseInt(" \t-7\n") == Option.Some(-7));
+check("parseInt invalid text", string.parseInt("12x") == Option.None());
+
+// Collections: empty, directional, and oversized inputs.
+check("range zero step", collections.range(1, 5, 0).len() == 0);
+var descending = collections.range(5, 0, -2);
+check("range negative step", descending.len() == 3 && descending[0] == 5 && descending[2] == 1);
+check("range equal endpoints", collections.range(3, 3).len() == 0);
+check("range step points wrong direction", collections.range(5, 1, 1).len() == 0);
+var emptyAny: Vec<any> = Vec.new();
+var numbers: Vec<any> = Vec.new();
+numbers.push(1);
+numbers.push(2);
+numbers.push(3);
+check("zip empty lists", collections.zip(emptyAny, emptyAny).len() == 0);
+var shortZip = collections.zip(numbers, emptyAny);
+check("zip unequal lists stops at shorter", shortZip.len() == 0);
+var leftZip: Vec<any> = Vec.new();
+leftZip.push("x");
+leftZip.push("y");
+var rightZip: Vec<any> = Vec.new();
+rightZip.push(1);
+var unequalZip = collections.zip(leftZip, rightZip);
+check("zip unequal non-empty lists", unequalZip.len() == 1 && unequalZip[0][0] == "x" && unequalZip[0][1] == 1);
+var noNested: Vec<Vec<any>> = Vec.new();
+check("flatten empty list", collections.flatten(noNested).len() == 0);
+var alreadyFlat: Vec<Vec<any>> = Vec.new();
+var onlyFirst: Vec<any> = Vec.new();
+onlyFirst.push(7);
+var onlySecond: Vec<any> = Vec.new();
+onlySecond.push("eight");
+alreadyFlat.push(onlyFirst);
+alreadyFlat.push(onlySecond);
+var flattened = collections.flatten(alreadyFlat);
+check("flatten already-flat nested input", flattened.len() == 2 && flattened[0] == 7 && flattened[1] == "eight");
+var allDuplicates: Vec<any> = Vec.new();
+allDuplicates.push("same");
+allDuplicates.push("same");
+allDuplicates.push("same");
+check("unique all duplicates", collections.unique(allDuplicates).len() == 1);
+var alreadyUnique: Vec<any> = Vec.new();
+alreadyUnique.push(1);
+alreadyUnique.push(2);
+alreadyUnique.push(3);
+check("unique already-unique input", collections.unique(alreadyUnique).len() == 3);
+var mixedUniqueInput: Vec<any> = Vec.new();
+mixedUniqueInput.push(1);
+mixedUniqueInput.push("1");
+mixedUniqueInput.push(true);
+mixedUniqueInput.push(1);
+var mixedUnique = collections.unique(mixedUniqueInput);
+check("unique mixed primitive types", mixedUnique.len() == 3 && mixedUnique[0] == 1 && mixedUnique[1] == "1" && mixedUnique[2] == true);
+check("chunk size zero", collections.chunk(numbers, 0).len() == 0);
+check("chunk negative size", collections.chunk(numbers, -2).len() == 0);
+var oversizedChunks = collections.chunk(numbers, 10);
+check("chunk larger than input", oversizedChunks.len() == 1 && oversizedChunks[0].len() == 3 && oversizedChunks[0][2] == 3);
+var everyMatches = collections.partition(numbers, (value: any) => value > 0);
+check("partition all match", everyMatches[0].len() == 3 && everyMatches[1].len() == 0);
+var noneMatch = collections.partition(numbers, (value: any) => value > 3);
+check("partition none match", noneMatch[0].len() == 0 && noneMatch[1].len() == 3);
+var emptyPartition = collections.partition(emptyAny, (value: any) => value > 0);
+check("partition empty list", emptyPartition.len() == 2 && emptyPartition[0].len() == 0 && emptyPartition[1].len() == 0);
+
+// Linear algebra zero-length and identity boundaries.
+var zeroVec2 = linalg.vec2Normalize(linalg.vec2(0.0, 0.0));
+check("normalize zero vec2 safely", zeroVec2.x == 0.0 && zeroVec2.y == 0.0);
+var zeroVec3 = linalg.vec3Normalize(linalg.vec3(0.0, 0.0, 0.0));
+check("normalize zero vec3 safely", zeroVec3.x == 0.0 && zeroVec3.y == 0.0 && zeroVec3.z == 0.0);
+var samePoint = linalg.vec2(2.5, -3.0);
+checkClose("vec2 distance to identical point", linalg.vec2Distance(samePoint, samePoint), 0.0);
+
+// Binary endpoints and hex parsing.
+var zeroU16 = binary.packU16Le(0);
+check("pack u16 zero", zeroU16.len() == 2 && zeroU16[0] == 0 && zeroU16[1] == 0);
+var maxU16 = binary.packU16Le(65535);
+check("pack u16 maximum", maxU16.len() == 2 && maxU16[0] == 255 && maxU16[1] == 255);
+var maxU32 = binary.packU32Le(4294967295);
+check("pack u32 maximum", maxU32.len() == 4 && maxU32[0] == 255 && maxU32[1] == 255 && maxU32[2] == 255 && maxU32[3] == 255);
+check("fromHex empty", binary.fromHex("").len() == 0);
+var parsedHex = binary.fromHex("0a0B0c");
+check("fromHex mixed-case digits", parsedHex.len() == 3 && parsedHex[0] == 10 && parsedHex[1] == 11 && parsedHex[2] == 12);
+
+// CSV quoting and TOML comments/defaults.
+var emptyCsvFields = csv.parse(",,\n");
+check("CSV empty fields", emptyCsvFields.len() == 1 && emptyCsvFields[0].len() == 3 && emptyCsvFields[0][0] == "" && emptyCsvFields[0][1] == "" && emptyCsvFields[0][2] == "");
+var quotedCsv = csv.parse("\"\",\"say \"\"hi, friend\"\"\"\n");
+check("CSV quoted empty field", quotedCsv[0][0] == "");
+check("CSV escaped quotes and embedded comma", quotedCsv[0][1] == "say \"hi, friend\"");
+var config = toml.parse("# whole-line comment\nname = \"\" # empty value\n# ignored = 99\n");
+check("TOML comments and empty string", toml.getString(config, "name", "fallback") == "");
+check("TOML missing string default", toml.getString(config, "missing", "fallback") == "fallback");
+check("TOML missing integer default", toml.getInt(config, "missing", 17) == 17);
+check("TOML missing boolean default", toml.getBool(config, "missing", true));
+
+// Regex empty matches, anchors, and quantifier boundaries.
+check("empty regex matches empty text", regex.isMatch("", ""));
+check("empty regex matches non-empty text", regex.isMatch("", "abc"));
+check("anchored pattern matches whole text", regex.isMatch("^rey$", "rey"));
+check("anchored pattern rejects extra characters", !regex.isMatch("^rey$", "xrey"));
+check("star matches zero repetitions", regex.isMatch("^ab*c$", "ac"));
+check("star matches repeated characters", regex.isMatch("^ab*c$", "abbbc"));
+check("plus rejects zero repetitions", !regex.isMatch("^ab+c$", "ac"));
+check("plus accepts repetitions", regex.isMatch("^ab+c$", "abbc"));
+check("question accepts zero or one", regex.isMatch("^colou?r$", "color") && regex.isMatch("^colou?r$", "colour"));
+check("question rejects multiple repetitions", !regex.isMatch("^colou?r$", "colouur"));
+
+println("edge cases: all tests passed");

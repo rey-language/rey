@@ -1,0 +1,58 @@
+// RGB image buffers with PPM text serialization.
+
+pub struct Image {
+    pub width: int,
+    pub height: int,
+    pub pixels: Vec<int>,
+}
+
+pub func createImage(width: int, height: int): Image {
+    assert(width >= 0 && height >= 0, "image dimensions must be non-negative");
+    var pixels: Vec<int> = Vec.new();
+    var count = width * height;
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        pixels.push(0);
+        i = i + 1;
+    }
+    return Image { width: width, height: height, pixels: pixels };
+}
+
+pub func setPixel(img: Image, x: int, y: int, r: int, g: int, b: int): void {
+    assert(x >= 0 && x < img.width && y >= 0 && y < img.height, "pixel coordinate is outside the image");
+    assert(r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255, "RGB channels must be in 0..255");
+    img.pixels.set(y * img.width + x, r * 65536 + g * 256 + b);
+}
+
+pub func getPixel(img: Image, x: int, y: int): Vec<int> {
+    assert(x >= 0 && x < img.width && y >= 0 && y < img.height, "pixel coordinate is outside the image");
+    var packed = img.pixels[y * img.width + x];
+    var rgb: Vec<int> = Vec.new();
+    rgb.push(packed / 65536);
+    rgb.push((packed / 256) % 256);
+    rgb.push(packed % 256);
+    return rgb;
+}
+
+pub func toPpm(img: Image): string {
+    assert(img.width >= 0 && img.height >= 0 && img.pixels.len() == img.width * img.height, "image buffer dimensions do not match its pixels");
+    var ppm = "P3\n" + img.width.toString() + " " + img.height.toString() + "\n255\n";
+    var i = 0;
+    loop {
+        if i >= img.pixels.len() { break; }
+        var packed = img.pixels[i];
+        ppm = ppm + (packed / 65536).toString() + " "
+            + ((packed / 256) % 256).toString() + " "
+            + (packed % 256).toString();
+        if (i + 1) % img.width != 0 { ppm = ppm + " "; }
+        if (i + 1) % img.width == 0 { ppm = ppm + "\n"; }
+        i = i + 1;
+    }
+    return ppm;
+}
+
+pub func writePpm(img: Image, path: string): bool {
+    writeFile(path, toPpm(img));
+    return fileExists(path);
+}

@@ -1,0 +1,401 @@
+// Collection helpers for Vec values. Callback functions use Rey's arrow syntax.
+
+func sameValue(a: any, b: any): bool {
+    if a instanceof int {
+        if b instanceof int { return a == b; }
+        return false;
+    }
+    if a instanceof float {
+        if b instanceof float { return a == b; }
+        return false;
+    }
+    if a instanceof bool {
+        if b instanceof bool { return a == b; }
+        return false;
+    }
+    if a instanceof string {
+        if b instanceof string { return a == b; }
+        return false;
+    }
+    return a.toString() == b.toString();
+}
+
+pub func range(start: int, end: int, step: int = 1): Vec<int> {
+    var result: Vec<int> = Vec.new();
+    if step == 0 { return result; }
+    var value = start;
+    if step > 0 {
+        loop {
+            if value >= end { break; }
+            result.push(value);
+            value = value + step;
+        }
+    } else {
+        loop {
+            if value <= end { break; }
+            result.push(value);
+            value = value + step;
+        }
+    }
+    return result;
+}
+
+pub func zip(a: Vec<any>, b: Vec<any>): Vec<Vec<any>> {
+    var result: Vec<Vec<any>> = Vec.new();
+    var length = a.len();
+    if b.len() < length { length = b.len(); }
+    var i = 0;
+    loop {
+        if i >= length { break; }
+        var pair: Vec<any> = Vec.new();
+        pair.push(a[i]);
+        pair.push(b[i]);
+        result.push(pair);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func flatten(nested: Vec<Vec<any>>): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= nested.len() { break; }
+        var inner = nested[i];
+        var j = 0;
+        loop {
+            if j >= inner.len() { break; }
+            result.push(inner[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func unique(arr: Vec<any>): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        var item = arr[i];
+        var found = false;
+        var j = 0;
+        loop {
+            if j >= result.len() { break; }
+            if sameValue(result[j], item) { found = true; break; }
+            j = j + 1;
+        }
+        if !found { result.push(item); }
+        i = i + 1;
+    }
+    return result;
+}
+
+// HashMap keys are strings in Rey, so computed keys are converted with toString().
+pub func groupBy(arr: Vec<any>, keyFn: (any) -> any): HashMap<string, any> {
+    var result: HashMap<string, any> = HashMap.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        var item = arr[i];
+        var key: string = keyFn(item).toString();
+        if result.has(key) {
+            var bucket = result.get(key);
+            bucket.push(item);
+        } else {
+            var bucket: Vec<any> = Vec.new();
+            bucket.push(item);
+            result.set(key, bucket);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func chunk(arr: Vec<any>, size: int): Vec<Vec<any>> {
+    var result: Vec<Vec<any>> = Vec.new();
+    if size <= 0 { return result; }
+    var start = 0;
+    loop {
+        if start >= arr.len() { break; }
+        var group: Vec<any> = Vec.new();
+        var i = start;
+        loop {
+            if i >= arr.len() || i >= start + size { break; }
+            group.push(arr[i]);
+            i = i + 1;
+        }
+        result.push(group);
+        start = start + size;
+    }
+    return result;
+}
+
+// The first result is the matching items; the second contains the rest.
+pub func partition(arr: Vec<any>, predicate: (any) -> bool): Vec<Vec<any>> {
+    var matched: Vec<any> = Vec.new();
+    var unmatched: Vec<any> = Vec.new();
+    var result: Vec<Vec<any>> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) {
+            matched.push(arr[i]);
+        } else {
+            unmatched.push(arr[i]);
+        }
+        i = i + 1;
+    }
+    result.push(matched);
+    result.push(unmatched);
+    return result;
+}
+
+pub func find(arr: Vec<any>, predicate: (any) -> bool): any {
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) { return Option.Some(arr[i]); }
+        i = i + 1;
+    }
+    return Option.None();
+}
+
+pub func findIndex(arr: Vec<any>, predicate: (any) -> bool): int {
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+pub func every(arr: Vec<any>, predicate: (any) -> bool): bool {
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if !predicate(arr[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func some(arr: Vec<any>, predicate: (any) -> bool): bool {
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub func count(arr: Vec<any>, predicate: (any) -> bool): int {
+    var total = 0;
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) { total = total + 1; }
+        i = i + 1;
+    }
+    return total;
+}
+
+pub func maxBy(arr: Vec<any>, keyFn: (any) -> any): any {
+    if arr.len() == 0 { return Option.None(); }
+    var best = arr[0];
+    var bestKey = keyFn(best);
+    var i = 1;
+    loop {
+        if i >= arr.len() { break; }
+        var key = keyFn(arr[i]);
+        if key > bestKey {
+            best = arr[i];
+            bestKey = key;
+        }
+        i = i + 1;
+    }
+    return Option.Some(best);
+}
+
+pub func minBy(arr: Vec<any>, keyFn: (any) -> any): any {
+    if arr.len() == 0 { return Option.None(); }
+    var best = arr[0];
+    var bestKey = keyFn(best);
+    var i = 1;
+    loop {
+        if i >= arr.len() { break; }
+        var key = keyFn(arr[i]);
+        if key < bestKey {
+            best = arr[i];
+            bestKey = key;
+        }
+        i = i + 1;
+    }
+    return Option.Some(best);
+}
+
+pub func sum(arr: Vec<any>): any {
+    var total = 0;
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        total = total + arr[i];
+        i = i + 1;
+    }
+    return total;
+}
+
+pub func sumBy(arr: Vec<any>, fn: (any) -> any): any {
+    var total = 0;
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        total = total + fn(arr[i]);
+        i = i + 1;
+    }
+    return total;
+}
+
+// Frequencies are keyed by each item's Rey string representation.
+pub func frequency(arr: Vec<any>): HashMap<string, int> {
+    var result: HashMap<string, int> = HashMap.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        var key: string = arr[i].toString();
+        if result.has(key) {
+            result.set(key, result.get(key) + 1);
+        } else {
+            result.set(key, 1);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func take(arr: Vec<any>, n: int): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var limit = n;
+    if limit < 0 { limit = 0; }
+    if limit > arr.len() { limit = arr.len(); }
+    var i = 0;
+    loop {
+        if i >= limit { break; }
+        result.push(arr[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func drop(arr: Vec<any>, n: int): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var start = n;
+    if start < 0 { start = 0; }
+    if start > arr.len() { start = arr.len(); }
+    var i = start;
+    loop {
+        if i >= arr.len() { break; }
+        result.push(arr[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func concat(a: Vec<any>, b: Vec<any>): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= a.len() { break; }
+        result.push(a[i]);
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= b.len() { break; }
+        result.push(b[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+// Removes null, false, numeric zero, the empty string, and Option.None values.
+pub func compact(arr: Vec<any>): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        var item = arr[i];
+        if item instanceof int {
+            if item != 0 { result.push(item); }
+        } else if item instanceof float {
+            if item != 0.0 { result.push(item); }
+        } else if item instanceof bool {
+            if item { result.push(item); }
+        } else if item instanceof string {
+            if item != "" { result.push(item); }
+        } else {
+            var display: string = item.toString();
+            if display != "null" && display != "None" { result.push(item); }
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// Additional foundational helpers retained for compatibility.
+pub func map(arr: Vec<any>, fn: (any) -> any): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        result.push(fn(arr[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func filter(arr: Vec<any>, predicate: (any) -> bool): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if predicate(arr[i]) { result.push(arr[i]); }
+        i = i + 1;
+    }
+    return result;
+}
+
+pub func reduce(arr: Vec<any>, fn: (any, any) -> any, initial: any): any {
+    var acc = initial;
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        acc = fn(acc, arr[i]);
+        i = i + 1;
+    }
+    return acc;
+}
+
+pub func reverse(arr: Vec<any>): Vec<any> {
+    var result: Vec<any> = Vec.new();
+    var i = arr.len() - 1;
+    loop {
+        if i < 0 { break; }
+        result.push(arr[i]);
+        i = i - 1;
+    }
+    return result;
+}
+
+pub func contains(arr: Vec<any>, item: any): bool {
+    var i = 0;
+    loop {
+        if i >= arr.len() { break; }
+        if sameValue(arr[i], item) { return true; }
+        i = i + 1;
+    }
+    return false;
+}

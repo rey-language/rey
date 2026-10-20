@@ -1,0 +1,31 @@
+import std::net;
+import std::process;
+
+func check(label: string, condition: bool): void {
+    if condition {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+var addr = net.socketAddr("127.0.0.1", 8080);
+check("format IPv4 address", net.formatAddr(addr) == "127.0.0.1:8080");
+check("IPv4 loopback recognized", net.isLoopback(addr));
+check("localhost recognized", net.isLoopback(net.socketAddr("LOCALHOST", 80)));
+check("IPv6 address gets brackets", net.formatAddr(net.socketAddr("::1", 443)) == "[::1]:443");
+
+var octets = net.parseIpv4("192.168.1.255");
+check("IPv4 parses to four octets", octets.len() == 4 && octets[0] == 192 && octets[1] == 168 && octets[2] == 1 && octets[3] == 255);
+check("IPv4 validation accepts valid address", net.isIpv4("0.0.0.0"));
+check("IPv4 validation rejects out of range octet", !net.isIpv4("256.1.2.3") && net.parseIpv4("256.1.2.3").len() == 0);
+check("IPv4 validation rejects missing octet", !net.isIpv4("10.0.0"));
+check("IPv4 loopback range recognized", net.isLoopback(net.socketAddr("127.8.9.10", 1)));
+check("unsafe ping host rejected", !net.pingHost("127.0.0.1; false"));
+if process.which("ping").isSome() {
+    // This only pings the local host and does not require external network access.
+    check("pingHost reaches IPv4 loopback", net.pingHost("127.0.0.1"));
+}
+
+println("net: all tests passed");

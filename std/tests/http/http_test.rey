@@ -1,0 +1,11 @@
+import std::http;
+
+// This is intentionally a demo-style test file.
+// It requires network access and `curl` on PATH.
+//
+// Example:
+// var r = http.get("https://example.com");
+// println(r);
+
+println("http: manual test file (see comments)");
+

@@ -1,0 +1,34 @@
+// Assertions and reporting helpers for standard library tests.
+
+pub func assertEq(actual, expected, msg: string): void {
+    assert(actual == expected, msg);
+}
+
+pub func assertNotEq(actual, expected, msg: string): void {
+    assert(actual != expected, msg);
+}
+
+pub func assertTrue(condition: bool, msg: string): void {
+    assert(condition, msg);
+}
+
+pub func assertFalse(condition: bool, msg: string): void {
+    assert(!condition, msg);
+}
+
+pub func assertApprox(actual: float, expected: float, epsilon: float, msg: string): void {
+    var difference = actual - expected;
+    if difference < 0.0 {
+        difference = -difference;
+    }
+    assert(difference <= epsilon, msg);
+}
+
+pub func pass(msg: string): void {
+    println("PASS: " + msg);
+}
+
+pub func fail(msg: string): void {
+    println("FAIL: " + msg);
+    assert(false, msg);
+}

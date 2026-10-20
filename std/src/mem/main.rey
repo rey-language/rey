@@ -1,0 +1,78 @@
+// Memory and layout helpers over Rey's vector-backed values.
+
+pub func sizeOfInt(): int {
+    return 8;
+}
+
+pub func sizeOfFloat(): int {
+    return 8;
+}
+
+pub func sizeOfBool(): int {
+    return 1;
+}
+
+pub func sizeOfChar(): int {
+    return 4;
+}
+
+pub struct Span {
+    pub buffer: Vec<any>,
+    pub offset: int,
+    pub length: int,
+}
+
+pub func makeSpan(buffer: Vec<any>, offset: int, length: int): Span {
+    assert(offset >= 0 && length >= 0 && offset + length <= buffer.len(), "makeSpan range is outside the buffer");
+    return Span { buffer: buffer, offset: offset, length: length };
+}
+
+pub func spanGet(s: Span, index: int): any {
+    assert(index >= 0 && index < s.length, "spanGet index is outside the span");
+    return s.buffer[s.offset + index];
+}
+
+pub func spanSlice(s: Span, start: int, end: int): Span {
+    assert(start >= 0 && start <= end && end <= s.length, "spanSlice range is outside the span");
+    return makeSpan(s.buffer, s.offset + start, end - start);
+}
+
+pub func copy(dest: Vec<any>, destOffset: int, src: Vec<any>, srcOffset: int, count: int): void {
+    assert(destOffset >= 0 && srcOffset >= 0 && count >= 0, "copy offsets and count must be nonnegative");
+    assert(destOffset + count <= dest.len(), "copy destination range is outside the buffer");
+    assert(srcOffset + count <= src.len(), "copy source range is outside the buffer");
+
+    // Stage values first so overlapping source and destination ranges are safe.
+    var staged: Vec<any> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        staged.push(src[srcOffset + i]);
+        i = i + 1;
+    }
+
+    var original: Vec<any> = Vec.new();
+    i = 0;
+    loop {
+        if i >= dest.len() { break; }
+        original.push(dest[i]);
+        i = i + 1;
+    }
+
+    // The runtime has no Vec index setter, so rebuild the shared destination.
+    loop {
+        if dest.len() == 0 { break; }
+        dest.pop();
+    }
+
+    i = 0;
+    loop {
+        if i >= original.len() { break; }
+        if i >= destOffset && i < destOffset + count {
+            dest.push(staged[i - destOffset]);
+        } else {
+            dest.push(original[i]);
+        }
+        i = i + 1;
+    }
+}

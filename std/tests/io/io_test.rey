@@ -1,0 +1,33 @@
+import std::io;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        assert(false, label);
+    }
+}
+
+check("progressBar partial progress", io.progressBar(2, 4, 4) == "[==  ]");
+check("progressBar clamps completed work", io.progressBar(5, 4, 3) == "[===]");
+check("progressBar handles zero total", io.progressBar(0, 0, 3) == "[   ]");
+check("progressBar handles negative width", io.progressBar(1, 2, -3) == "[]");
+
+var headers: Vec<string> = ["Name", "Value"];
+var row1: Vec<string> = ["alpha", "1"];
+var row2: Vec<string> = ["beta"];
+var rows: Vec<Vec<string>> = [row1, row2];
+
+io.printRed("red");
+io.printGreen("green");
+io.printYellow("yellow");
+io.printBlue("blue");
+io.printMagenta("magenta");
+io.printCyan("cyan");
+io.printBold("bold");
+io.printTable(headers, rows);
+io.printBox("Test", "first line\nsecond");
+io.clear();
+
+println("io: all tests passed");

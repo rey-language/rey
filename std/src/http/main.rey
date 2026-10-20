@@ -1,0 +1,177 @@
+// HTTP client helpers backed by curl and std::process.
+
+import std::process;
+
+func shellEscape(s: string): string {
+    // POSIX shell single-quote escaping. Rey's current process runner executes
+    // commands through a shell, so every user-supplied argument is quoted.
+    var out = "'";
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var c = s[i];
+        if c == '\'' {
+            out = out + "'\\''";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    out = out + "'";
+    return out;
+}
+
+func lastIndexOf(s: string, sub: string): int {
+    if sub.len() == 0 { return s.len(); }
+    if sub.len() > s.len() { return -1; }
+    var i = s.len() - sub.len();
+    loop {
+        if i < 0 { break; }
+        var ok = true;
+        var j = 0;
+        loop {
+            if j >= sub.len() { break; }
+            if s[i + j] != sub[j] { ok = false; break; }
+            j = j + 1;
+        }
+        if ok { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+func trimRightNewlines(s: string): string {
+    var end = s.len() - 1;
+    loop {
+        if end < 0 { break; }
+        var c = s[end];
+        if c == '\n' || c == '\r' {
+            end = end - 1;
+        } else {
+            break;
+        }
+    }
+    if end < 0 { return ""; }
+    var out = "";
+    var i = 0;
+    loop {
+        if i > end { break; }
+        out = out + s[i].toString();
+        i = i + 1;
+    }
+    return out;
+}
+
+func parseStatusAndBody(stdout: string): any {
+    var statusMarker = "\n__REY_HTTP_STATUS__";
+    var idx = lastIndexOf(stdout, statusMarker);
+    if idx < 0 {
+        return { ok: false, status: 0, body: "", error: "http: missing status marker in curl output" };
+    }
+
+    var body = "";
+    var i = 0;
+    loop {
+        if i >= idx { break; }
+        body = body + stdout[i].toString();
+        i = i + 1;
+    }
+
+    var statusStr = "";
+    var j = idx + statusMarker.len();
+    loop {
+        if j >= stdout.len() { break; }
+        statusStr = statusStr + stdout[j].toString();
+        j = j + 1;
+    }
+    statusStr = trimRightNewlines(statusStr);
+
+    var status = 0;
+    var k = 0;
+    loop {
+        if k >= statusStr.len() { break; }
+        var ch = statusStr[k];
+        if ch < '0' || ch > '9' {
+            return { ok: false, status: 0, body: "", error: "http: invalid status code: " + statusStr };
+        }
+        status = (status * 10) + (int(ch) - 48);
+        k = k + 1;
+    }
+
+    return { ok: true, status: status, body: body, error: "" };
+}
+
+func buildHeaders(headers: HashMap<string, string>): string {
+    var out = "";
+    var entries = headers.entries();
+    var i = 0;
+    loop {
+        if i >= entries.len() { break; }
+        var entry = entries[i];
+        var key = entry[0];
+        var value = entry[1];
+        out = out + " -H " + shellEscape(key + ": " + value);
+        i = i + 1;
+    }
+    return out;
+}
+
+// Execute an HTTP request. A successful curl invocation returns
+// Result.Ok({status: int, ok: bool, body: string, stderr: string}); failures
+// return Result.Err(message). `ok` is true for 2xx status codes.
+pub func request(
+    method: string,
+    url: string,
+    headers: HashMap<string, string>,
+    body: string
+): any {
+    var curl = process.which("curl");
+    if curl.isSome() == false {
+        return Result.Err("http: curl not found on PATH");
+    }
+
+    var cmd = "curl -sS";
+    cmd = cmd + " -X " + shellEscape(method);
+    cmd = cmd + buildHeaders(headers);
+    if body.len() > 0 {
+        cmd = cmd + " --data-raw " + shellEscape(body);
+    }
+    cmd = cmd + " " + shellEscape(url);
+    // Doubled braces keep curl's format token literal to Rey's interpolator.
+    var writeFormat = "\n__REY_HTTP_STATUS__%" + "{{" + "http_code" + "}}" + "\n";
+    cmd = cmd + " -w " + shellEscape(writeFormat);
+
+    var result = process.runDetailed(cmd);
+    if result.code != 0 {
+        return Result.Err("http: curl failed: " + result.stderr);
+    }
+
+    var parsed = parseStatusAndBody(result.stdout);
+    if parsed.ok == false {
+        return Result.Err(parsed.error);
+    }
+
+    var status = parsed.status;
+    var ok = status >= 200 && status < 300;
+    return Result.Ok({ status: status, ok: ok, body: parsed.body, stderr: result.stderr });
+}
+
+pub func get(url: string): any {
+    var headers: HashMap<string, string> = HashMap.new();
+    return request("GET", url, headers, "");
+}
+
+pub func post(url: string, body: string): any {
+    var headers: HashMap<string, string> = HashMap.new();
+    return request("POST", url, headers, body);
+}
+
+pub func put(url: string, body: string): any {
+    var headers: HashMap<string, string> = HashMap.new();
+    return request("PUT", url, headers, body);
+}
+
+pub func del(url: string): any {
+    var headers: HashMap<string, string> = HashMap.new();
+    return request("DELETE", url, headers, "");
+}

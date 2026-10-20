@@ -1,0 +1,144 @@
+// A small regular-expression matcher implemented entirely in Rey.
+
+func atomEnd(pattern: string, start: int): int {
+    if start >= pattern.len() || pattern[start] != '[' {
+        return start + 1;
+    }
+    var i = start + 1;
+    loop {
+        if i >= pattern.len() { break; }
+        if pattern[i] == ']' { return i + 1; }
+        i = i + 1;
+    }
+    return start + 1;
+}
+
+func atomMatches(pattern: string, start: int, end: int, text: string, textIndex: int): bool {
+    if textIndex >= text.len() { return false; }
+    if pattern[start] == '.' { return true; }
+    if pattern[start] != '[' || end == start + 1 {
+        return pattern[start] == text[textIndex];
+    }
+
+    var found = false;
+    var i = start + 1;
+    var last = end - 1;
+    var code = int(text[textIndex]);
+    loop {
+        if i >= last { break; }
+        if i + 2 < last && pattern[i + 1] == '-' {
+            var lower = int(pattern[i]);
+            var upper = int(pattern[i + 2]);
+            if code >= lower && code <= upper { found = true; }
+            i = i + 3;
+        } else {
+            if text[textIndex] == pattern[i] { found = true; }
+            i = i + 1;
+        }
+    }
+    return found;
+}
+
+func matchFrom(pattern: string, patternIndex: int, text: string, textIndex: int): int {
+    if patternIndex >= pattern.len() { return textIndex; }
+    if patternIndex == 0 && pattern[patternIndex] == '^' {
+        return matchFrom(pattern, patternIndex + 1, text, textIndex);
+    }
+    if pattern[patternIndex] == '$' && patternIndex == pattern.len() - 1 {
+        if textIndex == text.len() { return textIndex; }
+        return -1;
+    }
+
+    var end = atomEnd(pattern, patternIndex);
+    var quantifier = '\0';
+    if end < pattern.len() {
+        if pattern[end] == '*' || pattern[end] == '+' || pattern[end] == '?' {
+            quantifier = pattern[end];
+        }
+    }
+    var nextPattern = end;
+    if quantifier != '\0' { nextPattern = end + 1; }
+
+    if quantifier == '\0' {
+        if !atomMatches(pattern, patternIndex, end, text, textIndex) { return -1; }
+        return matchFrom(pattern, nextPattern, text, textIndex + 1);
+    }
+
+    var positions: Vec<int> = Vec.new();
+    positions.push(textIndex);
+    var cursor = textIndex;
+    var limit = text.len();
+    if quantifier == '?' { limit = textIndex + 1; }
+    loop {
+        if cursor >= limit { break; }
+        if !atomMatches(pattern, patternIndex, end, text, cursor) { break; }
+        cursor = cursor + 1;
+        positions.push(cursor);
+    }
+
+    var minimum = 0;
+    if quantifier == '+' { minimum = 1; }
+    if positions.len() - 1 < minimum { return -1; }
+
+    var candidate = positions.len() - 1;
+    loop {
+        if candidate < minimum { break; }
+        var result = matchFrom(pattern, nextPattern, text, positions[candidate]);
+        if result >= 0 { return result; }
+        candidate = candidate - 1;
+    }
+    return -1;
+}
+
+func findStartFrom(pattern: string, text: string, startAt: int): int {
+    var first = startAt;
+    var last = text.len();
+    if pattern.len() > 0 && pattern[0] == '^' { last = 0; }
+    loop {
+        if first > last { break; }
+        if matchFrom(pattern, 0, text, first) >= 0 { return first; }
+        first = first + 1;
+    }
+    return -1;
+}
+
+pub func isMatch(pattern: string, text: string): bool {
+    return findStartFrom(pattern, text, 0) >= 0;
+}
+
+pub func find(pattern: string, text: string): any {
+    var start = findStartFrom(pattern, text, 0);
+    if start < 0 { return Option.None(); }
+    var end = matchFrom(pattern, 0, text, start);
+    return Option.Some(text.slice(start, end));
+}
+
+pub func replace(pattern: string, text: string, repl: string): string {
+    var output = "";
+    var cursor = 0;
+    var searchAt = 0;
+    loop {
+        if searchAt > text.len() { break; }
+        var start = findStartFrom(pattern, text, searchAt);
+        if start < 0 {
+            output = output + text.slice(cursor, text.len());
+            break;
+        }
+        var end = matchFrom(pattern, 0, text, start);
+        output = output + text.slice(cursor, start) + repl;
+        if end == start {
+            if start >= text.len() {
+                cursor = start;
+                searchAt = text.len() + 1;
+            } else {
+                output = output + text.slice(start, start + 1);
+                cursor = start + 1;
+                searchAt = cursor;
+            }
+        } else {
+            cursor = end;
+            searchAt = end;
+        }
+    }
+    return output;
+}

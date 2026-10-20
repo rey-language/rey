@@ -1,0 +1,161 @@
+// IO Module
+// Colored output and terminal utilities
+
+pub func printRed(msg: string): void {
+    println("\x1b[31m{msg}\x1b[0m");
+}
+
+pub func printGreen(msg: string): void {
+    println("\x1b[32m{msg}\x1b[0m");
+}
+
+pub func printYellow(msg: string): void {
+    println("\x1b[33m{msg}\x1b[0m");
+}
+
+pub func printBlue(msg: string): void {
+    println("\x1b[34m{msg}\x1b[0m");
+}
+
+pub func printMagenta(msg: string): void {
+    println("\x1b[35m{msg}\x1b[0m");
+}
+
+pub func printCyan(msg: string): void {
+    println("\x1b[36m{msg}\x1b[0m");
+}
+
+pub func printBold(msg: string): void {
+    println("\x1b[1m{msg}\x1b[0m");
+}
+
+pub func clear(): void {
+    println("\x1b[2J\x1b[H");
+}
+
+pub func printTable(headers: Vec<string>, rows: Vec<Vec<string>>): void {
+    var colWidths = Vec.new();
+    var i = 0;
+    loop {
+        if i >= headers.len() {
+            break;
+        }
+        var width = headers[i].len();
+        var j = 0;
+        loop {
+            if j >= rows.len() {
+                break;
+            }
+            if i < rows[j].len() {
+                var rowLen = rows[j][i].len();
+                if rowLen > width {
+                    width = rowLen;
+                }
+            }
+            j = j + 1;
+        }
+        colWidths.push(width);
+        i = i + 1;
+    }
+
+    var sep = "";
+    var k = 0;
+    loop {
+        if k >= colWidths.len() {
+            break;
+        }
+        sep = sep + "+" + "-".repeat(colWidths[k] + 2);
+        k = k + 1;
+    }
+    sep = sep + "+";
+    println(sep);
+
+    var headerStr = "|";
+    var h = 0;
+    loop {
+        if h >= headers.len() {
+            break;
+        }
+        var pad = colWidths[h] - headers[h].len();
+        headerStr = headerStr + " " + headers[h] + " ".repeat(pad + 1) + "|";
+        h = h + 1;
+    }
+    println(headerStr);
+    println(sep);
+
+    var r = 0;
+    loop {
+        if r >= rows.len() {
+            break;
+        }
+        var rowStr = "|";
+        var c = 0;
+        loop {
+            if c >= headers.len() {
+                break;
+            }
+            var cell = "";
+            if c < rows[r].len() {
+                cell = rows[r][c];
+            }
+            var pad = colWidths[c] - cell.len();
+            rowStr = rowStr + " " + cell + " ".repeat(pad + 1) + "|";
+            c = c + 1;
+        }
+        println(rowStr);
+        r = r + 1;
+    }
+    println(sep);
+}
+
+// Returns a fixed-width ASCII progress bar. Width is the number of fill
+// characters inside the brackets; values are clamped to the range [0, total].
+pub func progressBar(current: int, total: int, width: int): string {
+    var safeWidth = width;
+    if safeWidth < 0 {
+        safeWidth = 0;
+    }
+    var filled = 0;
+    if total <= 0 {
+        if current > 0 {
+            filled = safeWidth;
+        }
+    } else if current >= total {
+        filled = safeWidth;
+    } else if current > 0 && safeWidth > 0 {
+        filled = current * safeWidth / total;
+    }
+    return "[" + "=".repeat(filled) + " ".repeat(safeWidth - filled) + "]";
+}
+
+// Prints the title and content inside an ASCII box. Content may contain
+// newlines; every line is padded to the same width.
+pub func printBox(title: string, content: string): void {
+    var lines = content.split("\n");
+    var width = title.len();
+    var i = 0;
+    loop {
+        if i >= lines.len() {
+            break;
+        }
+        if lines[i].len() > width {
+            width = lines[i].len();
+        }
+        i = i + 1;
+    }
+
+    var border = "+" + "-".repeat(width + 2) + "+";
+    println(border);
+    println("| " + title + " ".repeat(width - title.len()) + " |");
+    println(border);
+
+    var j = 0;
+    loop {
+        if j >= lines.len() {
+            break;
+        }
+        println("| " + lines[j] + " ".repeat(width - lines[j].len()) + " |");
+        j = j + 1;
+    }
+    println(border);
+}

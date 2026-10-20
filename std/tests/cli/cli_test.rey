@@ -1,0 +1,41 @@
+import std::cli;
+import std::string;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS: " + label);
+    } else {
+        println("FAIL: " + label);
+        assert(false, label);
+    }
+}
+
+var args: Vec<string> = Vec.new();
+args.push("input.txt");
+args.push("-v");
+args.push("--port=8080");
+args.push("--mode");
+args.push("fast");
+args.push("--");
+args.push("-literal");
+var parsed = cli.parseArgs(args);
+
+check("short flag parsed", cli.hasFlag(parsed, "v"));
+check("short flag accepts dash prefix", cli.hasFlag(parsed, "-v"));
+check("port equals option parsed", cli.getOption(parsed, "port", "missing") == "8080");
+check("space separated option parsed", cli.getOption(parsed, "--mode", "missing") == "fast");
+check("missing option uses default", cli.getOption(parsed, "other", "default") == "default");
+var positionals = cli.getPositionals(parsed);
+check("ordinary positional retained", positionals.len() == 2 && positionals[0] == "input.txt");
+check("double dash preserves switch-like positional", positionals[1] == "-literal");
+
+var rows: Vec<Vec<string>> = Vec.new();
+var helpRow: Vec<string> = Vec.new();
+helpRow.push("-v, --verbose");
+helpRow.push("Show details");
+rows.push(helpRow);
+var help = cli.renderHelp("demo", "A demo app", rows);
+check("help includes app and description", string.contains(help, "demo\nA demo app"));
+check("help includes option row", string.contains(help, "-v, --verbose  Show details"));
+
+println("cli: all tests passed");

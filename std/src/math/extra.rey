@@ -1,0 +1,15 @@
+pub func sqrt(x) {
+    return nativeSqrt(x);
+}
+
+pub func pow(base, exp) {
+    return nativePow(base, exp);
+}
+
+pub func log(x) {
+    return nativeLog(x);
+}
+
+pub func random() {
+    return nativeRandom();
+}
