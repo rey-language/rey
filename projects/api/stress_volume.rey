@@ -1,0 +1,58 @@
+// Pure Rey Volume Stress Test
+// Tests sustained user creation volume directly against PostgreSQL
+
+import "src/service.rey";
+import std::process;
+
+func runBatch(count: int, offset: int): bool {
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        var userNum = offset + i;
+        var uname = "user_vol_" + userNum.toString();
+        var name = "Volume User " + userNum.toString();
+        var bio = "Stress testing user ingestion volume in pure Rey";
+
+        var res = createUser(uname, name, bio);
+        if res.status != 201 {
+            println("FAILURE at user " + userNum.toString() + ": " + res.body);
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+func main(): void {
+    println("==================================================");
+    println(" Rey Social API: Pure Rey User Volume Stress Test ");
+    println("==================================================");
+
+    resetDatabase("schema.sql");
+
+    var stages: Vec<int> = [50, 100, 250, 500];
+    var currentOffset = 0;
+
+    var s = 0;
+    loop {
+        if s >= stages.len() { break; }
+        var n = stages[s];
+        println("Inserting batch of " + n.toString() + " users sequentially...");
+
+        var ok = runBatch(n, currentOffset);
+        if !ok {
+            println("FAILED at volume stage " + n.toString());
+            process.exit(1);
+        }
+
+        currentOffset = currentOffset + n;
+        println("Progress: " + currentOffset.toString() + " total users created.");
+        s = s + 1;
+    }
+
+    // Verify DB count
+    var health = healthCheck();
+    println("\nFinal DB Health & Record Count: " + health.body);
+    println("Total users successfully ingested: " + currentOffset.toString());
+    println("==================================================");
+}

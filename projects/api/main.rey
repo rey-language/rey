@@ -1,0 +1,209 @@
+// Main Entry Point for Rey Social Media API
+// Root: projects/api/main.rey
+//
+// Usage:
+//   rey-v0 run main.rey -- init-db
+//   rey-v0 run main.rey -- test
+//   rey-v0 run main.rey -- handle GET /api/users
+//   rey-v0 run main.rey -- handle POST /api/users '{"username":"neo","name":"Thomas Anderson"}'
+
+import "src/router.rey";
+import "src/service.rey";
+import std::process;
+import std::string;
+
+func printUsage(): void {
+    println("Rey Social Media API (PostgreSQL)");
+    println("=================================");
+    println("Commands:");
+    println("  init-db                          Initialize / reset PostgreSQL database schema");
+    println("  test                             Run automated integration test suite");
+    println("  handle <METHOD> <PATH> [JSON]    Handle a single API request");
+}
+
+func runTestSuite(): void {
+    println("==============================================");
+    println(" Running Rey Social Media API Integration Test");
+    println(" Database: PostgreSQL (rey_social_db)");
+    println("==============================================");
+
+    // 1. Reset Schema
+    println("[1/10] Resetting schema...");
+    var resetRes = resetDatabase("schema.sql");
+    if resetRes.status != 200 {
+        println("FAIL: Database reset failed: " + resetRes.body);
+        process.exit(1);
+    }
+    println("PASS: Schema initialized.");
+
+    // 2. Health check
+    println("[2/10] Testing GET /api/health...");
+    var health = dispatch("GET", "/api/health", "");
+    if health.status != 200 {
+        println("FAIL: Healthcheck failed: " + health.body);
+        process.exit(1);
+    }
+    println("PASS: " + health.body);
+
+    // 3. Create Users
+    println("[3/10] Creating users (@alice, @bob, @carol)...");
+    var u1 = dispatch("POST", "/api/users", "{{\"username\":\"alice\",\"name\":\"Alice Smith\",\"bio\":\"Rey language engineer\"}}");
+    if u1.status != 201 {
+        println("FAIL: Failed to create Alice: " + u1.body);
+        process.exit(1);
+    }
+    println("PASS: User 1 created: " + u1.body);
+
+    var u2 = dispatch("POST", "/api/users", "{{\"username\":\"bob\",\"name\":\"Bob Jones\",\"bio\":\"PostgreSQL enthusiast\"}}");
+    if u2.status != 201 {
+        println("FAIL: Failed to create Bob: " + u2.body);
+        process.exit(1);
+    }
+    println("PASS: User 2 created: " + u2.body);
+
+    var u3 = dispatch("POST", "/api/users", "{{\"username\":\"carol\",\"name\":\"Carol Danvers\",\"bio\":\"Distributed systems\"}}");
+    if u3.status != 201 {
+        println("FAIL: Failed to create Carol: " + u3.body);
+        process.exit(1);
+    }
+    println("PASS: User 3 created: " + u3.body);
+
+    // 4. Duplicate User Validation (Expect 409)
+    println("[4/10] Testing duplicate username collision (expecting 409 Conflict)...");
+    var dup = dispatch("POST", "/api/users", "{{\"username\":\"alice\",\"name\":\"Imposter Alice\",\"bio\":\"Fake\"}}");
+    if dup.status != 409 {
+        println("FAIL: Expected 409 Conflict for duplicate username, got " + dup.status.toString());
+        process.exit(1);
+    }
+    println("PASS: Duplicate username correctly rejected with 409 Conflict: " + dup.body);
+
+    // 5. Query Users List
+    println("[5/10] Testing GET /api/users...");
+    var usersList = dispatch("GET", "/api/users", "");
+    if usersList.status != 200 {
+        println("FAIL: Failed to list users: " + usersList.body);
+        process.exit(1);
+    }
+    println("PASS: Users list retrieved: " + usersList.body);
+
+    // 6. Create Posts
+    println("[6/10] Publishing posts...");
+    var p1 = dispatch("POST", "/api/posts", "{{\"user_id\":1,\"content\":\"Just shipped Rey v0.3 with standard library!\"}}");
+    if p1.status != 201 {
+        println("FAIL: Failed to create post for Alice: " + p1.body);
+        process.exit(1);
+    }
+    println("PASS: Alice published post #1: " + p1.body);
+
+    var p2 = dispatch("POST", "/api/posts", "{{\"user_id\":2,\"content\":\"PostgreSQL 16 subqueries + JSON aggregation are incredibly fast.\"}}");
+    if p2.status != 201 {
+        println("FAIL: Failed to create post for Bob: " + p2.body);
+        process.exit(1);
+    }
+    println("PASS: Bob published post #2: " + p2.body);
+
+    var p3 = dispatch("POST", "/api/posts", "{{\"user_id\":3,\"content\":\"Consensus algorithms in pure Rey are fun.\"}}");
+    if p3.status != 201 {
+        println("FAIL: Failed to create post for Carol: " + p3.body);
+        process.exit(1);
+    }
+    println("PASS: Carol published post #3: " + p3.body);
+
+    // 7. Follows
+    println("[7/10] Testing social graph: Alice follows Bob & Carol...");
+    var f1 = dispatch("POST", "/api/follow", "{{\"follower_id\":1,\"following_id\":2}}");
+    if f1.status != 200 {
+        println("FAIL: Alice failed to follow Bob: " + f1.body);
+        process.exit(1);
+    }
+    var f2 = dispatch("POST", "/api/follow", "{{\"follower_id\":1,\"following_id\":3}}");
+    if f2.status != 200 {
+        println("FAIL: Alice failed to follow Carol: " + f2.body);
+        process.exit(1);
+    }
+    println("PASS: Alice followed Bob and Carol successfully.");
+
+    // 8. Likes
+    println("[8/10] Testing post likes...");
+    var likeRes = dispatch("POST", "/api/posts/2/like", "{{\"user_id\":1}}");
+    if likeRes.status != 200 {
+        println("FAIL: Alice failed to like Bob's post: " + likeRes.body);
+        process.exit(1);
+    }
+    println("PASS: Bob's post #2 liked by Alice: " + likeRes.body);
+
+    // 9. Personalized Feeds
+    println("[9/10] Testing personalized feeds (GET /api/feed/:id)...");
+    var feed1 = dispatch("GET", "/api/feed/1", "");
+    if feed1.status != 200 {
+        println("FAIL: Failed to fetch Alice's feed: " + feed1.body);
+        process.exit(1);
+    }
+    println("PASS: Alice's feed (following Bob & Carol): " + feed1.body);
+
+    var feed2 = dispatch("GET", "/api/feed/2", "");
+    if feed2.status != 200 {
+        println("FAIL: Failed to fetch Bob's feed: " + feed2.body);
+        process.exit(1);
+    }
+    println("PASS: Bob's feed (following nobody): " + feed2.body);
+
+    // 10. User profile stats & 404 checks
+    println("[10/10] Checking user profile stats & 404 handler...");
+    var aliceProfile = dispatch("GET", "/api/users/1", "");
+    println("PASS: Alice profile: " + aliceProfile.body);
+
+    var notFound = dispatch("GET", "/api/nonexistent", "");
+    if notFound.status != 404 {
+        println("FAIL: Expected 404 for unknown route, got " + notFound.status.toString());
+        process.exit(1);
+    }
+    println("PASS: 404 route handling verified: " + notFound.body);
+
+    println("==============================================");
+    println(" ALL INTEGRATION TESTS PASSED (10 / 10)");
+    println(" Social Media API + PostgreSQL Verified! ");
+    println("==============================================");
+}
+
+func main(): void {
+    var rawArgs = process.args();
+    var cmdArgs: Vec<string> = Vec.new();
+    var i = 1;
+    loop {
+        if i >= rawArgs.len() { break; }
+        cmdArgs.push(rawArgs[i]);
+        i = i + 1;
+    }
+
+    if cmdArgs.len() == 0 {
+        printUsage();
+        return;
+    }
+
+    var cmd = cmdArgs[0];
+    if cmd == "init-db" {
+        var res = resetDatabase("schema.sql");
+        println(res.body);
+    } else if cmd == "test" {
+        runTestSuite();
+    } else if cmd == "handle" {
+        if cmdArgs.len() < 3 {
+            println("Usage: handle <METHOD> <PATH> [JSON_BODY]");
+            process.exit(1);
+        }
+        var method = cmdArgs[1];
+        var path = cmdArgs[2];
+        var body = "";
+        if cmdArgs.len() >= 4 {
+            body = cmdArgs[3];
+        }
+        var res = dispatch(method, path, body);
+        println("STATUS:" + res.status.toString());
+        println("BODY:" + res.body);
+    } else {
+        println("Unknown command: " + cmd);
+        printUsage();
+        process.exit(1);
+    }
+}

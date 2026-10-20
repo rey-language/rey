@@ -1,0 +1,119 @@
+// JSON Utility Module for Rey
+// Simple robust field extraction for API payloads
+
+import std::string;
+
+pub func getString(json: string, key: string): string {
+    var search = "\"" + key + "\"";
+    var idx = string.indexOf(json, search);
+    if idx < 0 { return ""; }
+
+    var colonIdx = -1;
+    var i = idx + search.len();
+    loop {
+        if i >= json.len() { break; }
+        if json[i] == ':' {
+            colonIdx = i;
+            break;
+        }
+        i = i + 1;
+    }
+    if colonIdx < 0 { return ""; }
+
+    // Find opening quote
+    var quoteStart = -1;
+    i = colonIdx + 1;
+    loop {
+        if i >= json.len() { break; }
+        var c = json[i];
+        if c == '\"' {
+            quoteStart = i + 1;
+            break;
+        }
+        if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+            // Not a string value
+            return "";
+        }
+        i = i + 1;
+    }
+    if quoteStart < 0 { return ""; }
+
+    // Find closing quote (handling backslash escapes)
+    var out = "";
+    var escaped = false;
+    i = quoteStart;
+    loop {
+        if i >= json.len() { break; }
+        var c = json[i];
+        if escaped {
+            if c == 'n' { out = out + "\n"; }
+            else if c == 't' { out = out + "\t"; }
+            else if c == 'r' { out = out + "\r"; }
+            else { out = out + c.toString(); }
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '\"' {
+            break;
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub func getInt(json: string, key: string): int {
+    var search = "\"" + key + "\"";
+    var idx = string.indexOf(json, search);
+    if idx < 0 { return 0; }
+
+    var colonIdx = -1;
+    var i = idx + search.len();
+    loop {
+        if i >= json.len() { break; }
+        if json[i] == ':' {
+            colonIdx = i;
+            break;
+        }
+        i = i + 1;
+    }
+    if colonIdx < 0 { return 0; }
+
+    // Skip whitespace and optional quotes
+    i = colonIdx + 1;
+    var isNeg = false;
+    var numStart = -1;
+    loop {
+        if i >= json.len() { break; }
+        var c = json[i];
+        if c == '-' {
+            isNeg = true;
+            numStart = i + 1;
+            i = i + 1;
+            break;
+        }
+        if c >= '0' && c <= '9' {
+            numStart = i;
+            break;
+        }
+        i = i + 1;
+    }
+    if numStart < 0 { return 0; }
+
+    var val = 0;
+    i = numStart;
+    loop {
+        if i >= json.len() { break; }
+        var c = json[i];
+        if c >= '0' && c <= '9' {
+            val = val * 10 + (int(c) - 48);
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+
+    if isNeg { return -val; }
+    return val;
+}

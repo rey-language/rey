@@ -1,0 +1,139 @@
+// API Router Module for Rey
+// Dispatches incoming HTTP requests to service handlers
+
+import "json_util.rey";
+import "service.rey";
+import std::string;
+
+func parseIntSimple(s: string): int {
+    var val = 0;
+    var i = 0;
+    loop {
+        if i >= s.len() { break; }
+        var c = s[i];
+        if c >= '0' && c <= '9' {
+            val = val * 10 + (int(c) - 48);
+        } else {
+            return 0;
+        }
+        i = i + 1;
+    }
+    return val;
+}
+
+pub func dispatch(method: string, path: string, body: string): ApiResponse {
+    var m = string.toUpperCase(method);
+    var p = string.trim(path);
+
+    // Health
+    if (m == "GET" && (p == "/api/health" || p == "/health")) {
+        return healthCheck();
+    }
+
+    // Reset database
+    if (m == "POST" && (p == "/api/reset" || p == "/reset")) {
+        return resetDatabase("schema.sql");
+    }
+
+    // Users
+    if (m == "GET" && (p == "/api/users" || p == "/users")) {
+        return listUsers();
+    }
+
+    if (m == "POST" && (p == "/api/users" || p == "/users")) {
+        var username = getString(body, "username");
+        var name = getString(body, "name");
+        var bio = getString(body, "bio");
+        return createUser(username, name, bio);
+    }
+
+    // Single User by ID: /api/users/<id>
+    if (m == "GET" && string.startsWith(p, "/api/users/")) {
+        var idStr = p.slice(11, p.len());
+        var id = parseIntSimple(idStr);
+        if id <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"Invalid user id\"}}" };
+        }
+        return getUser(id);
+    }
+
+    // Follow / Unfollow
+    if (m == "POST" && (p == "/api/follow" || p == "/follow")) {
+        var followerId = getInt(body, "follower_id");
+        var followingId = getInt(body, "following_id");
+        if followerId <= 0 || followingId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"follower_id and following_id are required\"}}" };
+        }
+        return followUser(followerId, followingId);
+    }
+
+    if (m == "POST" && (p == "/api/unfollow" || p == "/unfollow")) {
+        var followerId = getInt(body, "follower_id");
+        var followingId = getInt(body, "following_id");
+        if followerId <= 0 || followingId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"follower_id and following_id are required\"}}" };
+        }
+        return unfollowUser(followerId, followingId);
+    }
+
+    // Posts
+    if (m == "GET" && (p == "/api/posts" || p == "/posts")) {
+        return listPosts(50);
+    }
+
+    if (m == "POST" && (p == "/api/posts" || p == "/posts")) {
+        var userId = getInt(body, "user_id");
+        var content = getString(body, "content");
+        if userId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"user_id is required\"}}" };
+        }
+        return createPost(userId, content);
+    }
+
+    // Post Like: /api/posts/<id>/like
+    if (m == "POST" && string.startsWith(p, "/api/posts/") && string.endsWith(p, "/like")) {
+        var idPart = p.slice(11, p.len() - 5);
+        var postId = parseIntSimple(idPart);
+        var userId = getInt(body, "user_id");
+        if postId <= 0 || userId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"valid postId and user_id are required\"}}" };
+        }
+        return likePost(userId, postId);
+    }
+
+    // Post Unlike: /api/posts/<id>/unlike
+    if (m == "POST" && string.startsWith(p, "/api/posts/") && string.endsWith(p, "/unlike")) {
+        var idPart = p.slice(11, p.len() - 7);
+        var postId = parseIntSimple(idPart);
+        var userId = getInt(body, "user_id");
+        if postId <= 0 || userId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"valid postId and user_id are required\"}}" };
+        }
+        return unlikePost(userId, postId);
+    }
+
+    // Single Post: /api/posts/<id>
+    if (m == "GET" && string.startsWith(p, "/api/posts/")) {
+        var idStr = p.slice(11, p.len());
+        var postId = parseIntSimple(idStr);
+        if postId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"Invalid post id\"}}" };
+        }
+        return getPost(postId);
+    }
+
+    // Personalized Feed: /api/feed/<user_id>
+    if (m == "GET" && string.startsWith(p, "/api/feed/")) {
+        var idStr = p.slice(10, p.len());
+        var userId = parseIntSimple(idStr);
+        if userId <= 0 {
+            return ApiResponse { status: 400, body: "{{\"error\":\"Invalid user id for feed\"}}" };
+        }
+        return getUserFeed(userId, 50);
+    }
+
+    return ApiResponse {
+        status: 404,
+        body: "{{\"error\":\"Route not found\",\"method\":\"" + m + "\",\"path\":\"" + p + "\"}}",
+    };
+}

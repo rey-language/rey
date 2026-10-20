@@ -1,0 +1,249 @@
+// Social Media Service Module for Rey
+// Implements core business logic querying PostgreSQL
+
+import "db.rey";
+import std::process;
+import std::string;
+
+pub struct ApiResponse {
+    pub status: int,
+    pub body: string,
+}
+
+func jsonError(status: int, message: string): ApiResponse {
+    var escapedMsg = escapeSql(message);
+    var body = "{{\"error\":\"" + escapedMsg + "\",\"status\":" + status.toString() + "}}";
+    return ApiResponse { status: status, body: body };
+}
+
+func jsonOk(body: string): ApiResponse {
+    return ApiResponse { status: 200, body: body };
+}
+
+func jsonCreated(body: string): ApiResponse {
+    return ApiResponse { status: 201, body: body };
+}
+
+pub func healthCheck(): ApiResponse {
+    var pingOk = ping();
+    if !pingOk {
+        return jsonError(503, "Database connection failed");
+    }
+
+    var statsRes = queryJsonRow("SELECT (SELECT COUNT(*) FROM users) AS total_users, (SELECT COUNT(*) FROM posts) AS total_posts, (SELECT COUNT(*) FROM follows) AS total_follows, (SELECT COUNT(*) FROM likes) AS total_likes;");
+    if !statsRes.ok {
+        return jsonError(500, "Failed to retrieve stats: " + statsRes.stderr);
+    }
+
+    var body = "{{\"status\":\"healthy\",\"database\":\"postgres\",\"stats\":" + statsRes.stdout + "}}";
+    return jsonOk(body);
+}
+
+pub func createUser(username: string, name: string, bio: string): ApiResponse {
+    var trimmedUser = string.trim(username);
+    var trimmedName = string.trim(name);
+    if trimmedUser.len() == 0 || trimmedName.len() == 0 {
+        return jsonError(400, "Username and name cannot be empty");
+    }
+
+    var checkSql = "SELECT id FROM users WHERE username = '" + escapeSql(trimmedUser) + "';";
+    var existing = queryJsonRow(checkSql);
+    if existing.ok && existing.stdout.len() > 0 && existing.stdout != "null" {
+        return jsonError(409, "Username already taken: @" + trimmedUser);
+    }
+
+    var insertSql = "INSERT INTO users (username, name, bio) VALUES ('" +
+        escapeSql(trimmedUser) + "', '" +
+        escapeSql(trimmedName) + "', '" +
+        escapeSql(bio) + "') RETURNING id, username, name, bio, created_at;";
+
+    var res = queryJsonRow(insertSql);
+    if !res.ok {
+        return jsonError(500, "Failed to insert user: " + res.stderr);
+    }
+
+    return jsonCreated(res.stdout);
+}
+
+pub func getUser(userId: int): ApiResponse {
+    var sql = "SELECT u.id, u.username, u.name, u.bio, u.created_at, " +
+        "(SELECT COUNT(*) FROM follows WHERE following_id = u.id) AS followers_count, " +
+        "(SELECT COUNT(*) FROM follows WHERE follower_id = u.id) AS following_count, " +
+        "(SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS posts_count " +
+        "FROM users u WHERE u.id = " + userId.toString() + ";";
+
+    var res = queryJsonRow(sql);
+    if !res.ok || res.stdout.len() == 0 || res.stdout == "null" {
+        return jsonError(404, "User not found with id " + userId.toString());
+    }
+
+    return jsonOk(res.stdout);
+}
+
+pub func listUsers(): ApiResponse {
+    var sql = "SELECT u.id, u.username, u.name, u.bio, u.created_at, " +
+        "(SELECT COUNT(*) FROM follows WHERE following_id = u.id) AS followers_count, " +
+        "(SELECT COUNT(*) FROM follows WHERE follower_id = u.id) AS following_count, " +
+        "(SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS posts_count " +
+        "FROM users u ORDER BY u.id ASC;";
+
+    var res = queryJson(sql);
+    if !res.ok {
+        return jsonError(500, "Failed to query users: " + res.stderr);
+    }
+
+    return jsonOk(res.stdout);
+}
+
+pub func createPost(userId: int, content: string): ApiResponse {
+    var trimmedContent = string.trim(content);
+    if trimmedContent.len() == 0 {
+        return jsonError(400, "Post content cannot be empty");
+    }
+
+    // Verify user exists
+    var userCheck = queryJsonRow("SELECT id, username, name FROM users WHERE id = " + userId.toString() + ";");
+    if !userCheck.ok || userCheck.stdout.len() == 0 || userCheck.stdout == "null" {
+        return jsonError(404, "Author user does not exist with id " + userId.toString());
+    }
+
+    var insertSql = "INSERT INTO posts (user_id, content) VALUES (" +
+        userId.toString() + ", '" +
+        escapeSql(trimmedContent) + "') RETURNING id, user_id, content, likes_count, created_at;";
+
+    var res = queryJsonRow(insertSql);
+    if !res.ok {
+        return jsonError(500, "Failed to create post: " + res.stderr);
+    }
+
+    return jsonCreated(res.stdout);
+}
+
+pub func getPost(postId: int): ApiResponse {
+    var sql = "SELECT p.id, p.content, p.likes_count, p.created_at, " +
+        "u.id AS author_id, u.username AS author_username, u.name AS author_name " +
+        "FROM posts p JOIN users u ON p.user_id = u.id WHERE p.id = " + postId.toString() + ";";
+
+    var res = queryJsonRow(sql);
+    if !res.ok || res.stdout.len() == 0 || res.stdout == "null" {
+        return jsonError(404, "Post not found with id " + postId.toString());
+    }
+
+    return jsonOk(res.stdout);
+}
+
+pub func listPosts(limit: int): ApiResponse {
+    var maxRows = limit;
+    if maxRows <= 0 { maxRows = 50; }
+
+    var sql = "SELECT p.id, p.content, p.likes_count, p.created_at, " +
+        "u.id AS author_id, u.username AS author_username, u.name AS author_name " +
+        "FROM posts p JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC, p.id DESC LIMIT " +
+        maxRows.toString() + ";";
+
+    var res = queryJson(sql);
+    if !res.ok {
+        return jsonError(500, "Failed to query posts: " + res.stderr);
+    }
+
+    return jsonOk(res.stdout);
+}
+
+pub func followUser(followerId: int, followingId: int): ApiResponse {
+    if followerId == followingId {
+        return jsonError(400, "Cannot follow yourself");
+    }
+
+    // Verify both users exist
+    var f1 = queryJsonRow("SELECT id FROM users WHERE id = " + followerId.toString() + ";");
+    if !f1.ok || f1.stdout == "null" || f1.stdout.len() == 0 {
+        return jsonError(404, "Follower user not found");
+    }
+    var f2 = queryJsonRow("SELECT id FROM users WHERE id = " + followingId.toString() + ";");
+    if !f2.ok || f2.stdout == "null" || f2.stdout.len() == 0 {
+        return jsonError(404, "Target user to follow not found");
+    }
+
+    var insertSql = "INSERT INTO follows (follower_id, following_id) VALUES (" +
+        followerId.toString() + ", " + followingId.toString() + ") ON CONFLICT DO NOTHING RETURNING follower_id, following_id, created_at;";
+
+    var res = queryJsonRow(insertSql);
+    if !res.ok {
+        return jsonError(500, "Follow failed: " + res.stderr);
+    }
+
+    var body = "{{\"message\":\"Followed successfully\",\"follower_id\":" + followerId.toString() + ",\"following_id\":" + followingId.toString() + "}}";
+    return jsonOk(body);
+}
+
+pub func unfollowUser(followerId: int, followingId: int): ApiResponse {
+    var deleteSql = "DELETE FROM follows WHERE follower_id = " +
+        followerId.toString() + " AND following_id = " + followingId.toString() + ";";
+
+    var res = queryRaw(deleteSql);
+    if !res.ok {
+        return jsonError(500, "Unfollow failed: " + res.stderr);
+    }
+
+    var body = "{{\"message\":\"Unfollowed successfully\",\"follower_id\":" + followerId.toString() + ",\"following_id\":" + followingId.toString() + "}}";
+    return jsonOk(body);
+}
+
+pub func likePost(userId: int, postId: int): ApiResponse {
+    var checkPost = queryJsonRow("SELECT id FROM posts WHERE id = " + postId.toString() + ";");
+    if !checkPost.ok || checkPost.stdout == "null" || checkPost.stdout.len() == 0 {
+        return jsonError(404, "Post not found with id " + postId.toString());
+    }
+
+    var ins = execute("INSERT INTO likes (user_id, post_id) VALUES (" +
+        userId.toString() + ", " + postId.toString() + ") ON CONFLICT DO NOTHING;");
+    if !ins {
+        return jsonError(500, "Like operation failed");
+    }
+
+    execute("UPDATE posts SET likes_count = (SELECT COUNT(*) FROM likes WHERE post_id = " + postId.toString() + ") WHERE id = " + postId.toString() + ";");
+
+    var body = "{{\"message\":\"Post liked\",\"post_id\":" + postId.toString() + ",\"user_id\":" + userId.toString() + "}}";
+    return jsonOk(body);
+}
+
+pub func unlikePost(userId: int, postId: int): ApiResponse {
+    var del = execute("DELETE FROM likes WHERE user_id = " +
+        userId.toString() + " AND post_id = " + postId.toString() + ";");
+    if !del {
+        return jsonError(500, "Unlike failed");
+    }
+
+    execute("UPDATE posts SET likes_count = (SELECT COUNT(*) FROM likes WHERE post_id = " + postId.toString() + ") WHERE id = " + postId.toString() + ";");
+
+    var body = "{{\"message\":\"Post unliked\",\"post_id\":" + postId.toString() + ",\"user_id\":" + userId.toString() + "}}";
+    return jsonOk(body);
+}
+
+pub func getUserFeed(userId: int, limit: int): ApiResponse {
+    var maxRows = limit;
+    if maxRows <= 0 { maxRows = 50; }
+
+    var sql = "SELECT p.id, p.content, p.likes_count, p.created_at, " +
+        "u.id AS author_id, u.username AS author_username, u.name AS author_name " +
+        "FROM posts p JOIN users u ON p.user_id = u.id " +
+        "WHERE p.user_id IN (SELECT following_id FROM follows WHERE follower_id = " + userId.toString() + ") " +
+        "ORDER BY p.created_at DESC, p.id DESC LIMIT " + maxRows.toString() + ";";
+
+    var res = queryJson(sql);
+    if !res.ok {
+        return jsonError(500, "Failed to query feed: " + res.stderr);
+    }
+
+    return jsonOk(res.stdout);
+}
+
+pub func resetDatabase(schemaFilePath: string): ApiResponse {
+    var cfg = getDefaultConfig();
+    var cmd = "psql -d " + cfg.dbname + " -f " + schemaFilePath;
+    var res = process.runDetailed(cmd);
+    if res.code != 0 {
+        return jsonError(500, "Database reset failed: " + res.stderr);
+    }
+    return jsonOk("{{\"message\":\"Database reset and re-seeded successfully\"}}");
+}

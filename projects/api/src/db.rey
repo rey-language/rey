@@ -1,0 +1,120 @@
+// PostgreSQL Driver Module for Rey
+// Connects to PostgreSQL via psql CLI integration
+
+import std::env;
+import std::process;
+import std::string;
+
+pub struct DbConfig {
+    pub dbname: string,
+    pub host: string,
+    pub port: int,
+    pub user: string,
+}
+
+pub struct DbResult {
+    pub ok: bool,
+    pub stdout: string,
+    pub stderr: string,
+    pub code: int,
+}
+
+pub func getDefaultConfig(): DbConfig {
+    var dbname = env.getOr("PGDATABASE", "rey_social_db");
+    var host = env.getOr("PGHOST", "localhost");
+    var port = 5432;
+    var user = env.getOr("PGUSER", "");
+
+    return DbConfig {
+        dbname: dbname,
+        host: host,
+        port: port,
+        user: user,
+    };
+}
+
+pub func escapeSql(value: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = value[i];
+        if int(c) == 39 {
+            out = out + "''";
+        } else if int(c) == 92 {
+            out = out + "\\\\";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+func shellQuote(value: string): string {
+    var out = "'";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var c = value[i];
+        if int(c) == 39 {
+            out = out + "'\\''";
+        } else {
+            out = out + c.toString();
+        }
+        i = i + 1;
+    }
+    return out + "'";
+}
+
+func cleanSubquery(sql: string): string {
+    var s = string.trim(sql);
+    if s.len() > 0 && s[s.len() - 1] == ';' {
+        return string.trim(s.slice(0, s.len() - 1));
+    }
+    return s;
+}
+
+pub func queryRaw(sql: string): DbResult {
+    var cfg = getDefaultConfig();
+    var cmd = "psql -d " + cfg.dbname + " -t -A";
+    if cfg.user.len() > 0 {
+        cmd = cmd + " -U " + cfg.user;
+    }
+    if cfg.host.len() > 0 && cfg.host != "localhost" {
+        cmd = cmd + " -h " + cfg.host + " -p " + cfg.port.toString();
+    }
+    cmd = cmd + " -c " + shellQuote(sql);
+
+    var res = process.runDetailed(cmd);
+    return DbResult {
+        ok: res.code == 0,
+        stdout: string.trim(res.stdout),
+        stderr: string.trim(res.stderr),
+        code: res.code,
+    };
+}
+
+pub func queryJson(sql: string): DbResult {
+    // Wraps an arbitrary SQL query to emit a unified JSON array from PostgreSQL using CTE
+    var cleanSql = cleanSubquery(sql);
+    var wrappedSql = "WITH q AS (" + cleanSql + ") SELECT COALESCE(json_agg(q), '[]'::json) FROM q;";
+    return queryRaw(wrappedSql);
+}
+
+pub func queryJsonRow(sql: string): DbResult {
+    // For single-row queries (or null if empty) using CTE
+    var cleanSql = cleanSubquery(sql);
+    var wrappedSql = "WITH q AS (" + cleanSql + ") SELECT to_json(q) FROM q;";
+    return queryRaw(wrappedSql);
+}
+
+pub func execute(sql: string): bool {
+    var res = queryRaw(sql);
+    return res.ok;
+}
+
+pub func ping(): bool {
+    var res = queryRaw("SELECT 1;");
+    return res.ok && res.stdout == "1";
+}
