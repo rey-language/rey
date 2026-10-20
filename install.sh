@@ -42,10 +42,10 @@ STD_DIR="$INSTALL_DIR/std"
 
 printf "\n"
 printf "${CYAN}   ____             ${RESET}\n"
-printf "${CYAN}  / __ \___  __  __ ${RESET}  Rey Programming Language Installer\n"
-printf "${CYAN} / /_/ / _ \/ / / / ${RESET}  Release %s\n" "$VERSION"
+printf "${CYAN}  / __ \\___  __  __ ${RESET}  Rey Programming Language Installer\n"
+printf "${CYAN} / /_/ / _ \\/ / / / ${RESET}  Release %s\n" "$VERSION"
 printf "${CYAN}/ _, _/  __/ /_/ /  ${RESET}  https://rey-lang.org\n"
-printf "${CYAN}/_/ |_|\___/\__, /   ${RESET}\n"
+printf "${CYAN}/_/ |_|\\___/\\__, /   ${RESET}\n"
 printf "${CYAN}           /____/    ${RESET}\n\n"
 
 # 1. Detect OS and Architecture
@@ -91,6 +91,17 @@ fi
 TARGET="${PLATFORM}-${ARCHIVE_ARCH}"
 log_info "Detected system: $PLATFORM ($TARGET_ARCH)"
 
+# Check toolchain prerequisites
+if ! command -v clang >/dev/null 2>&1; then
+    log_warn "'clang' was not found in PATH."
+    log_warn "Rey compiles native binaries using Clang/LLVM."
+    if [ "$PLATFORM" = "linux" ]; then
+        log_warn "Run: sudo apt-get update && sudo apt-get install -y clang"
+    elif [ "$PLATFORM" = "macos" ]; then
+        log_warn "Run: xcode-select --install"
+    fi
+fi
+
 # 2. Prepare installation directory
 mkdir -p "$BIN_DIR"
 mkdir -p "$BIN_DIR/runtime"
@@ -98,106 +109,12 @@ mkdir -p "$STD_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
-# Helper to write the smart driver wrapper
-write_driver_script() {
-    local target="$1"
-    cat << 'DRIVER_EOF' > "$target"
-#!/usr/bin/env bash
-set -e
-
-SOURCE="${BASH_SOURCE[0]}"
-while [ -h "$SOURCE" ]; do
-    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-    SOURCE="$(readlink "$SOURCE")"
-    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-ENGINE="$BIN_DIR/rey.bin"
-
-# 1. Locate librey_rt.a runtime
-RUNTIME_DIR="${REY_RUNTIME_DIR:-}"
-if [ -z "$RUNTIME_DIR" ] || [ ! -f "$RUNTIME_DIR/librey_rt.a" ]; then
-    if [ -f "$BIN_DIR/runtime/librey_rt.a" ]; then
-        RUNTIME_DIR="$BIN_DIR/runtime"
-    elif [ -n "${REY_HOME:-}" ] && [ -f "$REY_HOME/bin/runtime/librey_rt.a" ]; then
-        RUNTIME_DIR="$REY_HOME/bin/runtime"
-    elif [ -n "${REY_HOME:-}" ] && [ -f "$REY_HOME/lib/librey_rt.a" ]; then
-        RUNTIME_DIR="$REY_HOME/lib"
-    elif [ -f "$HOME/.rey/bin/runtime/librey_rt.a" ]; then
-        RUNTIME_DIR="$HOME/.rey/bin/runtime"
-    elif [ -f "$HOME/.rey/lib/librey_rt.a" ]; then
-        RUNTIME_DIR="$HOME/.rey/lib"
-    fi
-fi
-
-# Ensure PATH prioritizes /usr/bin/clang over broken shims
-if [ -x /usr/bin/clang ] && [[ ":$PATH:" != *":/usr/bin:"* ]]; then
-    export PATH="/usr/bin:$PATH"
-fi
-if [ -x /usr/bin/clang ]; then
-    export CC=/usr/bin/clang
-fi
-
-# 2. Check if user already passed --runtime-dir
-has_runtime_flag=0
-for arg in "$@"; do
-    if [ "$arg" = "--runtime-dir" ]; then
-        has_runtime_flag=1
-        break
-    fi
-done
-
-if [ "$has_runtime_flag" -eq 1 ] || [ -z "$RUNTIME_DIR" ] || [ "$#" -eq 0 ]; then
-    exec "$ENGINE" "$@"
-fi
-
-# 3. For commands that take flags (build, run, check), insert --runtime-dir
-cmd="${1:-}"
-if [ "$cmd" != "build" ] && [ "$cmd" != "run" ] && [ "$cmd" != "check" ]; then
-    exec "$ENGINE" "$@"
-fi
-
-args=()
-inserted=0
-for arg in "$@"; do
-    if [ "$arg" = "--" ] && [ "$inserted" -eq 0 ]; then
-        args+=("--runtime-dir" "$RUNTIME_DIR" "--")
-        inserted=1
-    else
-        args+=("$arg")
-    fi
-done
-
-if [ "$inserted" -eq 0 ]; then
-    args+=("--runtime-dir" "$RUNTIME_DIR")
-fi
-
-exec "$ENGINE" "${args[@]}"
-DRIVER_EOF
-    chmod +x "$target"
-}
-
 # 3. Install packages
 LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.tar.gz"
 LOCAL_NATIVE_BIN="$SCRIPT_DIR/build/rey"
 LOCAL_RUNTIME_LIB="$SCRIPT_DIR/build/runtime/librey_rt.a"
-LOCAL_BUILD_BIN="$SCRIPT_DIR/compiler/v1/target/release/rey-v0"
 
-if [ -f "$LOCAL_NATIVE_BIN" ]; then
-    log_info "Installing native Rey compiler from $LOCAL_NATIVE_BIN..."
-    cp "$LOCAL_NATIVE_BIN" "$BIN_DIR/rey.bin"
-    chmod +x "$BIN_DIR/rey.bin"
-    write_driver_script "$BIN_DIR/rey"
-    [ -f "$LOCAL_BUILD_BIN" ] && cp "$LOCAL_BUILD_BIN" "$BIN_DIR/rey-v0" && chmod +x "$BIN_DIR/rey-v0"
-    [ -f "$LOCAL_RUNTIME_LIB" ] && cp "$LOCAL_RUNTIME_LIB" "$BIN_DIR/runtime/"
-    rm -rf "$STD_DIR/src"
-    mkdir -p "$STD_DIR"
-    if [ -d "$SCRIPT_DIR/std/src" ]; then
-        cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
-    elif [ -d "$SCRIPT_DIR/../std/src" ]; then
-        cp -R "$SCRIPT_DIR/../std/src" "$STD_DIR/src"
-    fi
-elif [ -f "$LOCAL_ARCHIVE" ]; then
+if [ -f "$LOCAL_ARCHIVE" ]; then
     log_info "Found local release package: $LOCAL_ARCHIVE"
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
     tar -xzf "$LOCAL_ARCHIVE" -C "$TMP_EXTRACT"
@@ -207,6 +124,17 @@ elif [ -f "$LOCAL_ARCHIVE" ]; then
     mkdir -p "$STD_DIR"
     cp -R "$SOURCE_DIR/std/src" "$STD_DIR/src"
     rm -rf "$TMP_EXTRACT"
+elif [ -f "$LOCAL_NATIVE_BIN" ] && [ -f "$LOCAL_RUNTIME_LIB" ]; then
+    log_info "Installing native Rey compiler from local build..."
+    cp "$LOCAL_NATIVE_BIN" "$BIN_DIR/rey"
+    cp "$LOCAL_RUNTIME_LIB" "$BIN_DIR/runtime/"
+    rm -rf "$STD_DIR/src"
+    mkdir -p "$STD_DIR"
+    if [ -d "$SCRIPT_DIR/../std/src" ]; then
+        cp -R "$SCRIPT_DIR/../std/src" "$STD_DIR/src"
+    elif [ -d "$SCRIPT_DIR/std/src" ]; then
+        cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
+    fi
 else
     DOWNLOAD_URL="${REPO_URL}/releases/download/${VERSION}/rey-${VERSION}-${TARGET}.tar.gz"
     log_info "Downloading Rey ${VERSION} from ${DOWNLOAD_URL}..."
@@ -230,18 +158,11 @@ else
     rm -rf "$TMP_ARCHIVE" "$TMP_EXTRACT"
 fi
 
+# Ensure correct permissions and clean up any stale bootstrap shims
 chmod +x "$BIN_DIR/rey" 2>/dev/null || true
-[ -f "$BIN_DIR/rey.bin" ] && chmod +x "$BIN_DIR/rey.bin" 2>/dev/null || true
-[ -f "$BIN_DIR/rey-v0" ] && chmod +x "$BIN_DIR/rey-v0" 2>/dev/null || true
+rm -f "$BIN_DIR/rey-v0" "$BIN_DIR/rey.bin" "$BIN_DIR/reyc" 2>/dev/null || true
 
-# 4. Create convenience symlinks
-(
-    cd "$BIN_DIR"
-    ln -sf rey reyc
-    [ ! -f rey-v0 ] && ln -sf rey rey-v0 || true
-)
-
-# 5. Link standard library
+# 4. Link standard library if not present
 if [ ! -d "$STD_DIR/src" ] || [ -z "$(ls -A "$STD_DIR/src" 2>/dev/null)" ]; then
     if [ -d "$SCRIPT_DIR/../std/src" ]; then
         log_info "Linking standard library from workspace..."
@@ -268,7 +189,7 @@ ln -sfn "$STD_DIR" "$CAPY_DIR/std" 2>/dev/null || true
 
 log_success "Rey compiler and Standard Library installed into: $INSTALL_DIR"
 
-# 6. Add to shell configuration profile
+# 5. Add to shell configuration profile
 add_to_shell() {
     PROFILE_FILE="$1"
     LINE_COMMENT="# Rey Language Environment"
@@ -298,7 +219,7 @@ if [ -f "$FISH_CONFIG" ]; then
     fi
 fi
 
-# 7. Verification
+# 6. Verification
 export PATH="$BIN_DIR:$PATH"
 export REY_STD_PATH="$STD_DIR/src"
 
@@ -318,5 +239,4 @@ printf "    ${BOLD}export PATH=\"\$REY_HOME/bin:\$PATH\"${RESET}\n\n"
 printf "Commands available:\n"
 printf "    ${CYAN}rey build <file>${RESET}     Compile Rey source to native machine executable\n"
 printf "    ${CYAN}rey run <file>${RESET}       Compile and execute immediately\n"
-printf "    ${CYAN}rey check <file>${RESET}     Typecheck source without compiling\n"
-printf "    ${CYAN}rey-v0 <file>${RESET}       Run via Rust reference bootstrap engine\n\n"
+printf "    ${CYAN}rey check <file>${RESET}     Typecheck source without compiling\n\n"
