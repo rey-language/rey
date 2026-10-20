@@ -89,7 +89,7 @@ These validate command construction, status handling, path quoting, and timeout
 cleanup. Except for the separately labeled runtime-helper invocation, they do
 not prove that Rust built the native compiler or that stage 1/2 works.
 
-Commands below were run from `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03`, not the repository root. `$ROOT` was `/Volumes/SSD/Developer/rey-language/rey-lang`; `$SCR` was `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/bootstrap-checks.PSJXVC`.
+Commands below were run from `/tmp/rey-v03`, not the repository root. `$ROOT` was `$REPO_ROOT`; `$SCR` was `/tmp/rey-v03/bootstrap-checks.PSJXVC`.
 
 Syntax/help checks:
 
@@ -188,13 +188,13 @@ directory was not created.
 ## Bounded real pipeline attempt (2026-10-17)
 
 One real run was made from the non-repository cwd
-`/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03`.
+`/tmp/rey-v03`.
 No `BOOTSTRAP_CARGO` or `CARGO_TARGET_DIR` override was set. The exact command
 was:
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-RUN_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/bootstrap-real-20261017.qWtbJn
+ROOT=$REPO_ROOT
+RUN_DIR=/tmp/rey-v03/bootstrap-real-20261017.qWtbJn
 BOOTSTRAP_BUILD_PARENT="$RUN_DIR/build parent" \
 BOOTSTRAP_TIMEOUT_SECONDS=180 "$ROOT/scripts/bootstrap.sh"
 ```

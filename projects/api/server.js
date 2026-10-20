@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const PORT = process.env.PORT || 8080;
-const REYC_BIN = process.env.REYC_BIN || '/Volumes/SSD/Developer/rey-language/rey-lang/compiler/v1/target/release/rey-v0';
+const REYC_BIN = process.env.REYC_BIN || '$REPO_ROOT/compiler/v1/target/release/rey-v0';
 const MAIN_FILE = path.join(__dirname, 'main.rey');
 
 function callRey(method, reqPath, body) {

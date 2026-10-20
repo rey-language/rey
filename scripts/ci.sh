@@ -4,7 +4,7 @@ set -u
 
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" 2>/dev/null && pwd) || exit 2
 REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/.." 2>/dev/null && pwd) || exit 2
-SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03
+SCRATCH=/tmp/rey-v03
 
 echo '=== Rey v0.3 machine gate (transient peer state possible) ==='
 

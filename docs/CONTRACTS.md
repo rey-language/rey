@@ -759,7 +759,7 @@ by the before/after source hashes reported below.
   on a 442-file unchanged input manifest
   (`e220a166e45c85c166503dc3914ba503a6399e29f1707ce36d88c1f9f0e80b7a`): unit
   tests 104/113 passed and conformance 102/125 passed. Binary:
-  `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`
+  `/tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`
   SHA-256 `cf9e85894d863e76f8bc38ac6b26a6eca76c01d318021460419556b52fdd6f33`.
   `runInjectsScriptAndUserArgsWithoutCliWrapperTokens` and
   `checkRejectsPrivateImportsAndLocatesImportedErrors` passed. The resolved

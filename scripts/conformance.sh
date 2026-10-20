@@ -81,7 +81,7 @@ if [[ -n "$engine_path" ]]; then
   engine_cmd=$(printf '%q' "$engine_dir/$(basename "$engine_path")")
 fi
 
-scratch_root=${REY_CONFORMANCE_SCRATCH:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/conformance}
+scratch_root=${REY_CONFORMANCE_SCRATCH:-/tmp/rey-v03/conformance}
 if ! mkdir -p "$scratch_root"; then
   printf 'Cannot create scratch directory: %s\n' "$scratch_root" >&2
   exit 2

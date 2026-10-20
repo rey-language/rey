@@ -24,7 +24,7 @@ if ! command -v "$COMPILER" >/dev/null 2>&1; then
 fi
 COMPILER_PATH=$(command -v "$COMPILER")
 
-TMP_ROOT=${REY_TEST_TMPDIR:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03}
+TMP_ROOT=${REY_TEST_TMPDIR:-/tmp/rey-v03}
 mkdir -p "$TMP_ROOT"
 BUILD_DIR=$(mktemp -d "$TMP_ROOT/rey-vec-test.XXXXXX")
 BIN="$BUILD_DIR/vec-test"

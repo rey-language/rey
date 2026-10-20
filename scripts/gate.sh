@@ -34,9 +34,9 @@ script_dir=$(cd "$(dirname "$0")" && pwd) || exit 2
 script_path=$script_dir/$(basename "$0")
 repo=$(cd "$script_dir/.." && pwd) || exit 2
 
-ORACLE=${ORACLE:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/sprint2/bin/rey-v0}
-SCRATCH=${REY_HARNESS_SCRATCH:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/sprint2/harness}
-HEAVY_LOCK=${REY_HEAVY_LOCK:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/sprint2/heavy.lock}
+ORACLE=${ORACLE:-/tmp/rey-v03/sprint2/bin/rey-v0}
+SCRATCH=${REY_HARNESS_SCRATCH:-/tmp/rey-v03/sprint2/harness}
+HEAVY_LOCK=${REY_HEAVY_LOCK:-/tmp/rey-v03/sprint2/heavy.lock}
 HISTORY=$SCRATCH/GATE-HISTORY.md
 MATRIX=$SCRATCH/NATIVE-MATRIX.md
 CI_STATUS=${CI_STATUS:-$SCRATCH/CI-STATUS.md}

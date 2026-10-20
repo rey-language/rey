@@ -127,7 +127,7 @@ func dumpErrors(result: TypecheckResult) {
 }
 
 func assertNominalGraph() {
-    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/same-name-nominal";
+    var root = "$REPO_ROOT/tests/native-typecheck/graphs/same-name-nominal";
     var innerPath = root + "/inner.rey";
     var leftPath = root + "/left.rey";
     var rightPath = root + "/right.rey";
@@ -206,7 +206,7 @@ func assertNominalGraph() {
 }
 
 func assertDistinctPointAssignment() {
-    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/same-name-nominal";
+    var root = "$REPO_ROOT/tests/native-typecheck/graphs/same-name-nominal";
     var open = char(123).toString();
     var close = char(125).toString();
     var entryPath = root + "/mismatch-main.rey";
@@ -243,7 +243,7 @@ func assertDistinctPointAssignment() {
 }
 
 func assertPrivateField() {
-    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/private-field";
+    var root = "$REPO_ROOT/tests/native-typecheck/graphs/private-field";
     var libPath = root + "/lib.rey";
     var entryPath = root + "/main.rey";
     var libSource = readFile(libPath);

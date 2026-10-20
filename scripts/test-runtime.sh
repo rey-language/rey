@@ -7,7 +7,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd -P)
 runtime_dir=$repo_root/rey-compiler/runtime
 compiler=${CC:-/usr/bin/clang}
-scratch_root=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03
+scratch_root=/tmp/rey-v03
 total_timeout=${REY_RUNTIME_TOTAL_TIMEOUT_SECONDS:-900}
 gate_timeout=${REY_RUNTIME_GATE_TIMEOUT_SECONDS:-120}
 gates="hashmap string vec io result stderr typed-value value overflow matrix float-format"

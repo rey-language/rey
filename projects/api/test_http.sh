@@ -17,7 +17,7 @@ echo " Starting Rey Social Media API HTTP Server on port $PORT"
 echo "=============================================="
 
 # Reset schema first
-/Volumes/SSD/Developer/rey-language/rey-lang/compiler/v1/target/release/rey-v0 run main.rey -- init-db
+$REPO_ROOT/compiler/v1/target/release/rey-v0 run main.rey -- init-db
 
 node server.js &
 SERVER_PID=$!

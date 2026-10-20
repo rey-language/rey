@@ -429,7 +429,7 @@ if [ -x "$engine_b" ] && [ ! -d "$engine_b" ]; then
     engine_b=$binary_b
 fi
 
-scratch=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03
+scratch=/tmp/rey-v03
 mkdir -p "$scratch" || { echo "error: cannot create scratch directory: $scratch" >&2; exit 2; }
 workspace=$(mktemp -d "$scratch/differential.XXXXXX") || { echo 'error: cannot create differential work directory' >&2; exit 2; }
 if [ "${REY_KEEP_DIFFERENTIAL_SCRATCH:-0}" = 1 ]; then

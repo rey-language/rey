@@ -1,6 +1,6 @@
 # Native self-host forensics
 
-Observed 2026-10-16 on macOS arm64. The committed native executable was treated as read-only. Test inputs and compiler outputs were confined to `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon/`; every potentially hanging compiler/debugger command was alarm-guarded. Build commands put `/usr/bin` first in `PATH`, so the compiler's `clang` fallback resolves to `/usr/bin/clang` (`llc` is absent).
+Observed 2026-10-16 on macOS arm64. The committed native executable was treated as read-only. Test inputs and compiler outputs were confined to `/tmp/rey-v03/selfhost-recon/`; every potentially hanging compiler/debugger command was alarm-guarded. Build commands put `/usr/bin` first in `PATH`, so the compiler's `clang` fallback resolves to `/usr/bin/clang` (`llc` is absent).
 
 ## CLI actually accepted by the native binary
 
@@ -21,7 +21,7 @@ This is not the usual `<binary> <cmd> <file>` CLI. `--help` is not implemented. 
 Reproduction of the short forms mentioned in the defect ledger:
 
 ```text
-$ cd /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler
+$ cd $REPO_ROOT/rey-compiler
 $ perl -e 'alarm 12; exec @ARGV' -- ./main --help
 Usage: reyc <build|run|check> <file>
 EXIT=0
@@ -42,8 +42,8 @@ a.out_after=absent
 Exact command:
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-SCR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon
+ROOT=$REPO_ROOT
+SCR=/tmp/rey-v03/selfhost-recon
 cd "$SCR/cases"
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 18; exec @ARGV' -- \
   "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" check "$SCR/cases/b00-main.rey"
@@ -56,8 +56,8 @@ To avoid the default output path colliding with committed `rey-compiler/main`/`m
 Exact guarded command:
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-SCR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon
+ROOT=$REPO_ROOT
+SCR=/tmp/rey-v03/selfhost-recon
 cd "$ROOT"
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 60; exec @ARGV' -- \
   "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" build "$SCR/compiler/main.rey"
@@ -70,9 +70,9 @@ LLDB was able to stop at `main` and then capture the signal. Command (also alarm
 ```sh
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 120; exec @ARGV' -- lldb --batch \
   -o 'breakpoint set -n main' \
-  -o 'run /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main.rey build /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon/compiler/main.rey' \
+  -o 'run $REPO_ROOT/rey-compiler/main.rey build /tmp/rey-v03/selfhost-recon/compiler/main.rey' \
   -o continue -k 'register read x0 x1' -k 'thread backtrace all' \
-  -- /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main
+  -- $REPO_ROOT/rey-compiler/main
 ```
 
 Top of the captured backtrace:
@@ -105,7 +105,7 @@ The fault is during IR generation (`codegenProgram2`/`generateIR`), before `comp
 Exact guarded command:
 
 ```sh
-cd /Volumes/SSD/Developer/rey-language/rey-lang
+cd $REPO_ROOT
 perl -e 'alarm 30; exec @ARGV' -- \
   ./rey-compiler/main ./rey-compiler/main.rey check rey-compiler/src/lexer/token.rey
 ```
@@ -122,9 +122,9 @@ LLDB breakpoint on `rey_panic_cstr` captured:
 ```sh
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 60; exec @ARGV' -- lldb --batch \
   -o 'breakpoint set -n rey_panic_cstr' \
-  -o 'run /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main.rey check /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/src/lexer/token.rey' \
+  -o 'run $REPO_ROOT/rey-compiler/main.rey check $REPO_ROOT/rey-compiler/src/lexer/token.rey' \
   -o 'thread backtrace all' -o quit \
-  -- /Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main
+  -- $REPO_ROOT/rey-compiler/main
 ```
 
 ```text
@@ -153,7 +153,7 @@ This explains why even an empty struct declaration triggers the panic: the struc
 Exact guarded reproduction:
 
 ```sh
-cd /Volumes/SSD/Developer/rey-language/rey-lang
+cd $REPO_ROOT
 perl -e 'alarm 25; exec @ARGV' -- \
   ./rey-compiler/main ./rey-compiler/main.rey check tests/enum_match.rey
 ```
@@ -163,8 +163,8 @@ Observed: no output before the guard; `EXIT=142` (SIGALRM).
 For a live sample, I launched only the native child with a 45-second alarm, sampled that PID for three seconds, then sent SIGTERM to that child and waited for it:
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-SCR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon
+ROOT=$REPO_ROOT
+SCR=/tmp/rey-v03/selfhost-recon
 cd "$ROOT"
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 45; exec @ARGV' -- \
   "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" check "$ROOT/tests/enum_match.rey" > "$SCR/enum-hang.log" 2>&1 &
@@ -201,8 +201,8 @@ enum E { A(x: int) }
 Exact minimal-repro commands (both alarm-guarded):
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-SCR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon
+ROOT=$REPO_ROOT
+SCR=/tmp/rey-v03/selfhost-recon
 perl -e 'alarm 8; exec @ARGV' -- "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" check "$SCR/cases/min-enum-payload.rey"
 perl -e 'alarm 12; exec @ARGV' -- "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" check "$SCR/cases/min-enum-plain.rey"
 ```
@@ -216,8 +216,8 @@ The sampled loop maps to `rey-compiler/src/parser/main.rey:330-348`. `parseEnumD
 Inputs were written under the scratch `cases/` directory. Each build used the same native invocation and an 18-second alarm:
 
 ```sh
-ROOT=/Volumes/SSD/Developer/rey-language/rey-lang
-SCR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/selfhost-recon
+ROOT=$REPO_ROOT
+SCR=/tmp/rey-v03/selfhost-recon
 PATH=/usr/bin:/bin:/usr/sbin:/sbin perl -e 'alarm 18; exec @ARGV' -- \
   "$ROOT/rey-compiler/main" "$ROOT/rey-compiler/main.rey" build "$SCR/cases/<case>.rey"
 ```

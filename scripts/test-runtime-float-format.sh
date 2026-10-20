@@ -4,7 +4,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 runtime_dir=${REY_RUNTIME_DIR:-$repo_root/rey-compiler/runtime}
-scratch_root=${REY_RUNTIME_TEST_SCRATCH:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode}
+scratch_root=${REY_RUNTIME_TEST_SCRATCH:-/tmp/opencode}
 build_dir="$scratch_root/rey-runtime-float-format"
 cc=${CC:-/usr/bin/clang}
 

@@ -12,22 +12,22 @@
 
 ## Snapshot identity
 
-- Source root: `/Volumes/SSD/Developer/rey-language/rey-lang`
-- Snapshot: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/verified-snapshot`
+- Source root: `$REPO_ROOT`
+- Snapshot: `/tmp/rey-v03/verifier-20261016T180754Z/verified-snapshot`
 - Corrected snapshot file timestamps: approximately `2026-10-16T18:09:04Z`.
 - Included: `compiler/v1/src`, `compiler/v1/Cargo.toml`, `compiler/v1/Cargo.lock`, `tests/imports`, `tests/conformance`, and `scripts`; no source-repo `target/` or `.git` was copied.
 - Fingerprint manifest: 281 files. SHA-256 of each manifest file (`verified-before.sha256`, `verified-after.sha256`, `verified-snapshot.sha256`):
   `a3e6b278fe2429994906775b23547f23bf3dcd1fb6cff53b283ff70ab7e9c7ef`
 - Before, after, and snapshot manifests compared equal on the corrected copy. The equality describes the checkout after the duplicate-directory incident, not a clean checkout before it.
-- Snapshot and failed logs are preserved under `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/`.
+- Snapshot and failed logs are preserved under `/tmp/rey-v03/verifier-20261016T180754Z/`.
 
 ## Build and unit-test evidence
 
 Exact commands, run in the snapshot's `compiler/v1` directory:
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/build-target cargo build --release -j1
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/test-target cargo test --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/verifier-20261016T180754Z/build-target cargo build --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/verifier-20261016T180754Z/test-target cargo test --release -j1
 ```
 
 Build tail:
@@ -66,7 +66,7 @@ The follow-up CLI tests for argv parsing, strict `check`/`build` args, silent/no
 Exact command (run from the snapshot root):
 
 ```sh
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/runner-scratch /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/verified-snapshot/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/build-target/release/rey-v0
+REY_CONFORMANCE_SCRATCH=/tmp/rey-v03/verifier-20261016T180754Z/runner-scratch /tmp/rey-v03/verifier-20261016T180754Z/verified-snapshot/scripts/conformance.sh --engine /tmp/rey-v03/verifier-20261016T180754Z/build-target/release/rey-v0
 ```
 
 The runner's valid-program check preflight passed before fixtures ran. Negative fixtures were counted as passing only when `check` exited exactly 1 and emitted the marker; usage errors and false-success checks failed. Summary:
@@ -113,7 +113,7 @@ No conformance-runner failure was observed; its preflight and golden comparisons
 
 ## Binary and log fingerprints
 
-- Binary: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/build-target/release/rey-v0`
+- Binary: `/tmp/rey-v03/verifier-20261016T180754Z/build-target/release/rey-v0`
 - Binary mtime UTC: `2026-10-16T18:09:46Z`
 - Binary SHA-256: `4fae4ee7f2ea9bfe25083decf38d803c27a8105ee8325b31bf36aa7ce938fdee`
 - Logs: `build.log`, `test.log`, and `conformance.log` in the snapshot-work directory above.
@@ -135,7 +135,7 @@ Runtime errors from `interpret_resolved` return only `String` with no assured or
 Exact command from `compiler/v1` (isolated target; no snapshot copy):
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/argv-integration-target cargo test --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/argv-integration-target cargo test --release -j1
 ```
 
 Compilation stopped before tests ran because the peer-owned typechecker does not handle newly added AST variants:
@@ -151,14 +151,14 @@ error: could not compile `rey-v0` (bin "rey-v0" test) due to 3 previous errors
 exit=101
 ```
 
-Full output is preserved at `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/argv-integration-test.log`.
+Full output is preserved at `/tmp/rey-v03/argv-integration-test.log`.
 
 ### Earlier runtime-representation compile blocker (before the runtime API landed)
 
 One bounded direct-source attempt, after the metadata-aware `main.rs` patch, used:
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/metadata-check-target cargo test --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/metadata-check-target cargo test --release -j1
 ```
 
 It stopped before tests ran with seven peer-owned `E0308` errors after runtime representation changes:
@@ -174,7 +174,7 @@ error: could not compile `rey-v0` (bin "rey-v0" test) due to 7 previous errors
 exit=101
 ```
 
-Full output is preserved at `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/metadata-check-test.log`. That blocker was superseded by the successful build in the latest direct-source run below.
+Full output is preserved at `/tmp/rey-v03/metadata-check-test.log`. That blocker was superseded by the successful build in the latest direct-source run below.
 
 ## Latest direct-source verification (2026-10-16T19:13:30Z)
 
@@ -183,8 +183,8 @@ No snapshot copy was made. Rust inputs and runtime fixtures were fingerprinted b
 Exact commands from `compiler/v1`, using the same fresh isolated target:
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target cargo build --release -j1
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target cargo test --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/runtime-consumer-20261016T191330Z/target cargo build --release -j1
+CARGO_TARGET_DIR=/tmp/rey-v03/runtime-consumer-20261016T191330Z/target cargo test --release -j1
 ```
 
 Build tail:
@@ -210,7 +210,7 @@ The new CLI tests passed, including imported-private rejection/imported-file loc
 Because the release build succeeded, the conformance runner was run on that fresh binary, including after the unit-test failures:
 
 ```sh
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/conformance-scratch /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0
+REY_CONFORMANCE_SCRATCH=/tmp/rey-v03/runtime-consumer-20261016T191330Z/conformance-scratch $REPO_ROOT/scripts/conformance.sh --engine /tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0
 ```
 
 The runner's valid silent-check preflight passed. It enforced exact check exit/diagnostic markers and byte-exact stdout goldens:
@@ -257,24 +257,24 @@ The corrected positive `types/struct-fields` passed; its private-mutation negati
 
 Fresh binary:
 
-- Path: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`
+- Path: `/tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`
 - mtime UTC: `2026-10-16T19:13:56Z`
 - SHA-256: `cf9e85894d863e76f8bc38ac6b26a6eca76c01d318021460419556b52fdd6f33`
 - Logs: `build.log`, `test.log`, `conformance.log`; before/after input manifests are in the same `runtime-consumer-20261016T191330Z` scratch directory.
 
 ### Targeted marker follow-up
 
-The SPEC requires `break` and `continue` outside a loop to be errors; the actual checker diagnostics are `break is only valid inside a loop` and `continue is only valid inside a loop`. Only the two corresponding `expect_check_fail` marker files changed. Each case was then run separately through the runner against the existing binary at `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`; both targeted runs passed. No build, full-suite rerun, or count update was performed. The unrelated malformed `rey-lang/tests` directory remains a recorded full-run failure.
+The SPEC requires `break` and `continue` outside a loop to be errors; the actual checker diagnostics are `break is only valid inside a loop` and `continue is only valid inside a loop`. Only the two corresponding `expect_check_fail` marker files changed. Each case was then run separately through the runner against the existing binary at `/tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0`; both targeted runs passed. No build, full-suite rerun, or count update was performed. The unrelated malformed `rey-lang/tests` directory remains a recorded full-run failure.
 
 Exact commands and outputs:
 
 ```sh
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/targeted-break /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0 --filter negative-break-outside-loop
+REY_CONFORMANCE_SCRATCH=/tmp/rey-v03/targeted-break $REPO_ROOT/scripts/conformance.sh --engine /tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0 --filter negative-break-outside-loop
 Engine preflight PASS
 PASS control/negative-break-outside-loop
 Summary: 1 passed, 0 failed, 1 total
 
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/targeted-continue /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0 --filter negative-continue-outside-loop
+REY_CONFORMANCE_SCRATCH=/tmp/rey-v03/targeted-continue $REPO_ROOT/scripts/conformance.sh --engine /tmp/rey-v03/runtime-consumer-20261016T191330Z/target/release/rey-v0 --filter negative-continue-outside-loop
 Engine preflight PASS
 PASS control/negative-continue-outside-loop
 Summary: 1 passed, 0 failed, 1 total
@@ -288,7 +288,7 @@ Before any future snapshot copy:
 2. Resolve the checked paths and reject equality or either path being an ancestor of the other. Keep build/output directories outside the source tree.
 3. Hash sorted relative file paths and contents before copying. After copying, re-hash the source and snapshot; accept only if both manifests match. If source changes during the copy, retry once to a fresh disjoint destination; if the retry also changes, mark the snapshot unreliable.
 
-The guard was exercised only under external scratch at `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/verifier-20261016T180754Z/copy-guard-selftest.py`; it did not read or write the source checkout. A tiny scratch-only tree was copied after validation and its manifests compared. Output:
+The guard was exercised only under external scratch at `/tmp/rey-v03/verifier-20261016T180754Z/copy-guard-selftest.py`; it did not read or write the source checkout. A tiny scratch-only tree was copied after validation and its manifests compared. Output:
 
 ```text
 PASS absolute disjoint source/destination accepted
@@ -307,15 +307,15 @@ tree without a source snapshot. The previous **119/125** result is superseded;
 this run still has one strict conformance failure and is not an all-pass gate.
 
 Fresh isolated target:
-`/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/target`
+`/tmp/opencode/recovery/full-verification-20261017/target`
 
 Exact commands, run from `compiler/v1` except the conformance runner, which ran
 from the repository root:
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/target cargo build --release -j1
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/target cargo test --release -j1
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/conformance-scratch /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/target/release/rey-v0
+CARGO_TARGET_DIR=/tmp/opencode/recovery/full-verification-20261017/target cargo build --release -j1
+CARGO_TARGET_DIR=/tmp/opencode/recovery/full-verification-20261017/target cargo test --release -j1
+REY_CONFORMANCE_SCRATCH=/tmp/opencode/recovery/full-verification-20261017/conformance-scratch $REPO_ROOT/scripts/conformance.sh --engine /tmp/opencode/recovery/full-verification-20261017/target/release/rey-v0
 ```
 
 Build completed successfully (`cargo build` exit 0; 7 existing warnings).
@@ -372,10 +372,10 @@ only; it provides no native compiler or native `.rey` execution proof.
 
 Fresh binary:
 
-- Path: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/target/release/rey-v0`
+- Path: `/tmp/opencode/recovery/full-verification-20261017/target/release/rey-v0`
 - SHA-256: `68375435d32fe32daebb631b8b2314fc3ea0a595ca12ff112a8ffb6100989740`
-- The pre-existing `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/interpreter-runtime-target/release/rey-v0` was not used as the build target; its hash after verification is identical.
-- Logs and complete input/case inventories: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-20261017/logs/` (`build.log`, `test.log`, `conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).
+- The pre-existing `/tmp/opencode/recovery/interpreter-runtime-target/release/rey-v0` was not used as the build target; its hash after verification is identical.
+- Logs and complete input/case inventories: `/tmp/opencode/recovery/full-verification-20261017/logs/` (`build.log`, `test.log`, `conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).
 
 ## Full gate after nominal-owner integration (2026-10-17)
 
@@ -386,8 +386,8 @@ new full gate; the earlier 134/134 unit result is historical and superseded.
 Exact commands:
 
 ```sh
-CARGO_TARGET_DIR=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/nominal-owner-typecheck-target cargo test --release -j1
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-nominal-owner-20261017/conformance-scratch /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/nominal-owner-typecheck-target/release/rey-v0
+CARGO_TARGET_DIR=/tmp/opencode/recovery/nominal-owner-typecheck-target cargo test --release -j1
+REY_CONFORMANCE_SCRATCH=/tmp/opencode/recovery/full-verification-nominal-owner-20261017/conformance-scratch $REPO_ROOT/scripts/conformance.sh --engine /tmp/opencode/recovery/nominal-owner-typecheck-target/release/rey-v0
 ```
 
 The full unfiltered Rust test run had one remaining failure:
@@ -396,7 +396,7 @@ The full unfiltered Rust test run had one remaining failure:
 running 141 tests
 test result: FAILED. 140 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 tests::matchReportsNonExhaustivePatterns
-got: /Volumes/SSD/Developer/rey-language/rey-lang/compiler/v1/src/tests/match_non_exhaustive.rey:8:11: error: TypeError: non-exhaustive match for enum '/Volumes/SSD/Developer/rey-language/rey-lang/compiler/v1/src/tests/match_non_exhaustive.rey::Direction'
+got: $REPO_ROOT/compiler/v1/src/tests/match_non_exhaustive.rey:8:11: error: TypeError: non-exhaustive match for enum '$REPO_ROOT/compiler/v1/src/tests/match_non_exhaustive.rey::Direction'
 ```
 
 Full conformance preflight passed. All 124 complete cases passed; the strict
@@ -426,22 +426,22 @@ native compiler behavior. This gate exercised only the Rust interpreter.
 
 Binary used:
 
-- Path: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/nominal-owner-typecheck-target/release/rey-v0`
+- Path: `/tmp/opencode/recovery/nominal-owner-typecheck-target/release/rey-v0`
 - SHA-256 before and after: `42e104af8b14b760aed42b5f8afa06372f8110676339366454dc47d35c6fd746`
-- Logs and complete inventories: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/full-verification-nominal-owner-20261017/logs/` (`test.log`, `conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).
+- Logs and complete inventories: `/tmp/opencode/recovery/full-verification-nominal-owner-20261017/logs/` (`test.log`, `conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).
 
 ## Conformance after built-in static generic arguments (2026-10-17)
 
 The preceding full release unit run for the built-in static-argument checker
 passed **147/147**; its test and build logs are under
-`/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/builtin-generic-checker-target/logs/`.
+`/tmp/opencode/recovery/builtin-generic-checker-target/logs/`.
 This verification did not rerun unit tests or rebuild. The supplied oracle hash
 matched before and after the full conformance run.
 
 Exact unfiltered command:
 
 ```sh
-REY_CONFORMANCE_SCRATCH=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/conformance-builtin-static-20261017/scratch /Volumes/SSD/Developer/rey-language/rey-lang/scripts/conformance.sh --engine /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/builtin-generic-checker-target/release/rey-v0
+REY_CONFORMANCE_SCRATCH=/tmp/opencode/recovery/conformance-builtin-static-20261017/scratch $REPO_ROOT/scripts/conformance.sh --engine /tmp/opencode/recovery/builtin-generic-checker-target/release/rey-v0
 ```
 
 The runner preflight passed. It ran all **125** depth-2 cases, without filters
@@ -487,6 +487,6 @@ parser, checker, or codegen pipeline works.
 
 Oracle used:
 
-- Path: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/builtin-generic-checker-target/release/rey-v0`
+- Path: `/tmp/opencode/recovery/builtin-generic-checker-target/release/rey-v0`
 - SHA-256 before and after: `da15cbef37c2005edee3dd4cbed48347154534d461cd3a190980c0e7998014cc`
-- Logs and inventories: `/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/recovery/conformance-builtin-static-20261017/logs/` (`conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).
+- Logs and inventories: `/tmp/opencode/recovery/conformance-builtin-static-20261017/logs/` (`conformance.log`, `before-fingerprint.log`, `after-fingerprint.log`, `coherency-comparison.log`).

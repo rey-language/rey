@@ -134,9 +134,9 @@ check_reyc() {
     else
       warn "~/.reyc/std is a DANGLING symlink -> $tgt"
       detail "report only: agents never fix or delete it"
-      if [ -d /Volumes/SSD/Developer/rey-language/std ]; then
-        detail "live std checkout exists at /Volumes/SSD/Developer/rey-language/std"
-        detail "recommended fix (owner approval required; outside repo): ln -sfn /Volumes/SSD/Developer/rey-language/std ~/.reyc/std"
+      if [ -d $STD_ROOT ]; then
+        detail "live std checkout exists at $STD_ROOT"
+        detail "recommended fix (owner approval required; outside repo): ln -sfn $STD_ROOT ~/.reyc/std"
       fi
     fi
   elif [ -d "$s" ]; then
@@ -188,18 +188,18 @@ check_machine() {
   section "machine"
   local out rc avail_g mem mem_gb ncpu
 
-  out="$(t_run 15 df -h /Volumes/SSD 2>&1)"
+  out="$(t_run 15 df -h /mnt/storage 2>&1)"
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    ok "df -h /Volumes/SSD:"
+    ok "df -h /mnt/storage:"
     printf '%s\n' "$out" | tail -n +2 | sed 's/^/     /'
-    avail_g="$(t_run 15 df -g /Volumes/SSD 2>/dev/null | awk 'NR==2 {print $4}')"
+    avail_g="$(t_run 15 df -g /mnt/storage 2>/dev/null | awk 'NR==2 {print $4}')"
     case "$avail_g" in
       ''|*[!0-9]*) : ;;
       *) [ "$avail_g" -lt 10 ] && warn "low disk headroom: ${avail_g} GiB free (cargo + clang builds want several GB)" ;;
     esac
   else
-    fail "df -h /Volumes/SSD failed (exit $rc): $(first_line "$out")"
+    fail "df -h /mnt/storage failed (exit $rc): $(first_line "$out")"
   fi
 
   out="$(t_run 10 sysctl -n hw.memsize 2>&1)"

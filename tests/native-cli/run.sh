@@ -8,7 +8,7 @@ fi
 
 compiler=$1
 runtime_source=$2
-scratch_root=${3:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/native-cli-tests}
+scratch_root=${3:-/tmp/rey-v03/native-cli-tests}
 mkdir -p "$scratch_root"
 scratch="$scratch_root/run-$$"
 runtime_copy="$scratch/runtime path"

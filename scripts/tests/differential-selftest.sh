@@ -4,7 +4,7 @@ set -u
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P) || exit 2
 repo_root=$(cd "$script_dir/../.." && pwd -P) || exit 2
-scratch=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03
+scratch=/tmp/rey-v03
 mkdir -p "$scratch" || exit 2
 work=$(mktemp -d "$scratch/differential-selftest.XXXXXX") || exit 2
 test_repo="$work/repo"

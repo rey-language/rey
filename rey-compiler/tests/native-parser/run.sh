@@ -37,7 +37,7 @@ fi
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 repo_root=$(cd "$script_dir/../../.." && pwd -P)
-scratch_root=${REY_NATIVE_PARSER_SCRATCH:-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/native-parser}
+scratch_root=${REY_NATIVE_PARSER_SCRATCH:-/tmp/rey-v03/native-parser}
 mkdir -p "$scratch_root"
 
 python3 - "$engine" "$timeout_seconds" "$repo_root" "$scratch_root" <<'PY'

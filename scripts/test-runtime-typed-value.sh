@@ -7,7 +7,7 @@ runtime_dir=${REY_RUNTIME_DIR:-$repo_root/rey-compiler/runtime}
 test_source=$runtime_dir/tests/typed_value_test.c
 compiler=${CC:-/usr/bin/clang}
 timeout_seconds=${REY_RUNTIME_TEST_TIMEOUT_SECONDS:-30}
-scratch_root=/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03
+scratch_root=/tmp/rey-v03
 
 case "$timeout_seconds" in
     ''|*[!0-9]*) echo "timeout must be a positive integer" >&2; exit 2 ;;

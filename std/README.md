@@ -88,7 +88,7 @@ func main(): void {
 Execute the entire test suite across all 28 modules with:
 
 ```bash
-cd /Volumes/SSD/Developer/rey-language/std
+cd $STD_ROOT
 ./tests/run_all.sh
 ```
 

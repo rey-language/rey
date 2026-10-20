@@ -73,7 +73,7 @@ native `main.rey:238-249` instead reads `args()[1]` as the compiler script,
 used was therefore:
 
 ```sh
-cat > /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.rey <<'EOF'
+cat > /tmp/rey-v03/call-repro.rey <<'EOF'
 func callee(x: int): int {
     return x + 1;
 }
@@ -84,16 +84,16 @@ func main(): Void {
     println(caller());
 }
 EOF
-PATH=/usr/bin:/bin:/usr/sbin:/sbin python3 -c 'import subprocess; subprocess.run(["/Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main", "/Volumes/SSD/Developer/rey-language/rey-lang/rey-compiler/main.rey", "build", "/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.rey"], timeout=30)'
+PATH=/usr/bin:/bin:/usr/sbin:/sbin python3 -c 'import subprocess; subprocess.run(["$REPO_ROOT/rey-compiler/main", "$REPO_ROOT/rey-compiler/main.rey", "build", "/tmp/rey-v03/call-repro.rey"], timeout=30)'
 ```
 
 The compiler wrote `call-repro.ll`, then printed (process exit was 0 despite
 reporting the compile failure):
 
 ```text
-DEBUG llc: llc -O0 -filetype=obj "/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.ll" -o "/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.o"
+DEBUG llc: llc -O0 -filetype=obj "/tmp/rey-v03/call-repro.ll" -o "/tmp/rey-v03/call-repro.o"
 DEBUG llc failed: ?
-DEBUG clang obj: clang -O0 -c -x ir "/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.ll" -o "/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.o"
+DEBUG clang obj: clang -O0 -c -x ir "/tmp/rey-v03/call-repro.ll" -o "/tmp/rey-v03/call-repro.o"
 DEBUG clang obj failed: ?
 Error: compile failed
 ```
@@ -111,12 +111,12 @@ define void @_rey_main() {
 The exact verifier command and diagnostic were:
 
 ```sh
-/usr/bin/clang -c -x ir /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.ll -o /private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro-check.o
+/usr/bin/clang -c -x ir /tmp/rey-v03/call-repro.ll -o /tmp/rey-v03/call-repro-check.o
 ```
 
 ```text
 exit=1
-/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/call-repro.ll:91:16: error: use of undefined value '@0'
+/tmp/rey-v03/call-repro.ll:91:16: error: use of undefined value '@0'
    91 | %t0 = call i64 @0(i64 41)
       |                ^
 1 error generated.
@@ -130,7 +130,7 @@ func main(): Void { println(fake.target(5)); }
 ```
 
 with the same native invocation, replacing the input with
-`/private/var/folders/dt/_kd6szqs4gxct6stfgskt30m0000gn/T/opencode/rey-v03/module-call.rey`.
+`/tmp/rey-v03/module-call.rey`.
 It generated `%t0 = call i64 @0(i64 0, 5 5)` (`module-call.ll:91`) and failed
 clang parsing with `error: expected type`. This confirms a field-qualified
 callee also reaches `@0`, but malformed argument IR prevents attributing it
