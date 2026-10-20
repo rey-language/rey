@@ -1,0 +1,14 @@
+compiler/v1/src/lexer/lexer.rs
+  h_90c9c948bf5ad1 5,56-58,83-84,121-142,170-174,257-270,273-286,306-356,372-373,375-403,406-417,421-473,476,481-486,488-491,493-508,511,516-538,554-555,568-576,582-590,657-680,684-890,892-915
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4995bb94171f132530107f0625a8330e636c5663",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
