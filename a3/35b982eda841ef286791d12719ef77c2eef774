@@ -1,0 +1,53 @@
+rey-compiler/runtime/tests/io_exec_test.c
+  s_9e2420774b8c0d::t_f5c9f57dc9b8d0 1-141
+rey-compiler/runtime/tests/value_test.c
+  s_9e2420774b8c0d::t_7b412e21bfa822 1-396
+rey-compiler/runtime/tests/vec_test.c
+  s_e038e37689b4b3::t_34ff186d961253 1-170
+rey-compiler/runtime/Makefile
+  s_dfcb7ef50327fb::t_d1b9098c3ad3c5 1-12,14-28,30,32-55,57,59-61,64-82
+rey-compiler/runtime/test_rt.c
+  s_1d9d1a761dd831::t_729ae512223f9e 28-54,82-109,113-116,131-137,154-221,243-244
+rey-compiler/runtime/vec.c
+  s_dfcb7ef50327fb::t_6ba7149a1dc67f 3,5-6,15-16,28-32,34-35,37-42,44,46,50-70,72-77,86,88,90-94,97,99-188,223-224,227-228,235,254,257-457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a335b982eda841ef286791d12719ef77c2eef774",
+  "prompts": {},
+  "sessions": {
+    "s_1d9d1a761dd831": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "agent-38acf737-0946-4cd4-89bd-5a3ad4712872",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_dfcb7ef50327fb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15585-6c1d-7e62-8d9f-67313cfd47ff",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_e038e37689b4b3": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "agent-8a33992a-0f27-4de6-a7a8-3e258eee3128",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
