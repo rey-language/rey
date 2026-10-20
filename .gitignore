@@ -5,6 +5,12 @@ target/
 # macOS
 .DS_Store
 
+# Tool state & caches
+.claude/
+.rocket/
+build/
+*.tmp
+
 # LLVM intermediate files
 *.ll
 *.o
