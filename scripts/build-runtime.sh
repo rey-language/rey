@@ -65,10 +65,15 @@ case "$OUTPUT_DIR/" in
         ;;
 esac
 
-if ! ulimit -t 120; then
-    echo "error: unable to set 120-second CPU limit" >&2
-    exit 2
-fi
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        if ! ulimit -t 120; then
+            echo "error: unable to set 120-second CPU limit" >&2
+            exit 2
+        fi
+        ;;
+esac
 
 "$MAKE_PATH" -C "$RUNTIME" \
     "OUT=$OUTPUT_DIR" \
