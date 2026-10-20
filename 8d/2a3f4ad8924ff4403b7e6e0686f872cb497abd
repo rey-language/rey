@@ -1,0 +1,16 @@
+README.md
+  h_90c9c948bf5ad1 1-4
+assets/logo.svg
+  h_90c9c948bf5ad1 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8d2a3f4ad8924ff4403b7e6e0686f872cb497abd",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
