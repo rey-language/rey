@@ -40,21 +40,7 @@ jobs:
       run:
         shell: ${{ matrix.shell }}
     steps:
-      - name: Check out source
-        if: matrix.target != 'windows-x86_64'
-        uses: actions/checkout@v4
-
-      - name: Check out Windows build sources
-        if: matrix.target == 'windows-x86_64'
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            /compiler/**
-            /rey-compiler/**
-            /std/src/**
-            /releases/0.3.0/**
-            /scripts/**
-          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
 
       - name: Install Linux build tools
         if: startsWith(matrix.target, 'linux-')
