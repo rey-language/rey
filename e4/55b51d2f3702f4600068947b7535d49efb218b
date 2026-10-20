@@ -1,0 +1,14 @@
+install.sh
+  h_90c9c948bf5ad1 96,103-104,107-119,124,146,154,156,160,174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e455b51d2f3702f4600068947b7535d49efb218b",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
