@@ -6,6 +6,8 @@ if [[ -z "$real_clang" ]]; then
     echo "release clang shim: REY_RELEASE_REAL_CLANG is not set" >&2
     exit 2
 fi
+real_ir_clang=${REY_RELEASE_REAL_IR_CLANG:-$real_clang}
+ir_target=${REY_RELEASE_IR_TARGET:-}
 
 args=("$@")
 is_ir_input=false
@@ -29,7 +31,17 @@ if ! sed -E '/^[[:space:]]*target (datalayout|triple) = /d' "${args[$input_index
     exit 2
 fi
 args[$input_index]=$tmp_ir
-"$real_clang" "${args[@]}"
+if [[ -n "$ir_target" ]]; then
+    args=("--target=$ir_target" "${args[@]}")
+fi
+if [[ ${REY_RELEASE_IR_NATIVE:-false} == true ]]; then
+    native_args=()
+    for arg in "${args[@]}"; do
+        [[ $arg == -flto ]] || native_args+=("$arg")
+    done
+    args=("${native_args[@]}")
+fi
+"$real_ir_clang" "${args[@]}"
 status=$?
 rm -f "$tmp_ir"
 exit "$status"

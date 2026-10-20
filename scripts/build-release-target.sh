@@ -16,6 +16,9 @@ repo_root=$(cd -- "$script_dir/.." && pwd)
 release_version=v0.3.1
 seed_version=v0.3.0
 seed_root_name="rey-${seed_version}-${target}"
+real_ir_clang=
+ir_target=
+ir_native=false
 workspace=${REY_RELEASE_WORKSPACE:-"$repo_root/build/release/$release_version/$target"}
 case "$workspace" in
     /*) ;;
@@ -38,15 +41,22 @@ case "$target" in
     linux-x86_64)
         [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo "release target $target requires a native Linux x86_64 runner" >&2; exit 2; }
         real_clang="$repo_root/scripts/zig-ld-linux-x86_64.sh"
+        real_ir_clang=$(command -v clang)
+        ir_target=x86_64-linux-musl
         ;;
     linux-aarch64)
         [[ $(uname -s) == Linux && $(uname -m) == aarch64 ]] || { echo "release target $target requires a native Linux aarch64 runner" >&2; exit 2; }
         real_clang="$repo_root/scripts/zig-ld-linux-aarch64.sh"
+        real_ir_clang=$(command -v clang)
+        ir_target=aarch64-linux-musl
         ;;
     windows-x86_64)
         case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) echo "release target $target requires a native Windows runner with MSYS2" >&2; exit 2 ;; esac
         [[ $(uname -m) == x86_64 ]] || { echo "release target $target requires a native Windows x86_64 runner" >&2; exit 2; }
         real_clang="$repo_root/scripts/zig-ld-windows-x86_64.sh"
+        real_ir_clang=$(command -v clang)
+        ir_target=x86_64-w64-windows-gnu
+        ir_native=true
         seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.zip"
         ;;
     *)
@@ -135,6 +145,9 @@ else
     chmod +x "$workspace/linker-bin/clang" "$workspace/linker-bin/llc"
 fi
 export REY_RELEASE_REAL_CLANG="$real_clang"
+export REY_RELEASE_REAL_IR_CLANG="$real_ir_clang"
+export REY_RELEASE_IR_TARGET="$ir_target"
+export REY_RELEASE_IR_NATIVE="$ir_native"
 linker_path="$workspace/linker-bin:$PATH"
 if [[ $target == windows-* ]]; then
     release_binary="$package_root/bin/rey.exe"
