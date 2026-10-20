@@ -2046,11 +2046,11 @@ func genLit(lit): String {
     }
     return "undef";
 }
-export pub func generateIR(program): String {
+pub func generateIR(program): String {
     return codegenProgram2(program);
 }
 
-export pub func compileLLVM(ir: String, outputPath: String, release: bool, rtDir: String) {
+pub func compileLLVM(ir: String, outputPath: String, release: bool, rtDir: String) {
     var llPath = outputPath + ".ll";
     var objPath = outputPath + ".o";
 
