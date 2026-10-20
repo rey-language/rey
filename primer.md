@@ -1,26 +1,55 @@
 # Primer — rey-lang
-Last updated: Apr 9, 2026 (bootstrap compiler progress)
+
+## Current handoff — 2026-10-17, work paused by owner
+
+- Read `docs/HANDOFF-2026-10-17.md` for the full last-day work report, exact stop fingerprints, evidence paths, and prioritized remaining work. The historical notes below are preserved, not current release claims.
+- Both active agents and the orphaned compiler self-check were stopped. Do not resume development until the owner asks.
+- Latest completed Rust checkpoint: 154 unit tests passed; all 124 complete reference conformance cases passed. Strict conformance still fails on the unapproved malformed discovery directory.
+- Real native smoke, enum/match, and multi-unit programs ran. No Stage 1/Stage 2 compiler or full native conformance pass is verified.
+- Current codegen is interrupted mid-integration: it references `CheckedNominalLayout` / `CheckedProgram.nominalLayouts`, but the checker has not added that metadata. Finish producer/consumer consistency before treating current source as buildable.
+- No commits, pushes, tags, publishing, resets, or cleanup are authorized. Preserve existing WIP/stashes/artifacts. The sprint charter documents the in-place workflow override.
+
+## Preserved historical primer
+
+Last updated: Apr 10, 2026 (interpreter stabilization + bootstrap alignment)
 
 ## Session objective
-Get the bootstrap compiler (`rey-compiler/`) compiling more of the language to native binaries, and keep docs/tests in sync with what actually works.
+Stabilize and align the Rust interpreter (`compiler/v1`) with syntax spec expectations and bootstrap behavior, starting with parser consistency and core runtime semantics.
 
-## What was done - Session Complete
+## What was done this session
 
-### Phase 0 - Baseline Audit (COMPLETE):
-- Read all compiler/v1/src/ files
-- Read rey-compiler/ and syntax.md
-- Documented all known bugs
+### Phase 1 - Syntax consistency (DONE)
+- Standardized missing semicolon parser error to `error[syntax]: expected ';'`.
+- Enforced comma separators between:
+  - struct fields
+  - enum variants
+  - match arms
+- Added parser regression coverage:
+  - `compiler/v1/src/tests/syntax_missing_semicolon.rey`
+  - `compiler/v1/src/tests/match_missing_comma.rey`
+  - `compiler/v1/src/tests/enum_missing_comma.rey`
+- Verified diagnostic output includes file + line + column via CLI path.
 
-### Phase 1 - Compiler v1 Hardening (COMPLETE):
-- Fixed string indexing: source[i] returns single character
-- Added typecheck for string indexing
-- Version bumped to 0.2.0
+### Phase 2/3 - Runtime and match stabilization (PARTIAL DONE)
+- Added array/string bounds diagnostics:
+  - `index out of bounds (i=..., len=...)`
+- Added runtime null guard in expression operations:
+  - `null dereference at line <n>`
+- Implemented equality semantics in runtime binary evaluation:
+  - primitives and strings: value equality
+  - arrays: reference equality
+  - structs: reference equality
+- Updated match fallback failure message to:
+  - `error[match]: non-exhaustive patterns`
+- Added runtime regression coverage:
+  - `compiler/v1/src/tests/runtime_ref_equality.rey`
+  - `compiler/v1/src/tests/runtime_index_oob.rey`
+  - `compiler/v1/src/tests/match_non_exhaustive.rey`
+  - direct executor-level null dereference unit assertion in `compiler/v1/src/main.rs`
 
-### Phase 2 - New Data Types (COMPLETE):
-- Implemented Vec, HashMap, Stack, Queue, Option, Result
-- All container methods working
-- Parser updated for Option.Some syntax
-- Tests pass
+## Verification run
+- `cargo build --release` (pass)
+- `cargo test` (pass, 14 tests)
 
 ## What's working now (v0.2.0+)
 - Integer division, struct mutation, enum match, imports
