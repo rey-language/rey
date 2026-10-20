@@ -1,0 +1,16 @@
+install.ps1
+  h_90c9c948bf5ad1 1-77
+install.sh
+  h_90c9c948bf5ad1 1-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc96da87c8675acf13aa22cabd46a9875e81dd2a",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
