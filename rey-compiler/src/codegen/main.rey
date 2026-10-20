@@ -8052,6 +8052,7 @@ pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: strin
 
     var clangCmd = "clang";
     if release { clangCmd = clangCmd + " " + opt + " " + lto; }
+    if outputPath.contains(":") { clangCmd = clangCmd + " -fuse-ld=lld"; }
     clangCmd = clangCmd + " " + clangPathArgument(objPath) + " " + clangPathArgument(libPath) + " -o " + clangPathArgument(outputPath);
     var clangResult: Result<string,string> = exec(clangCmd);
     if clangResult.isErr() {
