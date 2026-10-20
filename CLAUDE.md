@@ -66,6 +66,13 @@ From the codebase and CONTRIBUTING.md:
 - The Rust reference interpreter lives at `compiler/v1`.
 - The experimental bootstrap compiler (Rey → LLVM IR → native) lives at `rey-compiler/`.
 
+## Forward v0.4 architecture — 2026-10-21
+
+- The implementation proposal is [docs/V0.4-EXECUTION-PLAN.md](docs/V0.4-EXECUTION-PLAN.md). It supersedes the old v0.4 LLVM/C architecture; it does not claim implementation or amend SPEC.md by itself.
+- The goal is a compiler, optimizer, native backend, executable writer/linker, and runtime implemented in Rey. Clang/LLVM and the historical C runtime belong only to recorded bootstrap history, not the production dependency closure.
+- Implement in gated slices: baseline, typed IR, direct native backend/runtime, correct reclamation, native self-hosting, inferred memory optimizations, pipeline optimization, incremental builds, platform ports, and release validation.
+- Preserve shared identity, aliases, specified errors, and arithmetic semantics. Performance goals require workload-specific measurements; allocator nanoseconds do not establish compilation or application runtime.
+
 ## v0.1.0 snapshot
 
 - Full import system is implemented:

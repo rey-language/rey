@@ -1,5 +1,14 @@
 # Primer — rey-lang
 
+## Current v0.4 planning handoff — 2026-10-21
+
+- This session delivers a written plan, not compiler/runtime implementation. The contributor branch is `codex-v0.4-plan`, based on the released source at `0003e19`; the existing divergent `codex` branch and performance branch history are preserved.
+- [docs/V0.4-EXECUTION-PLAN.md](docs/V0.4-EXECUTION-PLAN.md) is the forward proposal: a compiler, optimizer, native backend, executable writer/linker, and runtime in Rey, with no Clang/LLVM/C compiler/external linker in production builds or native self-rebuilds.
+- Order: reproducible baseline; typed IR; direct ARM64/Mach-O and minimal Rey runtime; correct tracing reclamation; native self-hosting; escape analysis/stack placement/regions/destination construction/promotion; data-movement optimization; incremental compiler and Capy; all five platform ports and concurrency gates; packaging/release.
+- The old v0.4 document is marked historical. Source semantics remain in SPEC.md. Low-level trusted primitives, bootstrap boundaries, alias preservation, precise roots, and measurable exit conditions are specified in the plan. Numerical performance goals are targets, not observations.
+- Next implementation work is M0 baseline/seed-capability validation followed by M1's smallest verified IR slice. This planning session is documentation only. Validation covers five documents, nine local links, ordered M0-M9 milestones, ten exit conditions, and the staged Git diff; compiler/runtime suites were not run for this documentation change. Git publication is reported in the session result.
+- Historical notes below predate completed v0.3.1 publication and must not be treated as current release status. Rey v0.3.1 and Capy v0.1.1 publication completed in the parent session; the current release workflow history is the source of build evidence.
+
 ## Current release repair — 2026-10-20, v0.3.1
 
 - Preserved the shared `perf-build-memory` branch, all unrelated local edits, and the existing Vec realloc change. No tests, commits, pushes, or tags were run during this repair.

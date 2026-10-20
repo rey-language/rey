@@ -1,5 +1,9 @@
 # Changelog
 
+## [unreleased] — v0.4 execution plan
+- Added `docs/V0.4-EXECUTION-PLAN.md` for a pure Rey compiler/backend/runtime, explicit seed-to-native bootstrap, correct reclamation, inferred regions and promotion, incremental Capy builds, and all five platform gates.
+- Marked the earlier LLVM/C-based v0.4 proposal historical and updated contributor handoff/context links. This is documentation only; performance targets and milestones are not implementation results.
+
 ## [0.3.1] — patch release
 - Vec capacity growth now uses `realloc` instead of allocating and zeroing a second full buffer; only live kind metadata is initialized. Large Vec workloads used 36–48% less peak RSS in the current macOS arm64 comparison.
 - Recovered the native typechecker and checked-program backend required by the existing driver; the tracked modules had been an old checker stub and backend. Source provenance and limits are recorded in `docs/BOOTSTRAP-SOURCE-RECOVERY.md`.
