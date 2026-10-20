@@ -5,6 +5,12 @@ pub struct Token {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringPart {
+    Text(Vec<u8>),
+    Expression { source: String, span: Span },
+}
+
 //this enum will grow over time
 // for v0, keeping it simple
 //contains all tokens supported for v0
@@ -19,6 +25,7 @@ pub enum TokenKind {
     RightBracket,
     Comma,
     Dot,
+    DotDot,
     Ellipsis,
     Minus,
     Plus,
@@ -42,6 +49,7 @@ pub enum TokenKind {
     SlashEqual,
     PercentEqual,
     ColonColon,
+    ThinArrow,
 
     //keywords
     Var,
@@ -71,6 +79,8 @@ pub enum TokenKind {
     //literals
     Identifier(String),
     StringLiteral(String),
+    ByteStringLiteral(Vec<u8>),
+    InterpolatedStringLiteral(Vec<StringPart>),
     CharLiteral(char),
     NumberLiteral(String),
 
