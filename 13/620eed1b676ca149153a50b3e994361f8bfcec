@@ -1,0 +1,14 @@
+compiler/v1/src/ast/expr.rs
+  h_90c9c948bf5ad1 39-42,70-75,120-125,138,144,152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "13620eed1b676ca149153a50b3e994361f8bfcec",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
