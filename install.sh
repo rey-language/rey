@@ -91,33 +91,63 @@ fi
 TARGET="${PLATFORM}-${ARCHIVE_ARCH}"
 log_info "Detected system: $PLATFORM ($TARGET_ARCH)"
 
-# Install the small Linux toolchain needed to compile and link Rey programs.
-# The runtime Makefile invokes /usr/bin/clang directly on Linux.
-if { [ "$PLATFORM" = "linux" ] && [ -x /usr/bin/clang ]; } || { [ "$PLATFORM" != "linux" ] && command -v clang >/dev/null 2>&1; }; then
-    log_info "Clang found; skipping toolchain installation."
-elif [ "$PLATFORM" = "linux" ] && command -v apt-get >/dev/null 2>&1; then
+# Install the native compiler toolchain only when Clang is missing.
+run_as_root() {
     if [ "$(id -u)" -eq 0 ]; then
-        SUDO=""
+        "$@"
     elif command -v sudo >/dev/null 2>&1; then
-        SUDO="sudo"
+        sudo "$@"
     else
-        log_error "Clang is missing. Re-run as root or install sudo, then retry."
+        log_error "Installing build tools requires root or sudo access."
         exit 1
     fi
+}
 
-    log_info "Installing Clang and native build tools..."
-    $SUDO apt-get update
-    $SUDO apt-get install -y clang make libc6-dev binutils
-    if [ ! -x /usr/bin/clang ]; then
-        log_error "Clang installation completed, but /usr/bin/clang is still unavailable."
-        exit 1
+if [ "$PLATFORM" = "linux" ]; then
+    # The runtime Makefile invokes /usr/bin/clang directly on Linux.
+    if [ -x /usr/bin/clang ]; then
+        log_info "Clang found; skipping toolchain installation."
+    else
+        log_info "Installing Clang and native build tools..."
+        if command -v apt-get >/dev/null 2>&1; then
+            run_as_root apt-get update
+            run_as_root apt-get install -y clang make libc6-dev binutils
+        elif command -v dnf >/dev/null 2>&1; then
+            run_as_root dnf install -y clang make glibc-devel binutils
+        elif command -v yum >/dev/null 2>&1; then
+            run_as_root yum install -y clang make glibc-devel binutils
+        elif command -v apk >/dev/null 2>&1; then
+            run_as_root apk add --no-cache clang make musl-dev binutils
+        elif command -v pacman >/dev/null 2>&1; then
+            run_as_root pacman -Syu --needed --noconfirm clang make glibc binutils
+        elif command -v zypper >/dev/null 2>&1; then
+            run_as_root zypper --non-interactive install clang make glibc-devel binutils
+        else
+            log_error "No supported Linux package manager found. Install clang, make, libc development files, and binutils, then retry."
+            exit 1
+        fi
+
+        if [ ! -x /usr/bin/clang ]; then
+            log_error "Clang installation completed, but /usr/bin/clang is still unavailable."
+            exit 1
+        fi
     fi
 elif [ "$PLATFORM" = "macos" ]; then
-    log_error "Clang is missing. Install the Xcode Command Line Tools with: xcode-select --install"
-    exit 1
-else
-    log_error "Clang is missing and this installer cannot install packages for this system. Install clang, make, libc development files, and binutils, then retry."
-    exit 1
+    if xcode-select -p >/dev/null 2>&1 && /usr/bin/clang --version >/dev/null 2>&1; then
+        log_info "Apple Clang found; skipping toolchain installation."
+    else
+        log_info "Starting the Xcode Command Line Tools installer..."
+        xcode-select --install || true
+        log_error "Finish the Xcode Command Line Tools installation, then rerun this installer."
+        exit 1
+    fi
+elif [ "$PLATFORM" = "windows" ]; then
+    if command -v clang.exe >/dev/null 2>&1; then
+        log_info "Clang found; skipping toolchain installation."
+    else
+        log_error "Run install.ps1 in PowerShell to install the Windows Clang toolchain."
+        exit 1
+    fi
 fi
 
 # 2. Prepare installation directory
