@@ -6,8 +6,8 @@ enum Direction {
     Up,
 }
 
-func run(): Void {
-    var d = North;
+func run(): void {
+    var d = Direction::North;
     var out = 0;
 
     match d {

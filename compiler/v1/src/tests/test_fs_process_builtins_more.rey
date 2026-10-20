@@ -1,0 +1,69 @@
+// Smoke test for extended fs/process builtins.
+// Avoids using `assert()` because Rey's assert currently exits the whole process.
+
+var failed = 0;
+
+func check(label: string, ok: bool): void {
+    if ok {
+        println("PASS:", label);
+    } else {
+        println("FAIL:", label);
+        failed += 1;
+    }
+}
+
+func main(): void {
+    var base = "__rey_test_tmp_dir";
+    if fileExists(base) {
+        // best-effort cleanup from previous runs
+        removeDirAll(base);
+    }
+
+    mkdirAll(base);
+    check("mkdirAll created dir", isDir(base));
+
+    var file = pathJoin(base, "a.txt");
+    writeFile(file, "hello");
+    appendFile(file, " world");
+    var got = readFile(file);
+    check("appendFile appends", got == "hello world");
+    check("isFile true for file", isFile(file));
+
+    var names = listDir(base);
+    println("listDir:", names);
+    var paths = listDirPaths(base);
+    println("listDirPaths:", paths);
+
+    var here = cwd();
+    chdir(base);
+    var now = cwd();
+    check("chdir changed cwd", now != here);
+    chdir(here);
+    check("chdir back restores cwd", cwd() == here);
+
+    var t = tempDir();
+    println("tempDir:", t);
+
+    var home = getEnv("HOME");
+    println("HOME:", home);
+    var all = envAll();
+    println("envAll size:", all.len());
+
+    var sh = which("sh");
+    println("which(sh):", sh);
+
+    var r = exec("echo rey");
+    println("exec(echo rey):", r);
+    var d = execDetailed("echo rey");
+    println("execDetailed(echo rey):", d);
+
+    deleteFile(file);
+    removeDirAll(base);
+    check("cleanup removed dir", !fileExists(base));
+
+    if failed == 0 {
+        println("fs/process builtins: all tests passed");
+    } else {
+        println("fs/process builtins:", failed, "test(s) failed");
+    }
+}

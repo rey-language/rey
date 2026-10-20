@@ -2,7 +2,7 @@ struct Counter {
     pub value: int,
 }
 
-func main(): Void {
+func main(): void {
     var c = Counter { value: 1 };
     c.value = 2;
     c.value += 3;

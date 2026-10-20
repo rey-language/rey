@@ -6,7 +6,7 @@ struct Outer {
     pub inner: Inner,
 }
 
-func main(): Void {
+func main(): void {
     var o = Outer { inner: Inner { value: 1 } };
     o.inner.value = 2;
 }

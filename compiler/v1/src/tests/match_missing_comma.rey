@@ -1,0 +1,15 @@
+enum Direction {
+    North,
+    South,
+}
+
+func main(): Void {
+    var d = Direction::North;
+    match d {
+        Direction::North => { println("north"); }
+        Direction::South => { println("south"); }
+        _ => { println("other"); }
+    }
+}
+
+main();

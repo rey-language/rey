@@ -1,9 +1,9 @@
 struct Point {
-    x: int,
-    y: int,
+    pub x: int,
+    pub y: int,
 }
 
-func run(): Void {
+func run(): void {
     var p = Point { x: 1, y: 2 };
     var ok = false;
 

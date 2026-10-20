@@ -1,4 +1,4 @@
-func main(): Void {
+func main(): void {
     var a = 10 / 3;
     if (a != 3) {
         var fail = 1 / 0;

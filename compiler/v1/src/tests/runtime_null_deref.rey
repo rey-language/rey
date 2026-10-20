@@ -1,0 +1,6 @@
+func check(): Void {
+    var x = null;
+    x.anything;
+}
+
+check();
