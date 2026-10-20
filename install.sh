@@ -91,15 +91,33 @@ fi
 TARGET="${PLATFORM}-${ARCHIVE_ARCH}"
 log_info "Detected system: $PLATFORM ($TARGET_ARCH)"
 
-# Check toolchain prerequisites
-if ! command -v clang >/dev/null 2>&1; then
-    log_warn "'clang' was not found in PATH."
-    log_warn "Rey compiles native binaries using Clang/LLVM."
-    if [ "$PLATFORM" = "linux" ]; then
-        log_warn "Run: sudo apt-get update && sudo apt-get install -y clang"
-    elif [ "$PLATFORM" = "macos" ]; then
-        log_warn "Run: xcode-select --install"
+# Install the small Linux toolchain needed to compile and link Rey programs.
+# The runtime Makefile invokes /usr/bin/clang directly on Linux.
+if { [ "$PLATFORM" = "linux" ] && [ -x /usr/bin/clang ]; } || { [ "$PLATFORM" != "linux" ] && command -v clang >/dev/null 2>&1; }; then
+    log_info "Clang found; skipping toolchain installation."
+elif [ "$PLATFORM" = "linux" ] && command -v apt-get >/dev/null 2>&1; then
+    if [ "$(id -u)" -eq 0 ]; then
+        SUDO=""
+    elif command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    else
+        log_error "Clang is missing. Re-run as root or install sudo, then retry."
+        exit 1
     fi
+
+    log_info "Installing Clang and native build tools..."
+    $SUDO apt-get update
+    $SUDO apt-get install -y clang make libc6-dev binutils
+    if [ ! -x /usr/bin/clang ]; then
+        log_error "Clang installation completed, but /usr/bin/clang is still unavailable."
+        exit 1
+    fi
+elif [ "$PLATFORM" = "macos" ]; then
+    log_error "Clang is missing. Install the Xcode Command Line Tools with: xcode-select --install"
+    exit 1
+else
+    log_error "Clang is missing and this installer cannot install packages for this system. Install clang, make, libc development files, and binutils, then retry."
+    exit 1
 fi
 
 # 2. Prepare installation directory
