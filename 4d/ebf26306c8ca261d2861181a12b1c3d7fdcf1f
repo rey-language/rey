@@ -1,0 +1,19 @@
+compiler/v1/src/ast/stmt.rs
+  s_9e2420774b8c0d::t_6032f85dba1a7a 56-69,89,115-120,141-145,151-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4debf26306c8ca261d2861181a12b1c3d7fdcf1f",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
