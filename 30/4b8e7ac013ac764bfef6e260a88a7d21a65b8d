@@ -1,0 +1,29 @@
+.github/workflows/release.yml
+  s_3868795c391050::t_e7e0e408f771cf 43-57
+releases/0.3.1/RELEASE.md
+  s_3868795c391050::t_e7e0e408f771cf 12-13
+scripts/build-release-target.sh
+  s_3868795c391050::t_e7e0e408f771cf 64-65,67-73,76-78,83-85,89-90,92-104
+scripts/zig-ar.sh
+  s_3868795c391050::t_e7e0e408f771cf 1-2
+docs/BOOTSTRAP-SOURCE-RECOVERY.md
+  s_3868795c391050::t_e7e0e408f771cf 59-66
+release/v0.3.1.md
+  s_3868795c391050::t_e7e0e408f771cf 12-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "304b8e7ac013ac764bfef6e260a88a7d21a65b8d",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
