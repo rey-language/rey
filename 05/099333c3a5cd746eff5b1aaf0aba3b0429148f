@@ -1,0 +1,199 @@
+rey-compiler/tests/native-codegen/char-boundary.expected.exit
+  s_9e2420774b8c0d::t_68354b5e62ce98 1
+rey-compiler/tests/native-codegen/char-overflow.expected.exit
+  s_9e2420774b8c0d::t_cd9d75c19fde98 1
+rey-compiler/tests/native-codegen/char-underflow.expected.exit
+  s_9e2420774b8c0d::t_120d9806c2cfa1 1
+rey-compiler/tests/native-codegen/checked-codegen-error.expected.exit
+  s_9e2420774b8c0d::t_afd8f16e39479e 1
+rey-compiler/tests/native-codegen/checked-codegen-error.expected.stdout
+  s_9e2420774b8c0d::t_b27d6552e0fbdf 1
+rey-compiler/tests/native-codegen/checked-handoff.expected.exit
+  s_9e2420774b8c0d::t_8cb3fd2d3a9b24 1
+rey-compiler/tests/native-codegen/checked-handoff.expected.stdout
+  s_9e2420774b8c0d::t_f81594443a35f2 1
+rey-compiler/tests/native-codegen/dict-literal/main.expected.exit
+  s_0fbd3b6d54039a::t_108fc27ed9f438 1
+rey-compiler/tests/native-codegen/direct-call.expected.exit
+  s_9e2420774b8c0d::t_f3ad8c272ba1c1 1
+rey-compiler/tests/native-codegen/direct-call.expected.stdout
+  s_9e2420774b8c0d::t_eb8ef698bb98d5 1
+rey-compiler/tests/native-codegen/empty-struct.expected.exit
+  s_9e2420774b8c0d::t_81113869907a13 1
+rey-compiler/tests/native-codegen/exit-status.expected.exit
+  s_9e2420774b8c0d::t_cd03902514fd16 1
+rey-compiler/tests/native-codegen/float-arithmetic.expected.exit
+  s_9e2420774b8c0d::t_8f044354239068 1
+rey-compiler/tests/native-codegen/float-arithmetic.expected.stdout
+  s_9e2420774b8c0d::t_24ab2f46858c96 1-11
+rey-compiler/tests/native-codegen/float-divzero.expected.exit
+  s_9e2420774b8c0d::t_892c7ac5396672 1
+rey-compiler/tests/native-codegen/float-mixed.expected.exit
+  s_9e2420774b8c0d::t_a03b0685b974e5 1
+rey-compiler/tests/native-codegen/float-mixed.expected.stdout
+  s_9e2420774b8c0d::t_8a3af34b6b1cd8 1-9
+rey-compiler/tests/native-codegen/float-remzero.expected.exit
+  s_9e2420774b8c0d::t_f19542fada3c10 1
+rey-compiler/tests/native-codegen/hashmap-get.expected.exit
+  s_9e2420774b8c0d::t_0eeebd0539d8c4 1
+rey-compiler/tests/native-codegen/hashmap-get.expected.stdout
+  s_9e2420774b8c0d::t_9dda31031a41b3 1
+rey-compiler/tests/native-codegen/integer-divzero.expected.exit
+  s_9e2420774b8c0d::t_80620aa445e05b 1
+rey-compiler/tests/native-codegen/integer-normal.expected.exit
+  s_9e2420774b8c0d::t_09f4daf75b5d46 1
+rey-compiler/tests/native-codegen/integer-normal.expected.stdout
+  s_9e2420774b8c0d::t_44fe24ab20188d 1
+rey-compiler/tests/native-codegen/integer-overflow-add.expected.exit
+  s_9e2420774b8c0d::t_3d98b942a0f258 1
+rey-compiler/tests/native-codegen/integer-overflow-compound.expected.exit
+  s_9e2420774b8c0d::t_fc3250584c56cf 1
+rey-compiler/tests/native-codegen/integer-overflow-dec.expected.exit
+  s_9e2420774b8c0d::t_0ab43c7406316c 1
+rey-compiler/tests/native-codegen/integer-overflow-div.expected.exit
+  s_9e2420774b8c0d::t_122ccfd2cd7068 1
+rey-compiler/tests/native-codegen/integer-overflow-field-compound.expected.build-fail
+  s_9e2420774b8c0d::t_64348e58951e05 1
+rey-compiler/tests/native-codegen/integer-overflow-inc.expected.exit
+  s_9e2420774b8c0d::t_26c5dda4115de0 1
+rey-compiler/tests/native-codegen/integer-overflow-index-update.expected.exit
+  s_9e2420774b8c0d::t_e75b0407d42918 1
+rey-compiler/tests/native-codegen/integer-overflow-mul.expected.exit
+  s_9e2420774b8c0d::t_1e1a2688ff577d 1
+rey-compiler/tests/native-codegen/integer-overflow-neg.expected.exit
+  s_9e2420774b8c0d::t_8aca4f9cd1d2c1 1
+rey-compiler/tests/native-codegen/integer-update-lvalues.expected.build-fail
+  s_9e2420774b8c0d::t_033fe4fc99d327 1
+rey-compiler/tests/native-codegen/module-qualified/main.expected.build-fail
+  s_9e2420774b8c0d::t_7a3f3568389bc2 1
+rey-compiler/tests/native-codegen/multi-unit-functions/main.expected.exit
+  s_9e2420774b8c0d::t_ced6046ef91972 1
+rey-compiler/tests/native-codegen/multi-unit-functions/main.expected.stdout
+  s_9e2420774b8c0d::t_71b8568b4cc984 1-2
+rey-compiler/tests/native-codegen/multi-unit-private-access/main.expected.build-fail
+  s_9e2420774b8c0d::t_458d696c399541 1
+rey-compiler/tests/native-codegen/multi-unit-same-name/expected.stdout
+  s_9e2420774b8c0d::t_1153b76cff1cdb 1-6
+rey-compiler/tests/native-codegen/multi-unit-same-name/left.rey
+  s_9e2420774b8c0d::t_a84c7978e61d26 1-33
+rey-compiler/tests/native-codegen/multi-unit-same-name/main.expected.exit
+  s_9e2420774b8c0d::t_19fea98eb87f14 1
+rey-compiler/tests/native-codegen/multi-unit-same-name/main.expected.stdout
+  s_9e2420774b8c0d::t_415dfe139a7d2f 1-6
+rey-compiler/tests/native-codegen/multi-unit-same-name/main.rey
+  s_9e2420774b8c0d::t_eb2af2b6eb4ed0 1-13
+rey-compiler/tests/native-codegen/multi-unit-same-name/right.rey
+  s_9e2420774b8c0d::t_aa8d4e8f30d49e 1-21
+rey-compiler/tests/native-codegen/multi-unit-struct/main.expected.exit
+  s_9e2420774b8c0d::t_b86de631c8b274 1
+rey-compiler/tests/native-codegen/multi-unit-struct/main.expected.stdout
+  s_9e2420774b8c0d::t_12dda59b444a15 1
+rey-compiler/tests/native-codegen/negative-enum-payload-type.expected.build-fail
+  s_9e2420774b8c0d::t_60c32e7a2bf690 1
+rey-compiler/tests/native-codegen/nested-call.expected.exit
+  s_9e2420774b8c0d::t_1d77ac36ad8577 1
+rey-compiler/tests/native-codegen/nested-call.expected.stdout
+  s_9e2420774b8c0d::t_a06aaba338a08d 1
+rey-compiler/tests/native-codegen/nested-enum-false-pattern.expected.exit
+  s_9e2420774b8c0d::t_93f114718fb8e2 1
+rey-compiler/tests/native-codegen/nested-enum-false-pattern.expected.stdout
+  s_9e2420774b8c0d::t_0054ef7ccb396e 1
+rey-compiler/tests/native-codegen/payload-enum-match.expected.exit
+  s_9e2420774b8c0d::t_e05ae16c77fa3d 1
+rey-compiler/tests/native-codegen/payload-enum-match.expected.stdout
+  s_9e2420774b8c0d::t_289af5eaf4badb 1
+rey-compiler/tests/native-codegen/recursive-call.expected.exit
+  s_9e2420774b8c0d::t_fa83c4d2341f10 1
+rey-compiler/tests/native-codegen/recursive-call.expected.stdout
+  s_9e2420774b8c0d::t_4c8ef91bab62da 1
+rey-compiler/tests/native-codegen/result-unwrapperr.expected.exit
+  s_9e2420774b8c0d::t_51f387cc0c5d80 1
+rey-compiler/tests/native-codegen/stderr-variadic.expected.exit
+  s_9e2420774b8c0d::t_a09d913e8a73ee 1
+rey-compiler/tests/native-codegen/unit-enum-match.expected.exit
+  s_9e2420774b8c0d::t_2b6abad0ae035f 1
+rey-compiler/tests/native-codegen/unit-enum-match.expected.stdout
+  s_9e2420774b8c0d::t_2fc2ef93ab2e57 1-2
+rey-compiler/tests/native-codegen/unknown-target.expected.build-fail
+  s_9e2420774b8c0d::t_eb13fba1602cf5 1
+rey-compiler/tests/native-codegen/vec-get.expected.exit
+  s_9e2420774b8c0d::t_11542f5959abd7 1
+rey-compiler/tests/native-codegen/vec-get.expected.stdout
+  s_9e2420774b8c0d::t_88d498a7e9ffd8 1
+rey-compiler/tests/e2e/collections.out
+  s_23d8ca0564219a::t_f1254f153e0d47 1-2,5-7
+rey-compiler/tests/e2e/collections.rey
+  s_23d8ca0564219a::t_f9c93290cfec4e 3,15-16,25,29,31
+rey-compiler/tests/e2e/imports.rey
+  s_7ed9cdfc869faa::t_5907798d7f52ea 3-4
+rey-compiler/tests/e2e/io.out
+  s_23d8ca0564219a::t_d40b76b0b8c3b8 1,4
+rey-compiler/tests/e2e/strings.out
+  s_23d8ca0564219a::t_aa33df62375082 3-4
+rey-compiler/tests/e2e/strings.rey
+  s_7ed9cdfc869faa::t_e697e531efd008 14-15
+rey-compiler/tests/e2e/vec.out
+  s_23d8ca0564219a::t_56f3de4ba90a8a 8-9
+rey-compiler/tests/e2e/vec.rey
+  s_23d8ca0564219a::t_5caf6c0f6d25e3 2,6,10,15,22,26
+rey-compiler/tests/native-codegen/dict-literal/main.expected.stdout
+  s_7ed9cdfc869faa::t_7b5b0c8cb1af6b 1-10
+rey-compiler/tests/native-codegen/dict-literal/main.rey
+  s_23d8ca0564219a::t_2b5ce2735f928e 1-25
+rey-compiler/tests/native-codegen/dict-literal/mixed-types/main.rey
+  s_23d8ca0564219a::t_85364f4732f5a6 1-4
+rey-compiler/tests/native-codegen/lambdas/main.expected.exit
+  s_3b3148149ce2f0::t_b16ac318095a44 1
+rey-compiler/tests/native-codegen/lambdas/main.expected.stdout
+  s_3b3148149ce2f0::t_57100a7f767814 1-4
+rey-compiler/tests/native-codegen/lambdas/main.rey
+  s_3b3148149ce2f0::t_89f6ce1b1bde38 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "05099333c3a5cd746eff5b1aaf0aba3b0429148f",
+  "prompts": {},
+  "sessions": {
+    "s_0fbd3b6d54039a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15569-d7ab-78d0-b134-827938f76185",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_23d8ca0564219a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15569-82f8-7250-b36c-ea0df29cf59f",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_3b3148149ce2f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15569-a0f7-7243-a9f3-afcfa0775535",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_7ed9cdfc869faa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15569-907a-7682-a0b3-eb245d44e0cd",
+        "model": "unknown"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    },
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
