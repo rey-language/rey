@@ -1,0 +1,6 @@
+func main(): void {
+    var one: float = 1.0;
+    var zero: float = 0.0;
+    var result: float = one % zero;
+    println("unreachable");
+}

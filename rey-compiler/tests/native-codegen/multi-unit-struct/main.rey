@@ -1,0 +1,6 @@
+import data.make;
+
+func main(): void {
+    var record = make();
+    println(record.value);
+}

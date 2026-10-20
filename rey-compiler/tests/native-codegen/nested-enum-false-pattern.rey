@@ -1,0 +1,16 @@
+enum Outer {
+    Nested(Inner),
+}
+
+enum Inner {
+    On(bool),
+    Off,
+}
+
+func main(): void {
+    var value = Outer::Nested(Inner::On(true));
+    match value {
+        Outer::Nested(Inner::On(false)) => { println("wrong"); },
+        _ => { println("matched fallback"); },
+    }
+}

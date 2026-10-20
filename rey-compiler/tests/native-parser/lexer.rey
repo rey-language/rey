@@ -1,0 +1,5 @@
+import "../../src/lexer/main.rey";
+
+pub func tokenizeSource(source: string, path: string): LexerResult {
+  return tokenize(source, path);
+}

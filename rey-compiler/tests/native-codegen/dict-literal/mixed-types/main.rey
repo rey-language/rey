@@ -1,0 +1,4 @@
+func main(): void {
+    var values = {"count": 1, "label": "two"};
+    println(values.len());
+}

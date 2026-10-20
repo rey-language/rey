@@ -1,0 +1,7 @@
+pub struct Record {
+    pub value: int,
+}
+
+pub func make(): Record {
+    return Record { value: 17 };
+}

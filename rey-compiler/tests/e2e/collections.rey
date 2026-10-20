@@ -1,6 +1,6 @@
 func main() {
     // HashMap
-    var hm = HashMap.new();
+    var hm: HashMap<string, string> = HashMap.new();
     hm.set("name", "Alice");
     hm.set("lang", "Rey");
     println(hm.has("name").toString());
@@ -12,8 +12,8 @@ func main() {
     println(hm.get("name").toString());
 
     // Result
-    var ok = Result.Ok(42);
-    var err = Result.Err("oops");
+    var ok: Result<int, string> = Result.Ok(42);
+    var err: Result<int, string> = Result.Err("oops");
     println(ok.isOk().toString());
     println(err.isOk().toString());
     println(err.isErr().toString());
@@ -22,11 +22,11 @@ func main() {
     println(err.unwrapOr(99).toString());
 
     // Vec of ints, pop, length
-    var v = Vec.new();
+    var v: Vec<int> = Vec.new();
     v.push(100);
     v.push(200);
     v.push(300);
-    println(v.length().toString());
+    println(v.len().toString());
     println(v.pop().toString());
-    println(v.length().toString());
+    println(v.len().toString());
 }

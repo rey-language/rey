@@ -1,0 +1,4 @@
+struct Empty {}
+
+func main(): void {
+}

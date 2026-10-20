@@ -1,0 +1,29 @@
+struct Box {
+    value: int,
+}
+
+enum Message {
+    Count(int),
+    Boxed(Box),
+    Maybe(Option<int>),
+    Outcome(Result<int, string>),
+    OptionalBox(Option<Box>),
+}
+
+func main(): void {
+    var shared = Box { value: 1 };
+    var first = Message::Boxed(shared);
+    var alias = Message::Boxed(shared);
+    var copy = Message::Boxed(Box { value: 1 });
+    println(first == alias);
+    println(first == copy);
+    println(Message::Count(7) == Message::Count(7));
+    println(Message::Maybe(Option::Some(7)) == Message::Maybe(Option::Some(7)));
+    println(Message::Maybe(Option::None) == Message::Maybe(Option::None));
+    println(Message::Outcome(Result::Ok(9)) == Message::Outcome(Result::Ok(9)));
+    println(Message::Outcome(Result::Err("bad")) == Message::Outcome(Result::Err("bad")));
+    println(Option::Some(7) == Option::Some(7));
+    println(Result::Ok(9) == Result::Ok(9));
+    println(Message::OptionalBox(Option::Some(shared)) == Message::OptionalBox(Option::Some(shared)));
+    println(Message::OptionalBox(Option::Some(shared)) == Message::OptionalBox(Option::Some(Box { value: 1 })));
+}

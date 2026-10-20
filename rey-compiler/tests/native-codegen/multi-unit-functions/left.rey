@@ -1,0 +1,7 @@
+func helper(): int {
+    return 10;
+}
+
+pub func leftValue(): int {
+    return helper();
+}

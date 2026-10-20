@@ -1,0 +1,10 @@
+func sumDown(value: int): int {
+    if (value <= 0) {
+        return 0;
+    }
+    return value + sumDown(value - 1);
+}
+
+func main(): void {
+    println(sumDown(4));
+}

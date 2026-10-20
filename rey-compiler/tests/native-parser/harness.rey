@@ -1,0 +1,447 @@
+import lexer.{tokenizeSource};
+import parser.{parseSource, NativeParseResult};
+import parser::ast::{Stmt, Expr, Pattern, EnumDeclStmt, MatchStmt, VarDeclStmt, StructDeclStmt, FuncDeclStmt, ImportStmt, ReturnStmt, ExprStmt, UpdateExpr, LambdaExpr, FieldAccessExpr, IndexExpr, IdentExpr, EnumVariantPattern, LiteralPattern, RangePattern};
+
+struct InputResult {
+  pub lexErrors: int,
+  pub parseResult: NativeParseResult,
+}
+
+func parseInput(path: string): InputResult {
+  var source = readFile("rey-compiler/tests/native-parser/" + path);
+  var lexed = tokenizeSource(source, path);
+  var parsed = parseSource(lexed.tokens, path);
+  return InputResult { lexErrors: lexed.errors.len(), parseResult: parsed };
+}
+
+func enumDeclaration(statement: Stmt): EnumDeclStmt? {
+  match statement {
+    Stmt::EnumDecl(declaration) => { return declaration; },
+    _ => {},
+  }
+  return null;
+}
+
+func matchStatement(statement: Stmt): MatchStmt? {
+  match statement {
+    Stmt::Match(parsed) => { return parsed; },
+    _ => {},
+  }
+  return null;
+}
+
+func variableDeclaration(statement: Stmt): VarDeclStmt? {
+  match statement {
+    Stmt::VarDecl(declaration) => { return declaration; },
+    _ => {},
+  }
+  return null;
+}
+
+func structDeclaration(statement: Stmt): StructDeclStmt? {
+  match statement {
+    Stmt::StructDecl(declaration) => { return declaration; },
+    _ => {},
+  }
+  return null;
+}
+
+func functionDeclaration(statement: Stmt): FuncDeclStmt? {
+  match statement {
+    Stmt::FuncDecl(declaration) => { return declaration; },
+    _ => {},
+  }
+  return null;
+}
+
+func importStatement(statement: Stmt): ImportStmt? {
+  match statement {
+    Stmt::Import(declaration) => { return declaration; },
+    _ => {},
+  }
+  return null;
+}
+
+func expressionStatement(statement: Stmt): Expr? {
+  match statement {
+    Stmt::ExprStmt(expression) => { return expression.expr; },
+    _ => {},
+  }
+  return null;
+}
+
+func updateExpression(statement: Stmt): UpdateExpr? {
+  var expression = expressionStatement(statement);
+  if expression != null {
+    match expression {
+      Expr::Update(update) => { return update; },
+      _ => {},
+    }
+  }
+  return null;
+}
+
+func lambdaExpression(expression: Expr): LambdaExpr? {
+  match expression {
+    Expr::Lambda(lambda) => { return lambda; },
+    _ => {},
+  }
+  return null;
+}
+
+func fieldAccess(expression: Expr): FieldAccessExpr? {
+  match expression {
+    Expr::FieldAccess(field) => { return field; },
+    _ => {},
+  }
+  return null;
+}
+
+func indexExpression(expression: Expr): IndexExpr? {
+  match expression {
+    Expr::Index(index) => { return index; },
+    _ => {},
+  }
+  return null;
+}
+
+func identifierExpression(expression: Expr): IdentExpr? {
+  match expression {
+    Expr::Identifier(identifier) => { return identifier; },
+    _ => {},
+  }
+  return null;
+}
+
+func enumVariantPattern(pattern: Pattern): EnumVariantPattern? {
+  match pattern {
+    Pattern::EnumVariant(variant) => { return variant; },
+    _ => {},
+  }
+  return null;
+}
+
+func literalPattern(pattern: Pattern): LiteralPattern? {
+  match pattern {
+    Pattern::Literal(literal) => { return literal; },
+    _ => {},
+  }
+  return null;
+}
+
+func rangePattern(pattern: Pattern): RangePattern? {
+  match pattern {
+    Pattern::Range(range) => { return range; },
+    _ => {},
+  }
+  return null;
+}
+
+func returnStatement(statement: Stmt): ReturnStmt? {
+  match statement {
+    Stmt::Return(ret) => { return ret; },
+    _ => {},
+  }
+  return null;
+}
+
+func pass(label: string): int {
+  println("PASS " + label);
+  return 0;
+}
+
+func fail(label: string): int {
+  println("FAIL " + label);
+  return 1;
+}
+
+func valid(path: string, statementCount: int): int {
+  var input = parseInput(path);
+  if input.lexErrors != 0 { return fail(path + " lexer errors=" + input.lexErrors.toString()); }
+  if input.parseResult.errors.len() != 0 { return fail(path + " parse errors=" + input.parseResult.errors.len().toString()); }
+  if input.parseResult.program.statements.len() != statementCount { return fail(path + " statement count"); }
+  return pass(path);
+}
+
+func malformed(path: string): int {
+  var input = parseInput(path);
+  if input.lexErrors != 0 { return fail(path + " lexer errors=" + input.lexErrors.toString()); }
+  if input.parseResult.errors.len() == 0 { return fail(path + " expected parse errors"); }
+  return pass(path + " rejected");
+}
+
+func unitEnumShape(): int {
+    var input = parseInput("valid/unit-enum.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("unit enum parse"); }
+    var decl = enumDeclaration(input.parseResult.program.statements[0]);
+    if decl != null {
+        if decl.name != "E" || decl.variants.len() != 1 || decl.variants[0] != "A" { return fail("unit enum declaration shape"); }
+        if decl.variantDecls[0].payloadTypes.len() != 0 { return fail("unit enum payload shape"); }
+        return pass("unit enum AST shape");
+    }
+    return fail("unit enum declaration variant");
+}
+
+func namedPayloadShape(): int {
+    var input = parseInput("valid/payload-enum-minimal.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("named payload parse"); }
+    var declaration = enumDeclaration(input.parseResult.program.statements[0]);
+    if declaration != null {
+        var payload = declaration.variantDecls[0];
+        if payload.name != "A" || payload.payloadNames.len() != 1 || payload.payloadNames[0] != "x" { return fail("named payload names"); }
+        if payload.payloadTypes.len() != 1 || payload.payloadTypes[0].name != "int" { return fail("named payload types"); }
+        return pass("named payload AST shape");
+    }
+    return fail("named payload enum declaration variant");
+}
+
+func positionalPayloadShape(): int {
+    var input = parseInput("valid/positional-enum-payload.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("positional payload parse"); }
+    var declaration = enumDeclaration(input.parseResult.program.statements[0]);
+    if declaration != null {
+        var payload = declaration.variantDecls[0];
+        if payload.payloadNames.len() != 1 || payload.payloadNames[0] != "" || payload.payloadTypes[0].name != "int" { return fail("positional payload shape"); }
+        return pass("positional payload AST shape");
+    }
+    return fail("positional payload enum declaration variant");
+}
+
+func matchPayloadShape(): int {
+    var input = parseInput("valid/match-payload-and-bare-variant.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("payload match parse"); }
+    var parsedMatch = matchStatement(input.parseResult.program.statements[2]);
+    if parsedMatch != null {
+        var arms = parsedMatch.arms;
+        if arms.len() != 3 { return fail("match arm count"); }
+        var qualified = enumVariantPattern(arms[0].pattern);
+        if qualified != null {
+            if qualified.enumName != "Message" || qualified.variant != "Count" { return fail("qualified variant shape"); }
+            if qualified.payloads.len() != 1 { return fail("payload binding count"); }
+            match qualified.payloads[0] {
+                Pattern::Variable(binding) => { if binding.name != "value" { return fail("payload binding name"); } },
+                _ => { return fail("payload binding variant"); },
+            }
+        } else { return fail("qualified variant pattern variant"); }
+        match arms[1].pattern {
+            Pattern::Variable(binding) => { if binding.name != "Empty" { return fail("bare variant name"); } },
+            _ => { return fail("bare variant pattern"); },
+        }
+        match arms[2].pattern {
+            Pattern::Wildcard(_) => {},
+            _ => { return fail("wildcard pattern variant"); },
+        }
+        match arms[0].body {
+            Stmt::Block(block) => { if block.statements.len() != 1 { return fail("match block arm body shape"); } },
+            _ => { return fail("match block arm body variant"); },
+        }
+        match arms[1].body {
+            Stmt::ExprStmt(_) => {},
+            _ => { return fail("match expression arm body variant"); },
+        }
+        return pass("match payload/bare/wildcard AST shape");
+    }
+    return fail("payload match statement variant");
+}
+
+func rangeAndLiteralShape(): int {
+    var input = parseInput("valid/match-literals-and-range.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("literal/range match parse"); }
+    var matches = input.parseResult.program.statements;
+    var firstMatch = matchStatement(matches[0]);
+    if firstMatch != null {
+        var truePattern = literalPattern(firstMatch.arms[0].pattern);
+        var falsePattern = literalPattern(firstMatch.arms[1].pattern);
+        if truePattern != null {
+            if falsePattern != null {
+                if truePattern.literal.text != "true" || falsePattern.literal.text != "false" { return fail("boolean literal patterns"); }
+            } else { return fail("false literal pattern variant"); }
+        } else { return fail("true literal pattern variant"); }
+    } else { return fail("boolean match statement variant"); }
+    var secondMatch = matchStatement(matches[1]);
+    if secondMatch != null {
+        var range = rangePattern(secondMatch.arms[0].pattern);
+        if range != null {
+            if range.start.text != "1" || range.end.text != "3" || !range.inclusive { return fail("inclusive range shape"); }
+        } else { return fail("range pattern variant"); }
+    } else { return fail("range match statement variant"); }
+  return pass("literal/range AST shape");
+}
+
+func updatesAndTypesShape(): int {
+    var input = parseInput("valid/tuples-updates-function-types.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("updates/types parse"); }
+    var statements = input.parseResult.program.statements;
+    var postfixField = updateExpression(statements[2]);
+    var prefixField = updateExpression(statements[3]);
+    var postfixVariable = updateExpression(statements[5]);
+    var prefixVariable = updateExpression(statements[6]);
+    var postfixIndex = updateExpression(statements[8]);
+    if postfixField != null {
+        if postfixField.op != "++" || postfixField.prefix { return fail("postfix field update"); }
+    } else { return fail("postfix field update variant"); }
+    if prefixField != null {
+        if prefixField.op != "++" || !prefixField.prefix { return fail("prefix field update"); }
+    } else { return fail("prefix field update variant"); }
+    if postfixVariable != null {
+        if postfixVariable.op != "++" || postfixVariable.prefix { return fail("postfix variable update"); }
+    } else { return fail("postfix variable update variant"); }
+    if prefixVariable != null {
+        if prefixVariable.op != "++" || !prefixVariable.prefix { return fail("prefix variable update"); }
+    } else { return fail("prefix variable update variant"); }
+    if postfixIndex != null {
+        if postfixIndex.op != "--" { return fail("postfix index update"); }
+        var index = indexExpression(postfixIndex.target);
+        if index != null {
+            match index.index {
+                Expr::Literal(literal) => { if literal.text != "0" { return fail("postfix index value"); } },
+                _ => { return fail("postfix index expression variant"); },
+            }
+        } else { return fail("postfix index target variant"); }
+    } else { return fail("postfix index update variant"); }
+    var pair = variableDeclaration(statements[9]);
+    var single = variableDeclaration(statements[10]);
+    if pair != null {
+        if single != null {
+            if pair.typeTag != "(int, string)" || single.typeTag != "(int,)" { return fail("tuple type/expression shape"); }
+        } else { return fail("single tuple declaration variant"); }
+    } else { return fail("pair declaration variant"); }
+    var convert = variableDeclaration(statements[11]);
+    var noArgs = variableDeclaration(statements[12]);
+    if convert != null {
+        var functionType = convert.typeExpr;
+        if functionType != null {
+            var functionResult = functionType.result;
+            if functionResult != null {
+                if functionType.params.len() != 1 || functionType.params[0].name != "int" || functionResult.name != "string" { return fail("function type shape"); }
+            } else { return fail("function type result missing"); }
+        } else { return fail("function type annotation missing"); }
+        var lambda = lambdaExpression(convert.value);
+        if lambda != null {
+            if lambda.params.len() != 1 || lambda.paramTypeExprs.len() != 1 || lambda.bodyExpr == null { return fail("lambda expression shape"); }
+        } else { return fail("lambda expression variant"); }
+    } else { return fail("function type declaration variant"); }
+    if noArgs != null {
+        var noArgsType = noArgs.typeExpr;
+        if noArgsType != null {
+            var noArgsResult = noArgsType.result;
+            if noArgsResult != null {
+                if noArgsType.params.len() != 0 || noArgsResult.name != "int" { return fail("zero-argument function type"); }
+            } else { return fail("zero-argument function type result missing"); }
+        } else { return fail("zero-argument function type annotation missing"); }
+    } else { return fail("zero-argument function type declaration variant"); }
+  return pass("updates/tuples/function types/lambda AST shape");
+}
+
+func importsShape(): int {
+    var input = parseInput("valid/imports-canonical.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("imports parse"); }
+    var items = input.parseResult.program.statements;
+    match items[0] {
+        Stmt::Import(moduleImport) => {
+            if moduleImport.path != "std::math" || moduleImport.namespaceName != "math" || moduleImport.items.len() != 0 { return fail("module namespace import shape"); }
+        },
+        _ => { return fail("module import statement variant"); },
+    }
+    match items[1] {
+        Stmt::Import(selectedImport) => {
+            if selectedImport.path != "std::math" || selectedImport.namespaceName != "" || selectedImport.items.len() != 2 || selectedImport.items[0] != "sin" { return fail("module selection import shape"); }
+        },
+        _ => { return fail("selected import statement variant"); },
+    }
+    match items[2] {
+        Stmt::Import(dottedImport) => {
+            if dottedImport.path != "a" || dottedImport.items.len() != 1 || dottedImport.items[0] != "b" { return fail("dotted file selection shape"); }
+        },
+        _ => { return fail("dotted import statement variant"); },
+    }
+    match items[3] {
+        Stmt::Import(groupedImport) => {
+            if groupedImport.path != "a" || groupedImport.items.len() != 2 || groupedImport.items[1] != "c" { return fail("grouped dotted import shape"); }
+        },
+        _ => { return fail("grouped import statement variant"); },
+    }
+    match items[4] {
+        Stmt::Import(pathImport) => {
+            if pathImport.path != "path/file.rey" || pathImport.namespaceName != "file" { return fail("string file namespace shape"); }
+        },
+        _ => { return fail("path import statement variant"); },
+    }
+    return pass("canonical import AST shape");
+}
+
+func publicAndSelfShape(): int {
+    var input = parseInput("valid/public-declarations-and-self.rey");
+    if input.lexErrors != 0 || input.parseResult.errors.len() != 0 { return fail("public declarations parse"); }
+    var statements = input.parseResult.program.statements;
+    match statements[0] {
+        Stmt::StructDecl(publicStruct) => {
+            if publicStruct.isPub != true || publicStruct.fields[0].isPub != true || publicStruct.methods[0].isPub != true { return fail("pub struct/member visibility"); }
+            match publicStruct.methods[0].body[0] {
+                Stmt::Return(returned) => {
+                    match returned.value {
+                        Expr::FieldAccess(selfAccess) => {
+                            match selfAccess.object {
+                                Expr::Identifier(selfExpr) => { if selfExpr.name != "self" { return fail("self expression shape"); } },
+                                _ => { return fail("self identifier expression variant"); },
+                            }
+                        },
+                        _ => { return fail("self field access expression variant"); },
+                    }
+                },
+                _ => { return fail("method return statement variant"); },
+            }
+        },
+        _ => { return fail("public struct declaration variant"); },
+    }
+    match statements[1] {
+        Stmt::EnumDecl(publicEnum) => { if publicEnum.isPub != true { return fail("pub enum visibility"); } },
+        _ => { return fail("public enum declaration variant"); },
+    }
+    match statements[2] {
+        Stmt::FuncDecl(publicFunction) => { if publicFunction.isPub != true { return fail("pub function visibility"); } },
+        _ => { return fail("public function declaration variant"); },
+    }
+    return pass("public visibility/self AST shape");
+}
+
+func emptyInputShape(): int {
+  var input = parseInput("malformed/empty.rey");
+  if input.lexErrors != 0 || input.parseResult.errors.len() != 0 || input.parseResult.program.statements.len() != 0 { return fail("empty EOF input"); }
+  return pass("empty EOF input");
+}
+
+pub func runTests(): void {
+  var failures = 0;
+  failures = failures + valid("valid/unit-enum.rey", 1);
+  failures = failures + valid("valid/payload-enum-minimal.rey", 1);
+  failures = failures + valid("valid/positional-enum-payload.rey", 1);
+  failures = failures + valid("valid/match-payload-and-bare-variant.rey", 3);
+  failures = failures + valid("valid/match-literals-and-range.rey", 3);
+  failures = failures + valid("valid/tuples-updates-function-types.rey", 13);
+  failures = failures + valid("valid/imports-canonical.rey", 5);
+  failures = failures + valid("valid/public-declarations-and-self.rey", 3);
+  failures = failures + valid("valid/conditions-and-for.rey", 1);
+  failures = failures + unitEnumShape();
+  failures = failures + namedPayloadShape();
+  failures = failures + positionalPayloadShape();
+  failures = failures + matchPayloadShape();
+  failures = failures + rangeAndLiteralShape();
+  failures = failures + updatesAndTypesShape();
+  failures = failures + importsShape();
+  failures = failures + publicAndSelfShape();
+  failures = failures + emptyInputShape();
+  failures = failures + malformed("malformed/mixed-enum-payload.rey");
+  failures = failures + malformed("malformed/truncated-enum-payload.rey");
+  failures = failures + malformed("malformed/truncated-enum-open.rey");
+  failures = failures + malformed("malformed/truncated-enum-paren.rey");
+  failures = failures + malformed("malformed/truncated-enum-payload-list.rey");
+  failures = failures + malformed("malformed/truncated-match-arm.rey");
+  failures = failures + malformed("malformed/truncated-function-type.rey");
+  failures = failures + malformed("malformed/missing-call-delimiter.rey");
+  if failures != 0 {
+    println("NATIVE-PARSER FAIL count=" + failures.toString());
+    exit(1);
+  }
+  println("NATIVE-PARSER PASS valid=9 malformed=8 empty=1");
+}

@@ -1,0 +1,4 @@
+func main(): void {
+    var failure = exec("false");
+    eprintln(failure.unwrapErr());
+}

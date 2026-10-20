@@ -1,0 +1,4 @@
+func main(): void {
+    var values: Vec<int> = [9223372036854775807];
+    values[0]++;
+}

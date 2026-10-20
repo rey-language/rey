@@ -1,0 +1,5 @@
+println("before");
+
+func main(): void {
+    println("after");
+}

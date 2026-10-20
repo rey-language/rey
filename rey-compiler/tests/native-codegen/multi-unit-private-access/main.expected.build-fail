@@ -1,0 +1,1 @@
+SPEC rejects reading a private field from another module.

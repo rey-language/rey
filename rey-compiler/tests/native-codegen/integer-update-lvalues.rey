@@ -1,0 +1,11 @@
+struct Counter {
+    value: int,
+}
+
+func main(): void {
+    var counter: Counter = Counter { value: 1 };
+    var values: Vec<int> = [1];
+    counter.value++;
+    ++values[0];
+    println(counter.value, values[0]);
+}

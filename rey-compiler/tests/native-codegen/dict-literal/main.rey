@@ -1,0 +1,25 @@
+func main(): void {
+    var values = {"a": 1, "b": 2, "c": 3};
+    println(values.len());
+    println(values["a"]);
+    values["b"] = 20;
+    println(values["b"]);
+    println(values["c"]);
+
+    var visited = 0;
+    for key in values.keys() {
+        if values.has(key) { visited += 1; }
+    }
+    println(visited);
+
+    var prices = {"a": 1.25, "b": 2.5};
+    println(prices.len());
+    println(prices["a"]);
+    prices["b"] = 4.5;
+    println(prices["b"]);
+
+    var labels = {"first": "one", "second": "two"};
+    println(labels["first"]);
+    labels["second"] = "changed";
+    println(labels["second"]);
+}

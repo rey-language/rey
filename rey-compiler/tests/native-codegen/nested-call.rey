@@ -1,0 +1,11 @@
+func double(value: int): int {
+    return value * 2;
+}
+
+func addOne(value: int): int {
+    return value + 1;
+}
+
+func main(): void {
+    println(addOne(double(20)));
+}

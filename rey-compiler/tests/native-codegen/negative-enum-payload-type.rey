@@ -1,0 +1,7 @@
+enum Message {
+    Count(int),
+}
+
+func main(): void {
+    var message = Message::Count("not an int");
+}

@@ -1,0 +1,13 @@
+func main(): void {
+    var whole: int = 2;
+    var half: float = 0.5;
+    println(whole + half == 2.5);
+    println(half + whole == 2.5);
+    println(whole - half == 1.5);
+    println(half - whole == -1.5);
+    println(whole * half == 1.0);
+    println(whole / half == 4.0);
+    println(5 % half == 0.0);
+    println(whole > half);
+    println(half < whole);
+}

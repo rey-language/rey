@@ -1,0 +1,7 @@
+func helper(): int {
+    return 20;
+}
+
+pub func rightValue(): int {
+    return helper();
+}

@@ -1,4 +1,4 @@
-func main(): Void {
+func main(): void {
     var i: int = 0;
     while (i < 3) {
         println(i);
@@ -17,7 +17,7 @@ func main(): Void {
         }
     }
 
-    for (x in [10, 20, 30]) {
+    for x in [10, 20, 30] {
         println(x);
     }
 }

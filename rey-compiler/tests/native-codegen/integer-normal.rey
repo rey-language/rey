@@ -1,0 +1,7 @@
+func main(): void {
+    var value: int = 40;
+    value += 2;
+    var oldValue = value++;
+    var newValue = ++value;
+    println(oldValue, newValue, value);
+}

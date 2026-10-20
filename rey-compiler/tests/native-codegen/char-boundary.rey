@@ -1,0 +1,3 @@
+func main(): void {
+    eprintln(char(0), char(255));
+}

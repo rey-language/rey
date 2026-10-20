@@ -1,0 +1,19 @@
+struct Empty {}
+
+struct Box {
+    pub value: int,
+}
+
+func twice(value: int): int {
+    return value * 2;
+}
+
+func main(): void {
+    var empty: Empty = Empty {};
+    var box: Box = Box { value: 3 };
+    var vector: Vec<int> = Vec.new();
+    vector.push(twice(box.value));
+    var values: HashMap<string, int> = HashMap.new();
+    values.set("answer", vector.get(0));
+    println(values.get("answer"));
+}

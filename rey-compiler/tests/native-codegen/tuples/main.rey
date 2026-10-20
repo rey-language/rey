@@ -1,0 +1,20 @@
+func passThrough(pair: (int, string)): (int, string) {
+    return pair;
+}
+
+func main(): void {
+    var made = (4, "right");
+    var back = passThrough(made);
+    var nested = ((1, 2), "z");
+    var flags = (true, 'Q');
+    println(back.0);
+    println(back.1);
+    println(nested.0.0);
+    println(nested.0.1);
+    println(made == (4, "right"));
+    println(made == (5, "right"));
+    println(made != back);
+    println(nested == ((1, 2), "z"));
+    println(flags.0);
+    println(flags.1);
+}

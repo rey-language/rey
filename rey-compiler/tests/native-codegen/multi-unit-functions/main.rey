@@ -1,0 +1,7 @@
+import left.leftValue;
+import right.rightValue;
+
+func main(): void {
+    println(leftValue());
+    println(rightValue());
+}

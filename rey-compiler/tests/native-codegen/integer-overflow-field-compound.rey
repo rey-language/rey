@@ -1,0 +1,8 @@
+struct Counter {
+    value: int,
+}
+
+func main(): void {
+    var counter: Counter = Counter { value: 9223372036854775807 };
+    counter.value += 1;
+}

@@ -1,0 +1,4 @@
+func main(): void {
+    var value: int = 9223372036854775807;
+    value++;
+}

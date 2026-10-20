@@ -1,0 +1,15 @@
+func apply(f: (int) -> int, value: int): int {
+    return f(value);
+}
+
+func main(): void {
+    var increment = (x: int) => x + 1;
+    println(increment(41));
+    println(apply(increment, 41));
+    println(apply((x: int) => x + 1, 41));
+
+    var offset = 3;
+    var addOffset = (x: int) => x + offset;
+    offset = 10;
+    println(addOffset(5));
+}

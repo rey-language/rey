@@ -1,0 +1,5 @@
+func main(): void {
+    var value: int = 0;
+    value -= 1;
+    eprint(char(value));
+}

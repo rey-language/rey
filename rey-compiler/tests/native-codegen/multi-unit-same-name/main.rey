@@ -1,0 +1,13 @@
+import left.{leftItem, leftTag, leftWrapped, leftTagValue};
+import right.{rightItem, rightTag, rightTagValue};
+
+func main(): void {
+    var leftRecord = leftItem();
+    var rightRecord = rightItem();
+    println(leftRecord.n);
+    println(leftRecord.child.flag);
+    println(rightRecord.label);
+    println(leftTagValue(leftTag()));
+    println(leftTagValue(leftWrapped()));
+    println(rightTagValue(rightTag()));
+}

@@ -1,0 +1,17 @@
+func main(): void {
+    var a: float = 5.5;
+    var b: float = 1.5;
+    var c: float = 6.0;
+    var d: float = 2.0;
+    println(a + b == 7.0);
+    println(a - b == 4.0);
+    println(a * b == 8.25);
+    println(c / d == 3.0);
+    println(a % d == 1.5);
+    println(-a < -b);
+    println(a > b);
+    println(a <= 5.5);
+    println(a >= 5.5);
+    println(a == 5.5);
+    println(a != b);
+}

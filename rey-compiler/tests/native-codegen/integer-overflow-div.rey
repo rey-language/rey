@@ -1,0 +1,4 @@
+func main(): void {
+    var minimum: int = -9223372036854775807 - 1;
+    println(minimum / -1);
+}

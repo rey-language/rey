@@ -1,0 +1,41 @@
+func main(): void {
+    var enabled = true;
+    match enabled {
+        true => { println("bool true"); },
+        false => { println("bool false"); },
+    }
+
+    var value = 2;
+    match value {
+        0..1 => { println("low"); },
+        2..3 => { println("range"); },
+        _ => { println("other"); },
+    }
+
+    match value {
+        1 => { println("one"); },
+        _ => { println("not one"); },
+    }
+
+    var label = "green";
+    match label {
+        "red" => { println("red label"); },
+        _ => { println("other label"); },
+    }
+
+    var letter = 'a';
+    match letter {
+        'a' => { println("letter a"); },
+        _ => { println("other letter"); },
+    }
+
+    var ratio = 1.5;
+    match ratio {
+        1.5 => { println("float literal"); },
+        _ => { println("other float"); },
+    }
+
+    match value {
+        bound => { println(bound); },
+    }
+}

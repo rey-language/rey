@@ -1,0 +1,12 @@
+enum Message {
+    Count(int),
+    Label(string),
+}
+
+func main(): void {
+    var message = Message::Count(7);
+    match message {
+        Message::Count(n) => { println(n); },
+        Message::Label(text) => { println(text); },
+    }
+}

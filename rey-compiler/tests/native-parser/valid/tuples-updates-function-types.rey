@@ -1,0 +1,13 @@
+struct Box { pub n: int, }
+var box = Box { n: 2 };
+box.n++;
+++box.n;
+var value = 1;
+value++;
+++value;
+var values: Vec<int> = [1, 2];
+values[0]--;
+var pair: (int, string) = (1, "one");
+var single: (int,) = (2,);
+var convert: (int) -> string = (n: int) => n.toString();
+var noArgs: () -> int = () => 1;

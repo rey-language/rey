@@ -1,0 +1,21 @@
+pub struct Item {
+    pub label: string,
+}
+
+pub enum Tag {
+    Text(string),
+}
+
+pub func rightItem(): Item {
+    return Item { label: "right" };
+}
+
+pub func rightTag(): Tag {
+    return Tag::Text("ab");
+}
+
+pub func rightTagValue(tag: Tag): int {
+    match tag {
+        Tag::Text(text) => { return text.len(); },
+    }
+}

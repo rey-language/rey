@@ -1,0 +1,12 @@
+import "../../src/parser/main.rey";
+import parser::ast::{Program, ParseError};
+
+pub struct NativeParseResult {
+  pub program: Program,
+  pub errors: Vec<ParseError>,
+}
+
+pub func parseSource(tokens, path: string): NativeParseResult {
+  var result = parse(tokens, path);
+  return NativeParseResult { program: result.program, errors: result.errors };
+}

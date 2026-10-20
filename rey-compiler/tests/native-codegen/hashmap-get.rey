@@ -1,0 +1,5 @@
+func main(): void {
+    var values: HashMap<string, int> = HashMap.new();
+    values.set("answer", 42);
+    println(values.get("answer"));
+}

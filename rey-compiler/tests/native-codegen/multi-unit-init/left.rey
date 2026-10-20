@@ -1,0 +1,12 @@
+import leaf.value;
+
+println("left init");
+var saved = value() + 1;
+
+func helper(): int {
+    return 9;
+}
+
+pub func fromLeft(): int {
+    return helper() + saved;
+}

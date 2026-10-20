@@ -1,0 +1,7 @@
+enum Message { Count(value: int), Empty, }
+var message: Message = Message::Count(7);
+match message {
+  Message::Count(value) => { println(value); },
+  Empty => println("empty");,
+  _ => println("other");
+}

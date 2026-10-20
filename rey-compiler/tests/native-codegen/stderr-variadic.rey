@@ -1,0 +1,3 @@
+func main(): void {
+    eprintln("byte", 255, false);
+}

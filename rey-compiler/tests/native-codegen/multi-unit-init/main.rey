@@ -1,0 +1,9 @@
+import left.fromLeft;
+import right.fromRight;
+
+println("entry init");
+var total = fromLeft() + fromRight();
+
+func main(): void {
+    println(total);
+}

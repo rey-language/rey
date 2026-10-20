@@ -1,0 +1,11 @@
+struct Counter {
+    value: int,
+    func get(): int {
+        return value;
+    }
+}
+
+func main(): void {
+    var counter: Counter = Counter { value: 7 };
+    println(counter.get());
+}

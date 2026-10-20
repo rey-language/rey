@@ -1,0 +1,10 @@
+pub struct PublicBox {
+  pub value: int,
+  pub func read(): int {
+    return self.value;
+  },
+}
+pub enum PublicMessage { Count(value: int), }
+pub func publicValue(): int {
+  return 1;
+}

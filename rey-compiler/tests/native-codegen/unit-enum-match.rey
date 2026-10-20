@@ -1,0 +1,15 @@
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+func main(): void {
+    var color = Color::Green;
+    match color {
+        Color::Red => { println("red"); },
+        Green => { println("green"); },
+        Color::Blue => { println("blue"); },
+    }
+    println(color == Color::Green);
+}

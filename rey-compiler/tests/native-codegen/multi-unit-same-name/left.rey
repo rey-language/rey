@@ -1,0 +1,33 @@
+pub struct Box {
+    pub flag: int,
+}
+
+pub struct Item {
+    pub n: int,
+    pub child: Box,
+}
+
+pub enum Tag {
+    Num(int),
+    Wrapped(Item),
+}
+
+pub func leftItem(): Item {
+    return Item { n: 4, child: Box { flag: 1 } };
+}
+
+pub func leftTag(): Tag {
+    return Tag::Num(11);
+}
+
+pub func leftWrapped(): Tag {
+    var item = Item { n: 5, child: Box { flag: 2 } };
+    return Tag::Wrapped(item);
+}
+
+pub func leftTagValue(tag: Tag): int {
+    match tag {
+        Tag::Num(n) => { return n; },
+        Tag::Wrapped(item) => { return item.n + item.child.flag; },
+    }
+}

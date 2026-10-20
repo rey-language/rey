@@ -1,0 +1,20 @@
+func demo(a: bool, b: bool): void {
+    if (a) || (b) {
+        println(a);
+    } else if (a) && (b) {
+        println(b);
+    }
+    var i = 0;
+    while i < 2 {
+        i = i + 1;
+    }
+    for x in [1, 2] {
+        println(x);
+    }
+    for (y in [3]) {
+        println(y);
+    }
+    var pair = (1, 2);
+    var first = pair.0;
+    println(first);
+}

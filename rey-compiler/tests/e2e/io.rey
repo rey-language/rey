@@ -1,5 +1,5 @@
 func main() {
-    var path = "/tmp/rey_io_test.txt";
+    var path = "rey_io_test.txt";
     writeFile(path, "hello from rey\n");
     println(fileExists(path).toString());
     var content = readFile(path);

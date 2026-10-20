@@ -1,0 +1,7 @@
+func increment(value: int): int {
+    return value + 1;
+}
+
+func main(): void {
+    println(increment(41));
+}

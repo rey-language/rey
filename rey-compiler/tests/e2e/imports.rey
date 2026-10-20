@@ -1,6 +1,5 @@
 import "imports/util.rey";
 
-func main(): Void {
-    println(add(2, 3));
+func main(): void {
+    println(util.add(2, 3));
 }
-
