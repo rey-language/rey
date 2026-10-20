@@ -1,0 +1,198 @@
+std/ARCHITECTURE.md
+  h_90c9c948bf5ad1 1-192
+std/README.md
+  h_90c9c948bf5ad1 1-100
+std/rey.toml
+  h_90c9c948bf5ad1 1-11
+std/src/binary/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/binary/main.rey
+  h_90c9c948bf5ad1 1-109
+std/src/cli/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/cli/main.rey
+  h_90c9c948bf5ad1 1-101
+std/src/collections/README.md
+  h_90c9c948bf5ad1 1-67
+std/src/collections/main.rey
+  h_90c9c948bf5ad1 1-401
+std/src/compress/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/compress/main.rey
+  h_90c9c948bf5ad1 1-95
+std/src/core/README.md
+  h_90c9c948bf5ad1 1-31
+std/src/core/main.rey
+  h_90c9c948bf5ad1 1-34
+std/src/crypto/README.md
+  h_90c9c948bf5ad1 1-32
+std/src/crypto/main.rey
+  h_90c9c948bf5ad1 1-191
+std/src/csv/README.md
+  h_90c9c948bf5ad1 1-16
+std/src/csv/main.rey
+  h_90c9c948bf5ad1 1-122
+std/src/env/README.md
+  h_90c9c948bf5ad1 1-25
+std/src/env/main.rey
+  h_90c9c948bf5ad1 1-31
+std/src/fmt/README.md
+  h_90c9c948bf5ad1 1-28
+std/src/fmt/main.rey
+  h_90c9c948bf5ad1 1-107
+std/src/fs/README.md
+  h_90c9c948bf5ad1 1-42
+std/src/fs/main.rey
+  h_90c9c948bf5ad1 1-206
+std/src/http/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/http/main.rey
+  h_90c9c948bf5ad1 1-177
+std/src/image/README.md
+  h_90c9c948bf5ad1 1-20
+std/src/image/main.rey
+  h_90c9c948bf5ad1 1-58
+std/src/io/README.md
+  h_90c9c948bf5ad1 1-27
+std/src/io/main.rey
+  h_90c9c948bf5ad1 1-161
+std/src/json/README.md
+  h_90c9c948bf5ad1 1-17
+std/src/json/main.rey
+  h_90c9c948bf5ad1 1-85
+std/src/linalg/README.md
+  h_90c9c948bf5ad1 1-20
+std/src/linalg/main.rey
+  h_90c9c948bf5ad1 1-88
+std/src/log/README.md
+  h_90c9c948bf5ad1 1-13
+std/src/log/main.rey
+  h_90c9c948bf5ad1 1-72
+std/src/math/README.md
+  h_90c9c948bf5ad1 1-36
+std/src/math/basic.rey
+  h_90c9c948bf5ad1 1-38
+std/src/math/extra.rey
+  h_90c9c948bf5ad1 1-15
+std/src/math/main.rey
+  h_90c9c948bf5ad1 1-299
+std/src/math/stats.rey
+  h_90c9c948bf5ad1 1-33
+std/src/math/trig.rey
+  h_90c9c948bf5ad1 1-69
+std/src/mem/README.md
+  h_90c9c948bf5ad1 1-25
+std/src/mem/main.rey
+  h_90c9c948bf5ad1 1-78
+std/src/net/README.md
+  h_90c9c948bf5ad1 1-23
+std/src/net/main.rey
+  h_90c9c948bf5ad1 1-90
+std/src/os/README.md
+  h_90c9c948bf5ad1 1-29
+std/src/os/main.rey
+  h_90c9c948bf5ad1 1-109
+std/src/process/README.md
+  h_90c9c948bf5ad1 1-27
+std/src/process/main.rey
+  h_90c9c948bf5ad1 1-78
+std/src/regex/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/regex/main.rey
+  h_90c9c948bf5ad1 1-144
+std/src/sql/README.md
+  h_90c9c948bf5ad1 1-42
+std/src/sql/main.rey
+  h_90c9c948bf5ad1 1-155
+std/src/string/README.md
+  h_90c9c948bf5ad1 1-72
+std/src/string/main.rey
+  h_90c9c948bf5ad1 1-479
+std/src/sync/README.md
+  h_90c9c948bf5ad1 1-22
+std/src/sync/main.rey
+  h_90c9c948bf5ad1 1-73
+std/src/test/README.md
+  h_90c9c948bf5ad1 1-26
+std/src/test/main.rey
+  h_90c9c948bf5ad1 1-34
+std/src/time/README.md
+  h_90c9c948bf5ad1 1-12
+std/src/time/main.rey
+  h_90c9c948bf5ad1 1-28
+std/src/toml/README.md
+  h_90c9c948bf5ad1 1-15
+std/src/toml/main.rey
+  h_90c9c948bf5ad1 1-210
+std/tests/binary/binary_test.rey
+  h_90c9c948bf5ad1 1-43
+std/tests/cli/cli_test.rey
+  h_90c9c948bf5ad1 1-41
+std/tests/collections/collections_test.rey
+  h_90c9c948bf5ad1 1-121
+std/tests/compress/compress_test.rey
+  h_90c9c948bf5ad1 1-38
+std/tests/core/core_test.rey
+  h_90c9c948bf5ad1 1-26
+std/tests/crypto/crypto_test.rey
+  h_90c9c948bf5ad1 1-30
+std/tests/csv/csv_test.rey
+  h_90c9c948bf5ad1 1-37
+std/tests/edge_cases/edge_cases_test.rey
+  h_90c9c948bf5ad1 1-188
+std/tests/env/env_test.rey
+  h_90c9c948bf5ad1 1-29
+std/tests/fmt/fmt_test.rey
+  h_90c9c948bf5ad1 1-28
+std/tests/fs/fs_test.rey
+  h_90c9c948bf5ad1 1-109
+std/tests/http/http_test.rey
+  h_90c9c948bf5ad1 1-11
+std/tests/image/image_test.rey
+  h_90c9c948bf5ad1 1-30
+std/tests/io/io_test.rey
+  h_90c9c948bf5ad1 1-33
+std/tests/json/json_test.rey
+  h_90c9c948bf5ad1 1-38
+std/tests/linalg/linalg_test.rey
+  h_90c9c948bf5ad1 1-56
+std/tests/log/log_test.rey
+  h_90c9c948bf5ad1 1-30
+std/tests/math/math_test.rey
+  h_90c9c948bf5ad1 1-106
+std/tests/mem/mem_test.rey
+  h_90c9c948bf5ad1 1-27
+std/tests/net/net_test.rey
+  h_90c9c948bf5ad1 1-31
+std/tests/os/os_test.rey
+  h_90c9c948bf5ad1 1-18
+std/tests/process/process_test.rey
+  h_90c9c948bf5ad1 1-49
+std/tests/regex/regex_test.rey
+  h_90c9c948bf5ad1 1-32
+std/tests/run_all.sh
+  h_90c9c948bf5ad1 1-81
+std/tests/sql/sql_test.rey
+  h_90c9c948bf5ad1 1-65
+std/tests/string/string_test.rey
+  h_90c9c948bf5ad1 1-90
+std/tests/sync/sync_test.rey
+  h_90c9c948bf5ad1 1-32
+std/tests/test/test_test.rey
+  h_90c9c948bf5ad1 1-10
+std/tests/time/time_test.rey
+  h_90c9c948bf5ad1 1-20
+std/tests/toml/toml_test.rey
+  h_90c9c948bf5ad1 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddc04541b49acbfe1bb52e9e42a99c35330c093b",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
