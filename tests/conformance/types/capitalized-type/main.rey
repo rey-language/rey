@@ -1,0 +1,6 @@
+// NEGATIVE: capitalized built-in type must fail checking.
+func main(): void {
+    var value: Int = 1;
+
+    println(value);
+}

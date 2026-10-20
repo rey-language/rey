@@ -1,0 +1,3 @@
+func wrong(): int {
+    return "not an int";
+}

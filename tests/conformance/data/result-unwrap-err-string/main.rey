@@ -1,0 +1,3 @@
+var err: Result<int, string> = Result::Err("bad");
+var message: string = err.unwrapErr();
+println(message);

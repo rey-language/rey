@@ -1,0 +1,7 @@
+func add(left: int, right: int): int {
+    return left + right;
+}
+
+func main(): void {
+    println(add(1));
+}

@@ -1,0 +1,6 @@
+import lib.{Safe, openSafe};
+
+func main(): void {
+    var safe: Safe = openSafe(7);
+    var leaked: int = safe.code;
+}

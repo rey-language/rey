@@ -1,0 +1,9 @@
+var positive = 7 / 2;
+var negative = -7 / 2;
+var positiveRemainder = 7 % 2;
+var negativeRemainder = -7 % 2;
+
+println(positive);
+println(negative);
+println(positiveRemainder);
+println(negativeRemainder);

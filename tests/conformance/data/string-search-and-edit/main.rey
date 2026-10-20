@@ -1,0 +1,17 @@
+func main(): void {
+    println("  AbC  ".trim());
+    println("AbC".toLower());
+    println("AbC".toUpper());
+    println("a,b,c".split(",").len());
+    println("hello".contains("ell"));
+    println("hello".startsWith("he"));
+    println("hello".endsWith("lo"));
+    println("hello".slice(1, 4));
+    println("ab".repeat(3));
+    println("12.5".toFloat() == 12.5);
+    println("h-e-l-l-o".replace("-", ""));
+    println("hello".indexOf("ll"));
+    println("hello".indexOf("z"));
+    println("ab".padLeft(4, "0"));
+    println("ab".padRight(4, "."));
+}

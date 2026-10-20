@@ -1,0 +1,11 @@
+var count = int('A');
+var ratio = float(3);
+var label = string(count);
+var initial = char(66);
+
+println(count);
+println(ratio == 3.0);
+println(label);
+println(initial);
+println("number=" + string(count));
+println("letter={initial}");

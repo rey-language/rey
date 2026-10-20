@@ -1,0 +1,5 @@
+import shared;
+
+pub func rightValue(): string {
+    return shared.answer();
+}

@@ -1,0 +1,6 @@
+// Charter §2 decision 11: a returned expression must match its annotated function return type.
+func wrong(): int {
+  return "wrong";
+}
+println(wrong());
+println("unreachable");

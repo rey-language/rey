@@ -1,0 +1,16 @@
+if true {
+    println("outer-then");
+    if false {
+        println("unreachable-inner");
+    } else {
+        println("inner-else");
+    }
+} else {
+    println("unreachable-outer");
+}
+
+if false {
+    println("unreachable");
+} else {
+    println("outer-else");
+}

@@ -1,0 +1,10 @@
+// Charter §2 decision 11: recursive functions have checked parameter and return types.
+func factorial(n: int): int {
+  if n <= 1 {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+println(factorial(0));
+println(factorial(1));
+println(factorial(5));

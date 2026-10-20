@@ -1,0 +1,3 @@
+println("before:divide-zero");
+var result: int = 7 / 0;
+println(result);

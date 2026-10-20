@@ -1,0 +1,9 @@
+var ok: Result<int, string> = Result::Ok(7);
+var err: Result<int, string> = Result::Err("bad");
+println(ok.isOk());
+println(ok.isErr());
+println(ok.unwrap());
+println(ok.unwrapOr(9));
+println(err.isOk());
+println(err.isErr());
+println(err.unwrapOr(9));

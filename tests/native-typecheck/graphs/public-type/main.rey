@@ -1,0 +1,6 @@
+import types.Point;
+
+func main(): void {
+    var point: Point = Point { value: 4 };
+    var result: int = point.value;
+}

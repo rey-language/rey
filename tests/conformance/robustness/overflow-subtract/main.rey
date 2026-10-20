@@ -1,0 +1,4 @@
+var min: int = -9223372036854775807 - 1;
+println("before:subtract");
+var result: int = min - 1;
+println(result);

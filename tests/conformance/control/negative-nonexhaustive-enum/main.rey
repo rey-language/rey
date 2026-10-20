@@ -1,0 +1,9 @@
+enum Status {
+    Idle,
+    Busy,
+}
+
+var status = Status::Idle;
+match status {
+    Status::Idle => { println("idle"); },
+}

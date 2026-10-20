@@ -1,0 +1,2 @@
+// pub func answer moved into math/main.rey (SPEC: one file per directory module).
+// This sibling file is pending owner deletion. See sprint2/harness/PENDING-DELETIONS.md.

@@ -1,0 +1,5 @@
+var values: Vec<int> = Vec.new();
+values.push(1);
+var readLength = () => values.len();
+values.push(2);
+println(readLength());

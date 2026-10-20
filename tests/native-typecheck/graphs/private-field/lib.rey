@@ -1,0 +1,8 @@
+pub struct Account {
+    pin: int,
+    pub id: int,
+}
+
+pub func makeAccount(id: int): Account {
+    return Account { pin: id, id: id };
+}

@@ -1,0 +1,4 @@
+func main(): void {
+    assert(1 < 2, "kept");
+    println("kept");
+}

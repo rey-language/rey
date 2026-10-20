@@ -1,0 +1,6 @@
+var word: string = "CAT";
+var initial: char = word[0];
+var lastChar: char = word[2];
+
+println(initial);
+println(lastChar == 'T');

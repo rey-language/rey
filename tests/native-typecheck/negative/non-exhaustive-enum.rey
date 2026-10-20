@@ -1,0 +1,8 @@
+enum Status { Idle, Busy }
+
+func main(): void {
+    var status = Status::Idle;
+    match status {
+        Status::Idle => { println("idle"); },
+    }
+}

@@ -1,0 +1,15 @@
+var outer = 0;
+var innerVisits = 0;
+while outer < 2 {
+    outer = outer + 1;
+    var inner = 0;
+    while inner < 3 {
+        inner = inner + 1;
+        if inner == 2 {
+            continue;
+        }
+        innerVisits = innerVisits + 1;
+    }
+    println(outer);
+}
+println(innerVisits);

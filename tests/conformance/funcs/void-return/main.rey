@@ -1,0 +1,7 @@
+// Charter §2 decision 1 and §3: void functions may return without a value.
+func announce(): void {
+  println("inside");
+  return;
+}
+announce();
+println("after");

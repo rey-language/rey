@@ -1,0 +1,5 @@
+// Charter §2 decision 11: incompatible expression types are rejected during checking.
+var invalid = 1 + "s";
+println(invalid);
+println(1);
+println("unreachable");

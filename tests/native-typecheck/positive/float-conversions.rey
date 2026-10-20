@@ -1,0 +1,13 @@
+func main(): void {
+    var huge: float = 3.9;
+    var value: int = huge.toInt();
+    var same: float = huge.toFloat();
+    var widened: float = value.toFloat();
+    var back: int = value.toInt();
+    println(value);
+    println(same == 3.9);
+    println(widened == 3.0);
+    println(back);
+    println((3.9).toInt());
+    println("12.8".toInt());
+}

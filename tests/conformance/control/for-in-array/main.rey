@@ -1,0 +1,5 @@
+var sum = 0;
+for value in [2, 4, 6] {
+    sum = sum + value;
+}
+println(sum);

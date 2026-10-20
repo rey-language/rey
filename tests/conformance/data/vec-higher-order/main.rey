@@ -1,0 +1,15 @@
+// spec 9.2: map, filter, and reduce on a vec.
+func main(): void {
+    var values: Vec<int> = Vec.new();
+    values.push(1);
+    values.push(2);
+    values.push(3);
+    values.push(4);
+    var doubled = values.map((value: int) => value * 2);
+    var evens = values.filter((value: int) => value % 2 == 0);
+    var total = values.reduce((sum: int, value: int) => sum + value, 0);
+    println(doubled.get(1));
+    println(evens.len());
+    println(evens.get(0));
+    println(total);
+}

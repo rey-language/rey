@@ -1,0 +1,9 @@
+var seed: int = 7;
+
+func readSeed(): int {
+    return seed;
+}
+
+func main(): void {
+    println(readSeed());
+}

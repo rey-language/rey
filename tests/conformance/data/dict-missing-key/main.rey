@@ -1,0 +1,6 @@
+func main(): void {
+    println("before");
+    var counts = {"apples": 1};
+    println(counts["missing"]);
+    println("after");
+}

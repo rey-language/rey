@@ -1,0 +1,18 @@
+struct Box {
+    pub n: int,
+}
+
+func main(): void {
+    var value: Box | string = Box { n: 4 };
+    if value instanceof Box {
+        println(value.n);
+    } else {
+        println("string");
+    }
+    var other: Box | string = "no";
+    if other instanceof Box {
+        println(other.n);
+    } else {
+        println(other);
+    }
+}

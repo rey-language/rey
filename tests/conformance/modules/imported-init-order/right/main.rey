@@ -1,0 +1,8 @@
+import leaf;
+
+println("right init");
+var saved = leaf.value() + 2;
+
+pub func fromRight(): int {
+    return saved;
+}

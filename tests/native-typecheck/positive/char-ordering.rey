@@ -1,0 +1,5 @@
+func main(): void {
+    println('a' < 'b');
+    println('\xFF' > '\x00');
+    println('a' <= 'a');
+}

@@ -1,0 +1,5 @@
+import types.Hidden;
+
+func read(value: Hidden): int {
+    return value.value;
+}

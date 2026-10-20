@@ -1,0 +1,6 @@
+var both = true && !false;
+var either = false || !true;
+
+println(both);
+println(either);
+println(!either);

@@ -1,0 +1,8 @@
+// spec 2.3 and 11: nul, hex nul, and a high byte stay in the string.
+func main(): void {
+    var raw = "a\0b\x00c\xFF";
+    println(raw.len());
+    println(raw[1] == '\0');
+    println(raw[3] == '\x00');
+    println(int(raw[5]));
+}

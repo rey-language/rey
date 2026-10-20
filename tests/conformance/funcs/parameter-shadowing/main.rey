@@ -1,0 +1,11 @@
+// Charter §2 decision 11: a nested local may shadow a parameter without changing its outer binding.
+func show(value: int): int {
+  var original = value;
+  if true {
+    var value = 99;
+    println(value);
+  }
+  println(original);
+  return value;
+}
+println(show(7));

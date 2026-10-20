@@ -1,0 +1,8 @@
+enum State { Ready, Failed }
+
+func isReady(state: State): bool {
+    match state {
+        State::Ready => { return true; },
+        State::Failed => { return false; },
+    }
+}

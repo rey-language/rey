@@ -1,0 +1,11 @@
+// spec 3.1 and 6.3: tuple equality is elementwise, including a one-element tuple.
+func main(): void {
+    var left = (1, "a", true);
+    var right = (1, "a", true);
+    var different = (1, "b", true);
+    println(left == right);
+    println(left == different);
+    println(left != different);
+    var single = (7,);
+    println(single.0);
+}

@@ -1,0 +1,6 @@
+func main(): void {
+    println("before");
+    var none: Option<int> = Option::None();
+    println(none.unwrap());
+    println("after");
+}

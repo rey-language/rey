@@ -1,0 +1,5 @@
+import cycle_b;
+
+pub func start(): int {
+    return cycle_b.ping();
+}

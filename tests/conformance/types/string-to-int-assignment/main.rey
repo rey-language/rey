@@ -1,0 +1,6 @@
+// NEGATIVE: assigning a string to int must fail checking.
+func main(): void {
+    var value: int = 1;
+    value = "one";
+    println(value);
+}

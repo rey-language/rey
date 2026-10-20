@@ -1,0 +1,7 @@
+func makePair(): (int, string) {
+    return (12, "dozen");
+}
+
+var pair = makePair();
+println(pair.0);
+println(pair.1);

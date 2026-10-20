@@ -1,0 +1,5 @@
+func main(): void {
+    println("count", 2, true);
+    eprint("left", "right");
+    eprintln();
+}

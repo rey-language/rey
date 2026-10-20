@@ -1,0 +1,7 @@
+var counts = {"apples": 1, pears: 2};
+println(counts["apples"]);
+println(counts["pears"]);
+counts["apples"] = 4;
+counts["pears"] = 3;
+println(counts["apples"]);
+println(counts.len());

@@ -1,0 +1,20 @@
+// spec 5.3: struct patterns match fields and bind the rest.
+struct Point {
+    pub x: int,
+    pub y: int,
+}
+
+func main(): void {
+    var exact = Point { x: 1, y: 2 };
+    match exact {
+        Point { x: 1, y: 2 } => { println("origin-ish"); },
+        Point { x: 1, y: bound } => { println(bound); },
+        _ => { println("other"); },
+    }
+    var other = Point { x: 1, y: 9 };
+    match other {
+        Point { x: 1, y: 2 } => { println("exact"); },
+        Point { x: 1, y: bound } => { println(bound); },
+        _ => { println("other"); },
+    }
+}

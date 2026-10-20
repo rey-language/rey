@@ -1,0 +1,7 @@
+var ready = 1;
+
+import lib.value;
+
+func main(): void {
+    println(ready + value());
+}

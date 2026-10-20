@@ -1,0 +1,6 @@
+func announce(): void {
+    println("called");
+}
+
+announce();
+println("returned");

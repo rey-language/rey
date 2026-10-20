@@ -1,0 +1,5 @@
+import lib.saved;
+
+func main(): void {
+    println(saved);
+}

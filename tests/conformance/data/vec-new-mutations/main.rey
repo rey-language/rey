@@ -1,0 +1,7 @@
+var values: Vec<int> = Vec.new();
+values.push(4);
+values.push(6);
+values.set(0, 5);
+println(values.get(0));
+println(values.pop());
+println(values.len());

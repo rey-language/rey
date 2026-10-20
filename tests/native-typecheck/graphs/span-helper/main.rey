@@ -1,0 +1,9 @@
+import model.Span;
+import model.Node;
+import model.nodeSpan;
+
+func main(): int {
+    var node: Node = Node::Error(Span { start: 1, end: 2 });
+    var span: Span = nodeSpan(node);
+    return span.start;
+}

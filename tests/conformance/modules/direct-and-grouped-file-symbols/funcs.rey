@@ -1,0 +1,7 @@
+pub func one(): int {
+    return 1;
+}
+
+pub func two(): int {
+    return 2;
+}

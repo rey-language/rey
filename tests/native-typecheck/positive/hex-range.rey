@@ -1,0 +1,7 @@
+func main(): void {
+    var n = 0x10;
+    match n {
+        0x10..0x20 => { println(n); },
+        _ => { println(0b1010); },
+    }
+}

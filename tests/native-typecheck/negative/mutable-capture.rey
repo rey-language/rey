@@ -1,0 +1,5 @@
+func run(): int {
+    var base: int = 5;
+    var add = (value: int) => value + base;
+    return add(2);
+}

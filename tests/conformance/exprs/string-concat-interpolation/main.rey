@@ -1,0 +1,5 @@
+// Charter §3: string concatenation and {expr} interpolation; literal-brace escaping awaits SPEC.
+println("hello " + "rey");
+println("value={1 + 2}");
+println("product={2 * 3}");
+println("concat=" + ("a" + "b"));

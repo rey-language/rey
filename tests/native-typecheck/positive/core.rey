@@ -1,0 +1,18 @@
+struct Pair {
+    left: int,
+    right: int,
+}
+
+func add(a: int, b: int): int {
+    return a + b;
+}
+
+func main(): void {
+    var total: int = add(2, 3);
+    const valid: bool = total > 0;
+    if valid {
+        var pair = Pair { left: total, right: 4 };
+        var result: int = pair.left + pair.right;
+    }
+    var text: string = "ok" + "!";
+}

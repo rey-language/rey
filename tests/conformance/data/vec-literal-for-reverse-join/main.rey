@@ -1,0 +1,10 @@
+var numbers: Vec<int> = [1, 2, 3];
+var total = 0;
+for item in numbers {
+    total = total + item;
+}
+println(total);
+
+var words: Vec<string> = ["red", "green", "blue"];
+words.reverse();
+println(words.join(","));

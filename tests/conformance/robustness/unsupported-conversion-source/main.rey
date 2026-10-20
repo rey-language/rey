@@ -1,0 +1,3 @@
+var values: Vec<int> = Vec.new();
+var value = values.toInt();
+println(value);

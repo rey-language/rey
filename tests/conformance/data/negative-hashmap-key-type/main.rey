@@ -1,0 +1,2 @@
+var table: HashMap<string, int> = HashMap.new();
+table.set(1, 2);

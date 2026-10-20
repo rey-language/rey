@@ -1,0 +1,5 @@
+// SPEC expressions: multiplicative before additive; subtraction is left-associative.
+println(1 + 2 * 3);
+println((1 + 2) * 3);
+println(10 - 4 - 3);
+println(2 * 3 % 4);

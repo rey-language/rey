@@ -1,0 +1,5 @@
+var saved = 1;
+
+pub func readSaved(): int {
+    return saved;
+}

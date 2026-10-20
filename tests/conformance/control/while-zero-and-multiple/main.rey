@@ -1,0 +1,13 @@
+var zeroCount = 0;
+while false {
+    zeroCount = zeroCount + 1;
+}
+println(zeroCount);
+
+var i = 0;
+var sum = 0;
+while i < 3 {
+    i = i + 1;
+    sum = sum + i;
+}
+println(sum);

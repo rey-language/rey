@@ -1,0 +1,260 @@
+import lexer;
+import parser;
+import lexer::{Span};
+import parser::ast::{Expr, ImportSourceKind, Program, Stmt};
+import typecheck::{CheckedExprInfo, CheckedFieldInitInfo, CheckedProgram, ImportEdge, SourceGraph, SourceUnit, TypecheckResult, ResolvedSymbol, typecheckAt, typecheckGraph};
+
+func parseSource(source: string, path: string): Program {
+    var lexed = lexer.tokenize(source, path);
+    assert(lexed.errors.len() == 0, "lexer errors in wrapper assertion source");
+    var parsed = parser.parse(lexed.tokens, path);
+    assert(parsed.errors.len() == 0, "parser errors in wrapper assertion source");
+    return parsed.program;
+}
+
+func sourceOpenBrace(): string {
+    return char(123).toString();
+}
+
+func sourceCloseBrace(): string {
+    return char(125).toString();
+}
+
+func resolvedSymbolMatches(info: CheckedExprInfo, path: string, module: string, name: string): bool {
+    var maybeSymbol = info.symbol;
+    if maybeSymbol != null {
+        var symbol: ResolvedSymbol = maybeSymbol;
+        return symbol.sourcePath == path && symbol.moduleId == module && symbol.sourceName == name;
+    }
+    return false;
+}
+
+func firstImportEdge(program: Program, fromPath: string, toPath: string): ImportEdge {
+    var edge = ImportEdge { fromPath: fromPath, toPath: toPath, sourceKind: ImportSourceKind.File, namespaceName: "", items: [], span: Span { start: -1, end: -1, line: 0, column: 0 } };
+    var found = false;
+    var i = 0;
+    loop {
+        if i >= program.statements.len() { break; }
+        match program.statements[i] {
+            Stmt::VarDecl(_) => {},
+            Stmt::ConstDecl(_) => {},
+            Stmt::FuncDecl(_) => {},
+            Stmt::StructDecl(_) => {},
+            Stmt::EnumDecl(_) => {},
+            Stmt::Import(importStmt) => {
+                edge = ImportEdge { fromPath: fromPath, toPath: toPath, sourceKind: importStmt.sourceKind, namespaceName: importStmt.namespaceName, items: importStmt.items, span: importStmt.span };
+                found = true;
+            },
+            Stmt::If(_) => {},
+            Stmt::Assign(_) => {},
+            Stmt::Return(_) => {},
+            Stmt::Break(_) => {},
+            Stmt::Continue(_) => {},
+            Stmt::While(_) => {},
+            Stmt::For(_) => {},
+            Stmt::Loop(_) => {},
+            Stmt::Block(_) => {},
+            Stmt::ExprStmt(_) => {},
+            Stmt::Match(_) => {},
+        }
+        i = i + 1;
+    }
+    assert(found, "missing source import for graph assertion");
+    return edge;
+}
+
+func assertSingleUnitMetadata() {
+    var path = "/fixture/checked-wrapper.rey";
+    var open = sourceOpenBrace();
+    var close = sourceCloseBrace();
+    var source = "struct Box " + open + " pub value: int " + close + "\nfunc twice(value: int): int " + open + " return value + value; " + close + "\nfunc main(): void " + open + " var box = Box " + open + " value: twice(2) " + close + "; var values: HashMap<string, int> = HashMap.new(); values.set(\"answer\", box.value); var result: int = values.get(\"answer\"); " + close;
+    var result: TypecheckResult = typecheckAt(parseSource(source, path), path, source);
+    assert(result.ok, "single-unit wrapper source did not typecheck");
+    var maybeChecked = result.checkedProgram;
+    if maybeChecked != null {
+        var checked: CheckedProgram = maybeChecked;
+        assert(checked.units.len() == 1 && checked.edges.len() == 0, "single-unit graph shape changed");
+        var sawDirectCall = false;
+        var sawField = false;
+        var sawMapGet = false;
+        var i = 0;
+        loop {
+            if i >= checked.expressions.len() { break; }
+            var info = checked.expressions[i];
+            match info.expression {
+                Expr::Error(_) => {},
+                Expr::Literal(_) => {},
+                Expr::Identifier(_) => {},
+                Expr::Binary(_) => {},
+                Expr::Unary(_) => {},
+                Expr::Update(_) => {},
+                Expr::Call(call) => {
+                    match call.callee {
+                        Expr::Identifier(ident) => {
+                            if ident.name == "twice" {
+                                sawDirectCall = true;
+                                assert(info.ty.kind == "Int", "direct call result metadata lost");
+                                assert(resolvedSymbolMatches(info, path, path, "twice"), "direct call owner metadata lost");
+                            }
+                        },
+                        Expr::FieldAccess(access) => {
+                            if access.name == "get" && info.receiverType.kind == "Dict" {
+                                sawMapGet = true;
+                                assert(info.ty.kind == "Int", "typed map receiver result metadata lost");
+                                var mapValue = info.receiverType.value;
+                                if mapValue != null { assert(mapValue.kind == "Int", "typed map receiver value metadata lost"); }
+                                else { assert(false, "typed map receiver value metadata missing"); }
+                            }
+                        },
+                        Expr::Error(_) => {},
+                        Expr::Literal(_) => {},
+                        Expr::Binary(_) => {},
+                        Expr::Unary(_) => {},
+                        Expr::Update(_) => {},
+                        Expr::Call(_) => {},
+                        Expr::EnumVariant(_) => {},
+                        Expr::Index(_) => {},
+                        Expr::Lambda(_) => {},
+                        Expr::Match(_) => {},
+                        Expr::If(_) => {},
+                        Expr::Tuple(_) => {},
+                        Expr::Array(_) => {},
+                        Expr::Dict(_) => {},
+                        Expr::StructLiteral(_) => {},
+                    }
+                },
+                Expr::EnumVariant(_) => {},
+                Expr::Index(_) => {},
+                Expr::FieldAccess(access) => {
+                    if access.name == "value" && info.receiverType.kind == "Struct" {
+                        sawField = true;
+                        assert(info.fieldIndex == 0, "field index metadata changed");
+                        assert(info.receiverType.name == "Box", "field receiver type metadata lost");
+                        assert(info.receiverType.sourcePath == path && info.receiverType.moduleId == path, "single-unit receiver identity lost");
+                        assert(resolvedSymbolMatches(info, path, path, "Box.value"), "single-unit field symbol owner lost");
+                    }
+                },
+                Expr::Lambda(_) => {},
+                Expr::Match(_) => {},
+                Expr::If(_) => {},
+                Expr::Tuple(_) => {},
+                Expr::Array(_) => {},
+                Expr::Dict(_) => {},
+                Expr::StructLiteral(_) => {},
+            }
+            i = i + 1;
+        }
+        assert(sawDirectCall, "missing checked direct-call wrapper");
+        assert(sawField, "missing checked field wrapper");
+        assert(sawMapGet, "missing checked map-call wrapper");
+        assert(checked.fieldInitializers.len() == 1, "unexpected checked field initializer count");
+        var fieldInit: CheckedFieldInitInfo = checked.fieldInitializers[0];
+        assert(fieldInit.fieldIndex == 0 && fieldInit.initializer.name == "value", "field initializer payload metadata lost");
+        match fieldInit.expression {
+            Expr::StructLiteral(literal) => { assert(literal.name == "Box" && fieldInit.literal.name == "Box", "outer literal wrapper metadata lost"); },
+            Expr::Error(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Literal(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Identifier(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Binary(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Unary(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Update(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Call(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::EnumVariant(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Index(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::FieldAccess(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Lambda(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Match(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::If(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Tuple(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Array(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+            Expr::Dict(_) => { assert(false, "field initializer did not retain its outer literal wrapper"); },
+        }
+    } else {
+        assert(false, "single-unit checker omitted its CheckedProgram");
+    }
+}
+
+func assertGraphOwnerMetadata() {
+    var modelPath = "/fixture/model.rey";
+    var entryPath = "/fixture/main.rey";
+    var open = sourceOpenBrace();
+    var close = sourceCloseBrace();
+    var modelSource = "pub struct Box " + open + " pub value: int " + close + "\nfunc hidden(value: int): int " + open + " return value + 1; " + close + "\npub func create(value: int): Box " + open + " return Box " + open + " value: hidden(value) " + close + "; " + close;
+    var entrySource = "import \"model.rey\";\nfunc main(): void " + open + " var box = model.create(4); var value: int = box.value; " + close;
+    var modelProgram = parseSource(modelSource, modelPath);
+    var entryProgram = parseSource(entrySource, entryPath);
+    var edge = firstImportEdge(entryProgram, entryPath, modelPath);
+    var graph = SourceGraph {
+        entryPath: entryPath,
+        units: [SourceUnit { sourcePath: modelPath, moduleId: modelPath, source: modelSource, isEntry: false, program: modelProgram }, SourceUnit { sourcePath: entryPath, moduleId: entryPath, source: entrySource, isEntry: true, program: entryProgram }],
+        edges: [edge],
+        errors: []
+    };
+    var result = typecheckGraph(graph);
+    assert(result.ok, "public module graph did not typecheck");
+    var maybeChecked = result.checkedProgram;
+    if maybeChecked != null {
+        var checked: CheckedProgram = maybeChecked;
+        assert(checked.units.len() == 2 && checked.edges.len() == 1, "multi-module graph shape changed");
+        assert(checked.units[0].sourcePath == modelPath && checked.units[0].moduleId == modelPath, "dependency source/module identity changed");
+        assert(checked.units[1].sourcePath == entryPath && checked.units[1].moduleId == entryPath, "entry source/module identity changed");
+        assert(checked.edges[0].fromPath == entryPath && checked.edges[0].toPath == modelPath, "retained import edge identity changed");
+        var sawPublicCallOwner = false;
+        var sawPublicFieldOwner = false;
+        var i = 0;
+        loop {
+            if i >= checked.expressions.len() { break; }
+            var info = checked.expressions[i];
+            match info.expression {
+                Expr::Call(call) => {
+                    match call.callee {
+                        Expr::FieldAccess(access) => {
+                            if access.name == "create" {
+                                sawPublicCallOwner = resolvedSymbolMatches(info, modelPath, modelPath, "create");
+                                assert(info.ty.kind == "Struct" && info.ty.sourcePath == modelPath && info.ty.moduleId == modelPath, "public return type owner metadata lost");
+                            }
+                        },
+                        _ => {},
+                    }
+                },
+                Expr::FieldAccess(access) => {
+                    if access.name == "value" && info.fieldIndex == 0 {
+                        sawPublicFieldOwner = info.sourcePath == entryPath && info.moduleId == entryPath && info.receiverType.sourcePath == modelPath && info.receiverType.moduleId == modelPath && resolvedSymbolMatches(info, modelPath, modelPath, "Box.value");
+                    }
+                },
+                _ => {},
+            }
+            i = i + 1;
+        }
+        assert(sawPublicCallOwner, "public call metadata lost source/module owner");
+        assert(sawPublicFieldOwner, "public field metadata lost source/module owner or field index");
+    } else {
+        assert(false, "graph checker omitted its CheckedProgram");
+    }
+
+    var privateSource = "import \"model.rey\";\nfunc main(): void " + open + " model.hidden(1); " + close;
+    var privatePath = "/fixture/private-main.rey";
+    var privateProgram = parseSource(privateSource, privatePath);
+    var privateEdge = firstImportEdge(privateProgram, privatePath, modelPath);
+    var privateGraph = SourceGraph {
+        entryPath: privatePath,
+        units: [SourceUnit { sourcePath: modelPath, moduleId: modelPath, source: modelSource, isEntry: false, program: modelProgram }, SourceUnit { sourcePath: privatePath, moduleId: privatePath, source: privateSource, isEntry: true, program: privateProgram }],
+        edges: [privateEdge],
+        errors: []
+    };
+    var privateResult = typecheckGraph(privateGraph);
+    assert(!privateResult.ok, "private module function became externally callable");
+    var sawPrivateDiagnostic = false;
+    var errorIndex = 0;
+    loop {
+        if errorIndex >= privateResult.errors.len() { break; }
+        if privateResult.errors[errorIndex].message.contains("cannot access private function 'hidden'") { sawPrivateDiagnostic = true; }
+        errorIndex = errorIndex + 1;
+    }
+    assert(sawPrivateDiagnostic, "private module call diagnostic changed");
+}
+
+func main(): void {
+    assertSingleUnitMetadata();
+    assertGraphOwnerMetadata();
+}

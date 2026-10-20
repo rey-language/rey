@@ -1,0 +1,20 @@
+enum NamedMessage {
+    Count(value: int),
+    Empty,
+}
+
+enum PositionalMessage {
+    Text(string),
+    Empty,
+}
+
+var count = NamedMessage::Count(7);
+var text = PositionalMessage::Text("ready");
+match count {
+    NamedMessage::Count(value) => { println(value); },
+    _ => { println("empty"); },
+}
+match text {
+    PositionalMessage::Text(value) => { println(value); },
+    _ => { println("empty"); },
+}

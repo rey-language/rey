@@ -1,0 +1,8 @@
+import left;
+import right;
+
+println("entry init");
+
+func main(): void {
+    println(left.fromLeft() + right.fromRight());
+}

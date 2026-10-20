@@ -1,0 +1,4 @@
+var offset: int = 41;
+var readOffset = () => offset;
+offset = 9;
+println(readOffset());

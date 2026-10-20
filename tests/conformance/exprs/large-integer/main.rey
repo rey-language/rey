@@ -1,0 +1,5 @@
+// SPEC types: int uses the signed i64 range; subtraction stays within range.
+var largest: int = 9223372036854775807;
+println(largest - 1);
+println(-9223372036854775807 - 1);
+println(-9223372036854775807);

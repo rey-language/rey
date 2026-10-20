@@ -1,0 +1,17 @@
+enum Message {
+    Count(value: int),
+    Label(value: string),
+}
+
+var numericMessage = Count(8);
+var textMessage = Label("ready");
+
+match numericMessage {
+    Message::Count(value) => { println(value); },
+    Message::Label(value) => { println(value); },
+}
+
+match textMessage {
+    Message::Count(value) => { println(value); },
+    Message::Label(value) => { println(value); },
+}

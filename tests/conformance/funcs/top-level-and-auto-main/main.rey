@@ -1,0 +1,6 @@
+// Charter §2 decision 13: top-level statements run and a defined main() is auto-called.
+println("top-before");
+func main() {
+  println("main");
+}
+println("top-after");

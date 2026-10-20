@@ -1,0 +1,3 @@
+pub func area(): int {
+    return 24;
+}

@@ -1,0 +1,42 @@
+import "./../../rey-compiler/src/diagnostics/main.rey";
+
+func positionText(span: Span): string {
+    return span.line.toString() + ":" + span.column.toString();
+}
+
+func makeDiagnostic(severity: Severity, message: string, span: Span): Diagnostic {
+    return Diagnostic {
+        severity: severity,
+        code: "",
+        message: message,
+        filePath: "fixture.rey",
+        span: span
+    };
+}
+
+func main() {
+    var source = "alpha\nomega";
+    var first = spanFromOffsets(source, 0, 1);
+    var lastLine = spanFromOffsets(source, 6, 7);
+    var eof = spanFromOffsets(source, source.len(), source.len());
+    var empty = spanFromOffsets("", 0, 0);
+    println(positionText(first));
+    println(positionText(lastLine));
+    println(positionText(eof));
+    println(positionText(empty));
+
+    var missing = makeDiagnostic(Severity::Note, "no location", unknownSpan());
+    println(formatDiagnostic(missing));
+    var invalid = spanFromOffsets("abc", -1, 3);
+    println(formatDiagnostic(makeDiagnostic(Severity::Error, "invalid offset", invalid)));
+
+    var multiline = makeDiagnostic(Severity::Error, "first\nsecond\rthird", first);
+    println(formatDiagnostic(multiline));
+
+    var bag = newBag();
+    pushDiagnostic(bag, makeDiagnostic(Severity::Warning, "later", lastLine));
+    println(hasErrors(bag));
+    pushDiagnostic(bag, makeDiagnostic(Severity::Error, "earlier", first));
+    println(hasErrors(bag));
+    println(formatDiagnostics(bag));
+}

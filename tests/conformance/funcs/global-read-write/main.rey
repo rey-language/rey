@@ -1,0 +1,9 @@
+// Charter §7 v1 defect ledger: function reads and writes a top-level global.
+var score = 10;
+func addScore(delta: int): int {
+  score = score + delta;
+  return score;
+}
+println(score);
+println(addScore(5));
+println(score);

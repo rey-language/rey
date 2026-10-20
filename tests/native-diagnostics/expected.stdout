@@ -1,0 +1,11 @@
+1:1
+2:1
+2:6
+1:1
+fixture.rey:?:?: note: no location
+fixture.rey:?:?: error: invalid offset
+fixture.rey:1:1: error: first\nsecond\rthird
+false
+true
+fixture.rey:2:1: warning: later
+fixture.rey:1:1: error: earlier

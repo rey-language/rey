@@ -1,0 +1,15 @@
+// spec 4.2: one trailing variadic collects the extra arguments.
+func sum(first: int, rest: ...int): int {
+    var total = first;
+    var index = 0;
+    while index < rest.len() {
+        total = total + rest[index];
+        index = index + 1;
+    }
+    return total;
+}
+
+func main(): void {
+    println(sum(4));
+    println(sum(1, 2, 3));
+}

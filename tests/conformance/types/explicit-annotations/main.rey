@@ -1,0 +1,11 @@
+var count: int = 12;
+var ratio: float = 1.5;
+var ready: bool = false;
+var label: string = "rey";
+var initial: char = 'R';
+
+println(count);
+println(ratio);
+println(ready);
+println(label);
+println(initial);

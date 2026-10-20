@@ -1,0 +1,6 @@
+pub struct Point { pub value: int }
+pub struct Other { pub value: int }
+
+pub func create(): Point {
+    return Point { value: 0 };
+}

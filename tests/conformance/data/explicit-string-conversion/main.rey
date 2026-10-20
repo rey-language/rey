@@ -1,0 +1,3 @@
+var value = 7;
+var message = "value=" + value.toString();
+println(message);

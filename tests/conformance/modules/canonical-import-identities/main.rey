@@ -1,0 +1,8 @@
+import shared.value;
+import "shared.rey";
+import modules::child;
+import modules::child;
+import "modules/child/main.rey";
+
+println(value());
+println(child.answer());

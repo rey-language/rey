@@ -1,0 +1,7 @@
+// Charter §2 decision 12: lambdas may capture immutable values but mutable captures are out of scope.
+func makeBump(): int {
+  var count = 0;
+  var bump = () => (count = count + 1);
+  return bump();
+}
+println(makeBump());

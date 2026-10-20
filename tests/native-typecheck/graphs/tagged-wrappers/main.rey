@@ -1,0 +1,6 @@
+import "model.rey";
+
+func main(): void {
+    var box = model.create(4);
+    var value: int = box.value;
+}

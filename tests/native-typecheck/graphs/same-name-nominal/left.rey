@@ -1,0 +1,32 @@
+import inner.Payload;
+
+pub struct Point {
+    pub x: int,
+    pub payload: Payload,
+    hidden: int,
+}
+
+pub struct Holder {
+    pub item: Point,
+    pub values: Vec<Payload>,
+    pub maybe: Payload?,
+    pub table: HashMap<string, Payload>,
+    pub choice: Option<Payload>,
+    pub outcome: Result<Payload, string>,
+    pub pair: (Payload, int),
+    pub convert: (Payload) -> int,
+}
+
+pub enum Event {
+    Ping(Payload),
+    Batch(Vec<Payload>),
+    Done,
+}
+
+pub func makePoint(x: int): Point {
+    return Point { x: x, payload: Payload { n: x }, hidden: 0 };
+}
+
+pub func makeEvent(payload: Payload): Event {
+    return Event::Ping(payload);
+}

@@ -1,0 +1,10 @@
+struct Payload { value: int }
+enum Leaf { Value(value: Payload) }
+enum Node { Leaf(value: Leaf), Empty }
+
+func leafValue(node: Node): int {
+    match node {
+        Node::Leaf(Leaf::Value(Payload { value: _ })) => { return 1; },
+        Node::Empty => { return 0; },
+    }
+}

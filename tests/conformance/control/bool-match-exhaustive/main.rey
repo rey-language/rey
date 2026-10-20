@@ -1,0 +1,5 @@
+var ready = false;
+match ready {
+    true => { println("ready"); },
+    false => { println("waiting"); },
+}

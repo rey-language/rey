@@ -1,0 +1,4 @@
+import math;
+
+println(math.answer());
+println(math.double(6));

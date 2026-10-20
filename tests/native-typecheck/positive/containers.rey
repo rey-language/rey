@@ -1,0 +1,10 @@
+func main(): void {
+    var values: Vec<int> = Vec.new();
+    values.push(7);
+    var item: int = values.get(0);
+
+    var table: HashMap<string, int> = HashMap.new();
+    table.set("item", item);
+    var present: bool = table.has("item");
+    var stored: int = table.get("item");
+}

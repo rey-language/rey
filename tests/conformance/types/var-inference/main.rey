@@ -1,0 +1,9 @@
+var count = 12;
+var ratio = 1.5;
+var ready = true;
+var label = "rey";
+
+println(count);
+println(ratio);
+println(ready);
+println(label);

@@ -1,0 +1,9 @@
+// Charter §2 decision 11: annotated function parameters and ordinary zero/multi-argument calls.
+func zero(): int {
+  return 7;
+}
+func add(a: int, b: int): int {
+  return a + b;
+}
+println(zero());
+println(add(8, 9));

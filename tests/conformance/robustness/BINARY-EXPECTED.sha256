@@ -1,0 +1,3 @@
+# Byte-exact expected.stdout manifest: relative path, SHA-256, byte hex.
+escaped-utf8-bytes/expected.stdout  870bfd4aa877bd6aca515e16328c603aee05de33afe72421d1a35354e7952bee  320ac3a90a
+raw-byte-char-string/expected.stdout  21589893e161968a601e2db5d87392faaae445478776dbcbcc2951aaba9462cb  0080ff7cff

@@ -1,0 +1,4 @@
+func main(): void {
+    var text = "count=" + 1;
+    println(text);
+}

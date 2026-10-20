@@ -1,0 +1,8 @@
+func success(): int {
+    var result: Result<int, string> = Result.Ok(4);
+    return result.unwrapOr(0);
+}
+
+func failure(): Result<int, string> {
+    return Result.Err("failure");
+}

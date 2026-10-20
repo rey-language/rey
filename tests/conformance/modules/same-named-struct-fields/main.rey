@@ -1,0 +1,9 @@
+import left;
+import right;
+
+func main(): void {
+    var leftPoint = left.makeLeft();
+    var rightPoint = right.makeRight();
+    println(leftPoint.x);
+    println(rightPoint.y);
+}

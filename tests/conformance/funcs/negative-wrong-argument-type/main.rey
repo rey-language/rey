@@ -1,0 +1,6 @@
+// Charter §2 decision 11: annotated function arguments are type-checked.
+func identity(value: int): int {
+  return value;
+}
+println(identity("wrong"));
+println("unreachable");

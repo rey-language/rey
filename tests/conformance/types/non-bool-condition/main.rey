@@ -1,0 +1,6 @@
+// NEGATIVE: non-bool condition must fail checking.
+func main(): void {
+    if 1 {
+        println("unreachable");
+    }
+}

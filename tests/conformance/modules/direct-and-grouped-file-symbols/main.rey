@@ -1,0 +1,4 @@
+import funcs.one;
+import funcs.{two};
+
+println(one() + two());

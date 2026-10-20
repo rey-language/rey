@@ -1,0 +1,3 @@
+pub func sum(first: int, rest: ...int): int {
+    return first + rest[0] + rest[1] + rest[2];
+}

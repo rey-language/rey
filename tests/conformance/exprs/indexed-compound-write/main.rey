@@ -1,0 +1,12 @@
+// spec 6.1 and 6.3: index targets accept compound assignment.
+func main(): void {
+    var values: Vec<int> = [10, 20];
+    values[0] += 3;
+    values[1] -= 4;
+    values[0] *= 2;
+    println(values[0]);
+    println(values[1]);
+    var counts = {"apples": 1};
+    counts["apples"] += 4;
+    println(counts["apples"]);
+}

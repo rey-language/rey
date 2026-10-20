@@ -1,0 +1,11 @@
+// These keys share bucket 14 in the native map's initial 16-slot FNV table.
+var table: HashMap<string, int> = HashMap.new();
+table.set("k0", 0);
+table.set("k22", 22);
+table.set("k31", 31);
+table.delete("k0");
+println(table.has("k22"));
+println(table.get("k22"));
+println(table.has("k31"));
+println(table.get("k31"));
+println(table.len());

@@ -1,0 +1,9 @@
+var some: Option<int> = Option::Some(5);
+var none: Option<int> = Option::None();
+println(some.isSome());
+println(some.isNone());
+println(some.unwrap());
+println(some.unwrapOr(9));
+println(none.isSome());
+println(none.isNone());
+println(none.unwrapOr(9));

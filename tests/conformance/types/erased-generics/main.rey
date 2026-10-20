@@ -1,0 +1,5 @@
+var words: Vec<string> = ["one", "two"];
+var counts: HashMap<string, int> = {"apples": 3};
+
+println(words[0]);
+println(counts["apples"]);

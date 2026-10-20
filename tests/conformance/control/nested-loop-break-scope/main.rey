@@ -1,0 +1,11 @@
+var outer = 0;
+var innerRuns = 0;
+while outer < 3 {
+    outer = outer + 1;
+    loop {
+        innerRuns = innerRuns + 1;
+        break;
+    }
+}
+println(outer);
+println(innerRuns);

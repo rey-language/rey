@@ -1,0 +1,5 @@
+import left;
+import right;
+
+println(left.leftValue());
+println(right.rightValue());

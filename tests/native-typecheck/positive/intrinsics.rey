@@ -1,0 +1,9 @@
+func errorMessage(value: Result<string, string>): string {
+    return value.unwrapErr();
+}
+
+func main(): void {
+    var letter: char = char(65);
+    eprintln(letter.toString());
+    exit(0);
+}

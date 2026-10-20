@@ -1,0 +1,7 @@
+// Charter §2 decision 11: every path through an annotated non-void function must return a value.
+func maybe(flag: bool): int {
+  if flag {
+    return 1;
+  }
+}
+println(maybe(false));

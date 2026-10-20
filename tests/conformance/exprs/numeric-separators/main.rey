@@ -1,0 +1,6 @@
+func main(): void {
+    // Underscores sit between digits and do not change the value.
+    println(1_000);
+    println(1_000_000);
+    println(3.1_25 == 3.125);
+}

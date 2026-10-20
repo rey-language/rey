@@ -1,0 +1,8 @@
+enum Color { Red, Blue }
+
+func code(color: Color): int {
+    match color {
+        Red => { return 1; },
+        Blue => { return 2; },
+    }
+}

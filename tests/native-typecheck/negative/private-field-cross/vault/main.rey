@@ -1,0 +1,8 @@
+pub struct Safe {
+    code: int,
+    pub id: int,
+}
+
+pub func openSafe(id: int): Safe {
+    return Safe { code: id, id: id };
+}

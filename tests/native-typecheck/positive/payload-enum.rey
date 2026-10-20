@@ -1,0 +1,13 @@
+enum Outcome { Number(amount: int), Empty }
+
+func unwrap(outcome: Outcome): int {
+    match outcome {
+        Number(value) => { return value; },
+        _ => { return 0; },
+    }
+}
+
+func main(): void {
+    var outcome: Outcome = Outcome::Number(3);
+    var amount: int = unwrap(outcome);
+}

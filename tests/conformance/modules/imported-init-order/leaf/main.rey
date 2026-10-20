@@ -1,0 +1,10 @@
+println("leaf init");
+var seed: int = 40;
+
+pub func value(): int {
+    return seed;
+}
+
+pub func main(): void {
+    println("leaf main");
+}

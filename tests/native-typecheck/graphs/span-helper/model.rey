@@ -1,0 +1,9 @@
+pub struct Span { pub start: int, pub end: int }
+pub enum Node { Error(span: Span), Literal(span: Span) }
+
+pub func nodeSpan(node: Node): Span {
+    match node {
+        Node::Error(span) => { return span; },
+        Node::Literal(span) => { return span; },
+    }
+}

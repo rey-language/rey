@@ -1,0 +1,9 @@
+// Charter §2 decision 11: nested function calls evaluate as ordinary expressions.
+func add(a: int, b: int): int {
+  return a + b;
+}
+func twice(n: int): int {
+  return n * 2;
+}
+println(add(twice(2), add(1, 3)));
+println(twice(add(2, 3)));

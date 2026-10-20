@@ -1,0 +1,6 @@
+var value = 10;
+if true {
+    var value = 20;
+    println(value);
+}
+println(value);

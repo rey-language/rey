@@ -1,0 +1,3 @@
+pub func perimeter(): int {
+    return 20;
+}

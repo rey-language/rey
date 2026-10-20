@@ -1,0 +1,6 @@
+func main(): void {
+    println("before");
+    var values: Vec<int> = [1];
+    println(values[3]);
+    println("after");
+}

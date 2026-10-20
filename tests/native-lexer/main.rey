@@ -1,0 +1,209 @@
+import "../../rey-compiler/src/lexer/main.rey";
+
+// This file import exposes the one public Token/Span/LexError result contract.
+
+func expect(condition: bool, label: string): void {
+    if !condition {
+        println("FAIL " + label);
+    }
+}
+
+func expectToken(result, index: int, kind: string, lexeme: string, start: int, end: int, line: int, column: int): void {
+    if result.tokens.len() <= index {
+        expect(false, "token missing at index " + index.toString());
+        return;
+    }
+    var token = result.tokens[index];
+    expect(token.kind == kind, "kind at " + index.toString());
+    expect(token.lexeme == lexeme, "lexeme at " + index.toString());
+    expect(token.span.start == start, "start at " + index.toString());
+    expect(token.span.end == end, "end at " + index.toString());
+    expect(token.span.line == line, "line at " + index.toString());
+    expect(token.span.column == column, "column at " + index.toString());
+}
+
+func expectError(result, index: int, kind: string, start: int, end: int, line: int, column: int): void {
+    if result.errors.len() <= index {
+        expect(false, "error missing at index " + index.toString());
+        return;
+    }
+    var error = result.errors[index];
+    expect(error.kind == kind, "error kind at " + index.toString());
+    expect(error.span.start == start, "error start at " + index.toString());
+    expect(error.span.end == end, "error end at " + index.toString());
+    expect(error.span.line == line, "error line at " + index.toString());
+    expect(error.span.column == column, "error column at " + index.toString());
+}
+
+var empty = tokenize("", "empty.rey");
+expect(empty.errors.len() == 0, "empty input errors");
+expect(empty.tokens.len() == 1, "empty input eof count");
+expectToken(empty, 0, "Eof", "", 0, 0, 1, 1);
+
+var canonicalApi = tokenize("name", "public-api.rey");
+expect(canonicalApi.errors.len() == 0, "public namespace import errors");
+expect(canonicalApi.tokens.len() == 2, "public namespace token result");
+expectToken(canonicalApi, 0, "Identifier", "name", 0, 4, 1, 1);
+expectToken(canonicalApi, 1, "Eof", "", 4, 4, 1, 5);
+
+var range = tokenize("1..3", "range.rey");
+expect(range.errors.len() == 0, "range errors");
+expect(range.tokens.len() == 4, "range token count");
+expectToken(range, 0, "NumberLiteral", "1", 0, 1, 1, 1);
+expectToken(range, 1, "DotDot", "..", 1, 3, 1, 2);
+expectToken(range, 2, "NumberLiteral", "3", 3, 4, 1, 4);
+expectToken(range, 3, "Eof", "", 4, 4, 1, 5);
+
+var numbers = tokenize("1_000 0xA_B 0b1_0", "numbers.rey");
+expect(numbers.errors.len() == 0, "numeric separators errors");
+expect(numbers.tokens.len() == 4, "numeric separators token count");
+expectToken(numbers, 0, "NumberLiteral", "1000", 0, 5, 1, 1);
+expectToken(numbers, 1, "NumberLiteral", "0xAB", 6, 11, 1, 7);
+expectToken(numbers, 2, "NumberLiteral", "0b10", 12, 17, 1, 13);
+expectToken(numbers, 3, "Eof", "", 17, 17, 1, 18);
+
+var operators = tokenize("=> -> :: ++ -- .. ... | ||", "operators.rey");
+expect(operators.errors.len() == 0, "operator errors");
+expect(operators.tokens.len() == 10, "operator token count");
+expectToken(operators, 0, "FatArrow", "=>", 0, 2, 1, 1);
+expectToken(operators, 1, "Arrow", "->", 3, 5, 1, 4);
+expectToken(operators, 2, "ColonColon", "::", 6, 8, 1, 7);
+expectToken(operators, 3, "PlusPlus", "++", 9, 11, 1, 10);
+expectToken(operators, 4, "MinusMinus", "--", 12, 14, 1, 13);
+expectToken(operators, 5, "DotDot", "..", 15, 17, 1, 16);
+expectToken(operators, 6, "Ellipsis", "...", 18, 21, 1, 19);
+expectToken(operators, 7, "Pipe", "|", 22, 23, 1, 23);
+expectToken(operators, 8, "OrOr", "||", 24, 26, 1, 25);
+expectToken(operators, 9, "Eof", "", 26, 26, 1, 27);
+
+var quotedAmp = tokenize("\"&\"", "amp.rey");
+expect(quotedAmp.errors.len() == 0, "quoted ampersand errors");
+expectToken(quotedAmp, 0, "StringLiteral", "&", 0, 3, 1, 1);
+expectToken(quotedAmp, 1, "Eof", "", 3, 3, 1, 4);
+
+var braces = tokenize("\x7B\x7D", "braces.rey");
+expect(braces.errors.len() == 0, "brace token errors");
+expectToken(braces, 0, "LeftBrace", "\x7B", 0, 1, 1, 1);
+expectToken(braces, 1, "RightBrace", "\x7D", 1, 2, 1, 2);
+expectToken(braces, 2, "Eof", "", 2, 2, 1, 3);
+
+var escapedBraceString = tokenize("\"\\x7B\"", "brace-string.rey");
+expect(escapedBraceString.errors.len() == 0, "escaped brace string errors");
+expectToken(escapedBraceString, 0, "StringLiteral", "\x7B", 0, 6, 1, 1);
+expectToken(escapedBraceString, 1, "Eof", "", 6, 6, 1, 7);
+
+var builtinNames = tokenize("int float bool string void char any len toUpper toLower toString", "builtin-names.rey");
+expect(builtinNames.errors.len() == 0, "builtin names errors");
+expect(builtinNames.tokens.len() == 12, "builtin names token count");
+var builtinIndex = 0;
+while builtinIndex < 11 {
+    expect(builtinNames.tokens[builtinIndex].kind == "Identifier", "builtin names remain identifiers");
+    builtinIndex = builtinIndex + 1;
+}
+expectToken(builtinNames, 11, "Eof", "", 64, 64, 1, 65);
+
+var escapes = tokenize("\"\\n\\t\\r\\\\\\\"\\'\\0\\x41\"", "escapes.rey");
+expect(escapes.errors.len() == 0, "string escape errors");
+expect(escapes.tokens.len() == 2, "string escape token count");
+expectToken(escapes, 0, "StringLiteral", "\n\t\r\\\"'\0A", 0, 20, 1, 1);
+expectToken(escapes, 1, "Eof", "", 20, 20, 1, 21);
+
+var chars = tokenize("'a' '\\n' '\\x41' '\\''", "chars.rey");
+expect(chars.errors.len() == 0, "char escape errors");
+expect(chars.tokens.len() == 5, "char token count");
+expectToken(chars, 0, "CharLiteral", "a", 0, 3, 1, 1);
+expectToken(chars, 1, "CharLiteral", "\n", 4, 8, 1, 5);
+expectToken(chars, 2, "CharLiteral", "A", 9, 15, 1, 10);
+expectToken(chars, 3, "CharLiteral", "'", 16, 20, 1, 17);
+expectToken(chars, 4, "Eof", "", 20, 20, 1, 21);
+
+var positions = tokenize("var x = 1;\n  x++", "positions.rey");
+expect(positions.errors.len() == 0, "position errors");
+expectToken(positions, 5, "Identifier", "x", 13, 14, 2, 3);
+expectToken(positions, 6, "PlusPlus", "++", 14, 16, 2, 4);
+expectToken(positions, 7, "Eof", "", 16, 16, 2, 6);
+
+var comment = tokenize("/* outer /* inner */ 7", "comment.rey");
+expect(comment.errors.len() == 0, "non-nested block comment errors");
+expect(comment.tokens.len() == 2, "non-nested block comment token count");
+expectToken(comment, 0, "NumberLiteral", "7", 21, 22, 1, 22);
+expectToken(comment, 1, "Eof", "", 22, 22, 1, 23);
+
+var invalid = tokenize("@x", "invalid.rey");
+expect(invalid.errors.len() == 1, "invalid character error count");
+expectError(invalid, 0, "UnexpectedCharacter", 0, 1, 1, 1);
+expect(invalid.tokens.len() == 2, "invalid character makes progress");
+expectToken(invalid, 0, "Identifier", "x", 1, 2, 1, 2);
+expectToken(invalid, 1, "Eof", "", 2, 2, 1, 3);
+
+var badEscape = tokenize("\"\\q\"x", "bad-escape.rey");
+expect(badEscape.errors.len() == 1, "unknown escape error count");
+expectError(badEscape, 0, "InvalidEscape", 0, 3, 1, 1);
+expect(badEscape.tokens.len() == 3, "unknown escape makes progress");
+expectToken(badEscape, 1, "Identifier", "x", 4, 5, 1, 5);
+expectToken(badEscape, 2, "Eof", "", 5, 5, 1, 6);
+
+var badChar = tokenize("'ab' x", "bad-char.rey");
+expect(badChar.errors.len() == 1, "multi-byte char error count");
+expectError(badChar, 0, "InvalidChar", 0, 4, 1, 1);
+expectToken(badChar, 0, "CharLiteral", "ab", 0, 4, 1, 1);
+expectToken(badChar, 1, "Identifier", "x", 5, 6, 1, 6);
+
+var badNumber = tokenize("1__2", "bad-number.rey");
+expect(badNumber.errors.len() == 1, "invalid number error count");
+expectError(badNumber, 0, "InvalidNumber", 0, 4, 1, 1);
+expect(badNumber.tokens.len() == 2, "invalid number makes progress");
+expectToken(badNumber, 0, "NumberLiteral", "12", 0, 4, 1, 1);
+expectToken(badNumber, 1, "Eof", "", 4, 4, 1, 5);
+
+var shortEscape = tokenize("\"\\x4", "short-escape.rey");
+expect(shortEscape.errors.len() >= 1, "truncated escape error");
+expect(shortEscape.tokens.len() == 2, "truncated escape makes progress");
+expectToken(shortEscape, 1, "Eof", "", 4, 4, 1, 5);
+
+var shortString = tokenize("\"open", "short-string.rey");
+expect(shortString.errors.len() == 1, "truncated string error");
+expectError(shortString, 0, "UnterminatedString", 0, 5, 1, 1);
+expectToken(shortString, 0, "StringLiteral", "open", 0, 5, 1, 1);
+expectToken(shortString, 1, "Eof", "", 5, 5, 1, 6);
+
+var shortChar = tokenize("'open", "short-char.rey");
+expect(shortChar.errors.len() >= 1, "truncated char error");
+expectToken(shortChar, 1, "Eof", "", 5, 5, 1, 6);
+
+var shortComment = tokenize("/*", "short-comment.rey");
+expect(shortComment.errors.len() == 1, "truncated comment error");
+expectError(shortComment, 0, "UnterminatedComment", 0, 2, 1, 1);
+expectToken(shortComment, 0, "Eof", "", 2, 2, 1, 3);
+
+var removed = tokenize("export pub", "visibility.rey");
+expect(removed.errors.len() == 1, "export migration error");
+expectToken(removed, 0, "Export", "export", 0, 6, 1, 1);
+expectToken(removed, 1, "Pub", "pub", 7, 10, 1, 8);
+
+var tupleIndex = tokenize("pair.0 (item).1", "tuple-index.rey");
+expect(tupleIndex.errors.len() == 0, "tuple index errors");
+expectToken(tupleIndex, 0, "Identifier", "pair", 0, 4, 1, 1);
+expectToken(tupleIndex, 1, "Dot", ".", 4, 5, 1, 5);
+expectToken(tupleIndex, 2, "NumberLiteral", "0", 5, 6, 1, 6);
+expectToken(tupleIndex, 5, "RightParen", ")", 12, 13, 1, 13);
+expectToken(tupleIndex, 6, "Dot", ".", 13, 14, 1, 14);
+expectToken(tupleIndex, 7, "NumberLiteral", "1", 14, 15, 1, 15);
+
+var chainedIndex = tokenize("nested.0.0", "chained-index.rey");
+expect(chainedIndex.errors.len() == 0, "chained tuple index errors");
+expectToken(chainedIndex, 0, "Identifier", "nested", 0, 6, 1, 1);
+expectToken(chainedIndex, 1, "Dot", ".", 6, 7, 1, 7);
+expectToken(chainedIndex, 2, "NumberLiteral", "0", 7, 8, 1, 8);
+expectToken(chainedIndex, 3, "Dot", ".", 8, 9, 1, 9);
+expectToken(chainedIndex, 4, "NumberLiteral", "0", 9, 10, 1, 10);
+
+var floatLiteral = tokenize("1.5", "float.rey");
+expect(floatLiteral.errors.len() == 0, "float literal errors");
+expectToken(floatLiteral, 0, "NumberLiteral", "1.5", 0, 3, 1, 1);
+
+var leadingDot = tokenize(".5", "leading-dot.rey");
+expect(leadingDot.errors.len() == 1, "leading dot float error");
+expectError(leadingDot, 0, "InvalidNumber", 0, 1, 1, 1);
+
+println("native lexer checks passed");

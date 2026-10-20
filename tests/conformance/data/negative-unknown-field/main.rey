@@ -1,0 +1,6 @@
+struct Point {
+    x: int,
+}
+
+var point = Point { x: 1 };
+println(point.missing);

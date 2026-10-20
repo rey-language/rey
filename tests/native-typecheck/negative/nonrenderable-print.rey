@@ -1,0 +1,6 @@
+struct Point { x: int }
+
+func main(): void {
+    var point = Point { x: 1 };
+    println(point);
+}

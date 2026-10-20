@@ -1,0 +1,15 @@
+// spec 3.3: instanceof narrows both the true arm and the remaining union.
+func main(): void {
+    var value: int | string = 7;
+    if value instanceof string {
+        println(value);
+    } else {
+        println(value + 1);
+    }
+    var label: int | string = "rey";
+    if label instanceof string {
+        println(label);
+    } else {
+        println(label);
+    }
+}

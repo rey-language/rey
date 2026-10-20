@@ -1,0 +1,11 @@
+// spec 5.2: for-in over a vec honors break and continue.
+func main(): void {
+    var values: Vec<int> = [1, 2, 3, 4];
+    var total = 0;
+    for item in values {
+        if item == 2 { continue; }
+        if item == 4 { break; }
+        total = total + item;
+    }
+    println(total);
+}

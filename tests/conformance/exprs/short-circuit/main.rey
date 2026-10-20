@@ -1,0 +1,9 @@
+// SPEC operators: && and || short-circuit their right operand when its value is already determined.
+func boom(): bool {
+  println("boom");
+  return true;
+}
+var x = false && boom();
+var y = true || boom();
+var z = true && boom();
+println(z);

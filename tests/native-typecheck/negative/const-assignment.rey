@@ -1,0 +1,4 @@
+func main(): void {
+    const limit: int = 4;
+    limit = 5;
+}

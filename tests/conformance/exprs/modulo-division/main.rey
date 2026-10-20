@@ -1,0 +1,5 @@
+// Charter §3: int / int truncates toward zero and % preserves int; negative remainder follows v1 baseline.
+println(17 % 5);
+println(17 / 5);
+println(-17 % 5);
+println(-17 / 5);

@@ -1,0 +1,4 @@
+var mixed = ("item", 4, true);
+println(mixed.0);
+println(mixed.1);
+println(mixed.2);

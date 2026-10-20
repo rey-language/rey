@@ -1,0 +1,14 @@
+var text = "Rey";
+println(text.len());
+println(text[0] == 'R');
+println(text[1].toString());
+
+var withNul = "A\0B";
+println(withNul.len());
+println(withNul[1] == '\0');
+println(withNul[0] == '\x41');
+
+var highByte = "\xFF";
+println(highByte.len());
+println(highByte[0] == '\xFF');
+println(highByte[0].toString().len());

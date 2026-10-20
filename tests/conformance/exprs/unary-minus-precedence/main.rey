@@ -1,0 +1,5 @@
+// SPEC expressions: unary minus binds before multiplication and additive operators.
+println(-2 + 3);
+println(-(2 + 3));
+println(-2 * 3);
+println(2 * -3 + 1);

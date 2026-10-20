@@ -1,0 +1,12 @@
+struct Box { value: int }
+
+func twice(value: int): int {
+    return value + value;
+}
+
+func main(): void {
+    var box = Box { value: twice(2) };
+    var values: HashMap<string, int> = HashMap.new();
+    values.set("answer", box.value);
+    var result: int = values.get("answer");
+}

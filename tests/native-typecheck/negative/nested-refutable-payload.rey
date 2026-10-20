@@ -1,0 +1,9 @@
+enum Leaf { Number(value: int), Text(value: string) }
+enum Node { Leaf(value: Leaf), Empty }
+
+func leafValue(node: Node): int {
+    match node {
+        Node::Leaf(Leaf::Number(_)) => { return 1; },
+        Node::Empty => { return 0; },
+    }
+}

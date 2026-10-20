@@ -1,0 +1,3 @@
+println("before overflow");
+var maximum: int = 9223372036854775807;
+println(maximum + 1);

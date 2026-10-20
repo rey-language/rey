@@ -1,0 +1,276 @@
+import lexer;
+import parser;
+import parser::ast::{ImportStmt, Program, Stmt};
+import typecheck::{CheckedNominalField, CheckedNominalLayout, CheckedNominalVariant, CheckedProgram, ImportEdge, SourceGraph, SourceUnit, Type, TypecheckResult, typecheckGraph};
+
+func parseSource(source: string, path: string): Program {
+    var lexed = lexer.tokenize(source, path);
+    assert(lexed.errors.len() == 0, "lexer errors in " + path);
+    var parsed = parser.parse(lexed.tokens, path);
+    assert(parsed.errors.len() == 0, "parser errors in " + path);
+    return parsed.program;
+}
+
+func loadProgram(path: string): Program {
+    return parseSource(readFile(path), path);
+}
+
+func targetForImport(path: string, root: string): string {
+    if path == "inner" { return root + "/inner.rey"; }
+    if path == "left.rey" { return root + "/left.rey"; }
+    if path == "right.rey" { return root + "/right.rey"; }
+    if path == "lib" { return root + "/lib.rey"; }
+    return "";
+}
+
+func importEdges(program: Program, fromPath: string, root: string): Vec<ImportEdge> {
+    var edges: Vec<ImportEdge> = [];
+    var i = 0;
+    loop {
+        if i >= program.statements.len() { break; }
+        match program.statements[i] {
+            Stmt::Import(importStmt) => {
+                var toPath = targetForImport(importStmt.path, root);
+                assert(toPath != "", "fixture import was not mapped: " + importStmt.path);
+                edges.push(ImportEdge { fromPath: fromPath, toPath: toPath, sourceKind: importStmt.sourceKind, namespaceName: importStmt.namespaceName, items: importStmt.items, span: importStmt.span });
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    return edges;
+}
+
+func unitFor(path: string, source: string, program: Program, entry: bool): SourceUnit {
+    return SourceUnit { sourcePath: path, moduleId: path, source: source, isEntry: entry, program: program };
+}
+
+func appendEdges(into: Vec<ImportEdge>, extra: Vec<ImportEdge>) {
+    var i = 0;
+    loop {
+        if i >= extra.len() { break; }
+        into.push(extra[i]);
+        i = i + 1;
+    }
+}
+
+func layoutNamed(layouts: Vec<CheckedNominalLayout>, kind: string, name: string, moduleId: string): CheckedNominalLayout? {
+    var i = 0;
+    loop {
+        if i >= layouts.len() { break; }
+        var layout = layouts[i];
+        if layout.kind == kind && layout.name == name && layout.sourcePath == moduleId && layout.moduleId == moduleId { return layout; }
+        i = i + 1;
+    }
+    return null;
+}
+
+func requireLayout(layouts: Vec<CheckedNominalLayout>, kind: string, name: string, moduleId: string): CheckedNominalLayout {
+    var found = layoutNamed(layouts, kind, name, moduleId);
+    if found != null {
+        var layout: CheckedNominalLayout = found;
+        return layout;
+    }
+    assert(false, "missing " + kind + " layout " + moduleId + "::" + name);
+    var fields: Vec<CheckedNominalField> = [];
+    var variants: Vec<CheckedNominalVariant> = [];
+    return CheckedNominalLayout { kind: "", name: "", sourcePath: "", moduleId: "", declarationIndex: -1, fields: fields, variants: variants };
+}
+
+func nominalIs(ty: Type, kind: string, name: string, moduleId: string): bool {
+    return ty.kind == kind && ty.name == name && ty.sourcePath == moduleId && ty.moduleId == moduleId;
+}
+
+func innerType(ty: Type): Type {
+    var inner = ty.inner;
+    if inner != null {
+        var resolved: Type = inner;
+        return resolved;
+    }
+    return Type { kind: "Missing", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+}
+
+func valueType(ty: Type): Type {
+    var value = ty.value;
+    if value != null {
+        var resolved: Type = value;
+        return resolved;
+    }
+    return Type { kind: "Missing", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+}
+
+func keyType(ty: Type): Type {
+    var key = ty.key;
+    if key != null {
+        var resolved: Type = key;
+        return resolved;
+    }
+    return Type { kind: "Missing", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+}
+
+func returnType(ty: Type): Type {
+    var ret = ty.ret;
+    if ret != null {
+        var resolved: Type = ret;
+        return resolved;
+    }
+    return Type { kind: "Missing", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+}
+
+func dumpErrors(result: TypecheckResult) {
+    var i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        println(result.errors[i].sourcePath, result.errors[i].message);
+        i = i + 1;
+    }
+}
+
+func assertNominalGraph() {
+    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/same-name-nominal";
+    var innerPath = root + "/inner.rey";
+    var leftPath = root + "/left.rey";
+    var rightPath = root + "/right.rey";
+    var entryPath = root + "/main.rey";
+    var innerSource = readFile(innerPath);
+    var leftSource = readFile(leftPath);
+    var rightSource = readFile(rightPath);
+    var entrySource = readFile(entryPath);
+    var innerProgram = parseSource(innerSource, innerPath);
+    var leftProgram = parseSource(leftSource, leftPath);
+    var rightProgram = parseSource(rightSource, rightPath);
+    var entryProgram = parseSource(entrySource, entryPath);
+    var edges = importEdges(leftProgram, leftPath, root);
+    appendEdges(edges, importEdges(entryProgram, entryPath, root));
+    var graph = SourceGraph {
+        entryPath: entryPath,
+        units: [unitFor(innerPath, innerSource, innerProgram, false), unitFor(leftPath, leftSource, leftProgram, false), unitFor(rightPath, rightSource, rightProgram, false), unitFor(entryPath, entrySource, entryProgram, true)],
+        edges: edges,
+        errors: []
+    };
+    var result = typecheckGraph(graph);
+    if !result.ok { dumpErrors(result); }
+    assert(result.ok, "same-name nominal graph did not typecheck");
+    var maybeChecked = result.checkedProgram;
+    if maybeChecked != null {
+    var checked: CheckedProgram = maybeChecked;
+    assert(checked.nominalLayouts.len() == 7, "expected one layout per struct and enum");
+    var payload = requireLayout(checked.nominalLayouts, "Struct", "Payload", innerPath);
+    assert(payload.declarationIndex == 0 && payload.fields.len() == 1, "Payload layout index changed");
+    assert(payload.fields[0].name == "n" && payload.fields[0].fieldIndex == 0 && payload.fields[0].isPub && payload.fields[0].ty.kind == "Int", "Payload field layout changed");
+    var leftPoint = requireLayout(checked.nominalLayouts, "Struct", "Point", leftPath);
+    assert(leftPoint.declarationIndex == 1 && leftPoint.fields.len() == 3, "left Point declaration index changed");
+    assert(leftPoint.fields[0].name == "x" && leftPoint.fields[0].fieldIndex == 0 && leftPoint.fields[0].isPub && leftPoint.fields[0].ty.kind == "Int", "left Point.x layout changed");
+    assert(leftPoint.fields[1].name == "payload" && leftPoint.fields[1].fieldIndex == 1 && leftPoint.fields[1].isPub && nominalIs(leftPoint.fields[1].ty, "Struct", "Payload", innerPath), "left Point.payload lost inner owner");
+    assert(leftPoint.fields[2].name == "hidden" && leftPoint.fields[2].fieldIndex == 2 && !leftPoint.fields[2].isPub && leftPoint.fields[2].ty.kind == "Int", "left Point.hidden privacy changed");
+    var holder = requireLayout(checked.nominalLayouts, "Struct", "Holder", leftPath);
+    assert(holder.declarationIndex == 2 && holder.fields.len() == 8, "Holder layout changed");
+    assert(nominalIs(holder.fields[0].ty, "Struct", "Point", leftPath), "Holder.item lost left Point owner");
+    assert(holder.fields[1].ty.kind == "Array" && nominalIs(innerType(holder.fields[1].ty), "Struct", "Payload", innerPath), "Vec payload owner changed");
+    assert(holder.fields[2].ty.kind == "Nullable" && nominalIs(innerType(holder.fields[2].ty), "Struct", "Payload", innerPath), "nullable payload owner changed");
+    assert(holder.fields[3].ty.kind == "Dict" && keyType(holder.fields[3].ty).kind == "String" && nominalIs(valueType(holder.fields[3].ty), "Struct", "Payload", innerPath), "HashMap payload owner changed");
+    assert(holder.fields[4].ty.kind == "Option" && nominalIs(innerType(holder.fields[4].ty), "Struct", "Payload", innerPath), "Option payload owner changed");
+    assert(holder.fields[5].ty.kind == "Result" && nominalIs(innerType(holder.fields[5].ty), "Struct", "Payload", innerPath) && keyType(holder.fields[5].ty).kind == "String", "Result payload owner changed");
+    assert(holder.fields[6].ty.kind == "Tuple" && holder.fields[6].ty.params.len() == 2 && nominalIs(holder.fields[6].ty.params[0], "Struct", "Payload", innerPath) && holder.fields[6].ty.params[1].kind == "Int", "tuple payload owner changed");
+    assert(holder.fields[7].ty.kind == "Function" && holder.fields[7].ty.params.len() == 1 && nominalIs(holder.fields[7].ty.params[0], "Struct", "Payload", innerPath) && returnType(holder.fields[7].ty).kind == "Int", "function payload owner changed");
+    var leftEvent = requireLayout(checked.nominalLayouts, "Enum", "Event", leftPath);
+    assert(leftEvent.declarationIndex == 3 && leftEvent.variants.len() == 3, "left Event layout changed");
+    assert(leftEvent.variants[0].name == "Ping" && leftEvent.variants[0].variantIndex == 0 && leftEvent.variants[0].payloadTypes.len() == 1 && nominalIs(leftEvent.variants[0].payloadTypes[0], "Struct", "Payload", innerPath), "left Event::Ping payload owner changed");
+    assert(leftEvent.variants[1].name == "Batch" && leftEvent.variants[1].variantIndex == 1 && leftEvent.variants[1].payloadTypes[0].kind == "Array" && nominalIs(innerType(leftEvent.variants[1].payloadTypes[0]), "Struct", "Payload", innerPath), "left Event::Batch payload owner changed");
+    assert(leftEvent.variants[2].name == "Done" && leftEvent.variants[2].variantIndex == 2 && leftEvent.variants[2].payloadTypes.len() == 0, "left Event::Done gained a payload");
+    var label = requireLayout(checked.nominalLayouts, "Struct", "Label", rightPath);
+    assert(label.declarationIndex == 0 && label.fields.len() == 1 && label.fields[0].name == "text" && label.fields[0].ty.kind == "String", "right Label layout changed");
+    var rightPoint = requireLayout(checked.nominalLayouts, "Struct", "Point", rightPath);
+    assert(rightPoint.declarationIndex == 1 && rightPoint.moduleId != leftPoint.moduleId, "same-named Point layouts collapsed");
+    assert(rightPoint.fields[0].name == "y" && rightPoint.fields[0].ty.kind == "Float", "right Point.y layout changed");
+    assert(nominalIs(rightPoint.fields[1].ty, "Struct", "Label", rightPath), "right Point.label lost its owner");
+    var rightEvent = requireLayout(checked.nominalLayouts, "Enum", "Event", rightPath);
+    assert(rightEvent.declarationIndex == 2 && rightEvent.moduleId != leftEvent.moduleId, "same-named Event layouts collapsed");
+    assert(rightEvent.variants[0].payloadTypes[0].kind == "String", "right Event::Ping payload changed");
+    assert(nominalIs(rightEvent.variants[1].payloadTypes[0], "Struct", "Label", rightPath), "right Event::Done payload owner changed");
+    var sawLeftPoint = false;
+    var sawRightPoint = false;
+    var sawPayloadField = false;
+    var exprIndex = 0;
+    loop {
+        if exprIndex >= checked.expressions.len() { break; }
+        var info = checked.expressions[exprIndex];
+        if nominalIs(info.ty, "Struct", "Point", leftPath) { sawLeftPoint = true; }
+        if nominalIs(info.ty, "Struct", "Point", rightPath) { sawRightPoint = true; }
+        if info.fieldIndex == 1 && nominalIs(info.ty, "Struct", "Payload", innerPath) && nominalIs(info.receiverType, "Struct", "Point", leftPath) { sawPayloadField = true; }
+        exprIndex = exprIndex + 1;
+    }
+    assert(sawLeftPoint && sawRightPoint, "expression types lost distinct Point owners");
+    assert(sawPayloadField, "nested payload field type lost its declaring owner");
+    } else { assert(false, "checker omitted CheckedProgram"); }
+}
+
+func assertDistinctPointAssignment() {
+    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/same-name-nominal";
+    var open = char(123).toString();
+    var close = char(125).toString();
+    var entryPath = root + "/mismatch-main.rey";
+    var entrySource = "import \"left.rey\";\nimport \"right.rey\";\nfunc main(): void " + open + " var leftPoint = left.makePoint(1); var rightPoint = right.makePoint(1.5); leftPoint = rightPoint; " + close;
+    var innerPath = root + "/inner.rey";
+    var leftPath = root + "/left.rey";
+    var rightPath = root + "/right.rey";
+    var innerSource = readFile(innerPath);
+    var leftSource = readFile(leftPath);
+    var rightSource = readFile(rightPath);
+    var innerProgram = parseSource(innerSource, innerPath);
+    var leftProgram = parseSource(leftSource, leftPath);
+    var rightProgram = parseSource(rightSource, rightPath);
+    var entryProgram = parseSource(entrySource, entryPath);
+    var edges = importEdges(leftProgram, leftPath, root);
+    appendEdges(edges, importEdges(entryProgram, entryPath, root));
+    var graph = SourceGraph {
+        entryPath: entryPath,
+        units: [unitFor(innerPath, innerSource, innerProgram, false), unitFor(leftPath, leftSource, leftProgram, false), unitFor(rightPath, rightSource, rightProgram, false), unitFor(entryPath, entrySource, entryProgram, true)],
+        edges: edges,
+        errors: []
+    };
+    var result = typecheckGraph(graph);
+    assert(!result.ok, "same-named Point values from different modules were interchangeable");
+    var sawMismatch = false;
+    var i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        if result.errors[i].message.contains("assignment type mismatch") { sawMismatch = true; }
+        i = i + 1;
+    }
+    if !sawMismatch { dumpErrors(result); }
+    assert(sawMismatch, "cross-module Point assignment diagnostic changed");
+}
+
+func assertPrivateField() {
+    var root = "/Volumes/SSD/Developer/rey-language/rey-lang/tests/native-typecheck/graphs/private-field";
+    var libPath = root + "/lib.rey";
+    var entryPath = root + "/main.rey";
+    var libSource = readFile(libPath);
+    var entrySource = readFile(entryPath);
+    var libProgram = parseSource(libSource, libPath);
+    var entryProgram = parseSource(entrySource, entryPath);
+    var graph = SourceGraph {
+        entryPath: entryPath,
+        units: [unitFor(libPath, libSource, libProgram, false), unitFor(entryPath, entrySource, entryProgram, true)],
+        edges: importEdges(entryProgram, entryPath, root),
+        errors: []
+    };
+    var result = typecheckGraph(graph);
+    assert(!result.ok, "imported private field access was accepted");
+    var sawPrivate = false;
+    var i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        if result.errors[i].message.contains("cannot access private field 'pin'") { sawPrivate = true; }
+        i = i + 1;
+    }
+    if !sawPrivate { dumpErrors(result); }
+    assert(sawPrivate, "private field diagnostic changed");
+}
+
+func main(): void {
+    assertNominalGraph();
+    assertDistinctPointAssignment();
+    assertPrivateField();
+}

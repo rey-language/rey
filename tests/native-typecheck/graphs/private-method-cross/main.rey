@@ -1,0 +1,6 @@
+import lib.{Box};
+
+func main(): void {
+    var box = Box { id: 1 };
+    println(box.hidden());
+}

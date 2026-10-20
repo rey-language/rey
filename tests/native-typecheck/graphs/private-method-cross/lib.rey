@@ -1,0 +1,4 @@
+pub struct Box {
+    pub id: int,
+    func hidden(): int { return id; }
+}

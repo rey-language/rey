@@ -1,0 +1,4 @@
+var min: int = -9223372036854775807 - 1;
+var max: int = 9223372036854775807;
+println(min);
+println(max);

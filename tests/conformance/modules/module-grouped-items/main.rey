@@ -1,0 +1,4 @@
+import shapes::solid::{area, perimeter};
+
+println(area.area());
+println(perimeter.perimeter());

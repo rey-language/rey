@@ -1,0 +1,11 @@
+func main(): void {
+    println(min(3, 8));
+    println(max(3, 8));
+    println(abs(-4));
+    println(floor(3.9));
+    println(ceil(3.1));
+    println(round(1.2));
+    println(round(1.8));
+    println(floor(-1.2));
+    println(ceil(-1.2));
+}

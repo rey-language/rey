@@ -1,0 +1,7 @@
+func increment(value: int): int {
+    return value + 1;
+}
+
+pub func twice(value: int): int {
+    return increment(increment(value));
+}

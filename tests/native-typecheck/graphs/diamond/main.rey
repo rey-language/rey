@@ -1,0 +1,7 @@
+import "left.rey";
+import "right.rey";
+
+func main(): void {
+    var leftValue: int = left.one(1);
+    var rightValue: int = right.two(2);
+}

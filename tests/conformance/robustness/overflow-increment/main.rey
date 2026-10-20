@@ -1,0 +1,4 @@
+var value: int = 9223372036854775807;
+println("before:increment");
+value++;
+println(value);

@@ -1,0 +1,3 @@
+import private_mod;
+
+println(hidden());

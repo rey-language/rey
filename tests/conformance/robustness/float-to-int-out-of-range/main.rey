@@ -1,0 +1,4 @@
+println("before:float-to-int-range");
+var huge: float = pow(10.0, 100.0);
+var value: int = huge.toInt();
+println(value);

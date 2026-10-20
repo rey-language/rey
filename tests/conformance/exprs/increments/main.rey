@@ -1,0 +1,8 @@
+// Charter §2 decision 8: postfix yields old value; prefix yields incremented/decremented value.
+var a = 5;
+println(a++);
+println(a);
+println(++a);
+println(a--);
+println(a);
+println(--a);

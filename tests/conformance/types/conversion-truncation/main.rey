@@ -1,0 +1,7 @@
+// spec 9.1: string and float toInt truncate toward zero.
+func main(): void {
+    println("12.8".toInt());
+    println((3.9).toInt());
+    println(float(4) == 4.0);
+    println(char(65) == 'A');
+}

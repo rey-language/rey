@@ -1,0 +1,3 @@
+import secret.hidden;
+
+println(hidden());

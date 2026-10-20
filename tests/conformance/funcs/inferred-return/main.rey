@@ -1,0 +1,6 @@
+// Charter §2 decision 11: a function return type may be inferred when omitted.
+func twice(n: int) {
+  return n * 2;
+}
+var result = twice(21);
+println(result);

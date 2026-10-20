@@ -1,0 +1,7 @@
+func identity(value: int) {
+    return value;
+}
+
+func main(): void {
+    var result: int = identity(7);
+}

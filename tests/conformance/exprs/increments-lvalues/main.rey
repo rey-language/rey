@@ -1,0 +1,18 @@
+// Charter §2 decision 8: ++/-- accept field and index lvalues; target side effects occur once.
+struct Box {
+  pub n: int,
+}
+var b = Box { n: 5 };
+func getBox(): Box {
+  println("field");
+  return b;
+}
+var values: [int] = [5];
+func getIndex(): int {
+  println("index");
+  return 0;
+}
+println(getBox().n++);
+println(b.n);
+println(values[getIndex()]--);
+println(values[0]);

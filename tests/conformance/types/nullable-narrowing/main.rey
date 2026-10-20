@@ -1,0 +1,5 @@
+var maybeCount: int? = 7;
+
+if maybeCount != null {
+    println(maybeCount);
+}

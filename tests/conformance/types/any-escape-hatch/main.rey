@@ -1,0 +1,5 @@
+var value: any = 12;
+println(value);
+
+value = "twelve";
+println(value);

@@ -1,0 +1,9 @@
+// spec 2.3: interpolation converts values and doubled braces are literal.
+func main(): void {
+    var enabled = true;
+    println("flag={enabled}");
+    println("{{x}}");
+    println("brace={1 + 2}");
+    println("}}");
+    println("nested={{value}}");
+}

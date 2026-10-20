@@ -1,0 +1,5 @@
+// Charter §2 decision 11: annotations are enforced; an int cannot initialize bool.
+var b: bool = 1;
+println(b);
+println(true);
+println(false);

@@ -1,0 +1,3 @@
+pub func present(): int {
+    return 1;
+}

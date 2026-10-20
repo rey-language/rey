@@ -1,0 +1,5 @@
+import makers.{Point, create};
+
+func main(): void {
+    var point: Point = Point.create();
+}

@@ -1,0 +1,8 @@
+var count = 0;
+loop {
+    count = count + 1;
+    if count == 3 {
+        break;
+    }
+}
+println(count);

@@ -1,0 +1,3 @@
+pub func count(prefix: string, values: ...int): int {
+    return values.len();
+}

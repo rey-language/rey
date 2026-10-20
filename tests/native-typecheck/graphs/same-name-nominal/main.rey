@@ -1,0 +1,15 @@
+import "left.rey";
+import "right.rey";
+
+func main(): void {
+    var leftPoint = left.makePoint(3);
+    var nested: int = leftPoint.payload.n;
+    var leftEvent = left.makeEvent(leftPoint.payload);
+    var rightPoint = right.makePoint(1.5);
+    var y: float = rightPoint.y;
+    var nestedLabel: string = rightPoint.label.text;
+    var rightEvent = right.makeEvent(nestedLabel);
+    var sameLeft = leftEvent == leftEvent;
+    var sameRight = rightEvent == rightEvent;
+    println(nested, y, nestedLabel, sameLeft, sameRight);
+}

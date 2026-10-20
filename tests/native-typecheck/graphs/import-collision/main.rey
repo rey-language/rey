@@ -1,0 +1,6 @@
+import left.run;
+import right.run;
+
+func main(): void {
+    run();
+}

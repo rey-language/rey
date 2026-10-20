@@ -1,0 +1,15 @@
+import "./../../rey-compiler/src/diagnostics/main.rey";
+
+func positionText(span: Span): string {
+    return span.line.toString() + ":" + span.column.toString();
+}
+
+func main() {
+    var source = "a\nbc";
+    println(positionText(spanFromOffsets(source, 0, 1)));
+    println(positionText(spanFromOffsets(source, 2, 3)));
+    println(positionText(spanFromOffsets(source, source.len(), source.len())));
+    println(positionText(spanFromOffsets("", 0, 0)));
+    println(positionText(spanFromOffsets("a", -1, 1)));
+    println(positionText(unknownSpan()));
+}

@@ -1,0 +1,15 @@
+// spec 4.2: trailing defaults fill omitted arguments.
+func greet(name: string = "rey"): string {
+    return "hello " + name;
+}
+
+func add(left: int, right: int = 5): int {
+    return left + right;
+}
+
+func main(): void {
+    println(greet());
+    println(greet("ada"));
+    println(add(2));
+    println(add(2, 3));
+}

@@ -1,0 +1,9 @@
+// spec 3.3: the else arm of a null test does not narrow away null.
+func main(): void {
+    var maybeCount: int? = null;
+    if maybeCount != null {
+        println(maybeCount);
+    } else {
+        println(maybeCount + 1);
+    }
+}

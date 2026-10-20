@@ -1,0 +1,17 @@
+// spec 4.4: a method reads fields and writes updates back to the receiver.
+struct Counter {
+    pub value: int,
+    pub func add(delta: int): void {
+        value = value + delta;
+    }
+    pub func get(): int {
+        return value;
+    }
+}
+
+func main(): void {
+    var counter = Counter { value: 1 };
+    counter.add(6);
+    println(counter.get());
+    println(counter.value);
+}

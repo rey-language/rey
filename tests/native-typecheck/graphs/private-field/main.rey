@@ -1,0 +1,6 @@
+import lib.{Account, makeAccount};
+
+func main(): void {
+    var account: Account = makeAccount(4);
+    var secret: int = account.pin;
+}

@@ -1,0 +1,8 @@
+func id(value: int): int {
+    return value;
+}
+
+func main(): void {
+    var same = id == id;
+    println(same);
+}

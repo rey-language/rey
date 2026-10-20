@@ -1,0 +1,4 @@
+func main(): void {
+    var values: Vec<int> = Vec.new();
+    values.get("zero");
+}

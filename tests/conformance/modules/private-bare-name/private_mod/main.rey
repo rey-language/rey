@@ -1,0 +1,7 @@
+func hidden(): int {
+    return 9;
+}
+
+pub func visible(): int {
+    return 1;
+}

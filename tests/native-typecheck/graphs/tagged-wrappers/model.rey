@@ -1,0 +1,9 @@
+pub struct Box { pub value: int }
+
+func increment(value: int): int {
+    return value + 1;
+}
+
+pub func create(value: int): Box {
+    return Box { value: increment(value) };
+}

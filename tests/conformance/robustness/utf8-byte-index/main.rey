@@ -1,0 +1,4 @@
+var text: string = "é";
+println(text.len());
+println(int(text[0]));
+println(int(text[1]));

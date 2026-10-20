@@ -1,0 +1,7 @@
+var value: int | string = "rey";
+
+if value instanceof string {
+    println(value);
+} else {
+    println("not string");
+}

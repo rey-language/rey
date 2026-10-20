@@ -1,0 +1,3 @@
+println("before:char-300");
+var value: char = char(300);
+println(value);

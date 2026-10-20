@@ -1,0 +1,6 @@
+func main(): void {
+    println("before");
+    var values: HashMap<string, int> = HashMap.new();
+    println(values.get("missing"));
+    println("after");
+}

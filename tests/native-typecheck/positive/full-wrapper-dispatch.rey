@@ -1,0 +1,9 @@
+enum Token { Text(value: string), Number(value: int), End }
+
+func tokenCode(token: Token): int {
+    match token {
+        Token::Text(_) => { return 1; },
+        Token::Number(value) => { return value; },
+        Token::End => { return 0; },
+    }
+}

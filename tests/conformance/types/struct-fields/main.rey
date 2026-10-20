@@ -1,0 +1,15 @@
+struct Profile {
+    pub age: int,
+    pub score: float,
+    pub active: bool,
+    pub name: string,
+    pub initial: char,
+}
+
+var profile = Profile { age: 9, score: 1.5, active: true, name: "Ada", initial: 'A' };
+profile.age = 10;
+println(profile.age);
+println(profile.score);
+println(profile.active);
+println(profile.name);
+println(profile.initial);

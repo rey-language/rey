@@ -1,0 +1,7 @@
+pub struct Point {
+    pub x: int,
+}
+
+pub func makeLeft(): Point {
+    return Point { x: 1 };
+}

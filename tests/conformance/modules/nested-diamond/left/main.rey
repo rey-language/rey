@@ -1,0 +1,5 @@
+import shared;
+
+pub func leftValue(): string {
+    return shared.answer();
+}

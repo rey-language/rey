@@ -1,0 +1,5 @@
+import "math.rey";
+
+func main(): void {
+    var count: int = math.count("items", 1, 2, 3);
+}

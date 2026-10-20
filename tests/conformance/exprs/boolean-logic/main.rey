@@ -1,0 +1,6 @@
+// SPEC operators: !, &&, and || boolean logic with && binding tighter than ||.
+println(!false);
+println(true || false && false);
+println(false || true && false);
+println((true || false) && false);
+println(!(false || false));

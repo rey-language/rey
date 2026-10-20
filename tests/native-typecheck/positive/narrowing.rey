@@ -1,0 +1,15 @@
+struct Point { x: int }
+
+func stringLength(value: string?): int {
+    if value != null {
+        return value.len();
+    }
+    return 0;
+}
+
+func pointX(value: any): int {
+    if value instanceof Point {
+        return value.x;
+    }
+    return 0;
+}

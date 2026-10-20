@@ -1,0 +1,6 @@
+struct Profile {
+    age: int,
+}
+
+var profile = Profile { age: 9 };
+profile.age = 10;

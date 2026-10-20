@@ -1,0 +1,12 @@
+// Charter §2 decision 11: variadic direct calls accept zero or more values of the declared element type.
+func sum(values: ...int): int {
+  var total = 0;
+  var i = 0;
+  while i < values.len() {
+    total = total + values[i];
+    i = i + 1;
+  }
+  return total;
+}
+println(sum());
+println(sum(1, 2, 3, 4));

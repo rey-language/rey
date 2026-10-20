@@ -1,0 +1,13 @@
+// spec 4.3: a returned lambda keeps the scalar captured at creation.
+func makeAdder(offset: int): (int) -> int {
+    return (value: int) => value + offset;
+}
+
+func main(): void {
+    var addTen = makeAdder(10);
+    println(addTen(4));
+    var offset = 1;
+    var snapshot = (value: int) => value + offset;
+    offset = 100;
+    println(snapshot(1));
+}

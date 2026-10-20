@@ -1,0 +1,19 @@
+pub struct Label { pub text: string }
+
+pub struct Point {
+    pub y: float,
+    pub label: Label,
+}
+
+pub enum Event {
+    Ping(string),
+    Done(Label),
+}
+
+pub func makePoint(y: float): Point {
+    return Point { y: y, label: Label { text: "r" } };
+}
+
+pub func makeEvent(label: string): Event {
+    return Event::Ping(label);
+}

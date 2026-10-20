@@ -1,0 +1,8 @@
+var table: HashMap<string, int> = HashMap.new();
+table.set("alpha", 10);
+table.set("beta", 20);
+println(table.has("alpha"));
+println(table.get("beta"));
+table.delete("alpha");
+println(table.has("alpha"));
+println(table.len());

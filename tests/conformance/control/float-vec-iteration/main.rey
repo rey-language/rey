@@ -1,0 +1,8 @@
+func main(): void {
+    var ratios: Vec<float> = [1.5, 2.5];
+    var total: float = 0.0;
+    for item in ratios {
+        total = total + item;
+    }
+    println(total == 4.0);
+}

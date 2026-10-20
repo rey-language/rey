@@ -1,0 +1,11 @@
+var values = [1];
+var valuesAlias = values;
+valuesAlias.push(2);
+println(values == valuesAlias);
+println(values.len());
+
+var table = {"x": 1};
+var tableAlias = table;
+tableAlias["x"] = 8;
+println(table["x"]);
+println(table == tableAlias);

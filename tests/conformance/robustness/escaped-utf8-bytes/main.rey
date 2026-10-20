@@ -1,0 +1,3 @@
+var text: string = "\xC3\xA9";
+println(text.len());
+println(text);

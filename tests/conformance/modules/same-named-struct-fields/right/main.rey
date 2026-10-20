@@ -1,0 +1,7 @@
+pub struct Point {
+    pub y: int,
+}
+
+pub func makeRight(): Point {
+    return Point { y: 2 };
+}

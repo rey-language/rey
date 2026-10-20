@@ -1,0 +1,7 @@
+pub func answer(): int {
+    return 42;
+}
+
+pub func double(value: int): int {
+    return value * 2;
+}

@@ -1,0 +1,10 @@
+// Charter §2 decisions 2 and 12: typed function values and immutable-capture lambdas use =>.
+func apply(f: (int) -> int, value: int): int {
+  return f(value);
+}
+func run(): int {
+  const offset = 40;
+  var addOffset = (n: int) => n + offset;
+  return apply(addOffset, 2);
+}
+println(run());

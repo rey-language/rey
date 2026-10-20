@@ -1,0 +1,10 @@
+enum Box { Hold(value: Option<int>) }
+
+func main(): void {
+    var boxed = Box::Hold(Option::Some(7));
+    var empty = Option::None();
+    println(empty == empty);
+    match boxed {
+        Box::Hold(value) => { println(value.isSome()); },
+    }
+}

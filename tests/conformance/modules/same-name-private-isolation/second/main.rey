@@ -1,0 +1,7 @@
+func helper(): string {
+    return "second";
+}
+
+pub func secondValue(): string {
+    return helper();
+}

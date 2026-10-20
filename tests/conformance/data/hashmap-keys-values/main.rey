@@ -1,0 +1,7 @@
+func main(): void {
+    var map = HashMap.new();
+    map.set("a", 1);
+    map.set("b", 2);
+    println(map.keys().len());
+    println(map.values().len());
+}

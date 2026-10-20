@@ -1,0 +1,13 @@
+// OPEN: payload syntax follows the existing enum-payloads fixture; SPEC.md is not available to verify its grammar.
+enum Outcome {
+    Empty,
+    Count(value: int),
+    Message(text: string),
+}
+
+var outcome = Outcome::Count(7);
+match outcome {
+    Outcome::Empty => { println("empty"); },
+    Count(value) => { println(value); },
+    Message(text) => { println(text); },
+}

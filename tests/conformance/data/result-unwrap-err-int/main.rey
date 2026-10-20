@@ -1,0 +1,3 @@
+var err: Result<string, int> = Result::Err(42);
+var code: int = err.unwrapErr();
+println(code);
