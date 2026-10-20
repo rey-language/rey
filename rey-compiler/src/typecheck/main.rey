@@ -128,6 +128,6 @@ func typecheckProgram(program) {
     return TypecheckResult { ok: true, errors: [] };
 }
 
-export pub func typecheck(program) {
+pub func typecheck(program) {
     return typecheckProgram(program);
 }
