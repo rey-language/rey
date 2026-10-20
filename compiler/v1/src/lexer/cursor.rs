@@ -40,6 +40,10 @@ impl<'a> Cursor<'a> {
         self.position
     }
 
+    pub fn byteAt(&self, index: usize) -> Option<u8> {
+        self.source.as_bytes().get(index).copied()
+    }
+
     pub fn line(&self) -> usize {
         self.line
     }
