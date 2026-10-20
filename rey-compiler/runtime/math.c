@@ -1,6 +1,7 @@
 // Numeric builtins. Domain and overflow failures print "error: ..." and exit 1.
 #include "rey_rt.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/time.h>
 

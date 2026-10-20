@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 void rey_eprint(const char* s) {
     if (!s) return;
@@ -110,10 +113,39 @@ static char** g_argv = NULL;
 
 void rey_init(int argc, char** argv) { g_argc = argc; g_argv = argv; }
 
+static char* get_real_exe_path(const char* fallback) {
+#if defined(__APPLE__)
+    char buf[1024];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) == 0) {
+        char real[1024];
+        if (realpath(buf, real) != NULL) {
+            return strdup(real);
+        }
+        return strdup(buf);
+    }
+#elif defined(__linux__)
+    char buf[1024];
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+        return strdup(buf);
+    }
+#endif
+    return strdup(fallback);
+}
+
 int64_t rey_args(void) {
     int64_t v = rey_vec_new();
-    for (int i = 0; i < g_argc; i++)
-        rey_vec_push(v, (int64_t)(uintptr_t)rey_str_cstr(g_argv[i]));
+    for (int i = 0; i < g_argc; i++) {
+        if (i == 0 && g_argv != NULL && g_argv[0] != NULL) {
+            char* real_exe = get_real_exe_path(g_argv[0]);
+            rey_vec_push(v, (int64_t)(uintptr_t)rey_str_cstr(real_exe));
+            free(real_exe);
+        } else {
+            rey_vec_push(v, (int64_t)(uintptr_t)rey_str_cstr(g_argv[i]));
+        }
+    }
     return v;
 }
 
