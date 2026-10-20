@@ -4,6 +4,7 @@
 #include <string.h>
 
 void* rey_alloc(int64_t size) {
+    if (size < 0) rey_panic_cstr("negative allocation");
     void* p = malloc((size_t)size);
     if (!p) { fprintf(stderr, "rey: out of memory\n"); exit(1); }
     memset(p, 0, (size_t)size);
