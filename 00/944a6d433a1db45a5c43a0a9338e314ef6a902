@@ -1,0 +1,108 @@
+tests/imports/README.md
+  h_90c9c948bf5ad1 1,4-13,15-19
+tests/imports/errors/actuator.rey
+  h_90c9c948bf5ad1 1
+tests/imports/errors/circular/cycle_a.rey
+  h_90c9c948bf5ad1 3
+tests/imports/errors/circular/cycle_b.rey
+  h_90c9c948bf5ad1 3
+tests/imports/errors/duplicate_import.rey
+  h_90c9c948bf5ad1 4
+tests/imports/errors/missingmod/walk.rey
+  h_90c9c948bf5ad1 1
+tests/imports/errors/pub_not_export.rey
+  h_90c9c948bf5ad1 3
+tests/imports/imports/README.md
+  h_90c9c948bf5ad1 1-17
+tests/imports/imports/errors/actuator.rey
+  h_90c9c948bf5ad1 1-7
+tests/imports/imports/errors/circular/cycle_a.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/imports/errors/circular/cycle_b.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/imports/errors/circular/cycle_entry.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/duplicate_import.rey
+  h_90c9c948bf5ad1 1-4
+tests/imports/imports/errors/file_not_found.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/folder_missing_main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/function_not_found.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/group_missing_symbol.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/missingmod/walk.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/errors/pub_not_export.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/action/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/action/run.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/action/run/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/action/walk.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/action/walk/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/actuator.rey
+  h_90c9c948bf5ad1 1-15
+tests/imports/imports/success/folder_priority/main.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/imports/success/folder_priority/modules/account.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/folder_priority/modules/account/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/folder_priority/modules/auth/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/folder_priority/modules/display/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/main.rey
+  h_90c9c948bf5ad1 1-11
+tests/imports/imports/success/nested_resolution.rey
+  h_90c9c948bf5ad1 1-9
+tests/imports/imports/success/nestedmod/helper.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/imports/success/nestedmod/main.rey
+  h_90c9c948bf5ad1 1-5
+tests/imports/success/action/main.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/action/run.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/action/run/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/action/walk.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/action/walk/main.rey
+  h_90c9c948bf5ad1 1-3
+tests/imports/success/actuator.rey
+  h_90c9c948bf5ad1 1,5
+tests/imports/success/folder_priority/modules/account.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/folder_priority/modules/account/main.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/folder_priority/modules/auth/main.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/folder_priority/modules/display/main.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/main.rey
+  h_90c9c948bf5ad1 5
+tests/imports/success/nested_resolution.rey
+  h_90c9c948bf5ad1 3
+tests/imports/success/nestedmod/helper.rey
+  h_90c9c948bf5ad1 1
+tests/imports/success/nestedmod/main.rey
+  h_90c9c948bf5ad1 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "00944a6d433a1db45a5c43a0a9338e314ef6a902",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
