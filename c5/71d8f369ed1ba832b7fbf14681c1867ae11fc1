@@ -1,0 +1,19 @@
+compiler/v1/src/interpreter/tests.rs
+  s_9e2420774b8c0d::t_b64d902e918dcb 1-2066
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c571d8f369ed1ba832b7fbf14681c1867ae11fc1",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
