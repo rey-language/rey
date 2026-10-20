@@ -1,35 +1,54 @@
 // Rey Compiler - Full Pipeline
 
 import lexer;
+import lexer::{Span, LexError};
 import parser;
-import typecheck;
+import parser::ast::{Program, Stmt, ImportStmt, ImportSourceKind, ParseError};
+import typecheck::{SourceGraph, SourceUnit, ImportEdge, TypecheckResult, TypeError, CheckedProgram, typecheckGraph};
 import codegen;
 
 struct CompileResult {
     pub ok: bool,
-    pub errors: Any,
-    pub ir: String,
-    pub outputPath: String,
+    pub errors: string,
+    pub ir: string,
+    pub outputPath: string,
 }
 
-func lastSlashIndex(path: String): int {
+struct CliOptions {
+    pub action: string,
+    pub command: string,
+    pub filePath: string,
+    pub programPath: string,
+    pub outputPath: string,
+    pub runtimeDir: string,
+    pub runArgs: Vec<string>,
+    pub message: string,
+}
+
+struct RuntimeDirResult {
+    pub ok: bool,
+    pub path: string,
+    pub error: string,
+}
+
+func lastSlashIndex(path: string): int {
     var i = path.len() - 1;
     loop {
         if i < 0 { break; }
-        if path[i] == "/" { return i; }
+        if path.slice(i, i + 1) == "/" { return i; }
         i = i - 1;
     }
     return -1;
 }
 
-func dirname(path: String): String {
+func dirname(path: string): string {
     var idx = lastSlashIndex(path);
     if idx < 0 { return "."; }
     if idx == 0 { return "/"; }
     return path.slice(0, idx);
 }
 
-func projectRootDir(basePath: String): String {
+func projectRootDir(basePath: string): string {
     var srcIdx = basePath.indexOf("/src/");
     if srcIdx >= 0 {
         return basePath.slice(0, srcIdx);
@@ -37,40 +56,217 @@ func projectRootDir(basePath: String): String {
     return dirname(basePath);
 }
 
-func resolveImportPath(basePath: String, importPath: String): String {
-    var base = dirname(basePath);
-    if importPath.startsWith("/") { return importPath; }
-    if importPath.startsWith("./") {
-        return base + "/" + importPath.slice(2, importPath.len());
+func addPathPart(parts: Vec<string>, part: string, absolute: bool) {
+    if part == "" || part == "." { return; }
+    if part == ".." {
+        if parts.len() > 0 {
+            var last = parts[parts.len() - 1];
+            if last != ".." {
+                parts.pop();
+                return;
+            }
+        }
+        if !absolute { parts.push(part); }
+        return;
     }
-    // Module import: search from base dir, then from project root
-    // Try direct .rey file in same directory first (matches Rust interpreter behavior)
-    var directFile = base + "/" + importPath + ".rey";
-    if fileExists(directFile) { return directFile; }
-    var srcModPath = base + "/src/" + importPath + "/main.rey";
-    if fileExists(srcModPath) { return srcModPath; }
-    var modPath = base + "/" + importPath + "/main.rey";
-    if fileExists(modPath) { return modPath; }
-    var root = projectRootDir(basePath);
-    var rootSrcPath = root + "/src/" + importPath + "/main.rey";
-    if fileExists(rootSrcPath) { return rootSrcPath; }
-    var rootModPath = root + "/" + importPath + "/main.rey";
-    if fileExists(rootModPath) { return rootModPath; }
-    return base + "/" + importPath;
+    parts.push(part);
 }
 
-func lastDotIndex(path: String): int {
+func normalizePath(path: string): string {
+    var absolute = path.startsWith("/");
+    var parts: Vec<string> = [];
+    var part = "";
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        var char = path.slice(i, i + 1);
+        if char == "/" {
+            addPathPart(parts, part, absolute);
+            part = "";
+        } else {
+            part = part + char;
+        }
+        i = i + 1;
+    }
+    addPathPart(parts, part, absolute);
+
+    var out = "";
+    if absolute { out = "/"; }
+    i = 0;
+    loop {
+        if i >= parts.len() { break; }
+        if out.len() > 0 && out != "/" { out = out + "/"; }
+        out = out + parts[i];
+        i = i + 1;
+    }
+    if out.len() == 0 { return "."; }
+    return out;
+}
+
+func modulePathAsRelative(path: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        if path.slice(i, i + 1) == ":" && i + 1 < path.len() && path.slice(i + 1, i + 2) == ":" {
+            out = out + "/";
+            i = i + 2;
+        } else {
+            out = out + path.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+func homeDir(): string {
+    var listed: Result<string, string> = exec("printf %s \"$HOME\"");
+    if listed.isOk() { return listed.unwrap(); }
+    return "";
+}
+
+func pushModuleCandidate(candidates: Vec<string>, path: string) {
+    candidates.push(normalizePath(path));
+}
+
+func dirHasExactName(dir: string, name: string): bool {
+    var names = listDir(dir);
+    var i = 0;
+    loop {
+        if i >= names.len() { break; }
+        if names[i] == name { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func pathExistsExact(path: string): bool {
+    if !fileExists(path) { return false; }
+    if !path.startsWith("/") { return true; }
+    var parent = "/";
+    var i = 1;
+    loop {
+        if i >= path.len() { break; }
+        var start = i;
+        loop {
+            if i >= path.len() { break; }
+            if path.slice(i, i + 1) == "/" { break; }
+            i = i + 1;
+        }
+        var name = path.slice(start, i);
+        if name.len() > 0 && !dirHasExactName(parent, name) { return false; }
+        if parent == "/" { parent = "/" + name; }
+        else if name.len() > 0 { parent = parent + "/" + name; }
+        if i < path.len() { i = i + 1; }
+    }
+    return true;
+}
+
+func firstExistingPath(candidates: Vec<string>, fallback: string): string {
+    var i = 0;
+    loop {
+        if i >= candidates.len() { break; }
+        if pathExistsExact(candidates[i]) { return candidates[i]; }
+        i = i + 1;
+    }
+    return fallback;
+}
+
+func resolveModuleFile(base: string, root: string, importPath: string): string {
+    var searchPath = modulePathAsRelative(importPath);
+    var nested = importPath.contains("::");
+    var candidates: Vec<string> = [];
+    pushModuleCandidate(candidates, base + "/" + searchPath + "/main.rey");
+    pushModuleCandidate(candidates, base + "/src/" + searchPath + "/main.rey");
+    pushModuleCandidate(candidates, root + "/" + searchPath + "/main.rey");
+    pushModuleCandidate(candidates, root + "/src/" + searchPath + "/main.rey");
+    if nested {
+        pushModuleCandidate(candidates, base + "/" + searchPath + ".rey");
+        pushModuleCandidate(candidates, base + "/src/" + searchPath + ".rey");
+        pushModuleCandidate(candidates, root + "/" + searchPath + ".rey");
+        pushModuleCandidate(candidates, root + "/src/" + searchPath + ".rey");
+    }
+    var local = firstExistingPath(candidates, "");
+    if local.len() > 0 { return local; }
+    var fallback = candidates[0];
+    var home = homeDir();
+    if home.len() == 0 { return fallback; }
+    var external: Vec<string> = [];
+    if searchPath == "std" || searchPath.startsWith("std/") {
+        var stdRoot = home + "/.reyc/std/src";
+        if searchPath == "std" {
+            pushModuleCandidate(external, stdRoot + "/main.rey");
+        } else {
+            var stdRelative = searchPath.slice(4, searchPath.len());
+            pushModuleCandidate(external, stdRoot + "/" + stdRelative + "/main.rey");
+            pushModuleCandidate(external, stdRoot + "/" + stdRelative + ".rey");
+        }
+    }
+    var packageRoot = home + "/.reyc/packages/" + searchPath;
+    pushModuleCandidate(external, packageRoot + "/main.rey");
+    if nested { pushModuleCandidate(external, packageRoot + ".rey"); }
+    return firstExistingPath(external, fallback);
+}
+
+func existingModuleItem(base: string, root: string, modulePath: string, item: string): string {
+    var searchPath = modulePathAsRelative(modulePath);
+    var prefixes: Vec<string> = [];
+    prefixes.push(base);
+    prefixes.push(base + "/src");
+    prefixes.push(root);
+    prefixes.push(root + "/src");
+    var i = 0;
+    loop {
+        if i >= prefixes.len() { break; }
+        var prefix = prefixes[i];
+        var folder = normalizePath(prefix + "/" + searchPath + "/" + item + "/main.rey");
+        if pathExistsExact(folder) { return folder; }
+        var file = normalizePath(prefix + "/" + searchPath + "/" + item + ".rey");
+        if pathExistsExact(file) { return file; }
+        i = i + 1;
+    }
+    return "";
+}
+
+func resolveImportPath(basePath: string, importPath: string, sourceKind: ImportSourceKind, projectRoot: string): string {
+    var base = dirname(basePath);
+    var root = projectRoot;
+    var searchPath = importPath;
+    if sourceKind == ImportSourceKind::Module { searchPath = modulePathAsRelative(importPath); }
+    if searchPath.startsWith("/") { return normalizePath(searchPath); }
+    if sourceKind == ImportSourceKind::Module {
+        return resolveModuleFile(base, root, importPath);
+    }
+    if searchPath.startsWith("./") || searchPath.startsWith("../") || searchPath.contains("/") || searchPath.endsWith(".rey") {
+        var explicitFile = normalizePath(base + "/" + searchPath);
+        if pathExistsExact(explicitFile) { return explicitFile; }
+        var explicitRootFile = normalizePath(root + "/" + searchPath);
+        if pathExistsExact(explicitRootFile) { return explicitRootFile; }
+        return explicitFile;
+    }
+    var importerFile = normalizePath(base + "/" + searchPath + ".rey");
+    if pathExistsExact(importerFile) { return importerFile; }
+    var importerSrcFile = normalizePath(base + "/src/" + searchPath + ".rey");
+    if pathExistsExact(importerSrcFile) { return importerSrcFile; }
+    var rootFile = normalizePath(root + "/" + searchPath + ".rey");
+    if pathExistsExact(rootFile) { return rootFile; }
+    var rootSrcFile = normalizePath(root + "/src/" + searchPath + ".rey");
+    if pathExistsExact(rootSrcFile) { return rootSrcFile; }
+    return importerFile;
+}
+
+func lastDotIndex(path: string): int {
     var i = path.len() - 1;
     loop {
         if i < 0 { break; }
-        if path[i] == "." { return i; }
-        if path[i] == "/" { break; }
+        if path.slice(i, i + 1) == "." { return i; }
+        if path.slice(i, i + 1) == "/" { break; }
         i = i - 1;
     }
     return -1;
 }
 
-func basenameNoExt(path: String): String {
+func basenameNoExt(path: string): string {
     var slash = lastSlashIndex(path);
     var start = 0;
     if slash >= 0 { start = slash + 1; }
@@ -82,7 +278,7 @@ func basenameNoExt(path: String): String {
     return name;
 }
 
-func defaultOutputPath(srcPath: String): String {
+func defaultOutputPath(srcPath: string): string {
     var out = dirname(srcPath) + "/" + basenameNoExt(srcPath);
     // avoid collisions with existing files/dirs (common in tests, e.g. `imports/`)
     if fileExists(out) {
@@ -91,56 +287,304 @@ func defaultOutputPath(srcPath: String): String {
     return out;
 }
 
-func parseFileToProgram(path: String) {
-    var content = readFile(path);
-    var lexResult = lexer.tokenize(content, path);
-    if lexResult.errors.length() > 0 {
-        var e = lexResult.errors[0];
-        return Result.Err("lexer error at line " + e.span.line.toString() + ": " + e.message);
+func usageText(): string {
+    return "Usage: rey build <file> [-o|--output <output>] [--runtime-dir <directory>]\n       rey run <file> [-o|--output <output>] [--runtime-dir <directory>] [-- args]\n       rey check <file> [--runtime-dir <directory>]\n       rey --help\n       rey --version";
+}
+
+func emptyRunArgs(): Vec<string> {
+    var args: Vec<string> = [];
+    return args;
+}
+
+func isMissingOptionValue(cliArgs: Vec<string>, valueIndex: int): bool {
+    if valueIndex >= cliArgs.len() { return true; }
+    var value: string = cliArgs[valueIndex];
+    return value.len() == 0 || value.startsWith("-");
+}
+
+func parseCli(cliArgs: Vec<string>): CliOptions {
+    if cliArgs.len() == 0 {
+        return CliOptions { action: "usage", command: "", filePath: "", programPath: "", outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: usageText() };
+    }
+
+    var programPath = cliArgs[0];
+    if cliArgs.len() == 2 && cliArgs[1] == "--help" {
+        return CliOptions { action: "help", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: usageText() };
+    }
+    if cliArgs.len() == 2 && cliArgs[1] == "--version" {
+        return CliOptions { action: "version", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "rey 0.3.0" };
+    }
+    if cliArgs.len() < 3 {
+        return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: usageText() };
+    }
+
+    var command = cliArgs[1];
+    if command != "build" && command != "run" && command != "check" {
+        return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "unsupported command: " + command + "\n" + usageText() };
+    }
+
+    var outputPath = "";
+    var runtimeDir = "";
+    var i = 3;
+    loop {
+        if i >= cliArgs.len() { break; }
+        var flag = cliArgs[i];
+        if flag == "-o" || flag == "--output" {
+            if isMissingOptionValue(cliArgs, i + 1) {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "missing value for " + flag + "\n" + usageText() };
+            }
+            if command == "check" {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "-o is not supported for check\n" + usageText() };
+            }
+            if outputPath.len() > 0 {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "output path specified more than once\n" + usageText() };
+            }
+            outputPath = cliArgs[i + 1];
+            i = i + 2;
+        } else if flag == "--runtime-dir" {
+            if isMissingOptionValue(cliArgs, i + 1) {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "missing value for --runtime-dir\n" + usageText() };
+            }
+            if runtimeDir.len() > 0 {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "runtime directory specified more than once\n" + usageText() };
+            }
+            runtimeDir = cliArgs[i + 1];
+            i = i + 2;
+        } else if flag == "--" {
+            if command != "run" {
+                return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "unexpected arguments\n" + usageText() };
+            }
+            var runArgs = emptyRunArgs();
+            var argIndex = i + 1;
+            loop {
+                if argIndex >= cliArgs.len() { break; }
+                runArgs.push(cliArgs[argIndex]);
+                argIndex = argIndex + 1;
+            }
+            return CliOptions { action: "command", command: command, filePath: cliArgs[2], programPath: programPath, outputPath: outputPath, runtimeDir: runtimeDir, runArgs: runArgs, message: "" };
+        } else {
+            return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "unknown option or argument: " + flag + "\n" + usageText() };
+        }
+    }
+
+    return CliOptions { action: "command", command: command, filePath: cliArgs[2], programPath: programPath, outputPath: outputPath, runtimeDir: runtimeDir, runArgs: emptyRunArgs(), message: "" };
+}
+
+func resolveRuntimeDir(programPath: string): RuntimeDirResult {
+    var candidate = dirname(programPath) + "/runtime";
+    if fileExists(candidate + "/librey_rt.a") {
+        return RuntimeDirResult { ok: true, path: candidate, error: "" };
+    }
+    return RuntimeDirResult { ok: false, path: "", error: "runtime library not found beside program; pass --runtime-dir <directory-containing-librey_rt.a>" };
+}
+
+func validateRuntimeDir(path: string): RuntimeDirResult {
+    if fileExists(path + "/librey_rt.a") {
+        return RuntimeDirResult { ok: true, path: path, error: "" };
+    }
+    return RuntimeDirResult { ok: false, path: "", error: "runtime directory does not contain librey_rt.a: " + path };
+}
+
+func diagnosticSingleLine(value: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var part = value.slice(i, i + 1);
+        if part == "\n" { out = out + "\\n"; }
+        else if part == "\r" { out = out + "\\r"; }
+        else { out = out + part; }
+        i = i + 1;
+    }
+    return out;
+}
+
+func formatOneDiagnostic(path: string, message: string, line: int, column: int): string {
+    var lineText = "?";
+    var columnText = "?";
+    if line > 0 { lineText = line.toString(); }
+    if column > 0 { columnText = column.toString(); }
+    return diagnosticSingleLine(path) + ":" + lineText + ":" + columnText + ": error: " + diagnosticSingleLine(message);
+}
+
+func formatUnknownDiagnostic(path: string, message: string): string {
+    return formatOneDiagnostic(path, message, 0, 0);
+}
+
+func requireCheckedProgram(value: CheckedProgram?): Result<CheckedProgram, string> {
+    if value == null {
+        return Result.Err("typechecker returned no checked program");
+    } else {
+        return Result.Ok(value);
+    }
+}
+
+func formatLexDiagnostics(path: string, source: string, errors: Vec<LexError>): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= errors.len() { break; }
+        var e = errors[i];
+        if i > 0 { out = out + "\n"; }
+        out = out + formatOneDiagnostic(path, e.message, e.span.line, e.span.column);
+        i = i + 1;
+    }
+    return out;
+}
+
+func formatParseDiagnostics(path: string, source: string, errors: Vec<ParseError>): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= errors.len() { break; }
+        var e = errors[i];
+        if i > 0 { out = out + "\n"; }
+        out = out + formatOneDiagnostic(path, e.message, e.span.line, e.span.column);
+        i = i + 1;
+    }
+    return out;
+}
+
+struct SourcePosition {
+    pub line: int,
+    pub column: int,
+}
+
+func lineStartsForSource(source: string): Vec<int> {
+    var starts: Vec<int> = [];
+    starts.push(0);
+    var i = 0;
+    loop {
+        if i >= source.len() { break; }
+        if source.slice(i, i + 1) == "\n" { starts.push(i + 1); }
+        i = i + 1;
+    }
+    return starts;
+}
+
+func positionFromOffset(starts: Vec<int>, sourceLength: int, offset: int): SourcePosition {
+    if offset < 0 || offset > sourceLength || starts.len() == 0 { return SourcePosition { line: 0, column: 0 }; }
+    var low = 0;
+    var high = starts.len();
+    loop {
+        if low >= high { break; }
+        var middle = (low + high) / 2;
+        if starts[middle] <= offset { low = middle + 1; }
+        else { high = middle; }
+    }
+    var lineIndex = low - 1;
+    return SourcePosition { line: lineIndex + 1, column: offset - starts[lineIndex] + 1 };
+}
+
+func formatTypeDiagnostics(units: Vec<SourceUnit>, errors: Vec<TypeError>): string {
+    var out = "";
+    if errors.len() == 0 {
+        var path = "<unknown>";
+        if units.len() > 0 { path = units[0].sourcePath; }
+        return formatOneDiagnostic(path, "type error", 0, 0);
+    }
+    var unitsByPath: HashMap<string, SourceUnit> = HashMap.new();
+    var lineStartsByPath: HashMap<string, Vec<int>> = HashMap.new();
+    var unitIndex = 0;
+    loop {
+        if unitIndex >= units.len() { break; }
+        var unit: SourceUnit = units[unitIndex];
+        unitsByPath.set(unit.sourcePath, unit);
+        lineStartsByPath.set(unit.sourcePath, lineStartsForSource(unit.source));
+        unitIndex = unitIndex + 1;
+    }
+    var i = 0;
+    loop {
+        if i >= errors.len() { break; }
+        var e = errors[i];
+        var path = e.sourcePath;
+        var position = SourcePosition { line: 0, column: 0 };
+        if unitsByPath.has(path) && lineStartsByPath.has(path) && e.span >= 0 {
+            var unitForError: SourceUnit = unitsByPath.get(path);
+            if unitForError.source != "" { position = positionFromOffset(lineStartsByPath.get(path), unitForError.source.len(), e.span); }
+        }
+        if i > 0 { out = out + "\n"; }
+        out = out + formatOneDiagnostic(path, e.message, position.line, position.column);
+        i = i + 1;
+    }
+    return out;
+}
+
+func parseSourceToProgram(source: string, path: string): Result<Program, string> {
+    var lexResult = lexer.tokenize(source, path);
+    if lexResult.errors.len() > 0 {
+        return Result.Err(formatLexDiagnostics(path, source, lexResult.errors));
     }
     var parseResult = parser.parse(lexResult.tokens, path);
-    if parseResult.errors.length() > 0 {
-        var pe = parseResult.errors[0];
-        var ei = 0;
-        loop {
-            if ei >= 20 { break; }
-            if ei >= parseResult.errors.length() { break; }
-            var e2 = parseResult.errors[ei];
-            println("  err[" + ei.toString() + "] line " + e2.span.line.toString() + ": " + e2.message);
-            ei = ei + 1;
-        }
-        return Result.Err("parse error at line " + pe.span.line.toString() + ": " + pe.message);
+    if parseResult.errors.len() > 0 {
+        return Result.Err(formatParseDiagnostics(path, source, parseResult.errors));
     }
     return Result.Ok(parseResult.program);
 }
 
-func loadProgramWithImports(path: String, visited, stack) {
-    if visited.has(path) {
-        return Result.Ok(Program { statements: [], span: Span { start: 0, end: 0, line: 0, column: 0 } });
-    }
-    if stack.contains(path) {
-        return Result.Err("circular import: " + stack.join(" -> ") + " -> " + path);
-    }
-    stack.push(path);
-    visited.set(path, true);
+func parseFileToProgram(path: string): Result<Program, string> {
+    return parseSourceToProgram(readFile(path), path);
+}
 
-    var pr = parseFileToProgram(path);
-    if pr.isErr() { return pr; }
+func importPayloadFromStmt(stmt: Stmt): ImportStmt? {
+    match stmt {
+        Stmt::VarDecl(_) => { return null; },
+        Stmt::ConstDecl(_) => { return null; },
+        Stmt::FuncDecl(_) => { return null; },
+        Stmt::StructDecl(_) => { return null; },
+        Stmt::EnumDecl(_) => { return null; },
+        Stmt::Import(payload) => { return payload; },
+        Stmt::If(_) => { return null; },
+        Stmt::Assign(_) => { return null; },
+        Stmt::Return(_) => { return null; },
+        Stmt::Break(_) => { return null; },
+        Stmt::Continue(_) => { return null; },
+        Stmt::While(_) => { return null; },
+        Stmt::For(_) => { return null; },
+        Stmt::Loop(_) => { return null; },
+        Stmt::Block(_) => { return null; },
+        Stmt::ExprStmt(_) => { return null; },
+        Stmt::Match(_) => { return null; },
+    }
+    return null;
+}
+
+// Kept for compatibility; the release driver uses loadSourceGraph to retain ownership.
+func loadProgramWithImports(path: string, visited: HashMap<string, bool>, stack: Vec<string>, projectRoot: string): Result<Program, string> {
+    var normalizedPath = normalizePath(path);
+    if stack.contains(normalizedPath) {
+        return Result.Err(formatUnknownDiagnostic(normalizedPath, formatImportCycle(stack, normalizedPath)));
+    }
+    if visited.has(normalizedPath) {
+        return Result.Ok(Program { statements: [], span: Span { start: -1, end: -1, line: 0, column: 0 } });
+    }
+    stack.push(normalizedPath);
+
+    var pr = parseFileToProgram(normalizedPath);
+    if pr.isErr() {
+        stack.pop();
+        return pr;
+    }
     var prog = pr.unwrap();
 
-    var merged = [];
+    var merged: Vec<Stmt> = [];
     var i = 0;
     loop {
-        if i >= prog.statements.length() { break; }
+        if i >= prog.statements.len() { break; }
         var st = prog.statements[i];
-        if st instanceof ImportStmt {
-            var ip = resolveImportPath(path, st.path);
-            var sub = loadProgramWithImports(ip, visited, stack);
-            if sub.isErr() { return sub; }
+        var importPayload = importPayloadFromStmt(st);
+        if importPayload != null {
+            var importStmt: ImportStmt = importPayload;
+            var ip = resolveImportPath(normalizedPath, importStmt.path, importStmt.sourceKind, projectRoot);
+            var sub = loadProgramWithImports(ip, visited, stack, projectRoot);
+            if sub.isErr() {
+                stack.pop();
+                return sub;
+            }
             var subProg = sub.unwrap();
             var j = 0;
             loop {
-                if j >= subProg.statements.length() { break; }
+                if j >= subProg.statements.len() { break; }
                 merged.push(subProg.statements[j]);
                 j = j + 1;
             }
@@ -151,116 +595,396 @@ func loadProgramWithImports(path: String, visited, stack) {
     }
 
     stack.pop();
+    visited.set(normalizedPath, true);
     return Result.Ok(Program { statements: merged, span: prog.span });
 }
 
-func compileSource(source: String, path: String, cmd: String, rtDir: String): CompileResult {
-    var errors = Vec.new();
+func formatImportCycle(stack: Vec<string>, repeated: string): string {
+    var chain = "";
+    var index = 0;
+    loop {
+        if index >= stack.len() { break; }
+        var part = stack[index];
+        if part.len() > 0 {
+            if chain.len() > 0 { chain = chain + " -> "; }
+            chain = chain + part;
+        }
+        index = index + 1;
+    }
+    if repeated.len() > 0 {
+        if chain.len() > 0 { chain = chain + " -> "; }
+        chain = chain + repeated;
+    }
+    if chain.len() == 0 { return "Circular import detected"; }
+    return "Circular import detected: " + chain;
+}
 
+func loadSourceGraphUnit(path: string, graph: SourceGraph, visited: HashMap<string, bool>, stack: Vec<string>, originPath: string, originLine: int, originColumn: int, projectRoot: string, cycleChain: string) {
+    var normalizedPath = normalizePath(path);
+    var chainHere = normalizedPath;
+    if cycleChain.len() > 0 { chainHere = cycleChain + " -> " + normalizedPath; }
+    if stack.contains(normalizedPath) {
+        var cycleFile = originPath;
+        if cycleFile.len() == 0 { cycleFile = normalizedPath; }
+        var cycleMessage = "Circular import detected: " + chainHere;
+        if chainHere.len() == 0 { cycleMessage = formatImportCycle(stack, normalizedPath); }
+        graph.errors.push(formatOneDiagnostic(cycleFile, cycleMessage, originLine, originColumn));
+        return Result.Ok(true);
+    }
+    if visited.has(normalizedPath) { return Result.Ok(true); }
+    if !pathExistsExact(normalizedPath) {
+        graph.errors.push(formatUnknownDiagnostic(normalizedPath, "file not found"));
+        visited.set(normalizedPath, true);
+        return Result.Ok(true);
+    }
+
+    stack.push(normalizedPath);
+    var source = readFile(normalizedPath);
+    var parsed = parseSourceToProgram(source, normalizedPath);
+    if parsed.isErr() {
+        graph.errors.push(parsed.unwrapErr());
+        stack.pop();
+        visited.set(normalizedPath, true);
+        return Result.Ok(true);
+    }
+    var program = parsed.unwrap();
+    var i = 0;
+    loop {
+        if i >= program.statements.len() { break; }
+        var stmt = program.statements[i];
+        var importPayload = importPayloadFromStmt(stmt);
+        if importPayload != null {
+            var importStmt: ImportStmt = importPayload;
+            var target = normalizePath(resolveImportPath(normalizedPath, importStmt.path, importStmt.sourceKind, projectRoot));
+            var braceItems = importStmt.sourceKind == ImportSourceKind::Module && importStmt.items.len() > 0;
+            if braceItems && pathExistsExact(target) {
+                graph.edges.push(ImportEdge {
+                    fromPath: normalizedPath,
+                    toPath: target,
+                    sourceKind: ImportSourceKind::Module,
+                    namespaceName: "",
+                    items: importStmt.items,
+                    span: importStmt.span
+                });
+                loadSourceGraphUnit(target, graph, visited, stack, normalizedPath, importStmt.span.line, importStmt.span.column, projectRoot, chainHere);
+            } else if braceItems {
+                var symbolItems: Vec<string> = [];
+                var itemIndex = 0;
+                loop {
+                    if itemIndex >= importStmt.items.len() { break; }
+                    var itemName = importStmt.items[itemIndex];
+                    var childPath = existingModuleItem(dirname(normalizedPath), projectRoot, importStmt.path, itemName);
+                    if childPath.len() > 0 {
+                        var childTarget = normalizePath(childPath);
+                        var childItems: Vec<string> = [];
+                        graph.edges.push(ImportEdge {
+                            fromPath: normalizedPath,
+                            toPath: childTarget,
+                            sourceKind: ImportSourceKind::Module,
+                            namespaceName: itemName,
+                            items: childItems,
+                            span: importStmt.span
+                        });
+                        loadSourceGraphUnit(childTarget, graph, visited, stack, normalizedPath, importStmt.span.line, importStmt.span.column, projectRoot, chainHere);
+                    } else {
+                        symbolItems.push(itemName);
+                    }
+                    itemIndex = itemIndex + 1;
+                }
+                if symbolItems.len() > 0 {
+                    graph.edges.push(ImportEdge {
+                        fromPath: normalizedPath,
+                        toPath: target,
+                        sourceKind: ImportSourceKind::Module,
+                        namespaceName: "",
+                        items: symbolItems,
+                        span: importStmt.span
+                    });
+                    loadSourceGraphUnit(target, graph, visited, stack, normalizedPath, importStmt.span.line, importStmt.span.column, projectRoot, chainHere);
+                }
+            } else {
+                graph.edges.push(ImportEdge {
+                    fromPath: normalizedPath,
+                    toPath: target,
+                    sourceKind: importStmt.sourceKind,
+                    namespaceName: importStmt.namespaceName,
+                    items: importStmt.items,
+                    span: importStmt.span
+                });
+                loadSourceGraphUnit(target, graph, visited, stack, normalizedPath, importStmt.span.line, importStmt.span.column, projectRoot, chainHere);
+            }
+        }
+        i = i + 1;
+    }
+
+    graph.units.push(SourceUnit {
+        sourcePath: normalizedPath,
+        moduleId: normalizedPath,
+        source: source,
+        isEntry: normalizedPath == graph.entryPath,
+        program: program
+    });
+    visited.set(normalizedPath, true);
+    stack.pop();
+    return Result.Ok(true);
+}
+
+func loadSourceGraph(entryPath: string): Result<SourceGraph, string> {
+    var normalizedEntry = normalizePath(entryPath);
+    var projectRoot = projectRootDir(normalizedEntry);
+    var graph = SourceGraph { entryPath: normalizedEntry, units: [], edges: [], errors: [] };
+    var visited: HashMap<string, bool> = HashMap.new();
+    var stack: Vec<string> = Vec.new();
+    loadSourceGraphUnit(normalizedEntry, graph, visited, stack, "", 0, 0, projectRoot, "");
+    return Result.Ok(graph);
+}
+
+func compileCheckedGraphWithOutput(graph: SourceGraph, path: string, cmd: string, rtDir: string, requestedOutput: string): CompileResult {
+    if cmd != "build" && cmd != "run" && cmd != "check" {
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(path, "unsupported command: " + cmd), ir: "", outputPath: "" };
+    }
+    if graph.errors.len() > 0 {
+        var loadMessage = "";
+        var loadIndex = 0;
+        loop {
+            if loadIndex >= graph.errors.len() { break; }
+            if loadIndex > 0 { loadMessage = loadMessage + "\n"; }
+            loadMessage = loadMessage + graph.errors[loadIndex];
+            loadIndex = loadIndex + 1;
+        }
+        return CompileResult { ok: false, errors: loadMessage, ir: "", outputPath: "" };
+    }
+    var typeResult = typecheckGraph(graph);
+    if !typeResult.ok {
+        return CompileResult { ok: false, errors: formatTypeDiagnostics(graph.units, typeResult.errors), ir: "", outputPath: "" };
+    }
+    if cmd == "check" { return CompileResult { ok: true, errors: "ok", ir: "", outputPath: "" }; }
+    var checkedProgramResult = requireCheckedProgram(typeResult.checkedProgram);
+    if checkedProgramResult.isErr() {
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(path, checkedProgramResult.unwrapErr()), ir: "", outputPath: "" };
+    }
+
+    var checkedProgram: CheckedProgram = checkedProgramResult.unwrap();
+    var irResult = codegen.generateIRChecked(checkedProgram);
+    if irResult.isErr() {
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(path, "checked lowering failed: " + irResult.unwrapErr()), ir: "", outputPath: "" };
+    }
+    var ir = irResult.unwrap();
+    var outputPath = requestedOutput;
+    if outputPath.len() == 0 { outputPath = defaultOutputPath(path); }
+    var compileRes: Result<string, string> = codegen.compileLLVM(ir, outputPath, true, rtDir);
+    if compileRes.isErr() {
+        var detail = compileRes.unwrapErr();
+        if detail.len() == 0 { detail = "compiler returned an error without a payload; inspect stderr"; }
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(path, "compiler failed: " + detail), ir: ir, outputPath: "" };
+    }
+    outputPath = compileRes.unwrap();
+    return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
+}
+
+func compileSourceWithOutput(source: string, path: string, cmd: string, rtDir: string, requestedOutput: string): CompileResult {
+    if cmd != "build" && cmd != "run" && cmd != "check" {
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(path, "unsupported command: " + cmd), ir: "", outputPath: "" };
+    }
     var lexResult = lexer.tokenize(source, path);
-    if lexResult.errors.length() > 0 {
-        var e = lexResult.errors[0];
-        return CompileResult { ok: false, errors: "lexer error at line " + e.span.line.toString() + ": " + e.message, ir: "", outputPath: "" };
+    if lexResult.errors.len() > 0 {
+        return CompileResult { ok: false, errors: formatLexDiagnostics(path, source, lexResult.errors), ir: "", outputPath: "" };
     }
 
     var parseResult = parser.parse(lexResult.tokens, path);
-    if parseResult.errors.length() > 0 {
-        var pe = parseResult.errors[0];
-        return CompileResult { ok: false, errors: "parse error at line " + pe.span.line.toString() + ": " + pe.message, ir: "", outputPath: "" };
+    if parseResult.errors.len() > 0 {
+        return CompileResult { ok: false, errors: formatParseDiagnostics(path, source, parseResult.errors), ir: "", outputPath: "" };
     }
 
-    var typeResult = typecheck.typecheck(parseResult.program);
-    if !typeResult.ok {
-        if typeResult.errors.length() > 0 {
-            var te = typeResult.errors[0];
-            return CompileResult { ok: false, errors: "type error: " + te.message, ir: "", outputPath: "" };
-        }
-        return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
-    }
-
-    var ir = codegen.generateIR(parseResult.program);
-
-    if cmd == "build" || cmd == "run" {
-        var outputPath = defaultOutputPath(path);
-        var compileRes = codegen.compileLLVM(ir, outputPath, false, rtDir);
-        if compileRes.isErr() {
-            return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
-        }
-        outputPath = compileRes.unwrap();
-
-        println("Compiled: " + path);
-        return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
-    }
-
-    return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: "a.out" };
+    var normalizedPath = normalizePath(path);
+    var unit = SourceUnit { sourcePath: normalizedPath, moduleId: normalizedPath, source: source, isEntry: true, program: parseResult.program };
+    var graph = SourceGraph { entryPath: normalizedPath, units: [unit], edges: [], errors: [] };
+    return compileCheckedGraphWithOutput(graph, normalizedPath, cmd, rtDir, requestedOutput);
 }
 
-func compileFile(entryPath: String, cmd: String, rtDir: String): CompileResult {
+func compileSource(source: string, path: string, cmd: string, rtDir: string): CompileResult {
+    return compileSourceWithOutput(source, path, cmd, rtDir, "");
+}
+
+func compileFileWithOutput(entryPath: string, cmd: string, rtDir: string, requestedOutput: string): CompileResult {
+    if cmd != "build" && cmd != "run" && cmd != "check" {
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(entryPath, "unsupported command: " + cmd), ir: "", outputPath: "" };
+    }
     var exists = fileExists(entryPath);
     if !exists {
-        return CompileResult { ok: false, errors: "file not found", ir: "", outputPath: "" };
+        return CompileResult { ok: false, errors: formatUnknownDiagnostic(entryPath, "file not found"), ir: "", outputPath: "" };
     }
 
-    var visited = HashMap.new();
-    var stack = Vec.new();
-    var pr = loadProgramWithImports(entryPath, visited, stack);
-    if pr.isErr() {
-        return CompileResult { ok: false, errors: pr.unwrapOr("import error"), ir: "", outputPath: "" };
-    }
-    var program = pr.unwrap();
+    var graphResult = loadSourceGraph(entryPath);
+    if graphResult.isErr() { return CompileResult { ok: false, errors: graphResult.unwrapErr(), ir: "", outputPath: "" }; }
+    var graph: SourceGraph = graphResult.unwrap();
+    return compileCheckedGraphWithOutput(graph, graph.entryPath, cmd, rtDir, requestedOutput);
+}
 
-    var typeResult = typecheck.typecheck(program);
-    if !typeResult.ok {
-        if typeResult.errors.length() > 0 {
-            var te = typeResult.errors[0];
-            return CompileResult { ok: false, errors: "type error: " + te.message, ir: "", outputPath: "" };
+func compileFile(entryPath: string, cmd: string, rtDir: string): CompileResult {
+    return compileFileWithOutput(entryPath, cmd, rtDir, "");
+}
+
+func shellQuote(value: string): string {
+    var parts: Vec<string> = [];
+    parts.push("'");
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var part = value.slice(i, i + 1);
+        if part == "'" { parts.push("'\\''"); }
+        else { parts.push(part); }
+        i = i + 1;
+    }
+    parts.push("'");
+    return parts.join("");
+}
+
+func tempRunPath(srcPath: string): string {
+    var parts: Vec<string> = [];
+    parts.push("/tmp/rey-run-");
+    var i = 0;
+    loop {
+        if i >= srcPath.len() { break; }
+        var c = srcPath.slice(i, i + 1);
+        var ok = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "." || c == "_" || c == "-";
+        if ok { parts.push(c); }
+        else { parts.push("_"); }
+        i = i + 1;
+    }
+    if srcPath.len() == 0 { parts.push("program"); }
+    return parts.join("");
+}
+
+func digitValue(c: string): int {
+    if c == "0" { return 0; }
+    if c == "1" { return 1; }
+    if c == "2" { return 2; }
+    if c == "3" { return 3; }
+    if c == "4" { return 4; }
+    if c == "5" { return 5; }
+    if c == "6" { return 6; }
+    if c == "7" { return 7; }
+    if c == "8" { return 8; }
+    if c == "9" { return 9; }
+    return -1;
+}
+
+func statusCode(text: string): int {
+    var n = 0;
+    var i = 0;
+    var seen = false;
+    loop {
+        if i >= text.len() { break; }
+        var c = text.slice(i, i + 1);
+        if c == " " || c == "\n" || c == "\r" {
+            if seen { break; }
+        } else {
+            var digit = digitValue(c);
+            if digit < 0 { return 1; }
+            seen = true;
+            n = n * 10 + digit;
         }
-        return CompileResult { ok: false, errors: "type error", ir: "", outputPath: "" };
+        i = i + 1;
     }
+    if !seen { return 1; }
+    return n;
+}
 
-    var ir = codegen.generateIR(program);
-
-    if cmd == "build" || cmd == "run" {
-        var outputPath = defaultOutputPath(entryPath);
-        var compileRes = codegen.compileLLVM(ir, outputPath, false, rtDir);
-        if compileRes.isErr() {
-            return CompileResult { ok: false, errors: compileRes.unwrapOr("compile failed"), ir: ir, outputPath: "" };
-        }
-        outputPath = compileRes.unwrap();
-
-        println("Compiled: " + entryPath);
-        return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: outputPath };
+func runBuiltProgram(programPath: string, runArgs: Vec<string>) {
+    var parts: Vec<string> = [];
+    parts.push(shellQuote(programPath));
+    var i = 0;
+    loop {
+        if i >= runArgs.len() { break; }
+        parts.push(" ");
+        parts.push(shellQuote(runArgs[i]));
+        i = i + 1;
     }
-
-    return CompileResult { ok: true, errors: "ok", ir: ir, outputPath: "a.out" };
+    var stdoutPath = programPath + ".rey-stdout";
+    var stderrPath = programPath + ".rey-stderr";
+    var statusPath = programPath + ".rey-status";
+    parts.push(" > ");
+    parts.push(shellQuote(stdoutPath));
+    parts.push(" 2> ");
+    parts.push(shellQuote(stderrPath));
+    parts.push("; printf '%s' $? > ");
+    parts.push(shellQuote(statusPath));
+    var execResult: Result<string, string> = exec(parts.join(""));
+    if execResult.isErr() {
+        eprintln(formatUnknownDiagnostic(programPath, "failed to execute program: " + execResult.unwrapErr()));
+        exit(1);
+        return;
+    }
+    var stdoutText = "";
+    var stderrText = "";
+    var statusText = "1";
+    if fileExists(stdoutPath) { stdoutText = readFile(stdoutPath); }
+    if fileExists(stderrPath) { stderrText = readFile(stderrPath); }
+    if fileExists(statusPath) { statusText = readFile(statusPath); }
+    if stdoutText.len() > 0 { print(stdoutText); }
+    if stderrText.len() > 0 { eprint(stderrText); }
+    if fileExists(stdoutPath) { deleteFile(stdoutPath); }
+    if fileExists(stderrPath) { deleteFile(stderrPath); }
+    if fileExists(statusPath) { deleteFile(statusPath); }
+    var status = statusCode(statusText);
+    if status != 0 { exit(status); }
 }
 
 func main() {
     var cliArgs = args();
-    if cliArgs.length() < 4 {
-        println("Usage: reyc <build|run|check> <file>");
-    } else {
-        var cmd = cliArgs[2];
-        var path = cliArgs[3];
+    var cli = parseCli(cliArgs);
 
-        // derive runtime dir from compiler script path (args()[1] = rey-compiler/main.rey)
-        var compilerPath = cliArgs[1];
-        var rtDir = dirname(compilerPath) + "/runtime";
-
-        var result = compileFile(path, cmd, rtDir);
-
-        if result.ok {
-            println("Success: " + result.outputPath);
-            if cmd == "run" {
-                var runRes = exec(result.outputPath);
-                if runRes.isOk() {
-                    print("" + runRes.unwrap());
-                } else {
-                    println("run error: " + runRes.unwrapOr("?"));
-                }
-            }
-        } else {
-            println("Error: " + result.errors);
-        }
+    if cli.action == "help" {
+        println(cli.message);
+        return;
     }
+    if cli.action == "version" {
+        println(cli.message);
+        return;
+    }
+    if cli.action == "usage" {
+        eprintln(cli.message);
+        exit(2);
+        return;
+    }
+
+    var rtDir = "";
+    if cli.runtimeDir.len() > 0 {
+        var runtimeDir = validateRuntimeDir(cli.runtimeDir);
+        if !runtimeDir.ok {
+            eprintln(formatUnknownDiagnostic(cli.filePath, runtimeDir.error));
+            exit(1);
+            return;
+        }
+        rtDir = runtimeDir.path;
+    } else if cli.command != "check" {
+        var runtimeDir = resolveRuntimeDir(cli.programPath);
+        if !runtimeDir.ok {
+            eprintln(formatUnknownDiagnostic(cli.filePath, runtimeDir.error));
+            exit(1);
+            return;
+        }
+        rtDir = runtimeDir.path;
+    }
+
+    var requestedOutput = cli.outputPath;
+    if cli.command == "run" && requestedOutput.len() == 0 { requestedOutput = tempRunPath(cli.filePath); }
+    var result = compileFileWithOutput(cli.filePath, cli.command, rtDir, requestedOutput);
+    if !result.ok {
+        eprintln(result.errors);
+        exit(1);
+        return;
+    }
+
+    if cli.command == "build" {
+        println(result.outputPath);
+        return;
+    }
+    if cli.command == "check" {
+        return;
+    }
+
+    runBuiltProgram(result.outputPath, cli.runArgs);
+    return;
 }
