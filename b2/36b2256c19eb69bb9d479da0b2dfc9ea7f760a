@@ -1,0 +1,29 @@
+primer.md
+  s_3868795c391050::t_947868475adf88 3-8,10-11
+  s_3868795c391050::t_f62b9732065362 9
+docs/V0.4-DESIGN.md
+  s_3868795c391050::t_947868475adf88 3-4
+docs/V0.4-EXECUTION-PLAN.md
+  s_3868795c391050::t_947868475adf88 1-71,73-106,108-263
+  s_3868795c391050::t_f62b9732065362 72,107
+CLAUDE.md
+  s_3868795c391050::t_947868475adf88 69-75
+CHANGELOG.md
+  s_3868795c391050::t_947868475adf88 3-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b236b2256c19eb69bb9d479da0b2dfc9ea7f760a",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
