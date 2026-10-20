@@ -1,0 +1,169 @@
+tests/conformance/control/float-vec-iteration/expected.stdout
+  s_9e2420774b8c0d::t_eca10428052b36 1
+tests/conformance/control/float-vec-iteration/main.rey
+  s_9e2420774b8c0d::t_62f4e6824ea048 1-8
+tests/conformance/control/struct-pattern-binding/expected.stdout
+  s_9e2420774b8c0d::t_639dcb598640b9 1-2
+tests/conformance/control/struct-pattern-binding/main.rey
+  s_9e2420774b8c0d::t_e9bd1f6064dae7 1-20
+tests/conformance/control/vec-iteration-break-continue/expected.stdout
+  s_9e2420774b8c0d::t_ad9c998d07ce07 1
+tests/conformance/control/vec-iteration-break-continue/main.rey
+  s_9e2420774b8c0d::t_6dceb3abb877b3 1-11
+tests/conformance/data/dict-missing-key/expected.exit
+  s_9e2420774b8c0d::t_fee8a8cc0388dc 1
+tests/conformance/data/dict-missing-key/expected.stdout
+  s_9e2420774b8c0d::t_df4ce1f4c3fc17 1
+tests/conformance/data/dict-missing-key/main.rey
+  s_9e2420774b8c0d::t_9fa5deadf899ad 1-6
+tests/conformance/data/float-collections/expected.stdout
+  s_9e2420774b8c0d::t_b30928635e6195 1-4
+tests/conformance/data/float-collections/main.rey
+  s_9e2420774b8c0d::t_132666b8860453 1-13
+tests/conformance/data/hashmap-keys-values/main.rey
+  s_9e2420774b8c0d::t_fdee4050e02126 1-7
+tests/conformance/data/hashmap-missing-key/expected.exit
+  s_9e2420774b8c0d::t_9a6c64cc922c1a 1
+tests/conformance/data/hashmap-missing-key/expected.stdout
+  s_9e2420774b8c0d::t_b6a738ed6a6039 1
+tests/conformance/data/hashmap-missing-key/main.rey
+  s_9e2420774b8c0d::t_b9d241adff4712 1-6
+tests/conformance/data/option-unwrap-none/expected.exit
+  s_9e2420774b8c0d::t_49d57f483859bb 1
+tests/conformance/data/option-unwrap-none/expected.stdout
+  s_9e2420774b8c0d::t_007b196809afc4 1
+tests/conformance/data/option-unwrap-none/main.rey
+  s_9e2420774b8c0d::t_163d0ba8d526d7 1-6
+tests/conformance/data/string-search-and-edit/expected.stdout
+  s_9e2420774b8c0d::t_91c55f1c19a7a3 1-15
+tests/conformance/data/string-search-and-edit/main.rey
+  s_9e2420774b8c0d::t_6fcb7ad8a35e10 1-17
+tests/conformance/data/struct-method-writeback/expected.stdout
+  s_9e2420774b8c0d::t_23d81355aa918e 1-2
+tests/conformance/data/struct-method-writeback/main.rey
+  s_9e2420774b8c0d::t_f5e11515961e8f 1-17
+tests/conformance/data/tuple-equality/expected.stdout
+  s_9e2420774b8c0d::t_bc068463458f75 1-4
+tests/conformance/data/tuple-equality/main.rey
+  s_9e2420774b8c0d::t_cce0d1c123f531 1-11
+tests/conformance/data/vec-higher-order/expected.stdout
+  s_9e2420774b8c0d::t_3490f56cdd5293 1-4
+tests/conformance/data/vec-higher-order/main.rey
+  s_9e2420774b8c0d::t_4ccce9780ba5c9 1-15
+tests/conformance/data/vec-index-out-of-bounds/expected.exit
+  s_9e2420774b8c0d::t_20e156f4e1f127 1
+tests/conformance/data/vec-index-out-of-bounds/expected.stdout
+  s_9e2420774b8c0d::t_38aa691d0289fc 1
+tests/conformance/data/vec-index-out-of-bounds/main.rey
+  s_9e2420774b8c0d::t_cedff4a06a40a7 1-6
+tests/conformance/data/vec-slice-search/expected.stdout
+  s_9e2420774b8c0d::t_178c083f38e1f8 1-5
+tests/conformance/data/vec-slice-search/main.rey
+  s_9e2420774b8c0d::t_4381a375c5f4eb 1-11
+tests/conformance/exprs/indexed-compound-write/expected.stdout
+  s_9e2420774b8c0d::t_3b3c69128b52d9 1-3
+tests/conformance/exprs/indexed-compound-write/main.rey
+  s_9e2420774b8c0d::t_7f5d08ddbee067 1-12
+tests/conformance/exprs/interpolation-braces/expected.stdout
+  s_9e2420774b8c0d::t_5f866d922093f4 1-5
+tests/conformance/exprs/interpolation-braces/main.rey
+  s_9e2420774b8c0d::t_6520c94e3241ef 1-9
+tests/conformance/exprs/numeric-builtins/expected.stdout
+  s_9e2420774b8c0d::t_9319ab0b8ce6ea 1-9
+tests/conformance/exprs/numeric-builtins/main.rey
+  s_9e2420774b8c0d::t_8f65d61b9388a1 1-11
+tests/conformance/exprs/numeric-separators/expected.stdout
+  s_9e2420774b8c0d::t_5e95246eb55234 1-3
+tests/conformance/exprs/numeric-separators/main.rey
+  s_9e2420774b8c0d::t_1b9471f10e7f90 1-6
+tests/conformance/funcs/default-arguments/expected.stdout
+  s_9e2420774b8c0d::t_7fa88fdfa302c9 1-4
+tests/conformance/funcs/default-arguments/main.rey
+  s_9e2420774b8c0d::t_ea9717ab919725 1-15
+tests/conformance/funcs/lambda-return-snapshot/expected.stdout
+  s_9e2420774b8c0d::t_a22ecb1cdb3b98 1-2
+tests/conformance/funcs/lambda-return-snapshot/main.rey
+  s_9e2420774b8c0d::t_f1e58fe5865982 1-13
+tests/conformance/funcs/variadic-after-fixed/expected.stdout
+  s_9e2420774b8c0d::t_70207af13552e5 1-2
+tests/conformance/funcs/variadic-after-fixed/main.rey
+  s_9e2420774b8c0d::t_217bb572ecd38f 1-15
+tests/conformance/modules/same-named-struct-fields/expected.stdout
+  s_9e2420774b8c0d::t_f4eff4d8c593d8 1-2
+tests/conformance/modules/same-named-struct-fields/left/main.rey
+  s_9e2420774b8c0d::t_530194fbadb62d 1-7
+tests/conformance/modules/same-named-struct-fields/main.rey
+  s_9e2420774b8c0d::t_679aa6b93bc26c 1-9
+tests/conformance/modules/same-named-struct-fields/right/main.rey
+  s_9e2420774b8c0d::t_3b19693ae16411 1-7
+tests/conformance/robustness/nul-and-hex-bytes/expected.stdout
+  s_9e2420774b8c0d::t_1c4dbfce241d83 1-4
+tests/conformance/robustness/nul-and-hex-bytes/main.rey
+  s_9e2420774b8c0d::t_b88e36a08fe50f 1-8
+tests/conformance/types/conversion-truncation/expected.stdout
+  s_9e2420774b8c0d::t_77e020a0e0d2ae 1-4
+tests/conformance/types/conversion-truncation/main.rey
+  s_9e2420774b8c0d::t_b46660c4526ed5 1-7
+tests/conformance/types/instanceof-struct/expected.stdout
+  s_9e2420774b8c0d::t_25641fc5a1028e 1-2
+tests/conformance/types/instanceof-struct/main.rey
+  s_9e2420774b8c0d::t_520955dd41e4fe 1-18
+tests/conformance/types/nullable-else-not-narrowed/expect_check_fail
+  s_9e2420774b8c0d::t_7b8816e9326cb6 1
+tests/conformance/types/nullable-else-not-narrowed/main.rey
+  s_9e2420774b8c0d::t_b76b9338756ab2 1-9
+tests/conformance/types/union-else-narrowing/expected.stdout
+  s_9e2420774b8c0d::t_64bfebe1560c90 1-2
+tests/conformance/types/union-else-narrowing/main.rey
+  s_9e2420774b8c0d::t_743ff77e398ffa 1-15
+tests/native-typecheck/graphs/same-name-nominal/inner.rey
+  s_9e2420774b8c0d::t_7a286adde8df90 1
+tests/native-typecheck/negative/char-int-order.expect_check_fail
+  s_9e2420774b8c0d::t_76467284020c51 1
+tests/native-typecheck/negative/char-int-order.rey
+  s_9e2420774b8c0d::t_19e83ade2489f8 1-3
+tests/native-typecheck/negative/entry-main-return.expect_check_fail
+  s_9e2420774b8c0d::t_c0b89057eb99a6 1
+tests/native-typecheck/negative/entry-main-return.rey
+  s_9e2420774b8c0d::t_19ecc920281451 1-3
+tests/native-typecheck/negative/entry-main-shape.expect_check_fail
+  s_9e2420774b8c0d::t_12eed163c7fff4 1
+tests/native-typecheck/negative/entry-main-shape.rey
+  s_9e2420774b8c0d::t_0039995f38b72d 1-3
+tests/native-typecheck/negative/private-field-same-module.expect_check_fail
+  s_9e2420774b8c0d::t_92f589d0b4c9fb 1
+tests/native-typecheck/negative/private-field-same-module.rey
+  s_9e2420774b8c0d::t_eca9b3220f753d 1-8
+tests/native-typecheck/negative/var-used-too-early.expect_check_fail
+  s_9e2420774b8c0d::t_c9b4b05bde6fa5 1
+tests/native-typecheck/negative/var-used-too-early.rey
+  s_9e2420774b8c0d::t_f15e28463e7254 1-9
+tests/native-typecheck/positive/char-ordering.rey
+  s_9e2420774b8c0d::t_18504447e083b2 1-5
+tests/native-typecheck/positive/earlier-module-var.rey
+  s_9e2420774b8c0d::t_57e8ae65ba7949 1-9
+tests/native-typecheck/positive/float-conversions.rey
+  s_9e2420774b8c0d::t_776bc6a5951201 1-13
+tests/native-typecheck/positive/hex-range.rey
+  s_9e2420774b8c0d::t_babcdf1be9875d 1-7
+tests/native-typecheck/positive/nested-option.rey
+  s_9e2420774b8c0d::t_aed61e9198ea52 1-10
+tests/native-typecheck/positive/private-method-call.rey
+  s_9e2420774b8c0d::t_e9300de7c9fa1f 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bda1e414f20a35b3721d252e81c44f0e025f756a",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
