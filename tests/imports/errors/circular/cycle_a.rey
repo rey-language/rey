@@ -1,5 +1,5 @@
 import cycle_b.ping;
 
-export pub func start() {
+pub func start() {
     ping();
 }

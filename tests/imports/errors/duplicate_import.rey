@@ -1,4 +1,4 @@
 import actuator.name;
 import actuator.name;
 
-println("should-not-run");
+name();

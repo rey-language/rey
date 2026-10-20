@@ -1,6 +1,6 @@
 import nestedmod;
 
-func main(): Void {
+func main(): void {
     var v = nestedmod.entry();
     if (v != "ok") {
         var fail = 1 / 0;

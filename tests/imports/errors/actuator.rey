@@ -1,4 +1,4 @@
-export pub func name() {
+pub func name() {
     println("ok");
 }
 

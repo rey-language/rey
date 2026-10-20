@@ -1,8 +1,8 @@
-export pub func name() {
+pub func name() {
     println("name");
 }
 
-export pub func other() {
+pub func other() {
     println("other");
 }
 

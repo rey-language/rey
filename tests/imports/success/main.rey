@@ -2,7 +2,7 @@ import actuator.name;
 import actuator.{other};
 import action;
 import action::walk;
-import action::{run};
+import action::run;
 
 name();
 other();
