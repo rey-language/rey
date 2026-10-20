@@ -23,58 +23,6 @@ Write-Host "/_/ |_|\___/\__, /   " -ForegroundColor Cyan
 Write-Host "           /____/    " -ForegroundColor Cyan
 Write-Host ""
 
-# Rey emits native code; on Windows use the MSYS2 UCRT64 Clang toolchain.
-$Clang = Get-Command clang.exe -ErrorAction SilentlyContinue
-if ($Clang) {
-    Write-Host "==> Clang found; skipping toolchain installation." -ForegroundColor Blue
-} else {
-    $MsysCandidates = @(
-        $env:MSYS2_ROOT,
-        "$env:SystemDrive\msys64",
-        "$env:ProgramFiles\MSYS2",
-        "$env:LOCALAPPDATA\Programs\MSYS2",
-        "C:\tools\msys64"
-    ) | Where-Object { $_ }
-    $MsysRoot = $MsysCandidates | Where-Object { Test-Path (Join-Path $_ "usr\bin\bash.exe") } | Select-Object -First 1
-
-    if (-not $MsysRoot) {
-        if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
-            Write-Host "==> Installing MSYS2..." -ForegroundColor Blue
-            & winget.exe install --id MSYS2.MSYS2 --exact --scope user --silent --location "$env:LOCALAPPDATA\Programs\MSYS2" --accept-source-agreements --accept-package-agreements
-            $WingetExit = $LASTEXITCODE
-            if ($WingetExit -notin @(0, 2)) { throw "MSYS2 installation failed (winget exit $WingetExit)." }
-        } else {
-            throw "Clang is missing. Install MSYS2 or Windows Package Manager, then rerun this installer."
-        }
-
-        for ($Attempt = 0; -not $MsysRoot -and $Attempt -lt 60; $Attempt++) {
-            Start-Sleep -Seconds 2
-            $MsysRoot = $MsysCandidates | Where-Object { Test-Path (Join-Path $_ "usr\bin\bash.exe") } | Select-Object -First 1
-        }
-    }
-
-    if (-not $MsysRoot) { throw "MSYS2 was installed, but bash.exe was not found. Set MSYS2_ROOT and retry." }
-
-    $MsysBash = Join-Path $MsysRoot "usr\bin\bash.exe"
-    Write-Host "==> Updating MSYS2 and installing Clang..." -ForegroundColor Blue
-    & $MsysBash -lc "pacman -Syu --noconfirm || true"
-    & $MsysBash -lc "pacman -Syu --noconfirm"
-    if ($LASTEXITCODE -ne 0) { throw "MSYS2 package update failed (pacman exit $LASTEXITCODE)." }
-    & $MsysBash -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-clang"
-    if ($LASTEXITCODE -ne 0) { throw "MSYS2 Clang installation failed (pacman exit $LASTEXITCODE)." }
-
-    $ClangBin = Join-Path $MsysRoot "ucrt64\bin"
-    if (-not (Test-Path (Join-Path $ClangBin "clang.exe"))) { throw "MSYS2 Clang was not found under $ClangBin." }
-
-    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (($UserPath -split ';') -notcontains $ClangBin) {
-        [Environment]::SetEnvironmentVariable("Path", "$ClangBin;$UserPath", "User")
-    }
-    $env:Path = "$ClangBin;$env:Path"
-    $Clang = Get-Command clang.exe -ErrorAction SilentlyContinue
-    if (-not $Clang) { throw "Clang was installed but is still unavailable in PATH." }
-}
-
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
 

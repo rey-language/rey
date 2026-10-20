@@ -145,8 +145,56 @@ elif [ "$PLATFORM" = "windows" ]; then
     if command -v clang.exe >/dev/null 2>&1; then
         log_info "Clang found; skipping toolchain installation."
     else
-        log_error "Run install.ps1 in PowerShell to install the Windows Clang toolchain."
-        exit 1
+        if ! command -v powershell.exe >/dev/null 2>&1 || ! command -v cygpath >/dev/null 2>&1; then
+            log_error "On Windows, run install.sh from Git Bash with Windows PowerShell and cygpath available."
+            exit 1
+        fi
+
+        LOCAL_APPDATA_WIN="$(powershell.exe -NoProfile -Command '$env:LOCALAPPDATA' | tr -d '\r')"
+        LOCAL_APPDATA="$(cygpath -u "$LOCAL_APPDATA_WIN")"
+        if [ -n "${MSYS2_ROOT:-}" ]; then
+            MSYS2_ROOT="$(cygpath -u "$MSYS2_ROOT")"
+        elif [ -x /c/msys64/usr/bin/bash.exe ]; then
+            MSYS2_ROOT=/c/msys64
+        else
+            MSYS2_ROOT="$LOCAL_APPDATA/Programs/MSYS2"
+        fi
+
+        if [ ! -x "$MSYS2_ROOT/usr/bin/bash.exe" ]; then
+            if ! command -v winget.exe >/dev/null 2>&1; then
+                log_error "Clang is missing. Install Windows Package Manager or MSYS2, then rerun install.sh."
+                exit 1
+            fi
+            log_info "Installing MSYS2..."
+            MSYS2_ROOT_WIN="$(cygpath -w "$MSYS2_ROOT")"
+            WINGET_EXIT=0
+            winget.exe install --id MSYS2.MSYS2 --exact --scope user --silent --location "$MSYS2_ROOT_WIN" --accept-source-agreements --accept-package-agreements || WINGET_EXIT=$?
+            if [ "$WINGET_EXIT" -ne 0 ] && [ "$WINGET_EXIT" -ne 2 ]; then
+                log_error "MSYS2 installation failed (winget exit $WINGET_EXIT)."
+                exit 1
+            fi
+            ATTEMPT=0
+            while [ ! -x "$MSYS2_ROOT/usr/bin/bash.exe" ] && [ "$ATTEMPT" -lt 60 ]; do
+                sleep 2
+                ATTEMPT=$((ATTEMPT + 1))
+            done
+        fi
+
+        if [ ! -x "$MSYS2_ROOT/usr/bin/bash.exe" ]; then
+            log_error "MSYS2 was installed, but bash.exe was not found. Set MSYS2_ROOT and retry."
+            exit 1
+        fi
+
+        log_info "Updating MSYS2 and installing the UCRT64 Clang toolchain..."
+        "$MSYS2_ROOT/usr/bin/bash.exe" -lc "pacman -Syu --noconfirm || true"
+        "$MSYS2_ROOT/usr/bin/bash.exe" -lc "pacman -Syu --noconfirm"
+        "$MSYS2_ROOT/usr/bin/bash.exe" -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-clang"
+        CLANG_BIN="$MSYS2_ROOT/ucrt64/bin"
+        export PATH="$CLANG_BIN:$PATH"
+        if ! command -v clang.exe >/dev/null 2>&1; then
+            log_error "Clang installation completed, but clang.exe is still unavailable."
+            exit 1
+        fi
     fi
 fi
 
@@ -158,14 +206,33 @@ mkdir -p "$STD_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 # 3. Install packages
-LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.tar.gz"
+if [ "$PLATFORM" = "windows" ]; then
+    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.zip"
+    ARCHIVE_EXT="zip"
+else
+    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.tar.gz"
+    ARCHIVE_EXT="tar.gz"
+fi
 LOCAL_NATIVE_BIN="$SCRIPT_DIR/build/rey"
 LOCAL_RUNTIME_LIB="$SCRIPT_DIR/build/runtime/librey_rt.a"
+
+extract_archive() {
+    ARCHIVE_PATH="$1"
+    DESTINATION_PATH="$2"
+    if [ "$PLATFORM" = "windows" ]; then
+        REY_ARCHIVE_WIN="$(cygpath -w "$ARCHIVE_PATH")"
+        REY_DESTINATION_WIN="$(cygpath -w "$DESTINATION_PATH")"
+        export REY_ARCHIVE_WIN REY_DESTINATION_WIN
+        powershell.exe -NoProfile -Command 'Expand-Archive -LiteralPath $env:REY_ARCHIVE_WIN -DestinationPath $env:REY_DESTINATION_WIN -Force'
+    else
+        tar -xzf "$ARCHIVE_PATH" -C "$DESTINATION_PATH"
+    fi
+}
 
 if [ -f "$LOCAL_ARCHIVE" ]; then
     log_info "Found local release package: $LOCAL_ARCHIVE"
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
-    tar -xzf "$LOCAL_ARCHIVE" -C "$TMP_EXTRACT"
+    extract_archive "$LOCAL_ARCHIVE" "$TMP_EXTRACT"
     SOURCE_DIR="$TMP_EXTRACT/rey-v0.3.0-${TARGET}"
     cp -R "$SOURCE_DIR/bin/"* "$BIN_DIR/"
     rm -rf "$STD_DIR/src"
@@ -184,9 +251,9 @@ elif [ -f "$LOCAL_NATIVE_BIN" ] && [ -f "$LOCAL_RUNTIME_LIB" ]; then
         cp -R "$SCRIPT_DIR/std/src" "$STD_DIR/src"
     fi
 else
-    DOWNLOAD_URL="${REPO_URL}/releases/download/${VERSION}/rey-${VERSION}-${TARGET}.tar.gz"
+    DOWNLOAD_URL="${REPO_URL}/releases/download/${VERSION}/rey-${VERSION}-${TARGET}.${ARCHIVE_EXT}"
     log_info "Downloading Rey ${VERSION} from ${DOWNLOAD_URL}..."
-    TMP_ARCHIVE="$(mktemp 2>/dev/null || mktemp -t 'rey-archive').tar.gz"
+    TMP_ARCHIVE="$(mktemp 2>/dev/null || mktemp -t 'rey-archive').${ARCHIVE_EXT}"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$DOWNLOAD_URL" -o "$TMP_ARCHIVE"
     elif command -v wget >/dev/null 2>&1; then
@@ -197,7 +264,7 @@ else
     fi
 
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
-    tar -xzf "$TMP_ARCHIVE" -C "$TMP_EXTRACT"
+    extract_archive "$TMP_ARCHIVE" "$TMP_EXTRACT"
     SOURCE_DIR="$TMP_EXTRACT/rey-${VERSION}-${TARGET}"
     cp -R "$SOURCE_DIR/bin/"* "$BIN_DIR/"
     rm -rf "$STD_DIR/src"
@@ -257,6 +324,15 @@ add_to_shell "$HOME/.zshrc"
 add_to_shell "$HOME/.bashrc"
 add_to_shell "$HOME/.bash_profile"
 add_to_shell "$HOME/.profile"
+
+if [ "$PLATFORM" = "windows" ] && [ -n "${CLANG_BIN:-}" ]; then
+    for PROFILE_FILE in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+        if [ -f "$PROFILE_FILE" ] && ! grep -Fq "$CLANG_BIN" "$PROFILE_FILE" 2>/dev/null; then
+            printf '\n# Rey Clang toolchain\nexport PATH="%s:$PATH"\n' "$CLANG_BIN" >> "$PROFILE_FILE"
+            log_info "Added Clang to $PROFILE_FILE"
+        fi
+    done
+fi
 
 # Fish shell support
 FISH_CONFIG="$HOME/.config/fish/config.fish"

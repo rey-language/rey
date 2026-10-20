@@ -8,7 +8,7 @@ ifeq ($(filter undefined default,$(origin ARFLAGS)), $(origin ARFLAGS))
 ARFLAGS := rcs
 endif
 ifeq ($(origin CFLAGS),undefined)
-CFLAGS := -O3 -flto -Wall -Wextra -Wno-unused-parameter -std=c11
+CFLAGS := -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11
 endif
 
 # Objects go to OUT, never beside these sources. BUILD_DIR is the older alias.
