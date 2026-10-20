@@ -15,7 +15,6 @@ impl Evaluator {
             Expr::Literal { value, .. } => Ok(Value::from(value.clone())),
             Expr::Variable { name, .. } => env
                 .get(name)
-                .cloned()
                 .ok_or_else(|| format!("Undefined variable '{}'", name)),
             Expr::Binary { left, op, right, .. } => {
                 let left_val = self.evaluate(left, env)?;
