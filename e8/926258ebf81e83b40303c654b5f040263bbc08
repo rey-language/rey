@@ -1,0 +1,16 @@
+install.sh
+  h_90c9c948bf5ad1 101-180,188-191,234,255-322
+rey-compiler/src/typecheck/main.rey
+  h_90c9c948bf5ad1 131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e8926258ebf81e83b40303c654b5f040263bbc08",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
