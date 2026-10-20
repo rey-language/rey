@@ -7,3 +7,6 @@ pub mod std;
 pub mod value;
 
 pub use interpreter::Interpreter;
+
+#[cfg(test)]
+mod tests;
