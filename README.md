@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="128" height="128" alt="Rey Programming Language Logo" />
+</p>
+
 # Rey Programming Language
 
 **Rey** is a statically-typed, compiled programming language with clean syntax, built for clarity and hackability. The compiler is written in Rey itself — it bootstraps from a Rust reference interpreter and emits LLVM IR compiled to native binaries via `clang`.
