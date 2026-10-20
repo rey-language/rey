@@ -1,20 +1,17 @@
-# Rey v0.3.1 — Patch Release Preparation
+# Rey v0.3.1
 
-**Version:** v0.3.1  
-**Preparation status:** macOS arm64 source bootstrap and native rebuild completed; four target builds pending CI; not tagged or published  
-**Release workflow:** `.github/workflows/release.yml`
+Rey v0.3.1 is a patch release focused on lower peak memory use, restored native typechecking/code generation, and reproducible compiler/runtime packages across supported platforms.
 
-## Patch contents
+## Highlights
 
-- Vec capacity growth uses `realloc` rather than allocating and zeroing a second full buffer. Only live kind metadata is initialized. The current macOS arm64 comparison measured 36–48% lower peak RSS on large Vec workloads.
-- Restored the missing native typechecker and checked-program backend as a matching source pair. The tracked driver already required their APIs, but the repository contained an old checker stub and backend. Recovery provenance and limits are recorded in [BOOTSTRAP-SOURCE-RECOVERY.md](../../docs/BOOTSTRAP-SOURCE-RECOVERY.md).
-- The release builder compiles the tracked Rust reference interpreter, runs the current compiler source through it to build stage 1, then uses stage 1 to rebuild the packaged native compiler. The package must report exactly `rey 0.3.1`. The Rust bootstrap is not distributed.
-- Every target rebuilds the runtime from tracked C sources using matching platform tools. Windows selects the new Win32 file, directory, and process implementation in `runtime/io_windows.c`; Unix uses `runtime/io.c`. This avoids the LLVM bitcode compatibility problem in v0.3.0 archives. All packages bundle current `std/src`.
-- Native compiler triples are Apple Darwin, Linux GNU, and Windows GNU. Linux release packages link through the existing Zig musl wrappers. The v0.3.1 source compiler detects its native host triple, without a cross-target CLI option.
+- Vec capacity growth now uses `realloc` instead of allocating and zeroing a second full buffer. Only live kind metadata is initialized. In the current macOS arm64 comparison, large Vec workloads used 36–48% less peak RSS.
+- Restored the native typechecker and checked-program backend required by the tracked compiler driver. See [the source recovery notes](../../docs/BOOTSTRAP-SOURCE-RECOVERY.md) for provenance and limitations.
+- Release packages are rebuilt from tracked compiler and runtime sources. Every target rebuilds the runtime with matching platform tools; Windows uses Win32 file, directory, and process I/O rather than reusing incompatible LLVM bitcode from v0.3.0.
+- Packages include the native compiler, `librey_rt.a`, and the current standard library source tree.
 
-## Planned assets
+## Downloads
 
-| Target | Asset |
+| Platform | Asset |
 |---|---|
 | macOS arm64 | `rey-v0.3.1-macos-arm64.tar.gz` |
 | macOS x86-64 | `rey-v0.3.1-macos-x86_64.tar.gz` |
@@ -22,12 +19,6 @@
 | Linux aarch64 | `rey-v0.3.1-linux-aarch64.tar.gz` |
 | Windows x86-64 | `rey-v0.3.1-windows-x86_64.zip` |
 
-Each package follows the v0.3 layout: a native compiler under `bin/`, its runtime at `bin/runtime/librey_rt.a`, and the standard library under `std/src/`.
+## Validation notes
 
-## Build status and limits
-
-The macOS arm64 release package built successfully. The revised release builder completed the Rust-source bootstrap and native compiler rebuild, and the packaged Mach-O arm64 compiler reported exactly `rey 0.3.1`. The archive contains the native compiler, runtime archive, and standard library in the expected package layout. Source recovery details are recorded in `docs/BOOTSTRAP-SOURCE-RECOVERY.md`.
-
-No test suites are run by the release builder. Build and version observations do not establish conformance or new performance results. The macOS x86-64, Linux x86-64, Linux aarch64, and Windows matrix legs require CI validation. A manual workflow dispatch builds all five packages without publishing. Tag-triggered publication is gated on all five successful builds and exact asset presence.
-
-The Windows runtime source and process-capture behavior must pass the Windows release matrix before publication; the release builder does not run the complete runtime or language conformance suites.
+All five hosted release package-build preflight targets passed. The tag-triggered release workflow repeats the builds and checks for all five assets before publishing. The release build does not run the full runtime or language conformance suites, and the memory comparison is limited to the noted macOS arm64 workloads.

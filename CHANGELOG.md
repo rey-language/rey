@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.3.1] — patch release preparation; Windows CI pending
+## [0.3.1] — patch release
 - Vec capacity growth now uses `realloc` instead of allocating and zeroing a second full buffer; only live kind metadata is initialized. Large Vec workloads used 36–48% less peak RSS in the current macOS arm64 comparison.
 - Recovered the native typechecker and checked-program backend required by the existing driver; the tracked modules had been an old checker stub and backend. Source provenance and limits are recorded in `docs/BOOTSTRAP-SOURCE-RECOVERY.md`.
 - The five-target release workflow rebuilds the tracked Rust source bootstrap, builds stage 1, and uses stage 1 to rebuild the packaged native compiler. Every target rebuilds the runtime from tracked sources; Windows uses Win32-native file and process I/O with matching MSYS2 LLVM tools. The compiler requires `rey 0.3.1` and emits the host triple. Manual dispatch builds packages without publishing; tag publication requires all five builds.
-- macOS arm64/x86-64 and Linux x86-64/AArch64 pass the hosted package-build preflight. Windows path quoting is corrected for safe drive-letter paths; the Windows package build remains to be verified. No test suites were run for this repair.
+- All five hosted package-build preflight targets pass: macOS arm64/x86-64, Linux x86-64/AArch64, and Windows x86-64. The tag-triggered publication workflow repeats the builds and requires all five assets. No conformance test suites were run for this patch.
 
 ## [unreleased] — performance
 - Capy skips the per-command `rey --version` subprocess during normal toolchain resolution; `capy doctor` still checks the actual compiler version.
