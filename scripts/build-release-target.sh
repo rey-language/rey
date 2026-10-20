@@ -30,22 +30,18 @@ case "$target" in
     macos-arm64)
         [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo "release target $target requires a native macOS arm64 runner" >&2; exit 2; }
         real_clang=$(command -v clang)
-        seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.tar.gz"
         ;;
     macos-x86_64)
         [[ $(uname -s) == Darwin && $(uname -m) == x86_64 ]] || { echo "release target $target requires a native macOS x86_64 runner" >&2; exit 2; }
         real_clang=$(command -v clang)
-        seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.tar.gz"
         ;;
     linux-x86_64)
         [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo "release target $target requires a native Linux x86_64 runner" >&2; exit 2; }
         real_clang="$repo_root/scripts/zig-ld-linux-x86_64.sh"
-        seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.tar.gz"
         ;;
     linux-aarch64)
         [[ $(uname -s) == Linux && $(uname -m) == aarch64 ]] || { echo "release target $target requires a native Linux aarch64 runner" >&2; exit 2; }
         real_clang="$repo_root/scripts/zig-ld-linux-aarch64.sh"
-        seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.tar.gz"
         ;;
     windows-x86_64)
         case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) echo "release target $target requires a native Windows runner with MSYS2" >&2; exit 2 ;; esac
@@ -63,57 +59,50 @@ if [[ -e "$workspace" ]]; then
     echo "error: release workspace already exists; set REY_RELEASE_WORKSPACE to a new absolute path: $workspace" >&2
     exit 2
 fi
-if [[ ! -f "$seed_archive" ]]; then
-    echo "error: matching v0.3.0 bootstrap package is missing: $seed_archive" >&2
-    exit 1
-fi
-
 mkdir -p "$seed_dir" "$runtime_dir" "$package_root/bin" "$package_root/std" "$dist_dir"
 if [[ $target == windows-* ]]; then
+    seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.zip"
+    [[ -f "$seed_archive" ]] || { echo "error: matching v0.3.0 bootstrap package is missing: $seed_archive" >&2; exit 1; }
     unzip -q "$seed_archive" -d "$seed_dir"
-else
-    tar -xzf "$seed_archive" -C "$seed_dir"
+    seed_package="$seed_dir/$seed_root_name"
+    seed_runtime="$seed_package/bin/runtime/librey_rt.a"
+    if [[ ! -f "$seed_runtime" ]]; then
+        echo "error: v0.3.0 package is missing its runtime: $seed_package" >&2
+        exit 1
+    fi
+    cp "$seed_runtime" "$runtime_dir/librey_rt.a"
 fi
 
-seed_package="$seed_dir/$seed_root_name"
-seed_runtime="$seed_package/bin/runtime/librey_rt.a"
-if [[ ! -f "$seed_runtime" ]]; then
-    echo "error: v0.3.0 package is missing its runtime: $seed_package" >&2
-    exit 1
-fi
-cp "$seed_runtime" "$runtime_dir/librey_rt.a"
-
-# Keep the v0.3.0 runtime archive's existing platform-specific objects. The
-# current runtime/io.c is POSIX-only, while the shipped Windows archive carries
-# the Windows-compatible I/O object. Rebuild and replace only Vec on every
-# platform so this release incorporates the current Vec realloc change.
+# Rebuild Unix runtime archives from current source so their LLVM bitcode is
+# compatible with the target runner's compiler. The Windows archive retains
+# its shipped I/O object because runtime/io.c is currently POSIX-only.
 runtime_source="$repo_root/rey-compiler/runtime"
 vec_object="$workspace/vec.o"
 compiler=${CC:-clang}
-archive_tool=("${AR:-ar}")
-if [[ -z ${AR:-} && ( $target == linux-* || $target == windows-* ) ]]; then
-    archive_tool=(zig ar)
-fi
-command -v "$compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $compiler" >&2; exit 2; }
-command -v "${archive_tool[0]}" >/dev/null 2>&1 || { echo "error: archiver not found: ${archive_tool[0]}" >&2; exit 2; }
 if [[ $target == windows-* ]]; then
+    archive_tool=(zig ar)
+    command -v "$compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $compiler" >&2; exit 2; }
+    command -v "${archive_tool[0]}" >/dev/null 2>&1 || { echo "error: archiver not found: ${archive_tool[0]}" >&2; exit 2; }
     "$repo_root/scripts/zig-ld-windows-x86_64.sh" \
         -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
         -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
-elif [[ $target == linux-x86_64 ]]; then
-    "$repo_root/scripts/zig-ld-linux-x86_64.sh" \
-        -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
-        -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
-elif [[ $target == linux-aarch64 ]]; then
-    "$repo_root/scripts/zig-ld-linux-aarch64.sh" \
-        -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
-        -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
+    "${archive_tool[@]}" d "$runtime_dir/librey_rt.a" vec.o
+    "${archive_tool[@]}" rcs "$runtime_dir/librey_rt.a" "$vec_object"
 else
-    "$compiler" -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
-        -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
+    runtime_compiler="$compiler"
+    runtime_archiver=${AR:-ar}
+    if [[ $target == linux-x86_64 ]]; then
+        runtime_compiler="$repo_root/scripts/zig-ld-linux-x86_64.sh"
+        runtime_archiver="$repo_root/scripts/zig-ar.sh"
+    elif [[ $target == linux-aarch64 ]]; then
+        runtime_compiler="$repo_root/scripts/zig-ld-linux-aarch64.sh"
+        runtime_archiver="$repo_root/scripts/zig-ar.sh"
+    fi
+    command -v "$runtime_compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $runtime_compiler" >&2; exit 2; }
+    command -v "$runtime_archiver" >/dev/null 2>&1 || { echo "error: archiver not found: $runtime_archiver" >&2; exit 2; }
+    CC="$runtime_compiler" AR="$runtime_archiver" MAKE="${MAKE:-make}" \
+        bash "$repo_root/scripts/build-runtime.sh" --output-dir "$runtime_dir"
 fi
-"${archive_tool[@]}" d "$runtime_dir/librey_rt.a" vec.o
-"${archive_tool[@]}" rcs "$runtime_dir/librey_rt.a" "$vec_object"
 
 # Rebuild the reference interpreter from tracked source. The v0.3.0 native
 # seed hardcodes /usr/bin/clang and bypasses PATH, so it cannot reliably use

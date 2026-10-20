@@ -56,11 +56,14 @@ wrappers. The release builder instead:
 3. Uses stage 1 to rebuild the current source as the packaged native compiler.
 4. Requires the packaged compiler to report exactly `rey 0.3.1`.
 
-The matching v0.3.0 archive supplies only the target runtime. Its `vec.o` is
-replaced from current source. Linux and Windows use Zig for compilation and
-archive indexing; macOS uses its native toolchain. Only the native compiler,
-runtime archive, and current standard library enter the package. Build
-intermediates and the Rust bootstrap remain outside it.
+The v0.3.0 archive supplies the Windows runtime because its I/O object is not
+portable to the current POSIX-only runtime source. The Windows builder replaces
+`vec.o` from current source. Unix packages rebuild the full runtime from tracked
+C sources with the target toolchain, avoiding the LLVM-version mismatch in the
+v0.3.0 bitcode archive. Linux uses Zig for target compilation and archive
+indexing; macOS uses its native toolchain. Only the native compiler, runtime
+archive, and current standard library enter the package. Build intermediates
+and the Rust bootstrap remain outside it.
 
 The five release targets are unchanged. The non-macOS-arm64 targets require
 their native CI runners; retaining their workflow legs does not establish that
