@@ -1,0 +1,18 @@
+scripts/zig-ld-linux-aarch64.sh
+  h_90c9c948bf5ad1 1-9
+scripts/zig-ld-linux-x86_64.sh
+  h_90c9c948bf5ad1 1-2
+scripts/zig-ld-windows-x86_64.sh
+  h_90c9c948bf5ad1 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fb2886152241c6286d9b5e2126be3721946015ae",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
