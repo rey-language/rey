@@ -1,0 +1,22 @@
+CHANGELOG.md
+  h_90c9c948bf5ad1 3-10,13-16,18-35
+CHECKPOINT.md
+  h_90c9c948bf5ad1 75-92
+release/RELEASE.md
+  h_90c9c948bf5ad1 1-83
+release/latest.md
+  h_90c9c948bf5ad1 1-83
+release/v0.3.0.md
+  h_90c9c948bf5ad1 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "72dcf8bc7973c12dc67abe4f65aa84157c0949a4",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
