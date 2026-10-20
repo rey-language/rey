@@ -1,8 +1,8 @@
 // AST Definitions for Rey Parser
-// Note: Span is defined in lexer/main.rey (imported via import lexer; or import "./ast.rey";)
+import lexer::{Span};
 
 // Literals
-enum LiteralKind {
+pub enum LiteralKind {
     String,
     Char,
     Int,
@@ -11,18 +11,21 @@ enum LiteralKind {
     Null,
 }
 
-struct Literal {
+pub struct Literal {
     pub kind: LiteralKind,
-    pub text: String,
+    pub text: string,
 }
 
 // Expression Kinds
-enum ExprKind {
+pub enum ExprKind {
+    Error,
     Literal,
     Identifier,
     Binary,
     Unary,
+    Update,
     Call,
+    EnumVariant,
     Index,
     FieldAccess,
     Lambda,
@@ -31,78 +34,135 @@ enum ExprKind {
     Tuple,
     Array,
     Dict,
+    StructLiteral,
+}
+
+pub enum TypeExprKind {
+    Error,
+    Named,
+    Nullable,
+    Union,
+    Tuple,
+    Function,
+    Applied,
+}
+
+pub struct TypeExpr {
+    pub kind: TypeExprKind,
+    pub name: string,
+    pub inner: TypeExpr?,
+    pub members: Vec<TypeExpr>,
+    pub params: Vec<TypeExpr>,
+    pub result: TypeExpr?,
+    pub span: Span,
 }
 
 // Expressions
-struct Expr {
-    pub kind: ExprKind,
+pub enum Expr {
+    Error(ErrorExpr),
+    Literal(LiteralExpr),
+    Identifier(IdentExpr),
+    Binary(BinaryExpr),
+    Unary(UnaryExpr),
+    Update(UpdateExpr),
+    Call(CallExpr),
+    EnumVariant(EnumVariantExpr),
+    Index(IndexExpr),
+    FieldAccess(FieldAccessExpr),
+    Lambda(LambdaExpr),
+    Match(MatchExpr),
+    If(IfExpr),
+    Tuple(TupleExpr),
+    Array(ArrayExpr),
+    Dict(DictExpr),
+    StructLiteral(StructLiteralExpr),
+}
+
+pub struct ErrorExpr {
+    pub message: string,
     pub span: Span,
 }
 
 // Literal expression
-struct LiteralExpr {
+pub struct LiteralExpr {
     pub kind: LiteralKind,
-    pub text: String,
+    pub text: string,
     pub span: Span,
 }
 
-// Identifier expression  
-struct IdentExpr {
-    pub name: String,
+// Identifier expression
+pub struct IdentExpr {
+    pub name: string,
     pub span: Span,
 }
 
 // Binary expression
-struct BinaryExpr {
+pub struct BinaryExpr {
     pub left: Expr,
-    pub op: String,
+    pub op: string,
     pub right: Expr,
     pub span: Span,
 }
 
 // Unary expression
-struct UnaryExpr {
-    pub op: String,
+pub struct UnaryExpr {
+    pub op: string,
     pub right: Expr,
     pub span: Span,
 }
 
+pub struct UpdateExpr {
+    pub target: Expr,
+    pub op: string,
+    pub prefix: bool,
+    pub span: Span,
+}
+
 // Call expression
-struct CallExpr {
+pub struct CallExpr {
     pub callee: Expr,
-    pub args: [Expr],
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
+pub struct EnumVariantExpr {
+    pub enumName: string,
+    pub variant: string,
+    pub args: Vec<Expr>,
     pub span: Span,
 }
 
 // Index expression
-struct IndexExpr {
+pub struct IndexExpr {
     pub target: Expr,
     pub index: Expr,
     pub span: Span,
 }
 
 // Field access expression
-struct FieldAccessExpr {
+pub struct FieldAccessExpr {
     pub object: Expr,
-    pub name: String,
+    pub name: string,
     pub span: Span,
 }
 
 // Lambda expression
-struct LambdaExpr {
-    pub params: [String],
-    pub body: [Stmt],
+pub struct LambdaExpr {
+    pub params: Vec<string>,
+    pub body: Vec<Stmt>,
+    pub paramTypeExprs: Vec<TypeExpr?>,
+    pub bodyExpr: Expr?,
     pub span: Span,
 }
 
 // Match expression
-struct MatchExpr {
+pub struct MatchExpr {
     pub expr: Expr,
-    pub arms: [MatchArm],
+    pub arms: Vec<MatchArm>,
     pub span: Span,
 }
 
-struct MatchArm {
+pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Expr,
     pub body: Expr,
@@ -110,7 +170,7 @@ struct MatchArm {
 }
 
 // If expression
-struct IfExpr {
+pub struct IfExpr {
     pub condition: Expr,
     pub thenBranch: Expr,
     pub elseBranch: Expr,
@@ -118,44 +178,44 @@ struct IfExpr {
 }
 
 // Tuple expression
-struct TupleExpr {
-    pub elements: [Expr],
+pub struct TupleExpr {
+    pub elements: Vec<Expr>,
     pub span: Span,
 }
 
 // Array expression
-struct ArrayExpr {
-    pub elements: [Expr],
+pub struct ArrayExpr {
+    pub elements: Vec<Expr>,
     pub span: Span,
 }
 
 // Dict expression
-struct DictExpr {
-    pub entries: [DictEntry],
+pub struct DictExpr {
+    pub entries: Vec<DictEntry>,
     pub span: Span,
 }
 
-struct DictEntry {
+pub struct DictEntry {
     pub key: Expr,
     pub value: Expr,
     pub span: Span,
 }
 
 // Struct literal expression: Point { x: 1, y: 2 }
-struct StructLiteralExpr {
-    pub name: String,
-    pub fields: [StructInitField],
+pub struct StructLiteralExpr {
+    pub name: string,
+    pub fields: Vec<StructInitField>,
     pub span: Span,
 }
 
-struct StructInitField {
-    pub name: String,
+pub struct StructInitField {
+    pub name: string,
     pub value: Expr,
     pub span: Span,
 }
 
 // Statement Kinds
-enum StmtKind {
+pub enum StmtKind {
     VarDecl,
     ConstDecl,
     FuncDecl,
@@ -172,126 +232,167 @@ enum StmtKind {
     Loop,
     Block,
     ExprStmt,
+    Match,
 }
 
 // Statements
-struct Stmt {
-    pub kind: StmtKind,
-    pub span: Span,
+pub enum Stmt {
+    VarDecl(VarDeclStmt),
+    ConstDecl(ConstDeclStmt),
+    FuncDecl(FuncDeclStmt),
+    StructDecl(StructDeclStmt),
+    EnumDecl(EnumDeclStmt),
+    Import(ImportStmt),
+    If(IfStmt),
+    Assign(AssignStmt),
+    Return(ReturnStmt),
+    Break(BreakStmt),
+    Continue(ContinueStmt),
+    While(WhileStmt),
+    For(ForStmt),
+    Loop(LoopStmt),
+    Block(BlockStmt),
+    ExprStmt(ExprStmt),
+    Match(MatchStmt),
 }
 
 // Variable declaration
-struct VarDeclStmt {
-    pub name: String,
-    pub typeTag: String,
+pub struct VarDeclStmt {
+    pub name: string,
+    pub typeTag: string,
+    pub typeExpr: TypeExpr?,
     pub value: Expr,
     pub span: Span,
 }
 
 // Constant declaration
-struct ConstDeclStmt {
-    pub name: String,
-    pub typeTag: String,
+pub struct ConstDeclStmt {
+    pub name: string,
+    pub typeTag: string,
+    pub typeExpr: TypeExpr?,
     pub value: Expr,
     pub span: Span,
 }
 
 // Function declaration
-struct FuncDeclStmt {
-    pub name: String,
-    pub params: [FuncParam],
-    pub returnType: String,
-    pub body: [Stmt],
+pub struct FuncDeclStmt {
+    pub name: string,
+    pub params: Vec<FuncParam>,
+    pub returnType: string,
+    pub returnTypeExpr: TypeExpr?,
+    pub isPub: bool,
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
-struct FuncParam {
-    pub name: String,
-    pub typeTag: String,
+pub struct FuncParam {
+    pub name: string,
+    pub typeTag: string,
+    pub typeExpr: TypeExpr?,
     pub default: Expr,
+    pub hasDefault: bool,
+    pub variadic: bool,
 }
 
 // Struct declaration
-struct StructDeclStmt {
-    pub name: String,
-    pub fields: [StructField],
-    pub methods: [FuncDeclStmt],
+pub struct StructDeclStmt {
+    pub name: string,
+    pub fields: Vec<StructField>,
+    pub methods: Vec<FuncDeclStmt>,
+    pub isPub: bool,
     pub span: Span,
 }
 
-struct StructField {
-    pub name: String,
-    pub typeTag: String,
+pub struct StructField {
+    pub name: string,
+    pub typeTag: string,
+    pub typeExpr: TypeExpr?,
     pub isPub: bool,
 }
 
 // Enum declaration
-struct EnumDeclStmt {
-    pub name: String,
-    pub variants: [String],
+pub struct EnumDeclStmt {
+    pub name: string,
+    pub variants: Vec<string>,
+    pub variantDecls: Vec<EnumVariantDecl>,
+    pub isPub: bool,
+    pub span: Span,
+}
+
+pub struct EnumVariantDecl {
+    pub name: string,
+    pub payloadNames: Vec<string>,
+    pub payloadTypes: Vec<TypeExpr>,
     pub span: Span,
 }
 
 // Import statement
-struct ImportStmt {
-    pub path: String,
-    pub items: [String],
+pub struct ImportStmt {
+    pub path: string,
+    pub items: Vec<string>,
+    pub sourceKind: ImportSourceKind,
+    pub namespaceName: string,
     pub span: Span,
 }
 
+pub enum ImportSourceKind {
+    File,
+    Module,
+}
+
 // Return statement
-struct ReturnStmt {
+pub struct ReturnStmt {
     pub value: Expr,
     pub span: Span,
 }
 
 // Break statement
-struct BreakStmt {
-    pub label: String,
+pub struct BreakStmt {
+    pub label: string,
     pub span: Span,
 }
 
 // Continue statement
-struct ContinueStmt {
-    pub label: String, 
+pub struct ContinueStmt {
+    pub label: string,
     pub span: Span,
 }
 
 // While statement
-struct WhileStmt {
+pub struct WhileStmt {
     pub condition: Expr,
-    pub body: [Stmt],
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
 // For statement
-struct ForStmt {
-    pub variable: String,
+pub struct ForStmt {
+    pub variable: string,
     pub iterable: Expr,
-    pub body: [Stmt],
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
 // Loop statement
-struct LoopStmt {
-    pub body: [Stmt],
+pub struct LoopStmt {
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
 // Block statement
-struct BlockStmt {
-    pub statements: [Stmt],
+pub struct BlockStmt {
+    pub statements: Vec<Stmt>,
     pub span: Span,
 }
 
 // Expression statement
-struct ExprStmt {
+pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
 }
 
 // If statement
-struct IfStmt {
+pub struct IfStmt {
     pub condition: Expr,
     pub thenBranch: BlockStmt,
     pub elseBranch: BlockStmt?,
@@ -299,74 +400,174 @@ struct IfStmt {
 }
 
 // Assignment statement
-struct AssignStmt {
+pub struct AssignStmt {
     pub target: Expr,
-    pub op: String,
+    pub op: string,
     pub value: Expr,
     pub span: Span,
 }
 
+pub struct MatchStmt {
+    pub scrutinee: Expr,
+    pub arms: Vec<MatchStmtArm>,
+    pub span: Span,
+}
+
+pub struct MatchStmtArm {
+    pub pattern: Pattern,
+    pub body: Stmt,
+    pub span: Span,
+}
+
 // Pattern kinds for match
-enum PatternKind {
+pub enum PatternKind {
+    Error,
     Wildcard,
     Literal,
     Variable,
     EnumVariant,
     Struct,
     Or,
+    Range,
 }
 
-struct Pattern {
+pub enum Pattern {
+    Error(ErrorPattern),
+    Wildcard(WildcardPattern),
+    Literal(LiteralPattern),
+    Variable(VariablePattern),
+    EnumVariant(EnumVariantPattern),
+    Struct(StructPattern),
+    Or(OrPattern),
+    Range(RangePattern),
+}
+
+pub struct ErrorPattern {
     pub kind: PatternKind,
     pub span: Span,
 }
 
-struct WildcardPattern {
+pub struct WildcardPattern {
+    pub kind: PatternKind,
     pub span: Span,
 }
 
-struct LiteralPattern {
+pub struct LiteralPattern {
+    pub kind: PatternKind,
     pub literal: Literal,
     pub span: Span,
 }
 
-struct VariablePattern {
-    pub name: String,
+pub struct VariablePattern {
+    pub kind: PatternKind,
+    pub name: string,
     pub span: Span,
 }
 
-struct EnumVariantPattern {
-    pub enumName: String,
-    pub variant: String,
+pub struct EnumVariantPattern {
+    pub kind: PatternKind,
+    pub enumName: string,
+    pub variant: string,
+    pub payloads: Vec<Pattern>,
     pub span: Span,
 }
 
-struct StructPattern {
-    pub structName: String,
-    pub fields: [PatternField],
+pub struct RangePattern {
+    pub kind: PatternKind,
+    pub start: Literal,
+    pub end: Literal,
+    pub inclusive: bool,
     pub span: Span,
 }
 
-struct PatternField {
-    pub name: String,
+pub struct StructPattern {
+    pub kind: PatternKind,
+    pub structName: string,
+    pub fields: Vec<PatternField>,
+    pub span: Span,
+}
+
+pub struct PatternField {
+    pub name: string,
     pub pattern: Pattern,
     pub span: Span,
 }
 
-struct OrPattern {
+pub struct OrPattern {
+    pub kind: PatternKind,
     pub left: Pattern,
     pub right: Pattern,
     pub span: Span,
 }
 
+pub func exprSpan(expr: Expr): Span {
+    match expr {
+        Expr::Error(payload) => { return payload.span; },
+        Expr::Literal(payload) => { return payload.span; },
+        Expr::Identifier(payload) => { return payload.span; },
+        Expr::Binary(payload) => { return payload.span; },
+        Expr::Unary(payload) => { return payload.span; },
+        Expr::Update(payload) => { return payload.span; },
+        Expr::Call(payload) => { return payload.span; },
+        Expr::EnumVariant(payload) => { return payload.span; },
+        Expr::Index(payload) => { return payload.span; },
+        Expr::FieldAccess(payload) => { return payload.span; },
+        Expr::Lambda(payload) => { return payload.span; },
+        Expr::Match(payload) => { return payload.span; },
+        Expr::If(payload) => { return payload.span; },
+        Expr::Tuple(payload) => { return payload.span; },
+        Expr::Array(payload) => { return payload.span; },
+        Expr::Dict(payload) => { return payload.span; },
+        Expr::StructLiteral(payload) => { return payload.span; },
+    }
+    return Span { start: 0, end: 0, line: 1, column: 0 };
+}
+
+pub func stmtSpan(stmt: Stmt): Span {
+    match stmt {
+        Stmt::VarDecl(payload) => { return payload.span; },
+        Stmt::ConstDecl(payload) => { return payload.span; },
+        Stmt::FuncDecl(payload) => { return payload.span; },
+        Stmt::StructDecl(payload) => { return payload.span; },
+        Stmt::EnumDecl(payload) => { return payload.span; },
+        Stmt::Import(payload) => { return payload.span; },
+        Stmt::If(payload) => { return payload.span; },
+        Stmt::Assign(payload) => { return payload.span; },
+        Stmt::Return(payload) => { return payload.span; },
+        Stmt::Break(payload) => { return payload.span; },
+        Stmt::Continue(payload) => { return payload.span; },
+        Stmt::While(payload) => { return payload.span; },
+        Stmt::For(payload) => { return payload.span; },
+        Stmt::Loop(payload) => { return payload.span; },
+        Stmt::Block(payload) => { return payload.span; },
+        Stmt::ExprStmt(payload) => { return payload.span; },
+        Stmt::Match(payload) => { return payload.span; },
+    }
+    return Span { start: 0, end: 0, line: 1, column: 0 };
+}
+
+pub func patternSpan(pattern: Pattern): Span {
+    match pattern {
+        Pattern::Error(payload) => { return payload.span; },
+        Pattern::Wildcard(payload) => { return payload.span; },
+        Pattern::Literal(payload) => { return payload.span; },
+        Pattern::Variable(payload) => { return payload.span; },
+        Pattern::EnumVariant(payload) => { return payload.span; },
+        Pattern::Struct(payload) => { return payload.span; },
+        Pattern::Or(payload) => { return payload.span; },
+        Pattern::Range(payload) => { return payload.span; },
+    }
+    return Span { start: 0, end: 0, line: 1, column: 0 };
+}
+
 // Program root
-struct Program {
-    pub statements: [Stmt],
+pub struct Program {
+    pub statements: Vec<Stmt>,
     pub span: Span,
 }
 
 // Parser error
-struct ParseError {
-    pub message: String,
+pub struct ParseError {
+    pub message: string,
     pub span: Span,
 }

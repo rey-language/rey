@@ -1,30 +1,38 @@
 // Parser Implementation for Rey
 
 import lexer;
-import ast;
+import lexer::{Token, Span};
+import ast::{LiteralKind, Literal, TypeExprKind, TypeExpr, Expr, exprSpan, ErrorExpr, LiteralExpr, IdentExpr, BinaryExpr, UnaryExpr, UpdateExpr, CallExpr, EnumVariantExpr, IndexExpr, FieldAccessExpr, LambdaExpr, TupleExpr, ArrayExpr, DictExpr, DictEntry, StructLiteralExpr, StructInitField, VarDeclStmt, ConstDeclStmt, FuncDeclStmt, FuncParam, StructDeclStmt, StructField, EnumDeclStmt, EnumVariantDecl, ImportStmt, ImportSourceKind, ReturnStmt, BreakStmt, ContinueStmt, WhileStmt, ForStmt, LoopStmt, BlockStmt, ExprStmt, IfStmt, AssignStmt, MatchStmt, MatchStmtArm, PatternKind, Pattern, ErrorPattern, WildcardPattern, LiteralPattern, VariablePattern, EnumVariantPattern, RangePattern, StructPattern, PatternField, Stmt, Program, ParseError};
 
-struct Parser {
-    pub tokens: [Token],
+pub struct Parser {
+    pub tokens: Vec<Token>,
     pub current: int,
-    pub errors: [ParseError],
+    pub errors: Vec<ParseError>,
 }
 
-struct ParserResult {
+pub struct ParserResult {
     pub program: Program,
-    pub errors: [ParseError],
+    pub errors: Vec<ParseError>,
 }
 
 func isAtEnd(p: Parser): bool {
-    if p.current >= p.tokens.length() {
+    if p.tokens.len() == 0 || p.current >= p.tokens.len() {
         return true;
     }
     var curTok: Token = p.tokens[p.current];
     return curTok.kind == "Eof";
 }
 
+func eofToken(): Token {
+    return Token { kind: "Eof", lexeme: "", span: Span { start: 0, end: 0, line: 1, column: 0 } };
+}
+
 func peek(p: Parser): Token {
-    if isAtEnd(p) {
-        var lastTok: Token = p.tokens[p.tokens.length() - 1];
+    if p.tokens.len() == 0 {
+        return eofToken();
+    }
+    if p.current >= p.tokens.len() {
+        var lastTok: Token = p.tokens[p.tokens.len() - 1];
         return lastTok;
     }
     var curTok: Token = p.tokens[p.current];
@@ -32,41 +40,41 @@ func peek(p: Parser): Token {
 }
 
 func peekNext(p: Parser): Token {
-    if p.current + 1 >= p.tokens.length() {
-        var lastTok: Token = p.tokens[p.tokens.length() - 1];
-        return lastTok;
+    if p.tokens.len() == 0 {
+        return eofToken();
+    }
+    if p.current + 1 >= p.tokens.len() {
+        return p.tokens[p.tokens.len() - 1];
     }
     var nextTok: Token = p.tokens[p.current + 1];
     return nextTok;
 }
 
 func advance(p: Parser): Token {
-    if isAtEnd(p) {
-        var lastTok: Token = p.tokens[p.tokens.length() - 1];
-        return lastTok;
+    if p.tokens.len() == 0 {
+        return eofToken();
+    }
+    if p.current >= p.tokens.len() {
+        return p.tokens[p.tokens.len() - 1];
     }
     var token: Token = p.tokens[p.current];
-    p.current = p.current + 1;
+    if token.kind != "Eof" {
+        p.current = p.current + 1;
+    }
     return token;
 }
 
-func check(p: Parser, kind): bool {
-    if isAtEnd(p) {
-        return false;
-    }
+func check(p: Parser, kind: string): bool {
     return peek(p).kind == kind;
 }
 
-func checkNext(p: Parser, kind): bool {
-    if p.current + 1 >= p.tokens.length() {
-        return false;
-    }
+func checkNext(p: Parser, kind: string): bool {
     return peekNext(p).kind == kind;
 }
 
-func matchToken(p: Parser, kinds): bool {
+func matchToken(p: Parser, kinds: Vec<string>): bool {
     var i = 0;
-    var kindsLen = kinds.length();
+    var kindsLen = kinds.len();
     loop {
         if i >= kindsLen {
             break;
@@ -80,146 +88,379 @@ func matchToken(p: Parser, kinds): bool {
     return false;
 }
 
-func toSpan(s) {
+func matchFatArrow(p: Parser): bool {
+    if matchToken(p, ["FatArrow"]) {
+        return true;
+    }
+    if check(p, "Equal") && checkNext(p, "Greater") {
+        advance(p);
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+func matchDotDot(p: Parser): bool {
+    if matchToken(p, ["DotDot"]) {
+        return true;
+    }
+    if check(p, "Dot") && checkNext(p, "Dot") {
+        advance(p);
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+func matchEllipsis(p: Parser): bool {
+    if matchToken(p, ["Ellipsis"]) { return true; }
+    if p.current + 2 < p.tokens.len() {
+        if p.tokens[p.current].kind == "Dot" && p.tokens[p.current + 1].kind == "Dot" && p.tokens[p.current + 2].kind == "Dot" {
+            advance(p);
+            advance(p);
+            advance(p);
+            return true;
+        }
+    }
+    return false;
+}
+
+func isTypePipe(p: Parser): bool {
+    var tok = peek(p);
+    return tok.kind == "Pipe" || (tok.kind == "Identifier" && tok.lexeme == "|");
+}
+
+func matchTypePipe(p: Parser): bool {
+    if isTypePipe(p) {
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+func emptyTypeExprs(): Vec<TypeExpr> {
+    var types: Vec<TypeExpr> = [];
+    return types;
+}
+
+func typeNode(kind: TypeExprKind, name: string, inner: TypeExpr?, members: Vec<TypeExpr>, params: Vec<TypeExpr>, result: TypeExpr?, span: Span): TypeExpr {
+    return TypeExpr { kind: kind, name: name, inner: inner, members: members, params: params, result: result, span: span };
+}
+
+func joinTypeText(types: Vec<TypeExpr>, separator: string): string {
+    var text = "";
+    var i = 0;
+    loop {
+        if i >= types.len() { break; }
+        if i > 0 { text = text + separator; }
+        text = text + typeExprText(types[i]);
+        i = i + 1;
+    }
+    return text;
+}
+
+func typeExprText(ty: TypeExpr): string {
+    match ty.kind {
+        TypeExprKind::Named => { return ty.name; },
+        TypeExprKind::Nullable => {
+            var innerType = ty.inner;
+            if innerType != null { return typeExprText(innerType) + "?"; }
+            return "";
+        },
+        TypeExprKind::Union => { return joinTypeText(ty.members, " | "); },
+        TypeExprKind::Tuple => {
+            var text = "(" + joinTypeText(ty.members, ", ");
+            if ty.members.len() == 1 { text = text + ","; }
+            return text + ")";
+        },
+        TypeExprKind::Function => {
+            var text = "(" + joinTypeText(ty.params, ", ") + ") -> ";
+            var resultType = ty.result;
+            if resultType != null { return text + typeExprText(resultType); }
+            return text;
+        },
+        TypeExprKind::Applied => { return ty.name + "<" + joinTypeText(ty.members, ", ") + ">"; },
+        TypeExprKind::Error => { return ty.name; },
+    }
+    return ty.name;
+}
+
+func parseTypeExpr(p: Parser): TypeExpr {
+    var start = p.current;
+    var first = parseTypeAtom(p);
+    if matchToken(p, ["Question"]) {
+        first = typeNode(TypeExprKind::Nullable, "", first, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+    }
+    var members = [first];
+    loop {
+        if !matchTypePipe(p) { break; }
+        var next = parseTypeAtom(p);
+        if matchToken(p, ["Question"]) {
+            next = typeNode(TypeExprKind::Nullable, "", next, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, p.current - 1, p.current - 1));
+        }
+        members.push(next);
+    }
+    if members.len() == 1 { return first; }
+    return typeNode(TypeExprKind::Union, "", null, members, emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+}
+
+func parseTypeAtom(p: Parser): TypeExpr {
+    var start = p.current;
+    if matchToken(p, ["LeftBracket"]) {
+        if check(p, "RightBracket") {
+            error(p, "type expected");
+            advance(p);
+            return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+        }
+        var inner = parseTypeExpr(p);
+        consume(p, "RightBracket", "] expected after array type");
+        var members: Vec<TypeExpr> = [];
+        members.push(inner);
+        return typeNode(TypeExprKind::Applied, "Vec", null, members, emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+    }
+    if matchToken(p, ["LeftParen"]) {
+        var params: Vec<TypeExpr> = [];
+        var hadComma = false;
+        var trailingComma = false;
+        if !check(p, "RightParen") {
+            loop {
+                var item = parseTypeExpr(p);
+                params.push(item);
+                if check(p, "Comma") {
+                    advance(p);
+                    hadComma = true;
+                    if check(p, "RightParen") {
+                        trailingComma = true;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+                ensureProgress(p, start);
+            }
+        }
+        consume(p, "RightParen", ") expected in type");
+        if matchToken(p, ["Arrow"]) {
+            if trailingComma {
+                error(p, "trailing comma is not allowed in function type parameters");
+                return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+            }
+            var result = parseTypeExpr(p);
+            return typeNode(TypeExprKind::Function, "", null, emptyTypeExprs(), params, result, spanBetween(p, start, p.current - 1));
+        }
+        if hadComma {
+            if trailingComma && params.len() != 1 {
+                error(p, "trailing comma is only valid for a one-element tuple type");
+                return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+            }
+            return typeNode(TypeExprKind::Tuple, "", null, params, emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+        }
+        error(p, "expected '->' or tuple comma after parenthesized type");
+        return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+    }
+    if check(p, "Identifier") {
+        var nameTok = advance(p);
+        var name = nameTok.lexeme;
+        if matchToken(p, ["Less"]) {
+            var args: Vec<TypeExpr> = [];
+            var trailingComma = false;
+            if !check(p, "Greater") {
+                loop {
+                    var arg = parseTypeExpr(p);
+                    args.push(arg);
+                    if check(p, "Comma") {
+                        advance(p);
+                        if check(p, "Greater") {
+                            trailingComma = true;
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                    ensureProgress(p, start);
+                }
+            }
+            consume(p, "Greater", "> expected in applied type");
+            if trailingComma {
+                error(p, "trailing comma is not allowed in applied type arguments");
+                return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+            }
+            return typeNode(TypeExprKind::Applied, name, null, args, emptyTypeExprs(), null, spanBetween(p, start, p.current - 1));
+        }
+        return typeNode(TypeExprKind::Named, name, null, emptyTypeExprs(), emptyTypeExprs(), null, toSpan(nameTok.span));
+    }
+    error(p, "type expected");
+    var bad = peek(p);
+    if !isAtEnd(p) { advance(p); }
+    return typeNode(TypeExprKind::Error, "", null, emptyTypeExprs(), emptyTypeExprs(), null, toSpan(bad.span));
+}
+
+func parseTypeTag(p: Parser): string {
+    return typeExprText(parseTypeExpr(p));
+}
+
+func toSpan(s: Span): Span {
     return Span { start: s.start, end: s.end, line: s.line, column: s.column };
 }
 
-// Parses a type annotation: Identifier, [Identifier], or Identifier? (nullable)
-func parseTypeTag(p: Parser): String {
-    if matchToken(p, ["LeftBracket"]) {
-        var inner = consume(p, "Identifier", "array element type expected");
-        consume(p, "RightBracket", "] expected");
-        return "[" + inner.lexeme + "]";
-    }
-    var tok = consume(p, "Identifier", "type expected");
-    var tag = tok.lexeme;
-    if matchToken(p, ["Question"]) {
-        tag = tag + "?";
-    }
-    return tag;
-}
-
-func consume(p: Parser, kind, message: String): Token {
+func consume(p: Parser, kind: string, message: string): Token {
     if check(p, kind) {
         return advance(p);
     }
-    var span = toSpan(peek(p).span);
-    p.errors.push(ParseError { message: message, span: span });
-    var firstTok: Token = p.tokens[0];
-    return firstTok;
+    error(p, message);
+    return peek(p);
 }
 
-func error(p: Parser, message: String) {
+func error(p: Parser, message: string) {
     var token: Token = peek(p);
     p.errors.push(ParseError { message: message, span: toSpan(token.span) });
 }
 
 func previous(p: Parser): Token {
-    if p.current == 0 {
-        var firstTok: Token = p.tokens[0];
-        return firstTok;
+    if p.current <= 0 || p.tokens.len() == 0 {
+        return peek(p);
     }
-    var prevTok: Token = p.tokens[p.current - 1];
-    return prevTok;
+    var index = p.current - 1;
+    if index >= p.tokens.len() {
+        index = p.tokens.len() - 1;
+    }
+    return p.tokens[index];
 }
 
-func makeSpan(p: Parser, start: int, end: int) {
-    if p.tokens.length() == 0 {
-        return null;
+func ensureProgress(p: Parser, before: int) {
+    if p.current <= before && !isAtEnd(p) {
+        error(p, "unable to parse token");
+        advance(p);
     }
-    var line = 1;
-    var column = 0;
-    if start < p.tokens.length() {
-        var startTok: Token = p.tokens[start];
-        line = startTok.span.line;
-        column = startTok.span.column;
+}
+
+func spanBetween(p: Parser, start: int, end: int): Span {
+    if p.tokens.len() == 0 {
+        return Span { start: 0, end: 0, line: 1, column: 0 };
     }
-    return Span { start: start, end: end, line: line, column: column };
+    var first = start;
+    var last = end;
+    if first < 0 { first = 0; }
+    if first >= p.tokens.len() { first = p.tokens.len() - 1; }
+    if last < first { last = first; }
+    if last >= p.tokens.len() { last = p.tokens.len() - 1; }
+    var a: Token = p.tokens[first];
+    var b: Token = p.tokens[last];
+    return Span { start: a.span.start, end: b.span.end, line: a.span.line, column: a.span.column };
+}
+
+func tokenIndexAt(p: Parser, offset: int): int {
+    if offset < 0 || p.tokens.len() == 0 { return -1; }
+    var low = 0;
+    var high = p.tokens.len();
+    loop {
+        if low >= high { break; }
+        var middle = (low + high) / 2;
+        var middleTok: Token = p.tokens[middle];
+        if middleTok.span.start <= offset { low = middle + 1; }
+        else { high = middle; }
+    }
+    return low - 1;
+}
+
+func makeSpan(p: Parser, start: int, end: int): Span {
+    if start < 0 { return Span { start: start, end: end, line: 0, column: 0 }; }
+    var index = tokenIndexAt(p, start);
+    if index < 0 { return Span { start: start, end: end, line: 1, column: 1 }; }
+    var startTok: Token = p.tokens[index];
+    var column = startTok.span.column;
+    if start > startTok.span.start { column = startTok.span.column + (start - startTok.span.start); }
+    return Span { start: start, end: end, line: startTok.span.line, column: column };
 }
 
 func parseProgram(p: Parser) {
-    var statements = [];
-    var dbgCount = 0;
+    var statements: Vec<Stmt> = [];
     loop {
         if isAtEnd(p) {
             break;
         }
+        var before = p.current;
         var stmt = parseStatement(p);
-        dbgCount = dbgCount + 1;
+        ensureProgress(p, before);
         statements.push(stmt);
     }
-    var span = makeSpan(p, 0, p.tokens.length() - 1);
+    var span = spanBetween(p, 0, p.tokens.len() - 1);
     return Program { statements: statements, span: span };
 }
 
-func parseStatement(p: Parser) {
+func parseStatement(p: Parser): Stmt {
     var token = peek(p);
     
     if token.kind == "Export" {
         advance(p);
-        if check(p, "Pub") { advance(p); }
+        error(p, "'export' was removed in v0.3; remove it and use 'pub' when needed");
+        var isPub = matchToken(p, ["Pub"]);
         var next = peek(p);
-        if next.kind == "Func" { return parseFuncDecl(p); }
-        if next.kind == "Struct" { return parseStructDecl(p); }
-        if next.kind == "Enum" { return parseEnumDecl(p); }
+        if next.kind == "Func" { return Stmt::FuncDecl(parseFuncDecl(p, isPub)); }
+        if next.kind == "Struct" { return Stmt::StructDecl(parseStructDecl(p, isPub)); }
+        if next.kind == "Enum" { return Stmt::EnumDecl(parseEnumDecl(p, isPub)); }
         error(p, "declaration expected after export");
         return parseExprStmt(p);
     }
     if token.kind == "Pub" {
         advance(p);
+        var isPub = true;
         var next2 = peek(p);
-        if next2.kind == "Func" { return parseFuncDecl(p); }
-        if next2.kind == "Struct" { return parseStructDecl(p); }
-        if next2.kind == "Enum" { return parseEnumDecl(p); }
+        if next2.kind == "Func" { return Stmt::FuncDecl(parseFuncDecl(p, isPub)); }
+        if next2.kind == "Struct" { return Stmt::StructDecl(parseStructDecl(p, isPub)); }
+        if next2.kind == "Enum" { return Stmt::EnumDecl(parseEnumDecl(p, isPub)); }
         error(p, "declaration expected after pub");
         return parseExprStmt(p);
     }
     if token.kind == "Var" {
-        return parseVarDecl(p);
+        return Stmt::VarDecl(parseVarDecl(p));
     }
     if token.kind == "Const" {
-        return parseConstDecl(p);
+        return Stmt::ConstDecl(parseConstDecl(p));
     }
     if token.kind == "If" {
-        return parseIf(p);
+        return Stmt::If(parseIf(p));
     }
     if token.kind == "Func" {
-        return parseFuncDecl(p);
+        return Stmt::FuncDecl(parseFuncDecl(p, false));
     }
     if token.kind == "Struct" {
-        return parseStructDecl(p);
+        return Stmt::StructDecl(parseStructDecl(p, false));
     }
     if token.kind == "Enum" {
-        return parseEnumDecl(p);
+        return Stmt::EnumDecl(parseEnumDecl(p, false));
     }
     if token.kind == "Import" {
-        return parseImport(p);
+        return Stmt::Import(parseImport(p));
     }
     if token.kind == "Return" {
-        return parseReturn(p);
+        return Stmt::Return(parseReturn(p));
+    }
+    if token.kind == "Match" {
+        return Stmt::Match(parseMatch(p));
     }
     if token.kind == "While" {
-        return parseWhile(p);
+        return Stmt::While(parseWhile(p));
     }
     if token.kind == "For" {
-        return parseFor(p);
+        return Stmt::For(parseFor(p));
     }
     if token.kind == "Loop" {
-        return parseLoop(p);
+        return Stmt::Loop(parseLoop(p));
     }
     if token.kind == "Break" {
-        return parseBreak(p);
+        return Stmt::Break(parseBreak(p));
     }
     if token.kind == "Continue" {
-        return parseContinue(p);
+        return Stmt::Continue(parseContinue(p));
     }
     if token.kind == "LeftBrace" {
-        return parseBlock(p);
+        return Stmt::Block(parseBlock(p));
     }
 
     if token.kind == "Identifier" {
         if checkNext(p, "Equal") || checkNext(p, "PlusEqual") || checkNext(p, "MinusEqual") || checkNext(p, "StarEqual") || checkNext(p, "SlashEqual") || checkNext(p, "PercentEqual") {
-            return parseAssign(p);
+            return Stmt::Assign(parseAssign(p));
         }
     }
     
@@ -231,14 +472,17 @@ func parseVarDecl(p: Parser) {
     var nameToken = consume(p, "Identifier", "var name expected");
     var name = nameToken.lexeme;
     var typeTag = "";
+    var typeExpr: TypeExpr? = null;
     if matchToken(p, ["Colon"]) {
-        typeTag = parseTypeTag(p);
+        var parsedType = parseTypeExpr(p);
+        typeExpr = parsedType;
+        typeTag = typeExprText(parsedType);
     }
     consume(p, "Equal", "= expected");
     var value = parseExpression(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return VarDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
+    return VarDeclStmt { name: name, typeTag: typeTag, typeExpr: typeExpr, value: value, span: span };
 }
 
 func parseConstDecl(p: Parser) {
@@ -246,17 +490,20 @@ func parseConstDecl(p: Parser) {
     var nameToken = consume(p, "Identifier", "const name expected");
     var name = nameToken.lexeme;
     var typeTag = "";
+    var typeExpr: TypeExpr? = null;
     if matchToken(p, ["Colon"]) {
-        typeTag = parseTypeTag(p);
+        var parsedType = parseTypeExpr(p);
+        typeExpr = parsedType;
+        typeTag = typeExprText(parsedType);
     }
     consume(p, "Equal", "= expected");
     var value = parseExpression(p);
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return ConstDeclStmt { name: name, typeTag: typeTag, value: value, span: span };
+    return ConstDeclStmt { name: name, typeTag: typeTag, typeExpr: typeExpr, value: value, span: span };
 }
 
-func parseFuncDecl(p: Parser) {
+func parseFuncDecl(p: Parser, isPub: bool) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "func name expected");
     var name = nameToken.lexeme;
@@ -264,117 +511,427 @@ func parseFuncDecl(p: Parser) {
     var params = parseFuncParams(p);
     consume(p, "RightParen", ") expected");
     var returnType = "";
+    var returnTypeExpr: TypeExpr? = null;
     if matchToken(p, ["Colon"]) {
-        returnType = parseTypeTag(p);
+        var parsedReturnType = parseTypeExpr(p);
+        returnTypeExpr = parsedReturnType;
+        returnType = typeExprText(parsedReturnType);
     }
-    var body = parseBlock(p);
+    var bodyBlock = parseBlock(p);
+    var body = bodyBlock.statements;
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return FuncDeclStmt { name: name, params: params, returnType: returnType, body: body, span: span };
+    return FuncDeclStmt { name: name, params: params, returnType: returnType, returnTypeExpr: returnTypeExpr, isPub: isPub, body: body, span: span };
 }
 
 func parseFuncParams(p: Parser) {
-    var params = [];
+    var params: Vec<FuncParam> = [];
     if check(p, "RightParen") {
         return params;
     }
     loop {
+        var before = p.current;
         var nameTok = consume(p, "Identifier", "param expected");
         var paramName = nameTok.lexeme;
         var typeTag = "";
+        var typeExpr: TypeExpr? = null;
+        var variadic = false;
         if matchToken(p, ["Colon"]) {
-            typeTag = parseTypeTag(p);
+            variadic = matchEllipsis(p);
+            var parsedType = parseTypeExpr(p);
+            typeExpr = parsedType;
+            typeTag = typeExprText(parsedType);
         }
-        params.push(FuncParam { name: paramName, typeTag: typeTag, default: LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(nameTok.span) } });
+        var hasDefault = false;
+        var defaultValue: Expr = Expr::Literal(LiteralExpr { kind: LiteralKind::Null, text: "null", span: toSpan(nameTok.span) });
+        if matchToken(p, ["Equal"]) {
+            hasDefault = true;
+            defaultValue = parseExpression(p);
+        }
+        params.push(FuncParam { name: paramName, typeTag: typeTag, typeExpr: typeExpr, default: defaultValue, hasDefault: hasDefault, variadic: variadic });
         if check(p, "Comma") {
             advance(p);
+            if check(p, "RightParen") { break; }
         } else {
             break;
         }
+        ensureProgress(p, before);
     }
     return params;
 }
 
-func parseStructDecl(p: Parser) {
+func parseStructDecl(p: Parser, isPub: bool) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "struct name expected");
     var name = nameToken.lexeme;
-    consume(p, "LeftBrace", "{ expected");
-    var fields = [];
-    var methods = [];
-    var loopCount = 0;
+    consume(p, "LeftBrace", "{{ expected");
+    var fields: Vec<StructField> = [];
+    var methods: Vec<FuncDeclStmt> = [];
+    var closed = false;
     loop {
-        loopCount = loopCount + 1;
         if check(p, "RightBrace") {
             advance(p);
+            closed = true;
             break;
         }
-        if matchToken(p, ["Func"]) {
-            var method = parseFuncDecl(p);
+        if isAtEnd(p) { break; }
+        var before = p.current;
+        var memberPub = matchToken(p, ["Pub"]);
+        if check(p, "Func") {
+            var method = parseFuncDecl(p, memberPub);
             methods.push(method);
+            if check(p, "Comma") { advance(p); }
         } else {
-            var isPub = matchToken(p, ["Pub"]);
             var fieldNameTok = consume(p, "Identifier", "field name expected");
             var fieldName = fieldNameTok.lexeme;
             var fieldType = "";
+            var fieldTypeExpr: TypeExpr? = null;
             if matchToken(p, ["Colon"]) {
-                fieldType = parseTypeTag(p);
+                var parsedFieldType = parseTypeExpr(p);
+                fieldTypeExpr = parsedFieldType;
+                fieldType = typeExprText(parsedFieldType);
+            } else {
+                error(p, "field type expected");
             }
-            matchToken(p, ["Semicolon", "Comma"]);
-            fields.push(StructField { name: fieldName, typeTag: fieldType, isPub: isPub });
+            fields.push(StructField { name: fieldName, typeTag: fieldType, typeExpr: fieldTypeExpr, isPub: memberPub });
+            if !check(p, "RightBrace") { consume(p, "Comma", ", expected after field"); }
         }
+        ensureProgress(p, before);
     }
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return StructDeclStmt { name: name, fields: fields, methods: methods, span: span };
+    if !closed { error(p, "}} expected after struct declaration"); }
+    return StructDeclStmt { name: name, fields: fields, methods: methods, isPub: isPub, span: span };
 }
 
-func parseEnumDecl(p: Parser) {
+func parseEnumDecl(p: Parser, isPub: bool) {
     var startToken = advance(p);
     var nameToken = consume(p, "Identifier", "enum name expected");
     var name = nameToken.lexeme;
-    consume(p, "LeftBrace", "{ expected");
-    var variants = [];
+    consume(p, "LeftBrace", "{{ expected");
+    var variants: Vec<string> = [];
+    var variantDecls: Vec<EnumVariantDecl> = [];
+    var closed = false;
     loop {
         if check(p, "RightBrace") {
             advance(p);
+            closed = true;
             break;
         }
+        if isAtEnd(p) { break; }
+        var before = p.current;
+        var variantStart = p.current;
         var vt = consume(p, "Identifier", "variant expected");
+        var payloadNames: Vec<string> = [];
+        var payloadTypes: Vec<TypeExpr> = [];
+        var sawNamedPayload = false;
+        var sawPositionalPayload = false;
+        if check(p, "LeftParen") {
+            advance(p);
+            if !check(p, "RightParen") {
+                loop {
+                    var payloadStart = p.current;
+                    var payloadName = "";
+                    if check(p, "Identifier") && checkNext(p, "Colon") {
+                        payloadName = advance(p).lexeme;
+                        advance(p);
+                        sawNamedPayload = true;
+                    } else {
+                        sawPositionalPayload = true;
+                    }
+                    var payloadType = parseTypeExpr(p);
+                    payloadTypes.push(payloadType);
+                    payloadNames.push(payloadName);
+                    if check(p, "Comma") {
+                        advance(p);
+                        if check(p, "RightParen") { break; }
+                    } else {
+                        break;
+                    }
+                    ensureProgress(p, payloadStart);
+                }
+            }
+            consume(p, "RightParen", ") expected after enum payload types");
+        }
+        if sawNamedPayload && sawPositionalPayload {
+            error(p, "enum payloads must be either all named or all positional");
+        }
         variants.push(vt.lexeme);
+        variantDecls.push(EnumVariantDecl { name: vt.lexeme, payloadNames: payloadNames, payloadTypes: payloadTypes, span: spanBetween(p, variantStart, p.current - 1) });
         if check(p, "Comma") {
             advance(p);
+        } else if !check(p, "RightBrace") {
+            error(p, ", expected between enum variants");
         }
+        ensureProgress(p, before);
     }
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return EnumDeclStmt { name: name, variants: variants, span: span };
+    if !closed { error(p, "}} expected after enum declaration"); }
+    return EnumDeclStmt { name: name, variants: variants, variantDecls: variantDecls, isPub: isPub, span: span };
+}
+
+func literalFromToken(tok: Token): Literal {
+    if tok.kind == "StringLiteral" { return Literal { kind: LiteralKind::String, text: tok.lexeme }; }
+    if tok.kind == "CharLiteral" { return Literal { kind: LiteralKind::Char, text: tok.lexeme }; }
+    if tok.kind == "True" || tok.kind == "False" { return Literal { kind: LiteralKind::Bool, text: tok.lexeme }; }
+    if tok.kind == "Null" { return Literal { kind: LiteralKind::Null, text: tok.lexeme }; }
+    if tok.kind == "NumberLiteral" && tok.lexeme.contains(".") { return Literal { kind: LiteralKind::Float, text: tok.lexeme }; }
+    return Literal { kind: LiteralKind::Int, text: tok.lexeme };
+}
+
+func parsePatternPayloads(p: Parser): Vec<Pattern> {
+    var payloads: Vec<Pattern> = [];
+    consume(p, "LeftParen", "( expected before variant payload patterns");
+    if !check(p, "RightParen") {
+        loop {
+            var before = p.current;
+            payloads.push(parsePattern(p));
+            if check(p, "Comma") {
+                advance(p);
+                if check(p, "RightParen") { break; }
+            } else {
+                break;
+            }
+            ensureProgress(p, before);
+        }
+    }
+    consume(p, "RightParen", ") expected after variant payload patterns");
+    return payloads;
+}
+
+func parsePatternAtom(p: Parser): Pattern {
+    var tok = peek(p);
+    if tok.kind == "Identifier" {
+        var patternStart = p.current;
+        var nameTok = advance(p);
+        var name = nameTok.lexeme;
+        if name == "_" { return Pattern::Wildcard(WildcardPattern { kind: PatternKind::Wildcard, span: toSpan(nameTok.span) }); }
+        if matchToken(p, ["ColonColon"]) {
+            var variantTok = consume(p, "Identifier", "variant name expected after ::");
+            var payloads: Vec<Pattern> = [];
+            if check(p, "LeftParen") { payloads = parsePatternPayloads(p); }
+            return Pattern::EnumVariant(EnumVariantPattern { kind: PatternKind::EnumVariant, enumName: name, variant: variantTok.lexeme, payloads: payloads, span: spanBetween(p, patternStart, p.current - 1) });
+        }
+        if check(p, "LeftParen") {
+            var payloads = parsePatternPayloads(p);
+            return Pattern::EnumVariant(EnumVariantPattern { kind: PatternKind::EnumVariant, enumName: "", variant: name, payloads: payloads, span: spanBetween(p, patternStart, p.current - 1) });
+        }
+        if check(p, "LeftBrace") && checkNext(p, "Identifier") {
+            var braceIndex = p.current;
+            var looksLikeStruct = false;
+            if braceIndex + 2 < p.tokens.len() {
+                looksLikeStruct = p.tokens[braceIndex + 2].kind == "Colon";
+            }
+            if looksLikeStruct {
+                advance(p);
+                var fields: Vec<PatternField> = [];
+                loop {
+                    var before = p.current;
+                    var field = consume(p, "Identifier", "struct pattern field expected");
+                    consume(p, "Colon", ": expected after struct pattern field");
+                    var pat = parsePattern(p);
+                    fields.push(PatternField { name: field.lexeme, pattern: pat, span: toSpan(field.span) });
+                    if check(p, "Comma") {
+                        advance(p);
+                        if check(p, "RightBrace") { break; }
+                    } else { break; }
+                    ensureProgress(p, before);
+                }
+                consume(p, "RightBrace", "}} expected after struct pattern");
+                return Pattern::Struct(StructPattern { kind: PatternKind::Struct, structName: name, fields: fields, span: toSpan(nameTok.span) });
+            }
+        }
+        return Pattern::Variable(VariablePattern { kind: PatternKind::Variable, name: name, span: toSpan(nameTok.span) });
+    }
+    if tok.kind == "True" || tok.kind == "False" || tok.kind == "Null" || tok.kind == "StringLiteral" || tok.kind == "CharLiteral" || tok.kind == "NumberLiteral" {
+        var literalTok = advance(p);
+        return Pattern::Literal(LiteralPattern { kind: PatternKind::Literal, literal: literalFromToken(literalTok), span: toSpan(literalTok.span) });
+    }
+    error(p, "pattern expected");
+    if !isAtEnd(p) { advance(p); }
+    return Pattern::Error(ErrorPattern { kind: PatternKind::Error, span: toSpan(tok.span) });
+}
+
+func patternLiteralValue(pattern: Pattern): Literal? {
+    match pattern {
+        Pattern::Literal(literalPattern) => { return literalPattern.literal; },
+        _ => {},
+    }
+    return null;
+}
+
+func parsePattern(p: Parser): Pattern {
+    var start = p.current;
+    var first = parsePatternAtom(p);
+    if !matchDotDot(p) { return first; }
+    var startLiteral = Literal { kind: LiteralKind::Int, text: "0" };
+    var validStart = false;
+    var firstLiteral = patternLiteralValue(first);
+    if firstLiteral != null {
+        match firstLiteral.kind {
+            LiteralKind::Int => {
+                startLiteral = firstLiteral;
+                validStart = true;
+            },
+            _ => {},
+        }
+    }
+    var endPattern = parsePatternAtom(p);
+    var endLiteral = Literal { kind: LiteralKind::Int, text: "0" };
+    var validEnd = false;
+    var lastLiteral = patternLiteralValue(endPattern);
+    if lastLiteral != null {
+        match lastLiteral.kind {
+            LiteralKind::Int => {
+                endLiteral = lastLiteral;
+                validEnd = true;
+            },
+            _ => {},
+        }
+    }
+    if !validStart || !validEnd {
+        error(p, "match range endpoints must be integer literals");
+        return Pattern::Error(ErrorPattern { kind: PatternKind::Error, span: spanBetween(p, start, p.current - 1) });
+    }
+    return Pattern::Range(RangePattern { kind: PatternKind::Range, start: startLiteral, end: endLiteral, inclusive: true, span: spanBetween(p, start, p.current - 1) });
+}
+
+func recoverMatchArm(p: Parser) {
+    loop {
+        if isAtEnd(p) || check(p, "Comma") || check(p, "RightBrace") { break; }
+        advance(p);
+    }
+    if check(p, "Comma") { advance(p); }
+}
+
+func parseMatchArmBody(p: Parser): Stmt {
+    if check(p, "LeftBrace") { return Stmt::Block(parseBlock(p)); }
+    var exprStart = p.current;
+    var expr = parseExpression(p);
+    consume(p, "Semicolon", "; expected after match arm expression");
+    return Stmt::ExprStmt(ExprStmt { expr: expr, span: spanBetween(p, exprStart, p.current - 1) });
+}
+
+func parseMatch(p: Parser) {
+    var start = p.current;
+    advance(p);
+    var scrutinee = parseExpression(p);
+    consume(p, "LeftBrace", "{{ expected after match scrutinee");
+    var arms: Vec<MatchStmtArm> = [];
+    var closed = false;
+    loop {
+        if check(p, "RightBrace") {
+            advance(p);
+            closed = true;
+            break;
+        }
+        if isAtEnd(p) { break; }
+        var before = p.current;
+        var pattern = parsePattern(p);
+        if !matchFatArrow(p) { error(p, "=> expected after match pattern"); }
+        var body = parseMatchArmBody(p);
+        var armSpan = spanBetween(p, before, p.current - 1);
+        arms.push(MatchStmtArm { pattern: pattern, body: body, span: armSpan });
+        if check(p, "Comma") {
+            advance(p);
+        } else if !check(p, "RightBrace") {
+            error(p, ", expected between match arms");
+            recoverMatchArm(p);
+        }
+        ensureProgress(p, before);
+    }
+    if !closed { error(p, "}} expected after match arms"); }
+    return MatchStmt { scrutinee: scrutinee, arms: arms, span: spanBetween(p, start, p.current - 1) };
+}
+
+func parseImportNames(p: Parser) {
+    var items: Vec<string> = [];
+    consume(p, "LeftBrace", "{{ expected before imported names");
+    if check(p, "RightBrace") {
+        error(p, "at least one imported name is required");
+    } else {
+        loop {
+            var before = p.current;
+            var item = consume(p, "Identifier", "imported name expected");
+            items.push(item.lexeme);
+            if check(p, "Comma") {
+                advance(p);
+                if check(p, "RightBrace") { break; }
+            } else {
+                break;
+            }
+            ensureProgress(p, before);
+        }
+    }
+    consume(p, "RightBrace", "}} expected after imported names");
+    return items;
+}
+
+func fileStem(path: string): string {
+    var start = 0;
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        if path[i].toString() == "/" { start = i + 1; }
+        i = i + 1;
+    }
+    var stem = path.slice(start, path.len());
+    if stem.endsWith(".rey") { return stem.slice(0, stem.len() - 4); }
+    return stem;
 }
 
 func parseImport(p: Parser) {
     var startToken = advance(p);
     var path = "";
+    var namespaceName = "";
+    var sourceKind = ImportSourceKind::Module;
+    var items: Vec<string> = [];
     if check(p, "StringLiteral") {
         path = advance(p).lexeme;
+        sourceKind = ImportSourceKind::File;
+        namespaceName = fileStem(path);
     } else {
         var pathTok = consume(p, "Identifier", "path expected");
         path = pathTok.lexeme;
+        namespaceName = pathTok.lexeme;
+        if matchToken(p, ["ColonColon"]) {
+            sourceKind = ImportSourceKind::Module;
+            loop {
+                if check(p, "LeftBrace") {
+                    items = parseImportNames(p);
+                    namespaceName = "";
+                    break;
+                }
+                var component = consume(p, "Identifier", "module name expected after ::");
+                path = path + "::" + component.lexeme;
+                namespaceName = component.lexeme;
+                if !matchToken(p, ["ColonColon"]) { break; }
+            }
+        } else if matchToken(p, ["Dot"]) {
+            sourceKind = ImportSourceKind::File;
+            namespaceName = "";
+            if check(p, "LeftBrace") {
+                items = parseImportNames(p);
+            } else {
+                var item = consume(p, "Identifier", "file symbol expected after '.'");
+                items.push(item.lexeme);
+            }
+        }
     }
-    var items = [];
     consume(p, "Semicolon", "; expected");
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
-    return ImportStmt { path: path, items: items, span: span };
+    return ImportStmt { path: path, items: items, sourceKind: sourceKind, namespaceName: namespaceName, span: span };
 }
 
 func parseIf(p: Parser) {
     var startToken = advance(p);
-    var hasParen = matchToken(p, ["LeftParen"]);
     var cond = parseExpression(p);
-    if hasParen {
-        consume(p, "RightParen", ") expected");
-    }
     var thenBranch = parseBlock(p);
-    var elseBranch = null;
+    var elseBranch: BlockStmt? = null;
     if matchToken(p, ["Else"]) {
         if check(p, "If") {
-            elseBranch = parseIf(p);
+            var nested = parseIf(p);
+            var nestedStatements: Vec<Stmt> = [];
+            nestedStatements.push(Stmt::If(nested));
+            elseBranch = BlockStmt { statements: nestedStatements, span: nested.span };
         } else {
             elseBranch = parseBlock(p);
         }
@@ -385,7 +942,7 @@ func parseIf(p: Parser) {
 
 func parseReturn(p: Parser) {
     var startToken = advance(p);
-    var value = LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(startToken.span) };
+    var value: Expr = Expr::Literal(LiteralExpr { kind: LiteralKind::Null, text: "null", span: toSpan(startToken.span) });
     if !check(p, "Semicolon") {
         value = parseExpression(p);
     }
@@ -407,30 +964,39 @@ func parseAssign(p: Parser) {
 
 func parseWhile(p: Parser) {
     var startToken = advance(p);
-    consume(p, "LeftParen", "( expected");
     var cond = parseExpression(p);
-    consume(p, "RightParen", ") expected");
-    var body = parseBlock(p);
+    var bodyBlock = parseBlock(p);
+    var body = bodyBlock.statements;
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return WhileStmt { condition: cond, body: body, span: span };
 }
 
+func isWrappedFor(p: Parser): bool {
+    if !check(p, "LeftParen") || p.current + 2 >= p.tokens.len() { return false; }
+    var nameTok: Token = p.tokens[p.current + 1];
+    var inTok: Token = p.tokens[p.current + 2];
+    return nameTok.kind == "Identifier" && inTok.kind == "In";
+}
+
 func parseFor(p: Parser) {
     var startToken = advance(p);
-    consume(p, "LeftParen", "( expected");
-    var varTok = consume(p, "Identifier", "var expected");
+    var wrapped = isWrappedFor(p);
+    if wrapped { advance(p); }
+    var varTok = consume(p, "Identifier", "loop variable expected");
     var varName = varTok.lexeme;
     consume(p, "In", "in expected");
     var iter = parseExpression(p);
-    consume(p, "RightParen", ") expected");
-    var body = parseBlock(p);
+    if wrapped { consume(p, "RightParen", ") expected"); }
+    var bodyBlock = parseBlock(p);
+    var body = bodyBlock.statements;
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return ForStmt { variable: varName, iterable: iter, body: body, span: span };
 }
 
 func parseLoop(p: Parser) {
     var startToken = advance(p);
-    var body = parseBlock(p);
+    var bodyBlock = parseBlock(p);
+    var body = bodyBlock.statements;
     var span = makeSpan(p, startToken.span.start, previous(p).span.end);
     return LoopStmt { body: body, span: span };
 }
@@ -450,48 +1016,62 @@ func parseContinue(p: Parser) {
 }
 
 func parseBlock(p: Parser) {
-    var startTok = consume(p, "LeftBrace", "{ expected");
-    var stmts = [];
+    var startTok = consume(p, "LeftBrace", "{{ expected");
+    var stmts: Vec<Stmt> = [];
     loop {
         if check(p, "RightBrace") || isAtEnd(p) {
             break;
         }
+        var before = p.current;
         var stmt = parseStatement(p);
+        ensureProgress(p, before);
         stmts.push(stmt);
     }
-    consume(p, "RightBrace", "} expected");
+    consume(p, "RightBrace", "}} expected");
     var span = makeSpan(p, startTok.span.start, previous(p).span.end);
     return BlockStmt { statements: stmts, span: span };
 }
 
-func parseExprStmt(p: Parser) {
+func parseExprStmt(p: Parser): Stmt {
     var startTok = peek(p);
-    var expr = parseExpression(p);
+    var expr = parseOr(p);
     if check(p, "Equal") || check(p, "PlusEqual") || check(p, "MinusEqual") || check(p, "StarEqual") || check(p, "SlashEqual") || check(p, "PercentEqual") {
         var opTok = advance(p);
         var value = parseExpression(p);
         consume(p, "Semicolon", "; expected");
         var span = makeSpan(p, startTok.span.start, previous(p).span.end);
-        return AssignStmt { target: expr, op: opTok.lexeme, value: value, span: span };
+        return Stmt::Assign(AssignStmt { target: expr, op: opTok.lexeme, value: value, span: span });
     }
     consume(p, "Semicolon", "; expected");
-    var span = expr.span;
-    return ExprStmt { expr: expr, span: span };
+    var span = exprSpan(expr);
+    return Stmt::ExprStmt(ExprStmt { expr: expr, span: span });
 }
 
-func parseExpression(p: Parser) {
-    return parseOr(p);
+func parseExpression(p: Parser): Expr {
+    return parseAssignment(p);
 }
 
-func parseOr(p: Parser) {
+func parseAssignment(p: Parser): Expr {
+    var start = p.current;
+    var left = parseOr(p);
+    if check(p, "Equal") || check(p, "PlusEqual") || check(p, "MinusEqual") || check(p, "StarEqual") || check(p, "SlashEqual") || check(p, "PercentEqual") {
+        var opTok = advance(p);
+        if !isLValue(left) { error(p, "assignment target is not an lvalue"); }
+        var right = parseAssignment(p);
+        return Expr::Binary(BinaryExpr { left: left, op: opTok.lexeme, right: right, span: spanBetween(p, start, p.current - 1) });
+    }
+    return left;
+}
+
+func parseOr(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseAnd(p);
     loop {
         if matchToken(p, ["OrOr"]) {
             var op = previous(p).lexeme;
             var right = parseAnd(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -499,15 +1079,15 @@ func parseOr(p: Parser) {
     return left;
 }
 
-func parseAnd(p: Parser) {
+func parseAnd(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseEquality(p);
     loop {
         if matchToken(p, ["AndAnd"]) {
             var op = previous(p).lexeme;
             var right = parseEquality(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -515,15 +1095,15 @@ func parseAnd(p: Parser) {
     return left;
 }
 
-func parseEquality(p: Parser) {
+func parseEquality(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseComparison(p);
     loop {
         if matchToken(p, ["EqualEqual", "NotEqual"]) {
             var op = previous(p).lexeme;
             var right = parseComparison(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -531,19 +1111,19 @@ func parseEquality(p: Parser) {
     return left;
 }
 
-func parseComparison(p: Parser) {
+func parseComparison(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseTerm(p);
     loop {
         if matchToken(p, ["InstanceOf"]) {
             var typeTok = consume(p, "Identifier", "type name expected after instanceof");
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: "instanceof", right: IdentExpr { name: typeTok.lexeme, span: toSpan(typeTok.span) }, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: "instanceof", right: Expr::Identifier(IdentExpr { name: typeTok.lexeme, span: toSpan(typeTok.span) }), span: span });
         } else if matchToken(p, ["Less", "Greater", "LessEqual", "GreaterEqual"]) {
             var op = previous(p).lexeme;
             var right = parseTerm(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -551,15 +1131,15 @@ func parseComparison(p: Parser) {
     return left;
 }
 
-func parseTerm(p: Parser) {
+func parseTerm(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseFactor(p);
     loop {
         if matchToken(p, ["Plus", "Minus"]) {
             var op = previous(p).lexeme;
             var right = parseFactor(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -567,15 +1147,15 @@ func parseTerm(p: Parser) {
     return left;
 }
 
-func parseFactor(p: Parser) {
+func parseFactor(p: Parser): Expr {
     var leftStart = p.current;
     var left = parseUnary(p);
     loop {
         if matchToken(p, ["Star", "Slash", "Percent"]) {
             var op = previous(p).lexeme;
             var right = parseUnary(p);
-            var span = makeSpan(p, leftStart, p.current - 1);
-            left = BinaryExpr { left: left, op: op, right: right, span: span };
+            var span = spanBetween(p, leftStart, p.current - 1);
+            left = Expr::Binary(BinaryExpr { left: left, op: op, right: right, span: span });
         } else {
             break;
         }
@@ -583,18 +1163,42 @@ func parseFactor(p: Parser) {
     return left;
 }
 
-func parseUnary(p: Parser) {
+func isLValue(expr: Expr): bool {
+    match expr {
+        Expr::Identifier(_) => { return true; },
+        Expr::FieldAccess(_) => { return true; },
+        Expr::Index(_) => { return true; },
+        _ => { return false; },
+    }
+    return false;
+}
+
+func parseUnary(p: Parser): Expr {
+    if matchToken(p, ["PlusPlus", "MinusMinus"]) {
+        var opTok = previous(p);
+        var start = p.current - 1;
+        var target = parseUnary(p);
+        if !isLValue(target) { error(p, "prefix update requires a mutable lvalue"); }
+        return Expr::Update(UpdateExpr { target: target, op: opTok.lexeme, prefix: true, span: spanBetween(p, start, p.current - 1) });
+    }
     if matchToken(p, ["Not", "Minus"]) {
         var op = previous(p).lexeme;
-        var unaryStart = p.current;
+        var start = p.current - 1;
         var right = parseUnary(p);
-        var span = makeSpan(p, unaryStart, p.current - 1);
-        return UnaryExpr { op: op, right: right, span: span };
+        return Expr::Unary(UnaryExpr { op: op, right: right, span: spanBetween(p, start, p.current - 1) });
     }
     return parseCall(p);
 }
 
-func parseCall(p: Parser) {
+func expressionIdentifier(expr: Expr): string? {
+    match expr {
+        Expr::Identifier(identifier) => { return identifier.name; },
+        _ => {},
+    }
+    return null;
+}
+
+func parseCall(p: Parser): Expr {
     var exprStart = p.current;
     var expr = parsePrimary(p);
     loop {
@@ -602,61 +1206,73 @@ func parseCall(p: Parser) {
             advance(p);
             var args = parseArgs(p);
             consume(p, "RightParen", ") expected");
-            var span = makeSpan(p, exprStart, previous(p).span.end);
-            expr = CallExpr { callee: expr, args: args, span: span };
+            expr = Expr::Call(CallExpr { callee: expr, args: args, span: spanBetween(p, exprStart, p.current - 1) });
+        } else if check(p, "ColonColon") {
+            advance(p);
+            var variantTok = consume(p, "Identifier", "enum variant expected after ::");
+            var enumName = "";
+            var qualifier = expressionIdentifier(expr);
+            if qualifier != null { enumName = qualifier; }
+            else { error(p, "enum qualifier must be an identifier"); }
+            var args: Vec<Expr> = [];
+            if check(p, "LeftParen") {
+                advance(p);
+                args = parseArgs(p);
+                consume(p, "RightParen", ") expected after enum variant arguments");
+            }
+            expr = Expr::EnumVariant(EnumVariantExpr { enumName: enumName, variant: variantTok.lexeme, args: args, span: spanBetween(p, exprStart, p.current - 1) });
         } else if check(p, "LeftBrace") {
-            if expr instanceof IdentExpr {
-                // Only parse as struct literal if { is followed by } (empty) or Identifier : (field)
+            var structName = expressionIdentifier(expr);
+            if structName != null {
                 var looksLikeStruct = false;
-                if p.current + 1 < p.tokens.length() {
+                if p.current + 1 < p.tokens.len() {
                     var afterBrace: Token = p.tokens[p.current + 1];
                     if afterBrace.kind == "RightBrace" {
                         looksLikeStruct = true;
-                    } else if afterBrace.kind == "Identifier" {
-                        if p.current + 2 < p.tokens.length() {
-                            var colonTok: Token = p.tokens[p.current + 2];
-                            if colonTok.kind == "Colon" {
-                                looksLikeStruct = true;
-                            }
-                        }
+                    } else if afterBrace.kind == "Identifier" && p.current + 2 < p.tokens.len() {
+                        var colonTok: Token = p.tokens[p.current + 2];
+                        looksLikeStruct = colonTok.kind == "Colon";
                     }
                 }
                 if looksLikeStruct {
-                    var startTok = advance(p);
-                    var fields = [];
+                    advance(p);
+                    var fields: Vec<StructInitField> = [];
                     if !check(p, "RightBrace") {
                         loop {
+                            var before = p.current;
                             var nameTok = consume(p, "Identifier", "field name expected");
                             consume(p, "Colon", ": expected");
                             var val = parseExpression(p);
                             fields.push(StructInitField { name: nameTok.lexeme, value: val, span: toSpan(nameTok.span) });
                             if check(p, "Comma") {
                                 advance(p);
-                            } else {
-                                break;
-                            }
+                                if check(p, "RightBrace") { break; }
+                            } else { break; }
+                            ensureProgress(p, before);
                         }
                     }
-                    consume(p, "RightBrace", "} expected");
-                    var span2 = makeSpan(p, exprStart, previous(p).span.end);
-                    expr = StructLiteralExpr { name: expr.name, fields: fields, span: span2 };
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
+                    consume(p, "RightBrace", "}} expected");
+                    expr = Expr::StructLiteral(StructLiteralExpr { name: structName, fields: fields, span: spanBetween(p, exprStart, p.current - 1) });
+                } else { break; }
+            } else { break; }
         } else if check(p, "Dot") {
             advance(p);
-            var nameTok = consume(p, "Identifier", "prop expected");
-            var span = makeSpan(p, exprStart, nameTok.span.end);
-            expr = FieldAccessExpr { object: expr, name: nameTok.lexeme, span: span };
+            if check(p, "NumberLiteral") {
+                var indexTok = advance(p);
+                expr = Expr::FieldAccess(FieldAccessExpr { object: expr, name: indexTok.lexeme, span: spanBetween(p, exprStart, p.current - 1) });
+            } else {
+                var nameTok = consume(p, "Identifier", "property name expected after '.'");
+                expr = Expr::FieldAccess(FieldAccessExpr { object: expr, name: nameTok.lexeme, span: spanBetween(p, exprStart, p.current - 1) });
+            }
         } else if check(p, "LeftBracket") {
             advance(p);
             var idx = parseExpression(p);
             consume(p, "RightBracket", "] expected");
-            var span = makeSpan(p, exprStart, previous(p).span.end);
-            expr = IndexExpr { target: expr, index: idx, span: span };
+            expr = Expr::Index(IndexExpr { target: expr, index: idx, span: spanBetween(p, exprStart, p.current - 1) });
+        } else if check(p, "PlusPlus") || check(p, "MinusMinus") {
+            var opTok = advance(p);
+            if !isLValue(expr) { error(p, "postfix update requires a mutable lvalue"); }
+            expr = Expr::Update(UpdateExpr { target: expr, op: opTok.lexeme, prefix: false, span: spanBetween(p, exprStart, p.current - 1) });
         } else {
             break;
         }
@@ -665,141 +1281,283 @@ func parseCall(p: Parser) {
 }
 
 func parseArgs(p: Parser) {
-    var args = [];
-    if check(p, "RightParen") {
-        return args;
-    }
+    var args: Vec<Expr> = [];
+    if check(p, "RightParen") { return args; }
     loop {
-        var arg = parseExpression(p);
-        args.push(arg);
+        var before = p.current;
+        args.push(parseExpression(p));
         if check(p, "Comma") {
             advance(p);
-        } else {
-            break;
-        }
+            if check(p, "RightParen") { break; }
+        } else { break; }
+        ensureProgress(p, before);
     }
     return args;
 }
 
-func parsePrimary(p: Parser) {
-    var tok = peek(p);
-    if tok.kind == "True" {
-        advance(p);
-        return LiteralExpr { kind: LiteralKind.Bool, text: "true", span: toSpan(tok.span) };
-    }
-    if tok.kind == "False" {
-        advance(p);
-        return LiteralExpr { kind: LiteralKind.Bool, text: "false", span: toSpan(tok.span) };
-    }
-    if tok.kind == "Null" {
-        advance(p);
-        return LiteralExpr { kind: LiteralKind.Null, text: "null", span: toSpan(tok.span) };
-    }
-    if tok.kind == "NumberLiteral" {
-        var nt = advance(p);
-        if nt.lexeme.contains(".") {
-            return LiteralExpr { kind: LiteralKind.Float, text: nt.lexeme, span: toSpan(nt.span) };
+func isLambdaStart(p: Parser): bool {
+    if !check(p, "LeftParen") { return false; }
+    var i = p.current;
+    var depth = 0;
+    loop {
+        if i >= p.tokens.len() { return false; }
+        var tok: Token = p.tokens[i];
+        if tok.kind == "LeftParen" { depth = depth + 1; }
+        if tok.kind == "RightParen" {
+            depth = depth - 1;
+            if depth == 0 {
+                if i + 1 < p.tokens.len() {
+                    if p.tokens[i + 1].kind == "FatArrow" { return true; }
+                    if p.tokens[i + 1].kind == "Equal" && i + 2 < p.tokens.len() && p.tokens[i + 2].kind == "Greater" { return true; }
+                }
+                return false;
+            }
         }
-        return LiteralExpr { kind: LiteralKind.Int, text: nt.lexeme, span: toSpan(nt.span) };
+        i = i + 1;
     }
-    if tok.kind == "StringLiteral" {
-        var st = advance(p);
-        return LiteralExpr { kind: LiteralKind.String, text: st.lexeme, span: toSpan(st.span) };
-    }
-    if tok.kind == "Identifier" {
-        var it = advance(p);
-        return IdentExpr { name: it.lexeme, span: toSpan(it.span) };
-    }
-    if tok.kind == "LeftParen" {
-        return parseGrouping(p);
-    }
-    if tok.kind == "LeftBracket" {
-        return parseArray(p);
-    }
-    if tok.kind == "LeftBrace" {
-        return parseDict(p);
-    }
-    if tok.kind == "Func" {
-        return parseLambda(p);
-    }
-    error(p, "expression expected");
-    advance(p);
-    return IdentExpr { name: "", span: toSpan(tok.span) };
+    return false;
 }
 
-func parseGrouping(p: Parser) {
-    var startTok = advance(p);
-    var expr = parseExpression(p);
-    consume(p, "RightParen", ") expected");
+func stringLiteralExpr(tok: Token): Expr {
+    return Expr::Literal(LiteralExpr { kind: LiteralKind::String, text: tok.lexeme, span: toSpan(tok.span) });
+}
+
+func concatStringExpr(left: Expr, right: Expr): Expr {
+    var span = exprSpan(left);
+    var rightSpan = exprSpan(right);
+    if rightSpan.end > span.end { span.end = rightSpan.end; }
+    return Expr::Binary(BinaryExpr { left: left, op: "+", right: right, span: span });
+}
+
+func toStringCallExpr(inner: Expr, span: Span): Expr {
+    var access = Expr::FieldAccess(FieldAccessExpr { object: inner, name: "toString", span: span });
+    var args: Vec<Expr> = [];
+    return Expr::Call(CallExpr { callee: access, args: args, span: span });
+}
+
+func shiftTokenSpans(tokens: Vec<Token>, base: int): Vec<Token> {
+    var adjusted: Vec<Token> = [];
+    var index = 0;
+    loop {
+        if index >= tokens.len() { break; }
+        var tok = tokens[index];
+        var span = tok.span;
+        span.start = span.start + base;
+        span.end = span.end + base;
+        tok.span = span;
+        adjusted.push(tok);
+        index = index + 1;
+    }
+    return adjusted;
+}
+
+func parseInterpolationHole(p: Parser, source: string, span: Span): Expr {
+    if source.len() == 0 {
+        error(p, "interpolation must contain one expression");
+        return Expr::Error(ErrorExpr { message: "empty interpolation", span: span });
+    }
+    var lexed = lexer.tokenize(source, "");
+    var holeTokens = shiftTokenSpans(lexed.tokens, span.start);
+    var errorIndex = 0;
+    loop {
+        if errorIndex >= lexed.errors.len() { break; }
+        p.errors.push(ParseError { message: lexed.errors[errorIndex].message, span: span });
+        errorIndex = errorIndex + 1;
+    }
+    if lexed.errors.len() > 0 {
+        return Expr::Error(ErrorExpr { message: "invalid interpolation", span: span });
+    }
+    var inner = newParser(holeTokens);
+    var expr = parseExpression(inner);
+    var parseIndex = 0;
+    loop {
+        if parseIndex >= inner.errors.len() { break; }
+        p.errors.push(ParseError { message: inner.errors[parseIndex].message, span: span });
+        parseIndex = parseIndex + 1;
+    }
+    if !isAtEnd(inner) { error(p, "interpolation must contain one expression"); }
     return expr;
 }
 
-func parseArray(p: Parser) {
-    var startTok = consume(p, "LeftBracket", "[ expected");
-    var elems = [];
+func continueInterpolatedString(p: Parser, current: Expr, haveCurrent: bool): Expr {
+    var expr = current;
+    var have = haveCurrent;
+    loop {
+        if !check(p, "Interpolation") { break; }
+        var hole = advance(p);
+        var holeSpan = toSpan(hole.span);
+        var converted = toStringCallExpr(parseInterpolationHole(p, hole.lexeme, holeSpan), holeSpan);
+        if have { expr = concatStringExpr(expr, converted); }
+        else { expr = converted; have = true; }
+        if check(p, "StringLiteral") {
+            var literalTok = advance(p);
+            expr = concatStringExpr(expr, stringLiteralExpr(literalTok));
+        }
+    }
+    return expr;
+}
+
+func parseStringLiteral(p: Parser): Expr {
+    var tok = advance(p);
+    return continueInterpolatedString(p, stringLiteralExpr(tok), true);
+}
+
+func parseInterpolationString(p: Parser): Expr {
+    var tok = peek(p);
+    var placeholder = Expr::Literal(LiteralExpr { kind: LiteralKind::String, text: "", span: toSpan(tok.span) });
+    return continueInterpolatedString(p, placeholder, false);
+}
+
+func parsePrimary(p: Parser): Expr {
+    var tok = peek(p);
+    if tok.kind == "True" || tok.kind == "False" {
+        advance(p);
+        return Expr::Literal(LiteralExpr { kind: LiteralKind::Bool, text: tok.lexeme, span: toSpan(tok.span) });
+    }
+    if tok.kind == "Null" {
+        advance(p);
+        return Expr::Literal(LiteralExpr { kind: LiteralKind::Null, text: tok.lexeme, span: toSpan(tok.span) });
+    }
+    if tok.kind == "NumberLiteral" {
+        advance(p);
+        if tok.lexeme.contains(".") {
+            return Expr::Literal(LiteralExpr { kind: LiteralKind::Float, text: tok.lexeme, span: toSpan(tok.span) });
+        }
+        return Expr::Literal(LiteralExpr { kind: LiteralKind::Int, text: tok.lexeme, span: toSpan(tok.span) });
+    }
+    if tok.kind == "StringLiteral" {
+        return parseStringLiteral(p);
+    }
+    if tok.kind == "Interpolation" {
+        return parseInterpolationString(p);
+    }
+    if tok.kind == "CharLiteral" {
+        advance(p);
+        return Expr::Literal(LiteralExpr { kind: LiteralKind::Char, text: tok.lexeme, span: toSpan(tok.span) });
+    }
+    if tok.kind == "Identifier" {
+        advance(p);
+        return Expr::Identifier(IdentExpr { name: tok.lexeme, span: toSpan(tok.span) });
+    }
+    if tok.kind == "Self" {
+        advance(p);
+        return Expr::Identifier(IdentExpr { name: "self", span: toSpan(tok.span) });
+    }
+    if tok.kind == "LeftParen" {
+        if isLambdaStart(p) { return parseLambda(p); }
+        return parseTupleOrGroup(p);
+    }
+    if tok.kind == "LeftBracket" { return parseArray(p); }
+    if tok.kind == "LeftBrace" { return parseDict(p); }
+    error(p, "expression expected");
+    if !isAtEnd(p) { advance(p); }
+    return Expr::Error(ErrorExpr { message: "expression expected", span: toSpan(tok.span) });
+}
+
+func parseTupleOrGroup(p: Parser): Expr {
+    var start = p.current;
+    advance(p);
+    if check(p, "RightParen") {
+        error(p, "empty tuple expressions are not supported");
+        advance(p);
+        return Expr::Error(ErrorExpr { message: "empty tuple", span: spanBetween(p, start, p.current - 1) });
+    }
+    var first = parseExpression(p);
+    if !check(p, "Comma") {
+        consume(p, "RightParen", ") expected");
+        return first;
+    }
+    var elements = [first];
+    loop {
+        advance(p);
+        if check(p, "RightParen") { break; }
+        var before = p.current;
+        elements.push(parseExpression(p));
+        if !check(p, "Comma") { break; }
+        ensureProgress(p, before);
+    }
+    consume(p, "RightParen", ") expected after tuple");
+    return Expr::Tuple(TupleExpr { elements: elements, span: spanBetween(p, start, p.current - 1) });
+}
+
+func parseArray(p: Parser): Expr {
+    var start = p.current;
+    consume(p, "LeftBracket", "[ expected");
+    var elems: Vec<Expr> = [];
     if !check(p, "RightBracket") {
         loop {
-            var e = parseExpression(p);
-            elems.push(e);
+            var before = p.current;
+            elems.push(parseExpression(p));
             if check(p, "Comma") {
                 advance(p);
-            } else {
-                break;
-            }
+                if check(p, "RightBracket") { break; }
+            } else { break; }
+            ensureProgress(p, before);
         }
     }
     consume(p, "RightBracket", "] expected");
-    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
-    return ArrayExpr { elements: elems, span: span };
+    return Expr::Array(ArrayExpr { elements: elems, span: spanBetween(p, start, p.current - 1) });
 }
 
-func parseDict(p: Parser) {
-    var startTok = consume(p, "LeftBrace", "{ expected");
-    var entries = [];
+func parseDict(p: Parser): Expr {
+    var start = p.current;
+    consume(p, "LeftBrace", "{{ expected");
+    var entries: Vec<DictEntry> = [];
     if !check(p, "RightBrace") {
         loop {
-            var k = parseExpression(p);
+            var before = p.current;
+            var key = parseExpression(p);
             consume(p, "Colon", ": expected");
-            var v = parseExpression(p);
-            entries.push(DictEntry { key: k, value: v, span: k.span });
+            var value = parseExpression(p);
+            entries.push(DictEntry { key: key, value: value, span: exprSpan(key) });
             if check(p, "Comma") {
                 advance(p);
-            } else {
-                break;
-            }
+                if check(p, "RightBrace") { break; }
+            } else { break; }
+            ensureProgress(p, before);
         }
     }
-    consume(p, "RightBrace", "} expected");
-    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
-    return DictExpr { entries: entries, span: span };
+    consume(p, "RightBrace", "}} expected");
+    return Expr::Dict(DictExpr { entries: entries, span: spanBetween(p, start, p.current - 1) });
 }
 
-func parseLambda(p: Parser) {
-    var startTok = advance(p);
+func parseLambda(p: Parser): Expr {
+    var start = p.current;
     consume(p, "LeftParen", "( expected");
-    var params = [];
+    var params: Vec<string> = [];
+    var paramTypeExprs: Vec<TypeExpr?> = [];
     if !check(p, "RightParen") {
         loop {
-            var pt = consume(p, "Identifier", "param expected");
-            params.push(pt.lexeme);
+            var before = p.current;
+            var param = consume(p, "Identifier", "lambda parameter name expected");
+            consume(p, "Colon", ": expected after lambda parameter name");
+            var paramType = parseTypeExpr(p);
+            params.push(param.lexeme);
+            paramTypeExprs.push(paramType);
             if check(p, "Comma") {
                 advance(p);
-            } else {
-                break;
-            }
+                if check(p, "RightParen") { break; }
+            } else { break; }
+            ensureProgress(p, before);
         }
     }
-    consume(p, "RightParen", ") expected");
-    var body = parseBlock(p);
-    var span = makeSpan(p, startTok.span.start, previous(p).span.end);
-    return LambdaExpr { params: params, body: body, span: span };
+    consume(p, "RightParen", ") expected after lambda parameters");
+    if !matchFatArrow(p) { error(p, "=> expected before lambda expression"); }
+    var bodyExpr = parseExpression(p);
+    var body: Vec<Stmt> = [];
+    return Expr::Lambda(LambdaExpr { params: params, body: body, paramTypeExprs: paramTypeExprs, bodyExpr: bodyExpr, span: spanBetween(p, start, p.current - 1) });
 }
 
-export pub func newParser(tokens): Parser {
-    return Parser { tokens: tokens, current: 0, errors: [] };
+pub func newParser(tokens: Vec<Token>): Parser {
+    var safeTokens = tokens;
+    var errors: Vec<ParseError> = [];
+    if safeTokens.len() == 0 || safeTokens[safeTokens.len() - 1].kind != "Eof" {
+        safeTokens.push(eofToken());
+    }
+    return Parser { tokens: safeTokens, current: 0, errors: errors };
 }
 
-export pub func parse(tokens, path: String): ParserResult {
+pub func parse(tokens: Vec<Token>, path: string): ParserResult {
     var parser = newParser(tokens);
     var program = parseProgram(parser);
     return ParserResult { program: program, errors: parser.errors };

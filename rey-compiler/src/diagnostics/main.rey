@@ -1,39 +1,126 @@
-enum Severity {
+pub enum Severity {
     Error,
     Warning,
     Note,
 }
 
-struct Span {
+pub struct Span {
     pub start: int,
     pub end: int,
     pub line: int,
     pub column: int,
 }
 
-struct Diagnostic {
+pub struct Diagnostic {
     pub severity: Severity,
-    pub code: String,
-    pub message: String,
-    pub filePath: String,
+    pub code: string,
+    pub message: string,
+    pub filePath: string,
     pub span: Span,
 }
 
-struct DiagnosticBag {
-    pub items: [Diagnostic],
+pub struct DiagnosticBag {
+    pub items: Vec<Diagnostic>,
 }
 
-export pub func newBag(): DiagnosticBag {
-    return null;
+pub func newBag(): DiagnosticBag {
+    var items: Vec<Diagnostic> = [];
+    return DiagnosticBag { items: items };
 }
 
-export pub func push(bag: DiagnosticBag, diag: Diagnostic): Void {
+pub func push(bag: DiagnosticBag, diag: Diagnostic): void {
+    pushDiagnostic(bag, diag);
 }
 
-export pub func hasErrors(bag: DiagnosticBag): bool {
-    return null;
+pub func pushDiagnostic(bag: DiagnosticBag, diag: Diagnostic): void {
+    bag.items.push(diag);
 }
 
-export pub func formatDiagnostic(diag: Diagnostic): String {
-    return null;
+pub func hasErrors(bag: DiagnosticBag): bool {
+    var i = 0;
+    loop {
+        if i >= bag.items.len() { break; }
+        match bag.items[i].severity {
+            Severity::Error => { return true; },
+            Severity::Warning => {},
+            Severity::Note => {},
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+func severityLabel(severity: Severity): string {
+    match severity {
+        Severity::Error => { return "error"; },
+        Severity::Warning => { return "warning"; },
+        Severity::Note => { return "note"; },
+    }
+    return "note";
+}
+
+func singleLine(value: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var part = value.slice(i, i + 1);
+        if part == "\n" {
+            out = out + "\\n";
+        } else if part == "\r" {
+            out = out + "\\r";
+        } else {
+            out = out + part;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// Offsets are zero-based half-open byte positions; coordinates are one-based.
+// Unknown locations use start/end = -1 and line/column = 0.
+pub func unknownSpan(): Span {
+    return Span { start: -1, end: -1, line: 0, column: 0 };
+}
+
+pub func spanFromOffsets(source: string, start: int, end: int): Span {
+    if start < 0 || start > source.len() || end < start || end > source.len() {
+        return unknownSpan();
+    }
+
+    var line = 1;
+    var column = 1;
+    var i = 0;
+    loop {
+        if i >= start { break; }
+        if source.slice(i, i + 1) == "\n" {
+            line = line + 1;
+            column = 1;
+        } else {
+            column = column + 1;
+        }
+        i = i + 1;
+    }
+    return Span { start: start, end: end, line: line, column: column };
+}
+
+pub func formatDiagnostic(diag: Diagnostic): string {
+    var line = "?";
+    var column = "?";
+    if diag.span.line > 0 { line = diag.span.line.toString(); }
+    if diag.span.column > 0 { column = diag.span.column.toString(); }
+    return singleLine(diag.filePath) + ":" + line + ":" + column + ": " +
+        severityLabel(diag.severity) + ": " + singleLine(diag.message);
+}
+
+pub func formatDiagnostics(bag: DiagnosticBag): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= bag.items.len() { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + formatDiagnostic(bag.items[i]);
+        i = i + 1;
+    }
+    return out;
 }
