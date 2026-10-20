@@ -1,0 +1,19 @@
+SPEC.md
+  s_9e2420774b8c0d::t_522e24eea7a5c6 1-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "504021d1f648d02307df110cb46b437f75d2cab3",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
