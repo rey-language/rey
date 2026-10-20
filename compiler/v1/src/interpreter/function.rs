@@ -1,6 +1,7 @@
 use super::environment::Environment;
 use crate::ast::{Parameter, Stmt};
 use crate::lexer::span::Span;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Function {
@@ -8,7 +9,7 @@ pub struct Function {
     pub params: Vec<Parameter>,
     pub body: Vec<Stmt>,
     pub span: Span,
-    pub closure: Option<Environment>,
+    pub closure: Option<Rc<Environment>>,
 }
 
 impl std::fmt::Debug for Function {
@@ -44,7 +45,7 @@ impl Function {
             params,
             body,
             span,
-            closure,
+            closure: closure.map(Rc::new),
         }
     }
 
