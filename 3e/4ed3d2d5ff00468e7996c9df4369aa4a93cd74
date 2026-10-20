@@ -1,0 +1,16 @@
+compiler/v1/src/lexer/cursor.rs
+  h_90c9c948bf5ad1 43-46
+compiler/v1/src/lexer/error.rs
+  h_90c9c948bf5ad1 11-16,25-30,41-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e4ed3d2d5ff00468e7996c9df4369aa4a93cd74",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
