@@ -1,6 +1,24 @@
 # Primer — rey-lang
 
-## Current handoff — 2026-10-17, work paused by owner
+## Current release repair — 2026-10-20, v0.3.1
+
+- Preserved the shared `perf-build-memory` branch, all unrelated local edits, and the existing Vec realloc change. No tests, commits, pushes, or tags were run during this repair.
+- Recovered the missing native checker and checked-program codegen as a matching pair from the retained `rey-bootstrap.3atk9E` source copy after comparing both bootstrap copies, tracked driver/parser APIs, and available Git history. This is a large source recovery, not a small API stub patch; see `docs/BOOTSTRAP-SOURCE-RECOVERY.md` for provenance and limits.
+- The recovered source builds on macOS arm64 and reports exactly `rey 0.3.1`. The release builder rebuilds the tracked Rust interpreter, builds stage 1, then uses stage 1 to rebuild the packaged native compiler. It retains the matching v0.3.0 runtime archive with only `vec.o` replaced.
+- All five release targets remain in the workflow. macOS x86_64, Linux x86_64/aarch64, and Windows x86_64 still need their native CI runs. Manual workflow dispatch builds without publishing; tag publication is gated on all five package builds. No renewed conformance or cross-platform readiness claim is made.
+- Parent handles review, commits, tags, and publishing. Local build outputs and original edited-file backups are retained under ignored `build/` directories.
+
+## Current handoff — 2026-10-20, performance iteration
+
+- Active compiler branch: `perf-build-memory`; active Capy branch: `codex/perf-build-memory`.
+- Rey Vec growth now uses `realloc` and only initializes live kind metadata. This cut peak RSS by 36–48% on the large sieve/vector/stream/transpose workloads in the current native benchmark run.
+- Capy toolchain discovery now uses the pinned bundled version on the normal path; `capy doctor` checks the live compiler version when requested.
+- Current macOS arm64 comparison: matching checksums on all 10 workloads. Rey is faster than C/Rust/C++/Zig on 6/10 and still trails on sieve, stream, transpose, and pointer chase. Capy build median is 0.394s versus 0.143s for direct `rey build`.
+- Benchmark artifacts: `comparison/.build/perf-all-languages.csv`, `comparison/.build/perf-rebenchmark.csv`, and the associated metadata files. The comparison runner now honors `REY_RUNTIME_DIR` and includes Zig.
+- Verification: runtime `make test` reports `ALL OK`; Vec regression has 6,687 assertions; typed-value normal and sanitizer runs pass; 70/70 language/workload checksum rows pass.
+- Remaining work: reduce Capy command/build overhead, narrow the remaining Vec-heavy runtime gaps, and address process-lifetime allocations. No commit or push was made.
+
+## Historical handoff — 2026-10-17, superseded by v0.3 release
 
 - Read `docs/HANDOFF-2026-10-17.md` for the full last-day work report, exact stop fingerprints, evidence paths, and prioritized remaining work. The historical notes below are preserved, not current release claims.
 - Both active agents and the orphaned compiler self-check were stopped. Do not resume development until the owner asks.

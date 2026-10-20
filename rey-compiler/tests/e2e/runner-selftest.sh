@@ -48,7 +48,7 @@ hang_if_requested() {
 
 if [[ "${1:-}" == "--version" ]]; then
   hang_if_requested version
-  printf 'rey 0.3.0\n'
+  printf 'rey 0.3.1\n'
   exit 0
 fi
 

@@ -1,5 +1,9 @@
 # Rey Release Notes
 
+## v0.3.1 (preparation; native CI pending)
+- Patch release metadata and a tag-triggered multi-platform build workflow are prepared in [release/v0.3.1.md](release/v0.3.1.md).
+- Recovered the checker/backend implementations required by the existing driver. The workflow now rebuilds the tracked Rust source bootstrap, builds stage 1, and rebuilds the packaged native compiler. The macOS arm64 package builds and reports `rey 0.3.1`; no test suites were run, and the other four targets remain unverified. Manual workflow dispatch can build the full matrix before tagging.
+
 ## v0.0.1-pre
 - Initial pre-release binary drop for Rey (`rey-v0`).
 - Established baseline language pipeline (lexer -> parser -> interpreter).

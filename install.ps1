@@ -6,7 +6,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$Version = "v0.3.0"
+$Version = "v0.3.1"
 $RepoUrl = "https://github.com/rey-language/rey"
 $StdRepoUrl = "https://github.com/IMisbahk/std.git"
 
@@ -28,13 +28,13 @@ New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path 2>$null
 
-$LocalZip = "$ScriptDir\releases\0.3.0\rey-v0.3.0-windows-x86_64.zip"
+$LocalZip = "$ScriptDir\releases\0.3.1\rey-v0.3.1-windows-x86_64.zip"
 
 if (Test-Path $LocalZip) {
     Write-Host "==> Found local release package: $LocalZip" -ForegroundColor Blue
     $TempExtract = Join-Path $env:TEMP "rey-install-$(Get-Random)"
     Expand-Archive -Path $LocalZip -DestinationPath $TempExtract -Force
-    $SourceDir = Join-Path $TempExtract "rey-v0.3.0-windows-x86_64"
+    $SourceDir = Join-Path $TempExtract "rey-v0.3.1-windows-x86_64"
     Copy-Item "$SourceDir\bin\*" -Destination $BinDir -Recurse -Force
     if (Test-Path "$StdDir\src") { Remove-Item "$StdDir\src" -Recurse -Force }
     Copy-Item "$SourceDir\std\src" -Destination "$StdDir\src" -Recurse -Force

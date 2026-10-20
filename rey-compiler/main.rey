@@ -312,7 +312,7 @@ func parseCli(cliArgs: Vec<string>): CliOptions {
         return CliOptions { action: "help", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: usageText() };
     }
     if cliArgs.len() == 2 && cliArgs[1] == "--version" {
-        return CliOptions { action: "version", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "rey 0.3.0" };
+        return CliOptions { action: "version", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: "rey 0.3.1" };
     }
     if cliArgs.len() < 3 {
         return CliOptions { action: "usage", command: "", filePath: "", programPath: programPath, outputPath: "", runtimeDir: "", runArgs: emptyRunArgs(), message: usageText() };

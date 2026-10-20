@@ -33,15 +33,14 @@ static void vec_grow(ReyVec* v) {
     int64_t nc = v->cap == 0 ? 8 : v->cap * 2;
     if (nc > max_cap) rey_panic_cstr("Vec capacity overflow");
 
-    int64_t* nd = (int64_t*)rey_alloc(nc * (int64_t)sizeof(int64_t));
+    size_t bytes = (size_t)nc * sizeof(int64_t);
+    int64_t* nd = (int64_t*)realloc(v->data, bytes);
+    if (!nd) { fprintf(stderr, "rey: out of memory\n"); exit(1); }
     int64_t* nk = NULL;
-    if (v->kinds) nk = (int64_t*)rey_alloc(nc * (int64_t)sizeof(int64_t));
-    if (v->data && v->len > 0) {
-        memcpy(nd, v->data, (size_t)v->len * sizeof(int64_t));
-        if (v->kinds) memcpy(nk, v->kinds, (size_t)v->len * sizeof(int64_t));
+    if (v->kinds) {
+        nk = (int64_t*)realloc(v->kinds, bytes);
+        if (!nk) { fprintf(stderr, "rey: out of memory\n"); exit(1); }
     }
-    free(v->data);
-    free(v->kinds);
     v->data = nd;
     v->kinds = nk;
     v->cap = nc;
@@ -49,11 +48,13 @@ static void vec_grow(ReyVec* v) {
 
 // Kinds are only needed once a Vec holds a typed (non-raw) slot. Plain
 // Vec<int>/Vec<bool>/Vec<string> values stay on the fast raw path and never
-// pay for a second 8-byte metadata array. rey_alloc zeroes, so existing slots
-// become REY_SLOT_RAW automatically.
+// pay for a second 8-byte metadata array. Initialize only live slots; pushes
+// write the kind before increasing len.
 static void vecEnsureKinds(ReyVec* v) {
     if (v->kinds) return;
-    v->kinds = (int64_t*)rey_alloc(v->cap * (int64_t)sizeof(int64_t));
+    v->kinds = (int64_t*)malloc((size_t)v->cap * sizeof(int64_t));
+    if (!v->kinds) { fprintf(stderr, "rey: out of memory\n"); exit(1); }
+    if (v->len > 0) memset(v->kinds, REY_SLOT_RAW, (size_t)v->len * sizeof(int64_t));
 }
 
 static int64_t slotKind(ReyVec* vec, int64_t index) {

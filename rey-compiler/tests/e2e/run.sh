@@ -144,7 +144,7 @@ run_bounded() {
   return "$actual_status"
 }
 
-printf 'rey 0.3.0\n' > "$scratch/expected-version.stdout"
+printf 'rey 0.3.1\n' > "$scratch/expected-version.stdout"
 : > "$scratch/empty"
 set +e
 run_bounded engine-version "$repo_root" "$scratch/version.stdout" "$scratch/version.stderr" --version
@@ -157,7 +157,7 @@ elif ((engine_left_children)); then
   echo "e2e: unsupported engine protocol; --version left child processes" >&2
   exit 2
 elif ((version_status != 0)) || ! cmp -s "$scratch/expected-version.stdout" "$scratch/version.stdout" || [[ -s "$scratch/version.stderr" ]]; then
-  echo "e2e: unsupported engine protocol; expected --version => 'rey 0.3.0' with exit 0" >&2
+  echo "e2e: unsupported engine protocol; expected --version => 'rey 0.3.1' with exit 0" >&2
   cat "$scratch/version.stdout" "$scratch/version.stderr" >&2
   exit 2
 fi

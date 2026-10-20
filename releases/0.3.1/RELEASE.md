@@ -1,0 +1,33 @@
+# Rey v0.3.1 — Patch Release Preparation
+
+**Version:** v0.3.1  
+**Preparation status:** macOS arm64 source bootstrap and native rebuild completed; four target builds pending CI; not tagged or published  
+**Release workflow:** `.github/workflows/release.yml`
+
+## Patch contents
+
+- Vec capacity growth uses `realloc` rather than allocating and zeroing a second full buffer. Only live kind metadata is initialized. The current macOS arm64 comparison measured 36–48% lower peak RSS on large Vec workloads.
+- Restored the missing native typechecker and checked-program backend as a matching source pair. The tracked driver already required their APIs, but the repository contained an old checker stub and backend. Recovery provenance and limits are recorded in [BOOTSTRAP-SOURCE-RECOVERY.md](../../docs/BOOTSTRAP-SOURCE-RECOVERY.md).
+- The release builder compiles the tracked Rust reference interpreter, runs the current compiler source through it to build stage 1, then uses stage 1 to rebuild the packaged native compiler. The package must report exactly `rey 0.3.1`. The Rust bootstrap is not distributed.
+- Each target-native runner retains its matching v0.3.0 static runtime archive, replaces only `vec.o` from current source, and bundles current `std/src`. Release linker shims route Clang through the platform toolchain. The v0.3.1 source compiler detects its native host triple, without a cross-target CLI option.
+- Native compiler triples are Apple Darwin, Linux GNU, and Windows GNU. Linux release packages continue linking through the existing Zig musl wrappers; the v0.3.0 PIE-compatible runtime objects are retained except for `vec.o`.
+
+## Planned assets
+
+| Target | Asset |
+|---|---|
+| macOS arm64 | `rey-v0.3.1-macos-arm64.tar.gz` |
+| macOS x86-64 | `rey-v0.3.1-macos-x86_64.tar.gz` |
+| Linux x86-64 | `rey-v0.3.1-linux-x86_64.tar.gz` |
+| Linux aarch64 | `rey-v0.3.1-linux-aarch64.tar.gz` |
+| Windows x86-64 | `rey-v0.3.1-windows-x86_64.zip` |
+
+Each package follows the v0.3 layout: a native compiler under `bin/`, its runtime at `bin/runtime/librey_rt.a`, and the standard library under `std/src/`.
+
+## Build status and limits
+
+The macOS arm64 release package built successfully. The revised release builder completed the Rust-source bootstrap and native compiler rebuild, and the packaged Mach-O arm64 compiler reported exactly `rey 0.3.1`. The archive contains the native compiler, runtime archive, and standard library in the expected package layout. Source recovery details are recorded in `docs/BOOTSTRAP-SOURCE-RECOVERY.md`.
+
+No test suites are run by the release builder. Build and version observations do not establish conformance or new performance results. The macOS x86-64, Linux x86-64, Linux aarch64, and Windows matrix legs require CI validation. A manual workflow dispatch builds all five packages without publishing. Tag-triggered publication is gated on all five successful builds and exact asset presence.
+
+Windows runtime source still lacks a portable Windows I/O implementation. The Windows package retains the matching v0.3.0 runtime objects and replaces only `vec.o` using the existing Zig Windows wrapper; this workflow does not claim a full Windows runtime rebuild.

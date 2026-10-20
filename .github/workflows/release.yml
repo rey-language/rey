@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v0.3.1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runs-on: macos-14
+            shell: bash
+          - target: macos-x86_64
+            runs-on: macos-15-intel
+            shell: bash
+          - target: linux-x86_64
+            runs-on: ubuntu-24.04
+            shell: bash
+          - target: linux-aarch64
+            runs-on: ubuntu-24.04-arm
+            shell: bash
+          - target: windows-x86_64
+            runs-on: windows-2022
+            shell: msys2 {0}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build tools
+        if: startsWith(matrix.target, 'linux-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make binutils
+
+      - name: Set up MSYS2
+        if: matrix.target == 'windows-x86_64'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: >-
+            make
+            unzip
+            zip
+            mingw-w64-ucrt-x86_64-clang
+
+      - name: Set up stable Rust for the source bootstrap
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Set up Zig for static Linux and Windows Vec objects
+        if: startsWith(matrix.target, 'linux-') || matrix.target == 'windows-x86_64'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Build target package
+        run: bash scripts/build-release-target.sh "${{ matrix.target }}"
+
+      - name: Upload target package
+        uses: actions/upload-artifact@v4
+        with:
+          name: rey-${{ matrix.target }}
+          path: build/release/v0.3.1/${{ matrix.target }}/dist/rey-v0.3.1-${{ matrix.target }}.*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish v0.3.1
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v0.3.1'
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify the five release assets are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            rey-v0.3.1-macos-arm64.tar.gz
+            rey-v0.3.1-macos-x86_64.tar.gz
+            rey-v0.3.1-linux-x86_64.tar.gz
+            rey-v0.3.1-linux-aarch64.tar.gz
+            rey-v0.3.1-windows-x86_64.zip
+          )
+          for asset in "${expected[@]}"; do
+            test -s "dist/$asset"
+          done
+          test "$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')" = 5
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.3.1
+          name: Rey v0.3.1
+          body_path: releases/0.3.1/RELEASE.md
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: dist/*

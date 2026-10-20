@@ -33,7 +33,7 @@ log_error() {
     printf "${RED}error:${RESET} %s\n" "$1" >&2
 }
 
-VERSION="v0.3.0"
+VERSION="v0.3.1"
 REPO_URL="https://github.com/rey-language/rey"
 STD_REPO_URL="https://github.com/IMisbahk/std.git"
 INSTALL_DIR="${REY_INSTALL_DIR:-$HOME/.rey}"
@@ -207,10 +207,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")
 
 # 3. Install packages
 if [ "$PLATFORM" = "windows" ]; then
-    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.zip"
+    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.1/rey-v0.3.1-${TARGET}.zip"
     ARCHIVE_EXT="zip"
 else
-    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.0/rey-v0.3.0-${TARGET}.tar.gz"
+    LOCAL_ARCHIVE="$SCRIPT_DIR/releases/0.3.1/rey-v0.3.1-${TARGET}.tar.gz"
     ARCHIVE_EXT="tar.gz"
 fi
 LOCAL_NATIVE_BIN="$SCRIPT_DIR/build/rey"
@@ -233,7 +233,7 @@ if [ -f "$LOCAL_ARCHIVE" ]; then
     log_info "Found local release package: $LOCAL_ARCHIVE"
     TMP_EXTRACT="$(mktemp -d 2>/dev/null || mktemp -d -t 'rey-install')"
     extract_archive "$LOCAL_ARCHIVE" "$TMP_EXTRACT"
-    SOURCE_DIR="$TMP_EXTRACT/rey-v0.3.0-${TARGET}"
+    SOURCE_DIR="$TMP_EXTRACT/rey-v0.3.1-${TARGET}"
     cp -R "$SOURCE_DIR/bin/"* "$BIN_DIR/"
     rm -rf "$STD_DIR/src"
     mkdir -p "$STD_DIR"

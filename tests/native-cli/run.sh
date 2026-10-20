@@ -47,7 +47,7 @@ expect_status 0 help --help
 grep -F 'Usage: rey' "$scratch/help.stdout" >/dev/null
 test ! -s "$scratch/help.stderr"
 expect_status 0 version --version
-grep -Fx 'rey 0.3.0' "$scratch/version.stdout" >/dev/null
+grep -Fx 'rey 0.3.1' "$scratch/version.stdout" >/dev/null
 test ! -s "$scratch/version.stderr"
 expect_status 2 usage
 grep -F 'Usage: rey' "$scratch/usage.stderr" >/dev/null
