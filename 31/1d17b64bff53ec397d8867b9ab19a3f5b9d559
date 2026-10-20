@@ -1,0 +1,21 @@
+.github/workflows/release.yml
+  s_3868795c391050::t_48252ba96e6fe7 62,72-73
+scripts/build-release-target.sh
+  s_3868795c391050::t_48252ba96e6fe7 56-57,92,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "311d17b64bff53ec397d8867b9ab19a3f5b9d559",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
