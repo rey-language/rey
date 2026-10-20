@@ -49,6 +49,11 @@ if ! command -v "$MAKE" >/dev/null 2>&1; then
     exit 2
 fi
 MAKE_PATH=$(command -v "$MAKE")
+IO_SOURCE=${REY_RUNTIME_IO_SOURCE:-io.c}
+if [ ! -f "$RUNTIME/$IO_SOURCE" ]; then
+    echo "error: runtime I/O source not found: $IO_SOURCE" >&2
+    exit 2
+fi
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR=$(CDPATH= cd -- "$OUTPUT_DIR" && pwd -P)
@@ -69,6 +74,7 @@ fi
     "OUT=$OUTPUT_DIR" \
     "CC=$COMPILER_PATH" \
     "AR=$ARCHIVER_PATH" \
+    "IO_SOURCE=$IO_SOURCE" \
     all
 
 ARCHIVE="$OUTPUT_DIR/librey_rt.a"

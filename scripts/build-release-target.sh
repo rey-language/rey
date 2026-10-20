@@ -14,8 +14,6 @@ target=$1
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 release_version=v0.3.1
-seed_version=v0.3.0
-seed_root_name="rey-${seed_version}-${target}"
 real_ir_clang=
 ir_target=
 ir_native=false
@@ -24,7 +22,6 @@ case "$workspace" in
     /*) ;;
     *) echo "error: REY_RELEASE_WORKSPACE must be an absolute path" >&2; exit 2 ;;
 esac
-seed_dir="$workspace/seed"
 package_root="$workspace/package/rey-${release_version}-${target}"
 runtime_dir="$package_root/bin/runtime"
 dist_dir="$workspace/dist"
@@ -56,7 +53,6 @@ case "$target" in
         real_clang=$(command -v clang)
         real_ir_clang="$real_clang"
         ir_target=x86_64-w64-windows-gnu
-        seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.zip"
         ;;
     *)
         usage
@@ -68,54 +64,36 @@ if [[ -e "$workspace" ]]; then
     echo "error: release workspace already exists; set REY_RELEASE_WORKSPACE to a new absolute path: $workspace" >&2
     exit 2
 fi
-mkdir -p "$seed_dir" "$runtime_dir" "$package_root/bin" "$package_root/std" "$dist_dir"
-if [[ $target == windows-* ]]; then
-    seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.zip"
-    [[ -f "$seed_archive" ]] || { echo "error: matching v0.3.0 bootstrap package is missing: $seed_archive" >&2; exit 1; }
-    unzip -q "$seed_archive" -d "$seed_dir"
-    seed_package="$seed_dir/$seed_root_name"
-    seed_runtime="$seed_package/bin/runtime/librey_rt.a"
-    if [[ ! -f "$seed_runtime" ]]; then
-        echo "error: v0.3.0 package is missing its runtime: $seed_package" >&2
-        exit 1
-    fi
-    cp "$seed_runtime" "$runtime_dir/librey_rt.a"
-fi
+mkdir -p "$runtime_dir" "$package_root/bin" "$package_root/std" "$dist_dir"
 
-# Rebuild Unix runtime archives from current source so their LLVM bitcode is
-# compatible with the target runner's compiler. The Windows archive retains
-# its shipped I/O object because runtime/io.c is currently POSIX-only.
+# Build each runtime from tracked source so its ABI and LLVM bitcode match the
+# compiler on that target. Windows uses Win32-native file and process I/O.
 runtime_source="$repo_root/rey-compiler/runtime"
-vec_object="$workspace/vec.o"
 compiler=${CC:-clang}
 if [[ $target == windows-* ]]; then
-    archive_tool=(llvm-ar)
-    command -v "$compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $compiler" >&2; exit 2; }
-    command -v "${archive_tool[0]}" >/dev/null 2>&1 || { echo "error: archiver not found: ${archive_tool[0]}" >&2; exit 2; }
-    "$compiler" \
-        -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
-        -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
-    "${archive_tool[@]}" d "$runtime_dir/librey_rt.a" vec.o
-    "${archive_tool[@]}" rcs "$runtime_dir/librey_rt.a" "$vec_object"
+    runtime_compiler="$compiler"
+    runtime_archiver=${AR:-llvm-ar}
+    runtime_io_source=io_windows.c
+elif [[ $target == linux-x86_64 ]]; then
+    runtime_compiler="$repo_root/scripts/zig-ld-linux-x86_64.sh"
+    runtime_archiver="$repo_root/scripts/zig-ar.sh"
+    runtime_io_source=io.c
+elif [[ $target == linux-aarch64 ]]; then
+    runtime_compiler="$repo_root/scripts/zig-ld-linux-aarch64.sh"
+    runtime_archiver="$repo_root/scripts/zig-ar.sh"
+    runtime_io_source=io.c
 else
     runtime_compiler="$compiler"
     runtime_archiver=${AR:-ar}
-    if [[ $target == linux-x86_64 ]]; then
-        runtime_compiler="$repo_root/scripts/zig-ld-linux-x86_64.sh"
-        runtime_archiver="$repo_root/scripts/zig-ar.sh"
-    elif [[ $target == linux-aarch64 ]]; then
-        runtime_compiler="$repo_root/scripts/zig-ld-linux-aarch64.sh"
-        runtime_archiver="$repo_root/scripts/zig-ar.sh"
-    fi
-    command -v "$runtime_compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $runtime_compiler" >&2; exit 2; }
-    command -v "$runtime_archiver" >/dev/null 2>&1 || { echo "error: archiver not found: $runtime_archiver" >&2; exit 2; }
-    CC="$runtime_compiler" AR="$runtime_archiver" MAKE="${MAKE:-make}" \
-        bash "$repo_root/scripts/build-runtime.sh" --output-dir "$runtime_dir"
+    runtime_io_source=io.c
 fi
+command -v "$runtime_compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $runtime_compiler" >&2; exit 2; }
+command -v "$runtime_archiver" >/dev/null 2>&1 || { echo "error: archiver not found: $runtime_archiver" >&2; exit 2; }
+CC="$runtime_compiler" AR="$runtime_archiver" MAKE="${MAKE:-make}" REY_RUNTIME_IO_SOURCE="$runtime_io_source" \
+    bash "$repo_root/scripts/build-runtime.sh" --output-dir "$runtime_dir"
 
-# Rebuild the reference interpreter from tracked source. The v0.3.0 native
-# seed hardcodes /usr/bin/clang and bypasses PATH, so it cannot reliably use
-# the platform linker wrappers. Never use ignored compiler-source snapshots.
+# Rebuild the reference interpreter from tracked source. Never use ignored
+# compiler-source snapshots or a prebuilt native compiler as the bootstrap.
 command -v cargo >/dev/null 2>&1 || { echo "error: cargo is required to build the source bootstrap" >&2; exit 2; }
 cargo build --release --manifest-path "$repo_root/compiler/v1/Cargo.toml" \
     --target-dir "$workspace/bootstrap-target"

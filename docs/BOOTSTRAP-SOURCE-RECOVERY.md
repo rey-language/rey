@@ -56,19 +56,20 @@ wrappers. The release builder instead:
 3. Uses stage 1 to rebuild the current source as the packaged native compiler.
 4. Requires the packaged compiler to report exactly `rey 0.3.1`.
 
-The v0.3.0 archive supplies the Windows runtime because its I/O object is not
-portable to the current POSIX-only runtime source. The Windows builder replaces
-`vec.o` from current source. Unix packages rebuild the full runtime from tracked
-C sources with the target toolchain, avoiding the LLVM-version mismatch in the
-v0.3.0 bitcode archive. Linux uses Zig for target compilation and archive
-indexing; macOS uses its native toolchain. Only the native compiler, runtime
-archive, and current standard library enter the package. Build intermediates
-and the Rust bootstrap remain outside it.
+Every target rebuilds its runtime archive from tracked C sources with a
+matching platform toolchain. Windows selects `io_windows.c`, which provides
+Win32 file, directory, and process APIs; Unix uses the POSIX runtime source.
+Linux uses Zig for musl compilation and archive indexing, macOS uses its
+native toolchain, and Windows uses matching MSYS2 Clang/LLVM tools. This avoids
+the LLVM-version mismatch in the v0.3.0 bitcode archives. Only the native
+compiler, rebuilt runtime archive, and current standard library enter the
+package. Build intermediates and the Rust bootstrap remain outside it.
 
 The five release targets are unchanged. The non-macOS-arm64 targets require
 their native CI runners; retaining their workflow legs does not establish that
-they build successfully. Windows still retains the prebuilt I/O runtime object
-because current runtime I/O source is POSIX-only.
+they build successfully. The Windows runtime source and process-capture path
+must pass the Windows release matrix before publication. The builder does not
+run the complete runtime or language conformance suites.
 
 No test suites are run by this release builder. The normal `bootstrap.sh`
 workflow includes conformance tests; historical snapshot logs are not new

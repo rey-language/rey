@@ -9,7 +9,7 @@
 - Vec capacity growth uses `realloc` rather than allocating and zeroing a second full buffer. Only live kind metadata is initialized. The current macOS arm64 comparison measured 36–48% lower peak RSS on large Vec workloads.
 - Restored the missing native typechecker and checked-program backend as a matching source pair. The tracked driver already required their APIs, but the repository contained an old checker stub and backend. Recovery provenance and limits are recorded in [BOOTSTRAP-SOURCE-RECOVERY.md](../../docs/BOOTSTRAP-SOURCE-RECOVERY.md).
 - The release builder compiles the tracked Rust reference interpreter, runs the current compiler source through it to build stage 1, then uses stage 1 to rebuild the packaged native compiler. The package must report exactly `rey 0.3.1`. The Rust bootstrap is not distributed.
-- Unix target runners rebuild the complete runtime from tracked C sources with their native toolchain, avoiding LLVM bitcode compatibility problems in the v0.3.0 archives. The Windows package retains the v0.3.0 I/O object because current runtime I/O source is POSIX-only, and replaces only `vec.o` from current source. All packages bundle current `std/src`.
+- Every target rebuilds the runtime from tracked C sources using matching platform tools. Windows selects the new Win32 file, directory, and process implementation in `runtime/io_windows.c`; Unix uses `runtime/io.c`. This avoids the LLVM bitcode compatibility problem in v0.3.0 archives. All packages bundle current `std/src`.
 - Native compiler triples are Apple Darwin, Linux GNU, and Windows GNU. Linux release packages link through the existing Zig musl wrappers. The v0.3.1 source compiler detects its native host triple, without a cross-target CLI option.
 
 ## Planned assets
@@ -30,4 +30,4 @@ The macOS arm64 release package built successfully. The revised release builder 
 
 No test suites are run by the release builder. Build and version observations do not establish conformance or new performance results. The macOS x86-64, Linux x86-64, Linux aarch64, and Windows matrix legs require CI validation. A manual workflow dispatch builds all five packages without publishing. Tag-triggered publication is gated on all five successful builds and exact asset presence.
 
-Windows runtime source still lacks a portable Windows I/O implementation. The Windows package retains the matching v0.3.0 runtime objects and replaces only `vec.o` using the existing Zig Windows wrapper; this workflow does not claim a full Windows runtime rebuild.
+The Windows runtime source and process-capture behavior must pass the Windows release matrix before publication; the release builder does not run the complete runtime or language conformance suites.
