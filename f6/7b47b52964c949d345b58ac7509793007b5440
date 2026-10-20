@@ -1,0 +1,14 @@
+rey-compiler/src/codegen/main.rey
+  h_90c9c948bf5ad1 2049,2053
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f67b47b52964c949d345b58ac7509793007b5440",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
