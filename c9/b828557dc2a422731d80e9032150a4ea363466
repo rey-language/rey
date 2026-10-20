@@ -1,0 +1,16 @@
+compiler/v1/src/interpreter/interpreter.rs
+  h_90c9c948bf5ad1 4,6,9-12,14,43,48,50-51,53-55,58,60,64-65,69,101-1034
+compiler/v1/src/main.rs
+  h_90c9c948bf5ad1 10,14,16-52,54-57,59-78,81-88,91-131,133-138,142-158,160-168,170-176,178,180-184,186-192,194-200,202-203,207-211,215-239,243-251,253-259,272-276,310-561
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9b828557dc2a422731d80e9032150a4ea363466",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
