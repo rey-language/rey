@@ -122,32 +122,22 @@ cargo build --release --manifest-path "$repo_root/compiler/v1/Cargo.toml" \
 oracle="$workspace/bootstrap-target/release/rey-v0"
 if [[ $target == windows-* ]]; then oracle="$oracle.exe"; fi
 
-# The compiler source resolves clang through PATH; route it to the native
-# toolchain (Zig musl/MinGW on Linux/Windows). The IR shim also removes any
-# inherited target data layout before clang derives the native layout.
-mkdir -p "$workspace/linker-bin"
-if [[ $target == windows-* ]]; then
-    repo_root_windows=$(cygpath -w "$repo_root")
-    cat > "$workspace/linker-bin/clang.cmd" <<EOF
-@echo off
-bash "$repo_root_windows\\scripts\\release-clang-shim.sh" %*
-exit /b %ERRORLEVEL%
-EOF
-    cat > "$workspace/linker-bin/llc.cmd" <<EOF
-@echo off
-bash "$repo_root_windows\\scripts\\release-llc-shim.sh" %*
-exit /b %ERRORLEVEL%
-EOF
-else
+# The compiler resolves clang through PATH. On Unix, use a shim to lower the
+# generated IR with native Clang and route final Linux links through Zig. On
+# Windows, MSYS2 Clang/LLVM is the compiler and linker directly; a .cmd shim
+# cannot reliably preserve quoted MSYS paths passed through cmd.exe.
+linker_path=$PATH
+if [[ $target != windows-* ]]; then
+    mkdir -p "$workspace/linker-bin"
     cp "$repo_root/scripts/release-clang-shim.sh" "$workspace/linker-bin/clang"
     cp "$repo_root/scripts/release-llc-shim.sh" "$workspace/linker-bin/llc"
     chmod +x "$workspace/linker-bin/clang" "$workspace/linker-bin/llc"
+    export REY_RELEASE_REAL_CLANG="$real_clang"
+    export REY_RELEASE_REAL_IR_CLANG="$real_ir_clang"
+    export REY_RELEASE_IR_TARGET="$ir_target"
+    export REY_RELEASE_IR_NATIVE="$ir_native"
+    linker_path="$workspace/linker-bin:$PATH"
 fi
-export REY_RELEASE_REAL_CLANG="$real_clang"
-export REY_RELEASE_REAL_IR_CLANG="$real_ir_clang"
-export REY_RELEASE_IR_TARGET="$ir_target"
-export REY_RELEASE_IR_NATIVE="$ir_native"
-linker_path="$workspace/linker-bin:$PATH"
 if [[ $target == windows-* ]]; then
     release_binary="$package_root/bin/rey.exe"
     stage1_binary="$workspace/stage1/rey.exe"
