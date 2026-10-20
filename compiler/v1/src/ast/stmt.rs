@@ -30,7 +30,6 @@ pub struct MethodDecl {
 pub enum FunctionVisibility {
     Private,
     Pub,
-    ExportPub,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +54,20 @@ pub struct ImportName {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EnumPayloadDecl {
+    pub name: Option<String>,
+    pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariantDecl {
+    pub name: String,
+    pub payloads: Vec<EnumPayloadDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     VarDecl {
         is_const: bool,
@@ -73,6 +86,7 @@ pub enum Stmt {
         name: String,
         fields: Vec<FieldDecl>,
         methods: Vec<MethodDecl>,
+        is_pub: bool,
     },
     Import {
         kind: ImportKind,
@@ -98,6 +112,12 @@ pub enum Stmt {
     EnumDecl {
         name: String,
         variants: Vec<String>,
+        is_pub: bool,
+    },
+    EnumDeclWithPayload {
+        name: String,
+        variants: Vec<EnumVariantDecl>,
+        is_pub: bool,
     },
     Match {
         expr: Expr,
@@ -118,11 +138,20 @@ pub struct MatchArm {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     EnumVariant(String, String), // enum_name, variant_name
+    EnumVariantPayload {
+        enum_name: Option<String>,
+        variant: String,
+        payloads: Vec<Pattern>,
+    },
     Struct {
         struct_name: String,
         fields: Vec<(String, Pattern)>, // field_name -> field_pattern
     },
     Literal(Literal),
+    Range {
+        start: Literal,
+        end: Literal,
+    },
     Variable(String),
     Wildcard,
 }
