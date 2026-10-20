@@ -1,0 +1,80 @@
+docs/BOOTSTRAP.md
+  h_90c9c948bf5ad1 92,191,196-197
+docs/CONTRACTS.md
+  h_90c9c948bf5ad1 762
+docs/ENVIRONMENT.md
+  h_90c9c948bf5ad1 3,5,12,23,31,37,40,47
+docs/HANDOFF-2026-10-17.md
+  h_90c9c948bf5ad1 18,23,262,390,402,436
+docs/NATIVE-ROOTCAUSE.md
+  h_90c9c948bf5ad1 76,87,94,96,114,119,133
+docs/REPO-STATE.md
+  h_90c9c948bf5ad1 19,21,23,27
+docs/SELFHOST-FORENSICS.md
+  h_90c9c948bf5ad1 3,24,45-46,59-60,73,75,108,125,127,156,166-167,204-205,219-220
+docs/V0.3-CHARTER.md
+  h_90c9c948bf5ad1 9,79
+docs/V0.4-DESIGN.md
+  h_90c9c948bf5ad1 487
+docs/V03-VERIFICATION.md
+  h_90c9c948bf5ad1 15-16,22,29-30,69,116,138,154,161,177,186-187,213,260,267,272,277,291,310,316-318,375,377-378,389-390,399,429,431,437,444,490,492
+projects/api/server.js
+  h_90c9c948bf5ad1 9
+projects/api/test_http.sh
+  h_90c9c948bf5ad1 20
+rey-compiler/tests/native-parser/run.sh
+  h_90c9c948bf5ad1 40
+scripts/ci.sh
+  h_90c9c948bf5ad1 7
+scripts/conformance.sh
+  h_90c9c948bf5ad1 84
+scripts/differential.sh
+  h_90c9c948bf5ad1 432
+scripts/doctor.sh
+  h_90c9c948bf5ad1 137-139,191,194,196,202
+scripts/gate.sh
+  h_90c9c948bf5ad1 37-39
+scripts/test-runtime-float-format.sh
+  h_90c9c948bf5ad1 7
+scripts/test-runtime-hashmap.sh
+  h_90c9c948bf5ad1 27
+scripts/test-runtime-io.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-matrix.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-overflow.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-result.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-stderr.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-string.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-typed-value.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-value.sh
+  h_90c9c948bf5ad1 10
+scripts/test-runtime-vec.sh
+  h_90c9c948bf5ad1 27
+scripts/test-runtime.sh
+  h_90c9c948bf5ad1 10
+scripts/tests/differential-selftest.sh
+  h_90c9c948bf5ad1 7
+std/README.md
+  h_90c9c948bf5ad1 91
+tests/native-cli/run.sh
+  h_90c9c948bf5ad1 11
+tests/native-typecheck/positive/nominal-layout-owners.rey
+  h_90c9c948bf5ad1 130,209,246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5d321595fc7c4d16690acba937035a6ca3d01628",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
