@@ -1,0 +1,47 @@
+scripts/bootstrap.sh
+  s_9e2420774b8c0d::t_83d2c341991838 1-407
+scripts/build-runtime.sh
+  s_9e2420774b8c0d::t_33dd489b1f9a91 1-79
+scripts/ci.sh
+  s_9e2420774b8c0d::t_06ef20b0e3f332 1-284
+scripts/test-runtime-float-format.sh
+  s_9e2420774b8c0d::t_ad6dca823dd592 1-50
+scripts/test-runtime-hashmap.sh
+  s_9e2420774b8c0d::t_429b8057052404 1-66
+scripts/test-runtime-io.sh
+  s_9e2420774b8c0d::t_94896b5952087c 1-121
+scripts/test-runtime-matrix.sh
+  s_9e2420774b8c0d::t_9d0c8fcc844dbb 1-122
+scripts/test-runtime-overflow.sh
+  s_9e2420774b8c0d::t_7e0eef9fbee218 1-122
+scripts/test-runtime-result.sh
+  s_9e2420774b8c0d::t_8699fe744e5efd 1-121
+scripts/test-runtime-stderr.sh
+  s_9e2420774b8c0d::t_64eb4ad808afba 1-121
+scripts/test-runtime-string.sh
+  s_9e2420774b8c0d::t_a4e9ed27c33142 1-99
+scripts/test-runtime-typed-value.sh
+  s_9e2420774b8c0d::t_567c7b7de2f950 1-122
+scripts/test-runtime-value.sh
+  s_9e2420774b8c0d::t_a315ce24f70b7c 1-122
+scripts/test-runtime-vec.sh
+  s_9e2420774b8c0d::t_b5d0c3f96f7bd4 1-66
+scripts/test-runtime.sh
+  s_9e2420774b8c0d::t_476fb59cc0a801 1-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "950ade44e4391482f82594c41d6b9d5502b5ecae",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "grok-4.7"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
