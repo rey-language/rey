@@ -1,0 +1,19 @@
+.github/workflows/release.yml
+  s_3868795c391050::t_13e6ab606fe768 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c0b371914c32c36dc9e9218af3ccf3db25665dac",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
