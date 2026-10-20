@@ -1,0 +1,14 @@
+releases/0.3.0/RELEASE.md
+  h_90c9c948bf5ad1 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3a210f85dbc6c622b8eefe4529c83229d6d52727",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
