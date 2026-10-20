@@ -53,10 +53,9 @@ case "$target" in
     windows-x86_64)
         case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) echo "release target $target requires a native Windows runner with MSYS2" >&2; exit 2 ;; esac
         [[ $(uname -m) == x86_64 ]] || { echo "release target $target requires a native Windows x86_64 runner" >&2; exit 2; }
-        real_clang="$repo_root/scripts/zig-ld-windows-x86_64.sh"
-        real_ir_clang=$(command -v clang)
+        real_clang=$(command -v clang)
+        real_ir_clang="$real_clang"
         ir_target=x86_64-w64-windows-gnu
-        ir_native=true
         seed_archive="$repo_root/releases/0.3.0/rey-v0.3.0-$target.zip"
         ;;
     *)
@@ -90,10 +89,10 @@ runtime_source="$repo_root/rey-compiler/runtime"
 vec_object="$workspace/vec.o"
 compiler=${CC:-clang}
 if [[ $target == windows-* ]]; then
-    archive_tool=(zig ar)
+    archive_tool=(llvm-ar)
     command -v "$compiler" >/dev/null 2>&1 || { echo "error: C compiler not found: $compiler" >&2; exit 2; }
     command -v "${archive_tool[0]}" >/dev/null 2>&1 || { echo "error: archiver not found: ${archive_tool[0]}" >&2; exit 2; }
-    "$repo_root/scripts/zig-ld-windows-x86_64.sh" \
+    "$compiler" \
         -O3 -flto -fPIC -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -std=c11 \
         -I "$runtime_source" -c "$runtime_source/vec.c" -o "$vec_object"
     "${archive_tool[@]}" d "$runtime_dir/librey_rt.a" vec.o

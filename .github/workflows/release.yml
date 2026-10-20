@@ -59,6 +59,7 @@ jobs:
             make
             unzip
             zip
+            mingw-w64-ucrt-x86_64-llvm
             mingw-w64-ucrt-x86_64-clang
 
       - name: Set up stable Rust for the source bootstrap
@@ -68,8 +69,8 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Set up Zig for static Linux and Windows Vec objects
-        if: startsWith(matrix.target, 'linux-') || matrix.target == 'windows-x86_64'
+      - name: Set up Zig for static Linux runtime objects
+        if: startsWith(matrix.target, 'linux-')
         uses: mlugg/setup-zig@v2
         with:
           version: 0.13.0
