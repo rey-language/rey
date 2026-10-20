@@ -1,0 +1,14 @@
+.gitignore
+  h_90c9c948bf5ad1 8-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7d8823132ab0d97345483ccfece4c77f9ccd092",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
