@@ -1,0 +1,16 @@
+rey-compiler/runtime/io.c
+  h_90c9c948bf5ad1 12-14,116-137,140-148
+rey-compiler/runtime/math.c
+  h_90c9c948bf5ad1 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dbbe43932ae922c9efa0b8365b2fc1a72074dab7",
+  "prompts": {},
+  "humans": {
+    "h_90c9c948bf5ad1": {
+      "author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
