@@ -7997,6 +7997,14 @@ pub func generateIR(program: Program): string {
     return codegenProgram2(program);
 }
 
+func clangPathArgument(path: string): string {
+    var isSafeWindowsPath = path.contains(":") && !path.contains(" ") && !path.contains("&") && !path.contains("|") && !path.contains("<") && !path.contains(">") && !path.contains("^") && !path.contains("%") && !path.contains("!") && !path.contains("(") && !path.contains(")");
+    if isSafeWindowsPath {
+        return path;
+    }
+    return "\"" + path + "\"";
+}
+
 pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: string) {
     var errorMarker = "; REY_CODEGEN_ERROR: ";
     if ir.startsWith(errorMarker) {
@@ -8024,17 +8032,17 @@ pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: strin
     if release {
         // Keep the generated module in LLVM bitcode so link-time optimization
         // can inline runtime Vec accessors and optimize loops across the ABI.
-        var clangObjCmd = "clang " + opt + " " + lto + " -Wno-override-module -c -x ir \"" + llPath + "\" -o \"" + objPath + "\"";
+        var clangObjCmd = "clang " + opt + " " + lto + " -Wno-override-module -c -x ir " + clangPathArgument(llPath) + " -o " + clangPathArgument(objPath);
         var clangObjResult: Result<string,string> = exec(clangObjCmd);
         if clangObjResult.isErr() {
             return Result.Err(clangObjResult.unwrapErr());
         }
     } else {
-        var llcCmd = "llc " + opt + " -filetype=obj \"" + llPath + "\" -o \"" + objPath + "\"";
+        var llcCmd = "llc " + opt + " -filetype=obj " + clangPathArgument(llPath) + " -o " + clangPathArgument(objPath);
         var llcResult: Result<string,string> = exec(llcCmd);
         if llcResult.isErr() {
             // clang can compile LLVM IR directly when llc isn't installed.
-            var clangObjCmd = "clang " + opt + " -Wno-override-module -c -x ir \"" + llPath + "\" -o \"" + objPath + "\"";
+            var clangObjCmd = "clang " + opt + " -Wno-override-module -c -x ir " + clangPathArgument(llPath) + " -o " + clangPathArgument(objPath);
             var clangObjResult: Result<string,string> = exec(clangObjCmd);
             if clangObjResult.isErr() {
                 return Result.Err(clangObjResult.unwrapErr());
@@ -8044,7 +8052,7 @@ pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: strin
 
     var clangCmd = "clang";
     if release { clangCmd = clangCmd + " " + opt + " " + lto; }
-    clangCmd = clangCmd + " \"" + objPath + "\" \"" + libPath + "\" -o \"" + outputPath + "\"";
+    clangCmd = clangCmd + " " + clangPathArgument(objPath) + " " + clangPathArgument(libPath) + " -o " + clangPathArgument(outputPath);
     var clangResult: Result<string,string> = exec(clangCmd);
     if clangResult.isErr() {
         return Result.Err(clangResult.unwrapErr());

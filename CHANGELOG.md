@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.3.1] — patch release preparation; native CI pending
+## [0.3.1] — patch release preparation; Windows CI pending
 - Vec capacity growth now uses `realloc` instead of allocating and zeroing a second full buffer; only live kind metadata is initialized. Large Vec workloads used 36–48% less peak RSS in the current macOS arm64 comparison.
 - Recovered the native typechecker and checked-program backend required by the existing driver; the tracked modules had been an old checker stub and backend. Source provenance and limits are recorded in `docs/BOOTSTRAP-SOURCE-RECOVERY.md`.
-- The five-target release workflow rebuilds the tracked Rust source bootstrap, builds stage 1, and uses stage 1 to rebuild the packaged native compiler. It requires `rey 0.3.1`, emits the native host triple, retains each target's v0.3.0 runtime archive, and replaces only `vec.o` from current source. Manual dispatch builds packages without publishing; tag publication requires all five builds.
-- The recovered source built on macOS arm64 with the v0.3.0 seed and with the revised Rust-source/native rebuild path. No tests were run for this repair. The other four targets remain unverified; Windows retains its v0.3.0 runtime objects except for rebuilt `vec.o`.
+- The five-target release workflow rebuilds the tracked Rust source bootstrap, builds stage 1, and uses stage 1 to rebuild the packaged native compiler. Unix builds compile the runtime from tracked sources; Windows retains its v0.3.0 runtime objects and updates `vec.o` with matching MSYS2 LLVM tools. The compiler requires `rey 0.3.1` and emits the host triple. Manual dispatch builds packages without publishing; tag publication requires all five builds.
+- macOS arm64/x86-64 and Linux x86-64/AArch64 pass the hosted package-build preflight. Windows path quoting is corrected for safe drive-letter paths; the Windows package build remains to be verified. No test suites were run for this repair.
 
 ## [unreleased] — performance
 - Capy skips the per-command `rey --version` subprocess during normal toolchain resolution; `capy doctor` still checks the actual compiler version.
