@@ -1,0 +1,19 @@
+compiler/v1/src/interpreter/value.rs
+  s_9e2420774b8c0d::t_6dfc4352eb6e7f 9-155,166-168,173-174,176-181,184-185,187,193,197,203-207,209,212-213,216-227,241-244,247,272-275,304-382,386-389,407-418,425-431,433,439,476-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5e58f2cf9d854847b7a4322ae0c7f54e52cccbdc",
+  "prompts": {},
+  "sessions": {
+    "s_9e2420774b8c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "38d0fe87-b7a4-40cd-a862-2e47f46bbd32",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
