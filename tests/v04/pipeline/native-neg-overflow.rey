@@ -1,0 +1,2 @@
+func negate(value: int): int { return -value; }
+func main(): void { var result = negate(-9223372036854775808); }

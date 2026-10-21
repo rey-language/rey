@@ -1,7 +1,7 @@
 // Historical-seed bring-up driver for direct scalar machine-code generation.
 // The generated executable contains no seed runtime. The driver itself still
 // uses that runtime until the full native self-hosting gate is implemented.
-import frontend;
+import frontend::graph::{checkSourceFileGraph};
 import ir::lower::{lowerProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
@@ -12,15 +12,20 @@ import native::bytes::{byteString};
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64>");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64> [--std-root <directory>]");
         return;
     }
-    if argv.len() != 7 || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64>");
+    if (argv.len() != 7 && argv.len() != 9) || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64> [--std-root <directory>]");
         exit(2);
         return;
     }
     var target = argv[6];
+    var stdRoot = "";
+    if argv.len() == 9 {
+        if argv[7] != "--std-root" { eprintln("expected --std-root <directory>"); exit(2); return; }
+        stdRoot = argv[8];
+    }
     var os = "";
     if target == "darwin-arm64" { os = "darwin"; }
     else if target == "linux-arm64" { os = "linux"; }
@@ -29,7 +34,7 @@ func main(): void {
     var output = argv[4];
     if output == path { eprintln("output must differ from the source path"); exit(2); return; }
     if !fileExists(path) { eprintln(path + ": error: source file not found"); exit(1); return; }
-    var checked = frontend.checkSingleSource(readFile(path), path);
+    var checked = checkSourceFileGraph(path, stdRoot);
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); return; }
     var lowered = lowerProgram(checked.unwrap());
     if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); return; }

@@ -1,0 +1,6 @@
+// π
+import private_mod::{secret};
+
+func main(): void {
+    var result: int = secret();
+}

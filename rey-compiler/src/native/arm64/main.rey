@@ -216,6 +216,25 @@ func predicateCondition(predicate: CompareI64Predicate): int {
     return 10;
 }
 
+func emitTrapBranch(emitter: Emitter, condition: int, overflowOffset: int): void {
+    var branchOffset = emitter.bytes.len();
+    emitWord(emitter, 1409286144 + condition);
+    addFixup(emitter, branchOffset, 4, -1, -1, overflowOffset, condition);
+}
+
+func emitDivGuard(emitter: Emitter, leftRegister: int, rightRegister: int, overflowOffset: int): void {
+    emitWord(emitter, 4043309087 + rightRegister * 32);
+    emitTrapBranch(emitter, 0, overflowOffset);
+    putMovImm16(emitter, 12, 32768, 3, false);
+    emitWord(emitter, 3942645791 + 12 * 65536 + leftRegister * 32);
+    var safeBranch = emitter.bytes.len();
+    emitWord(emitter, 1409286145);
+    emitWord(emitter, 2457862144 + 12);
+    emitWord(emitter, 3942645791 + 12 * 65536 + rightRegister * 32);
+    emitTrapBranch(emitter, 0, overflowOffset);
+    patchRelative(emitter, Fixup { offset: safeBranch, kind: 4, targetFunctionId: -1, targetBlockId: -1, targetOffset: 0, condition: 1 }, emitter.bytes.len());
+}
+
 func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, instruction: Instruction, overflowOffset: int): void {
     if instruction.kind == InstructionKind::ConstI64 {
         putConstant(emitter, 9, instruction.immediate);
@@ -237,7 +256,37 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
         putStore(emitter, 11, slotOffset(slots, instruction.resultId));
         return;
     }
-    if instruction.kind == InstructionKind::CompareI64 {
+    if instruction.kind == InstructionKind::SubCheckedI64 {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitWord(emitter, 3942645760 + 10 * 65536 + 9 * 32 + 11);
+        emitTrapBranch(emitter, 6, overflowOffset);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::MulCheckedI64 {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitWord(emitter, 2600500224 + 10 * 65536 + 9 * 32 + 11);
+        emitWord(emitter, 2604694528 + 10 * 65536 + 9 * 32 + 12);
+        emitWord(emitter, 2470445056 + 63 * 65536 + 63 * 1024 + 11 * 32 + 13);
+        emitWord(emitter, 3942645791 + 13 * 65536 + 12 * 32);
+        emitTrapBranch(emitter, 1, overflowOffset);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitDivGuard(emitter, 9, 10, overflowOffset);
+        emitWord(emitter, 2596277248 + 10 * 65536 + 9 * 32 + 11);
+        if instruction.kind == InstructionKind::RemCheckedI64 {
+            emitWord(emitter, 2600501248 + 10 * 65536 + 9 * 1024 + 11 * 32 + 11);
+        }
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
         putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
         putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
         emitWord(emitter, 3942645791 + 10 * 65536 + 9 * 32);

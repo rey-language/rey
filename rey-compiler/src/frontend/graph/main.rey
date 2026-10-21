@@ -1,0 +1,475 @@
+import lexer::{LexError};
+import lexer;
+import parser;
+import parser::ast::{ImportStmt, ImportSourceKind, Program, Stmt};
+import typecheck::{CheckedProgram, ImportEdge, SourceGraph, SourceUnit, TypeError, typecheckGraph};
+import diagnostics::{Diagnostic, Severity, formatDiagnostic, spanFromOffsets, unknownSpan};
+
+struct GraphLoadState {
+    pub graph: SourceGraph,
+    pub visited: HashMap<string, bool>,
+    pub stack: Vec<string>,
+    pub projectRoot: string,
+    pub stdRoot: string,
+}
+
+func lastSlashIndex(path: string): int {
+    var i = path.len() - 1;
+    loop {
+        if i < 0 { break; }
+        if path.slice(i, i + 1) == "/" { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+func dirname(path: string): string {
+    var slash = lastSlashIndex(path);
+    if slash < 0 { return "."; }
+    if slash == 0 { return "/"; }
+    return path.slice(0, slash);
+}
+
+func addPathPart(parts: Vec<string>, part: string, absolute: bool) {
+    if part == "" || part == "." { return; }
+    if part == ".." {
+        if parts.len() > 0 {
+            var last = parts[parts.len() - 1];
+            if last != ".." { parts.pop(); return; }
+        }
+        if !absolute { parts.push(part); }
+        return;
+    }
+    parts.push(part);
+}
+
+func normalizePath(path: string): string {
+    var absolute = path.startsWith("/");
+    var parts: Vec<string> = [];
+    var part = "";
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        var char = path.slice(i, i + 1);
+        if char == "/" { addPathPart(parts, part, absolute); part = ""; }
+        else { part = part + char; }
+        i = i + 1;
+    }
+    addPathPart(parts, part, absolute);
+    var out = "";
+    if absolute { out = "/"; }
+    i = 0;
+    loop {
+        if i >= parts.len() { break; }
+        if out.len() > 0 && out != "/" { out = out + "/"; }
+        out = out + parts[i];
+        i = i + 1;
+    }
+    if out.len() == 0 { return "."; }
+    return out;
+}
+
+func projectRootDir(path: string): string {
+    var sourceIndex = path.indexOf("/src/");
+    if sourceIndex >= 0 { return path.slice(0, sourceIndex); }
+    return dirname(path);
+}
+
+func modulePathAsRelative(path: string): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        if path.slice(i, i + 1) == ":" && i + 1 < path.len() && path.slice(i + 1, i + 2) == ":" {
+            out = out + "/";
+            i = i + 2;
+        } else {
+            out = out + path.slice(i, i + 1);
+            i = i + 1;
+        }
+    }
+    return out;
+}
+
+func dirHasExactName(dir: string, name: string): bool {
+    var names = listDir(dir);
+    var i = 0;
+    loop {
+        if i >= names.len() { break; }
+        if names[i] == name { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func pathExistsExact(path: string): bool {
+    if !fileExists(path) { return false; }
+    if !path.startsWith("/") { return true; }
+    var parent = "/";
+    var i = 1;
+    loop {
+        if i >= path.len() { break; }
+        var start = i;
+        loop {
+            if i >= path.len() || path.slice(i, i + 1) == "/" { break; }
+            i = i + 1;
+        }
+        var name = path.slice(start, i);
+        if name.len() > 0 && !dirHasExactName(parent, name) { return false; }
+        if parent == "/" { parent = "/" + name; }
+        else if name.len() > 0 { parent = parent + "/" + name; }
+        if i < path.len() { i = i + 1; }
+    }
+    return true;
+}
+
+func addCandidate(candidates: Vec<string>, path: string) {
+    candidates.push(normalizePath(path));
+}
+
+func firstExistingPath(candidates: Vec<string>, fallback: string): string {
+    var i = 0;
+    loop {
+        if i >= candidates.len() { break; }
+        if pathExistsExact(candidates[i]) { return candidates[i]; }
+        i = i + 1;
+    }
+    return fallback;
+}
+
+func isStdModule(path: string): bool {
+    return path == "std" || path.startsWith("std::");
+}
+
+func stdRelativePath(path: string): string {
+    var relative = modulePathAsRelative(path);
+    if relative == "std" { return ""; }
+    if relative.startsWith("std/") { return relative.slice(4, relative.len()); }
+    return relative;
+}
+
+func resolveStdModule(state: GraphLoadState, importPath: string): string {
+    var relative = stdRelativePath(importPath);
+    var candidates: Vec<string> = [];
+    if state.stdRoot == "" {
+        var missing = "<explicit-std-root-missing>";
+        if relative != "" { missing = missing + "/" + relative + "/main.rey"; }
+        return missing;
+    }
+    if relative == "" {
+        addCandidate(candidates, state.stdRoot + "/main.rey");
+        addCandidate(candidates, state.stdRoot + "/src/main.rey");
+    } else {
+        addCandidate(candidates, state.stdRoot + "/" + relative + "/main.rey");
+        addCandidate(candidates, state.stdRoot + "/" + relative + ".rey");
+        addCandidate(candidates, state.stdRoot + "/src/" + relative + "/main.rey");
+        addCandidate(candidates, state.stdRoot + "/src/" + relative + ".rey");
+    }
+    return firstExistingPath(candidates, candidates[0]);
+}
+
+func resolveModulePath(state: GraphLoadState, basePath: string, importPath: string): string {
+    if isStdModule(importPath) { return resolveStdModule(state, importPath); }
+    var base = dirname(basePath);
+    var root = state.projectRoot;
+    var relative = modulePathAsRelative(importPath);
+    var nested = importPath.contains("::");
+    var candidates: Vec<string> = [];
+    addCandidate(candidates, base + "/" + relative + "/main.rey");
+    addCandidate(candidates, base + "/src/" + relative + "/main.rey");
+    addCandidate(candidates, root + "/" + relative + "/main.rey");
+    addCandidate(candidates, root + "/src/" + relative + "/main.rey");
+    if nested {
+        addCandidate(candidates, base + "/" + relative + ".rey");
+        addCandidate(candidates, base + "/src/" + relative + ".rey");
+        addCandidate(candidates, root + "/" + relative + ".rey");
+        addCandidate(candidates, root + "/src/" + relative + ".rey");
+    }
+    return firstExistingPath(candidates, candidates[0]);
+}
+
+func resolveFilePath(state: GraphLoadState, basePath: string, importPath: string): string {
+    var base = dirname(basePath);
+    var root = state.projectRoot;
+    if importPath.startsWith("/") { return normalizePath(importPath); }
+    if importPath.startsWith("./") || importPath.startsWith("../") || importPath.contains("/") || importPath.endsWith(".rey") {
+        var local = normalizePath(base + "/" + importPath);
+        if pathExistsExact(local) { return local; }
+        var project = normalizePath(root + "/" + importPath);
+        if pathExistsExact(project) { return project; }
+        return local;
+    }
+    var candidates: Vec<string> = [];
+    addCandidate(candidates, base + "/" + importPath + ".rey");
+    addCandidate(candidates, base + "/src/" + importPath + ".rey");
+    addCandidate(candidates, root + "/" + importPath + ".rey");
+    addCandidate(candidates, root + "/src/" + importPath + ".rey");
+    return firstExistingPath(candidates, candidates[0]);
+}
+
+func resolveImportPath(state: GraphLoadState, basePath: string, importStmt: ImportStmt): string {
+    if importStmt.sourceKind == ImportSourceKind::Module {
+        return resolveModulePath(state, basePath, importStmt.path);
+    }
+    return resolveFilePath(state, basePath, importStmt.path);
+}
+
+func existingModuleItem(state: GraphLoadState, basePath: string, modulePath: string, item: string): string {
+    var relative = modulePathAsRelative(modulePath);
+    var prefixes: Vec<string> = [];
+    if isStdModule(modulePath) {
+        var stdRelative = stdRelativePath(modulePath);
+        prefixes.push(state.stdRoot);
+        prefixes.push(state.stdRoot + "/src");
+        relative = stdRelative;
+    } else {
+        var base = dirname(basePath);
+        prefixes.push(base);
+        prefixes.push(base + "/src");
+        prefixes.push(state.projectRoot);
+        prefixes.push(state.projectRoot + "/src");
+    }
+    var i = 0;
+    loop {
+        if i >= prefixes.len() { break; }
+        var prefix = prefixes[i];
+        var folder = normalizePath(prefix + "/" + relative + "/" + item + "/main.rey");
+        if pathExistsExact(folder) { return folder; }
+        var file = normalizePath(prefix + "/" + relative + "/" + item + ".rey");
+        if pathExistsExact(file) { return file; }
+        i = i + 1;
+    }
+    return "";
+}
+
+func graphDiagnostic(path: string, source: string, start: int, end: int, message: string): string {
+    var span = unknownSpan();
+    if start >= 0 { span = spanFromOffsets(source, start, end); }
+    return formatDiagnostic(Diagnostic {
+        severity: Severity::Error,
+        code: "V04-FRONTEND-GRAPH",
+        message: message,
+        filePath: path,
+        span: span,
+    });
+}
+
+func pushMissingImport(state: GraphLoadState, target: string, originPath: string, originSource: string, originStart: int, originEnd: int) {
+    state.graph.errors.push(graphDiagnostic(originPath, originSource, originStart, originEnd,
+        "file not found: " + target));
+}
+
+func importCyclePath(stack: Vec<string>, repeated: string): string {
+    var chain = "";
+    var i = 0;
+    loop {
+        if i >= stack.len() { break; }
+        if chain.len() > 0 { chain = chain + " -> "; }
+        chain = chain + stack[i];
+        i = i + 1;
+    }
+    if chain.len() > 0 { chain = chain + " -> "; }
+    return chain + repeated;
+}
+
+func loadUnit(state: GraphLoadState, path: string, originPath: string, originSource: string, originStart: int, originEnd: int) {
+    var normalizedPath = normalizePath(path);
+    if state.stack.contains(normalizedPath) {
+        state.graph.errors.push(graphDiagnostic(originPath, originSource, originStart, originEnd,
+            "Circular import detected: " + importCyclePath(state.stack, normalizedPath)));
+        return;
+    }
+    if state.visited.has(normalizedPath) { return; }
+    if !pathExistsExact(normalizedPath) {
+        if originPath == "" {
+            state.graph.errors.push(graphDiagnostic(normalizedPath, "", -1, -1, "file not found"));
+        } else {
+            pushMissingImport(state, normalizedPath, originPath, originSource, originStart, originEnd);
+        }
+        state.visited.set(normalizedPath, true);
+        return;
+    }
+
+    state.stack.push(normalizedPath);
+    var source = readFile(normalizedPath);
+    var lexed = lexer.tokenize(source, normalizedPath);
+    if lexed.errors.len() > 0 {
+        var lexIndex = 0;
+        loop {
+            if lexIndex >= lexed.errors.len() { break; }
+            var lexError: LexError = lexed.errors[lexIndex];
+            state.graph.errors.push(graphDiagnostic(normalizedPath, source, lexError.span.start, lexError.span.end, lexError.message));
+            lexIndex = lexIndex + 1;
+        }
+        state.stack.pop();
+        state.visited.set(normalizedPath, true);
+        return;
+    }
+    var parsed = parser.parse(lexed.tokens, normalizedPath);
+    if parsed.errors.len() > 0 {
+        var parseIndex = 0;
+        loop {
+            if parseIndex >= parsed.errors.len() { break; }
+            var parseError = parsed.errors[parseIndex];
+            state.graph.errors.push(graphDiagnostic(normalizedPath, source, parseError.span.start, parseError.span.end, parseError.message));
+            parseIndex = parseIndex + 1;
+        }
+        state.stack.pop();
+        state.visited.set(normalizedPath, true);
+        return;
+    }
+
+    var program: Program = parsed.program;
+    var statementIndex = 0;
+    loop {
+        if statementIndex >= program.statements.len() { break; }
+        var statement = program.statements[statementIndex];
+        match statement {
+            Stmt::Import(importStmt) => {
+                var target = normalizePath(resolveImportPath(state, normalizedPath, importStmt));
+                var selectedModuleItems = importStmt.sourceKind == ImportSourceKind::Module && importStmt.items.len() > 0;
+                if selectedModuleItems && pathExistsExact(target) {
+                    state.graph.edges.push(ImportEdge {
+                        fromPath: normalizedPath,
+                        toPath: target,
+                        sourceKind: ImportSourceKind::Module,
+                        namespaceName: "",
+                        items: importStmt.items,
+                        span: importStmt.span,
+                    });
+                    loadUnit(state, target, normalizedPath, source, importStmt.span.start, importStmt.span.end);
+                } else if selectedModuleItems {
+                    var symbolItems: Vec<string> = [];
+                    var itemIndex = 0;
+                    loop {
+                        if itemIndex >= importStmt.items.len() { break; }
+                        var itemName = importStmt.items[itemIndex];
+                        var childPath = existingModuleItem(state, normalizedPath, importStmt.path, itemName);
+                        if childPath.len() > 0 {
+                            var childItems: Vec<string> = [];
+                            state.graph.edges.push(ImportEdge {
+                                fromPath: normalizedPath,
+                                toPath: normalizePath(childPath),
+                                sourceKind: ImportSourceKind::Module,
+                                namespaceName: itemName,
+                                items: childItems,
+                                span: importStmt.span,
+                            });
+                            loadUnit(state, childPath, normalizedPath, source, importStmt.span.start, importStmt.span.end);
+                        } else {
+                            symbolItems.push(itemName);
+                        }
+                        itemIndex = itemIndex + 1;
+                    }
+                    if symbolItems.len() > 0 {
+                        state.graph.edges.push(ImportEdge {
+                            fromPath: normalizedPath,
+                            toPath: target,
+                            sourceKind: ImportSourceKind::Module,
+                            namespaceName: "",
+                            items: symbolItems,
+                            span: importStmt.span,
+                        });
+                        loadUnit(state, target, normalizedPath, source, importStmt.span.start, importStmt.span.end);
+                    }
+                } else {
+                    state.graph.edges.push(ImportEdge {
+                        fromPath: normalizedPath,
+                        toPath: target,
+                        sourceKind: importStmt.sourceKind,
+                        namespaceName: importStmt.namespaceName,
+                        items: importStmt.items,
+                        span: importStmt.span,
+                    });
+                    loadUnit(state, target, normalizedPath, source, importStmt.span.start, importStmt.span.end);
+                }
+            },
+            _ => {},
+        }
+        statementIndex = statementIndex + 1;
+    }
+
+    state.graph.units.push(SourceUnit {
+        sourcePath: normalizedPath,
+        moduleId: normalizedPath,
+        source: source,
+        isEntry: normalizedPath == state.graph.entryPath,
+        program: program,
+    });
+    state.visited.set(normalizedPath, true);
+    state.stack.pop();
+}
+
+func sourceForPath(units: Vec<SourceUnit>, path: string): string {
+    var i = 0;
+    loop {
+        if i >= units.len() { break; }
+        if units[i].sourcePath == path { return units[i].source; }
+        i = i + 1;
+    }
+    return "";
+}
+
+func typeErrorsToString(units: Vec<SourceUnit>, errors: Vec<TypeError>): string {
+    var out = "";
+    var i = 0;
+    loop {
+        if i >= errors.len() { break; }
+        var error = errors[i];
+        if i > 0 { out = out + "\n"; }
+        var source = sourceForPath(units, error.sourcePath);
+        var span = unknownSpan();
+        if error.span >= 0 { span = spanFromOffsets(source, error.span, error.span); }
+        out = out + formatDiagnostic(Diagnostic {
+            severity: Severity::Error,
+            code: "V04-FRONTEND-GRAPH",
+            message: error.message,
+            filePath: error.sourcePath,
+            span: span,
+        });
+        i = i + 1;
+    }
+    return out;
+}
+
+pub func checkSourceFileGraph(entryPath: string, stdRoot: string): Result<CheckedProgram, string> {
+    var normalizedEntry = normalizePath(entryPath);
+    var graph = SourceGraph { entryPath: normalizedEntry, units: [], edges: [], errors: [] };
+    var state = GraphLoadState {
+        graph: graph,
+        visited: HashMap.new(),
+        stack: [],
+        projectRoot: projectRootDir(normalizedEntry),
+        stdRoot: stdRoot,
+    };
+    if state.stdRoot != "" { state.stdRoot = normalizePath(state.stdRoot); }
+    loadUnit(state, normalizedEntry, "", "", -1, -1);
+
+    var checked = typecheckGraph(state.graph);
+    if state.graph.errors.len() > 0 {
+        var loadErrors = "";
+        var i = 0;
+        loop {
+            if i >= state.graph.errors.len() { break; }
+            if i > 0 { loadErrors = loadErrors + "\n"; }
+            loadErrors = loadErrors + state.graph.errors[i];
+            i = i + 1;
+        }
+        return Result.Err(loadErrors);
+    }
+    if !checked.ok {
+        var errors = typeErrorsToString(state.graph.units, checked.errors);
+        if errors.len() == 0 {
+            errors = graphDiagnostic(normalizedEntry, "", -1, -1, "typechecker failed without a diagnostic");
+        }
+        return Result.Err(errors);
+    }
+    var checkedProgram = checked.checkedProgram;
+    if checkedProgram != null {
+        var finalProgram: CheckedProgram = checkedProgram;
+        var success: Result<CheckedProgram, string> = Result.Ok(finalProgram);
+        return success;
+    } else {
+        return Result.Err(graphDiagnostic(normalizedEntry, "", -1, -1, "typechecker returned no checked program"));
+    }
+}

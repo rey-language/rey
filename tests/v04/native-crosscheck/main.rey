@@ -58,7 +58,11 @@ func addition(left: int, right: int): IRProgram {
 }
 
 func comparison(predicate: CompareI64Predicate, left: int, right: int): IRProgram {
-    var main = function(0, "comparison", [], ir.irBool(), [ir.basicBlock(0, [], [ir.constI64(0, left, source()), ir.constI64(1, right, source()), ir.compareI64(2, predicate, 0, 1, source())], ir.returnValue(2, source()))]);
+    var main = function(0, "comparison", [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(0, left, source()), ir.constI64(1, right, source()), ir.compareI64(2, predicate, 0, 1, source())], ir.branch(2, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [ir.constI64(3, 2, source())], ir.returnValue(3, source())),
+        ir.basicBlock(2, [], [ir.constI64(4, 0, source())], ir.returnValue(4, source()))
+    ]);
     return ir.irProgram(0, [main]);
 }
 
@@ -120,10 +124,10 @@ func main(): void {
     emitCase(out, "overflow-positive", addition(maximum, 1), 1);
     emitCase(out, "overflow-negative", addition(minimum, -1), 1);
     emitCase(out, "eq", comparison(ir.compareEq(), 7, 9), 0);
-    emitCase(out, "ne", comparison(ir.compareNe(), 7, 9), 1);
-    emitCase(out, "slt", comparison(ir.compareSlt(), minimum, 0), 1);
-    emitCase(out, "sle", comparison(ir.compareSle(), 9, 9), 1);
-    emitCase(out, "sgt", comparison(ir.compareSgt(), maximum, 0), 1);
+    emitCase(out, "ne", comparison(ir.compareNe(), 7, 9), 2);
+    emitCase(out, "slt", comparison(ir.compareSlt(), minimum, 0), 2);
+    emitCase(out, "sle", comparison(ir.compareSle(), 9, 9), 2);
+    emitCase(out, "sgt", comparison(ir.compareSgt(), maximum, 0), 2);
     emitCase(out, "sge", comparison(ir.compareSge(), 7, 9), 0);
     emitCase(out, "diamond-true", diamond(true), 7);
     emitCase(out, "diamond-false", diamond(false), 9);

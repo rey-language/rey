@@ -1,6 +1,7 @@
 # Changelog
 
 ## [unreleased] — v0.4 implementation
+- Extended checked scalar arithmetic, unary/boolean operators, short-circuit CFGs and module-graph function lowering. The expanded native gate passes 238 checks and 59 macOS arm64 executions; an independent 55-program arithmetic oracle passes 227 process checks. Nine emitted ELF programs pass 31 checks in a Linux arm64 VM. These are correctness results, not performance or release claims.
 - Added explicit-seed capability/baseline runners, matched seven-language numeric/vector benchmark fixtures, and a scalar typed IR model with deterministic printing.
 - Added the checked scalar frontend/IR pipeline with conservative effects, mutable local/while CFG lowering, precise memory/runtime ABI contract, and parallel implementation ledger. Scalar integration passes 26 checks. Pure Rey byte encoding and SHA-256 pass standard/binary/padding-boundary cases.
 - Added a direct scalar ARM64 emitter and pure Rey Mach-O/ELF image writer, including embedded Mach-O signing and OS loader metadata. The first native gate passes 114 checks and 24 real macOS arm64 executions, including source builds with compiler tools absent from PATH. ELF AArch64 is structurally checked only. Full language/native runtime support, self-hosting, collector, regions, tasks and release ports remain pending.

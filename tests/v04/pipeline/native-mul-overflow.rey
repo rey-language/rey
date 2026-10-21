@@ -1,0 +1,2 @@
+func square(value: int): int { return value * value; }
+func main(): void { var result = square(3037000500); }

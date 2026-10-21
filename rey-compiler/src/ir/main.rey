@@ -13,6 +13,11 @@ pub enum InstructionKind {
     AddCheckedI64,
     CompareI64,
     Call,
+    SubCheckedI64,
+    MulCheckedI64,
+    DivCheckedI64,
+    RemCheckedI64,
+    CompareBool,
 }
 
 pub enum TerminatorKind {
@@ -260,6 +265,29 @@ pub func addCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceR
     return instruction;
 }
 
+func arithmeticI64(kind: InstructionKind, resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(kind, resultId, irI64(), source);
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func subCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    return arithmeticI64(InstructionKind::SubCheckedI64, resultId, leftId, rightId, source);
+}
+
+pub func mulCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    return arithmeticI64(InstructionKind::MulCheckedI64, resultId, leftId, rightId, source);
+}
+
+pub func divCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    return arithmeticI64(InstructionKind::DivCheckedI64, resultId, leftId, rightId, source);
+}
+
+pub func remCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    return arithmeticI64(InstructionKind::RemCheckedI64, resultId, leftId, rightId, source);
+}
+
 pub func comparePredicateName(comparison: CompareI64Predicate): string {
     if comparison == CompareI64Predicate::Eq { return "eq"; }
     if comparison == CompareI64Predicate::Ne { return "ne"; }
@@ -271,6 +299,14 @@ pub func comparePredicateName(comparison: CompareI64Predicate): string {
 
 pub func compareI64(resultId: int, comparison: CompareI64Predicate, leftId: int, rightId: int, source: SourceRef): Instruction {
     var instruction = emptyInstruction(InstructionKind::CompareI64, resultId, irBool(), source);
+    instruction.comparison = comparison;
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func compareBool(resultId: int, comparison: CompareI64Predicate, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::CompareBool, resultId, irBool(), source);
     instruction.comparison = comparison;
     instruction.operands.push(leftId);
     instruction.operands.push(rightId);
@@ -422,11 +458,18 @@ func instructionText(instruction: Instruction): string {
         if instruction.immediate != 0 { value = "true"; }
         return prefix + "const.bool " + value + " " + sourceText(instruction.source);
     }
-    if instruction.kind == InstructionKind::AddCheckedI64 {
-        return prefix + "add.checked.i64 " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
+    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 {
+        var operation = "add";
+        if instruction.kind == InstructionKind::SubCheckedI64 { operation = "sub"; }
+        if instruction.kind == InstructionKind::MulCheckedI64 { operation = "mul"; }
+        if instruction.kind == InstructionKind::DivCheckedI64 { operation = "div"; }
+        if instruction.kind == InstructionKind::RemCheckedI64 { operation = "rem"; }
+        return prefix + operation + ".checked.i64 " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
     }
-    if instruction.kind == InstructionKind::CompareI64 {
-        return prefix + "compare.i64 " + comparePredicateName(instruction.comparison) + " " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
+    if instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
+        var operandType = "i64";
+        if instruction.kind == InstructionKind::CompareBool { operandType = "bool"; }
+        return prefix + "compare." + operandType + " " + comparePredicateName(instruction.comparison) + " " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
     }
     var args = "";
     var i = 0;

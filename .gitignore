@@ -48,3 +48,6 @@ test_all.rey
 projects/bank/
 projects/bank-project/
 compmaster
+# Python verification artifacts
+__pycache__/
+*.pyc

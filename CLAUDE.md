@@ -6,7 +6,7 @@
 
 - Released v0.3.1 uses the native Rey frontend/backend under `rey-compiler/` with its historical LLVM/Clang route. `compiler/v1` is the Rust reference/bring-up interpreter.
 - The `codex-v0.4` contributor branch contains an experimental direct ARM64 backend and Mach-O/ELF writer written in Rey. `rey-compiler/ir-main.rey` checks/dumps/evaluates scalar IR; `native-main.rey` emits native images. See `docs/V0.4-PARALLEL-PHASES.md` and `docs/V0.4-NATIVE-CONTRACT.md`.
-- The first native gate passes 114 coordinator checks, including 24 real macOS arm64 executions and source builds with compiler tools absent from PATH. macOS OS startup uses dyld/libSystem; the images import no Rey C runtime. Linux output is structurally checked only. This is a scalar bring-up slice, not a completed v0.4 or self-hosted runtime.
+- The arithmetic/module-graph gate passes 238 coordinator checks, including 59 real macOS arm64 executions and source builds with compiler tools absent from PATH. A separate Python arithmetic oracle passes 55 generated programs and 227 process records; nine emitted ELF programs pass 31 Linux arm64 VM checks. macOS startup uses dyld/libSystem; images import no Rey C runtime. This is a scalar bring-up slice, not a completed v0.4 or self-hosted runtime.
 - User authorized narrowly scoped GPT-6 Luna medium workers, three at a time, writing their entire assigned code/fixtures before testing. Coordinator owns shared interfaces, integration and Git. Current branch differs from the divergent historical `codex` branch deliberately; preserve both.
 
 ## Core Rules

@@ -1,0 +1,5 @@
+import left;
+import right;
+
+func main(): void { return; }
+func observed(): int { return left.same(5) * 100 + right.same(5); }

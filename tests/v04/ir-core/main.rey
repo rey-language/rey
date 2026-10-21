@@ -67,5 +67,10 @@ func main(): void {
     var exhausted = ir.irFunction(9223372036854775807, sparse.key, sparse.signature, [], [ir.basicBlock(9223372036854775807, [], [], ir.returnVoid(ir.sourceRef("sparse.rey", 0, 0)))], sparse.effects);
     assert(ir.nextFunctionId(ir.irProgram(exhausted.id, [exhausted])) == -1, "function ID exhaustion must not overflow");
     assert(ir.nextBlockId(exhausted) == -1, "block ID exhaustion must not overflow");
+    var arithmeticSource = ir.sourceRef("arithmetic.rey", 0, 1);
+    var arithmeticInstructions = [ir.constI64(0, 8, arithmeticSource), ir.constI64(1, 2, arithmeticSource), ir.subCheckedI64(2, 0, 1, arithmeticSource), ir.mulCheckedI64(3, 0, 1, arithmeticSource), ir.divCheckedI64(4, 0, 1, arithmeticSource), ir.remCheckedI64(5, 0, 1, arithmeticSource), ir.constBool(6, true, arithmeticSource), ir.constBool(7, false, arithmeticSource), ir.compareBool(8, ir.compareEq(), 6, 7, arithmeticSource)];
+    var arithmeticFunction = ir.irFunction(3, ir.functionKey("arithmetic", "", "test"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], arithmeticInstructions, ir.returnValue(4, arithmeticSource))], ir.noEffects());
+    var arithmeticPrint = ir.printIR(ir.irProgram(3, [arithmeticFunction]));
+    assert(arithmeticPrint.contains("sub.checked.i64") && arithmeticPrint.contains("mul.checked.i64") && arithmeticPrint.contains("div.checked.i64") && arithmeticPrint.contains("rem.checked.i64") && arithmeticPrint.contains("compare.bool eq"), "new scalar tags preserve deterministic operation names");
     print(printed);
 }

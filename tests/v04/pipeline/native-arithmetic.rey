@@ -1,0 +1,30 @@
+func overflow(): int { var value = 9223372036854775807; return value + 1; }
+func explode(): bool { var failure = overflow(); return true; }
+func require(ok: bool): void { if !ok { var failure = overflow(); } }
+func main(): void {
+    require(20 - 7 == 13);
+    require(-20 - -7 == -13);
+    require(6 * -7 == -42);
+    require(-6 * -7 == 42);
+    require(-17 / 5 == -3);
+    require(17 / -5 == -3);
+    require(-17 % 5 == -2);
+    require(17 % -5 == 2);
+    var value = 64;
+    value -= 4;
+    value *= 2;
+    value /= 5;
+    value %= 5;
+    require(value == 4);
+    var minimum = -9223372036854775808;
+    require(minimum < 0);
+    require(minimum / 1 == minimum);
+    require(minimum % 1 == 0);
+    require(true == true);
+    require(false != true);
+    require(!false);
+    require(!(false || false));
+    require(true || explode());
+    require(!(false && explode()));
+    require((true && true) && (false || true));
+}

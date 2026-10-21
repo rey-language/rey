@@ -1,0 +1,7 @@
+import left;
+import right;
+
+func main(): void {
+    var leftValue: int = left.same(1);
+    var rightValue: int = right.same(2);
+}

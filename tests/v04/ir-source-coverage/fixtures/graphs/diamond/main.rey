@@ -1,0 +1,5 @@
+import "left.rey";
+import "right.rey";
+
+func main(): void { return; }
+func observed(): int { return left.one(1) + right.two(2); }

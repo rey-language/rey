@@ -43,7 +43,7 @@ func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
     if instruction.kind == InstructionKind::ConstI64 || instruction.kind == InstructionKind::ConstBool {
         return instruction.resultId >= 0 && instruction.operands.len() == 0;
     }
-    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::CompareI64 {
+    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 || instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
         return instruction.resultId >= 0 && instruction.operands.len() == 2;
     }
     if instruction.kind == InstructionKind::Call {

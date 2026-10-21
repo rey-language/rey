@@ -1,0 +1,1 @@
+pub func base(value: int): int { return value + 1; }

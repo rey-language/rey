@@ -1,0 +1,184 @@
+import ir;
+import ir::analysis::{inferEffects};
+import ir::eval::{EvalResult, evaluateProgram};
+import ir::verify::{VerifyResult, verifyProgram};
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, IRFunction, IRProgram, IRType, IRValue, Instruction, InstructionKind};
+
+func cleanEffects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= parameterCount { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func binaryInstruction(kind: InstructionKind, resultId: int, leftId: int, rightId: int): Instruction {
+    var source = ir.sourceRef("arithmetic.rey", 5, 8);
+    if kind == InstructionKind::SubCheckedI64 { return ir.subCheckedI64(resultId, leftId, rightId, source); }
+    if kind == InstructionKind::MulCheckedI64 { return ir.mulCheckedI64(resultId, leftId, rightId, source); }
+    if kind == InstructionKind::DivCheckedI64 { return ir.divCheckedI64(resultId, leftId, rightId, source); }
+    return ir.remCheckedI64(resultId, leftId, rightId, source);
+}
+
+func binaryProgram(kind: InstructionKind, left: int, right: int): IRProgram {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(0, left, ir.sourceRef("arithmetic.rey", 1, 2)));
+    instructions.push(ir.constI64(1, right, ir.sourceRef("arithmetic.rey", 3, 4)));
+    instructions.push(binaryInstruction(kind, 2, 0, 1));
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(2, ir.sourceRef("arithmetic.rey", 9, 12)));
+    var function = ir.irFunction(0, ir.functionKey("arithmetic-test", "", "main"), ir.functionSignature([], ir.irI64()), [], [block], cleanEffects(0));
+    return ir.irProgram(0, [function]);
+}
+
+func verifyInstruction(instruction: Instruction, leftIsBool: bool, rightIsBool: bool): VerifyResult {
+    var instructions: Vec<Instruction> = [];
+    if leftIsBool { instructions.push(ir.constBool(0, true, ir.sourceRef("verify-arithmetic.rey", 1, 2))); }
+    else { instructions.push(ir.constI64(0, 1, ir.sourceRef("verify-arithmetic.rey", 1, 2))); }
+    if rightIsBool { instructions.push(ir.constBool(1, false, ir.sourceRef("verify-arithmetic.rey", 3, 4))); }
+    else { instructions.push(ir.constI64(1, 2, ir.sourceRef("verify-arithmetic.rey", 3, 4))); }
+    instructions.push(instruction);
+    var resultType = instruction.ty;
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(instruction.resultId, ir.sourceRef("verify-arithmetic.rey", 9, 12)));
+    var function = ir.irFunction(0, ir.functionKey("verify-arithmetic-test", "", "main"), ir.functionSignature([], resultType), [], [block], cleanEffects(0));
+    return verifyProgram(ir.irProgram(0, [function]));
+}
+
+func requireArithmetic(kind: InstructionKind, left: int, right: int, expected: int, label: string): void {
+    var program = binaryProgram(kind, left, right);
+    var verification = verifyProgram(program);
+    assert(verification.ok, label + " must pass scalar IR verification");
+    var result = evaluateProgram(program, 20, 3);
+    assert(result.ok && !result.isBool && !result.isVoid && result.value == expected, label + " must equal its independent expected value");
+    assert(result.steps == 4, label + " must preserve instruction and terminator step accounting");
+}
+
+func requireArithmeticError(kind: InstructionKind, left: int, right: int, message: string, label: string): void {
+    var result = evaluateProgram(binaryProgram(kind, left, right), 20, 3);
+    assert(!result.ok && result.error.contains(message), label + " must trap with the expected arithmetic diagnostic");
+    assert(result.error.contains("@arithmetic.rey:5..8"), label + " must preserve the arithmetic source span");
+    assert(result.steps == 3, label + " must account for the trapping instruction");
+}
+
+func boolProgram(predicate: CompareI64Predicate, left: bool, right: bool): IRProgram {
+    var instructions = [
+        ir.constBool(0, left, ir.sourceRef("bool-arithmetic.rey", 1, 2)),
+        ir.constBool(1, right, ir.sourceRef("bool-arithmetic.rey", 3, 4)),
+        ir.compareBool(2, predicate, 0, 1, ir.sourceRef("bool-arithmetic.rey", 5, 8))
+    ];
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(2, ir.sourceRef("bool-arithmetic.rey", 9, 12)));
+    var function = ir.irFunction(0, ir.functionKey("bool-arithmetic-test", "", "main"), ir.functionSignature([], ir.irBool()), [], [block], cleanEffects(0));
+    return ir.irProgram(0, [function]);
+}
+
+func requireBoolComparison(predicate: CompareI64Predicate, left: bool, right: bool, expected: bool, label: string): void {
+    var program = boolProgram(predicate, left, right);
+    var verification = verifyProgram(program);
+    assert(verification.ok, label + " must pass bool comparison verification");
+    var result = evaluateProgram(program, 20, 3);
+    var expectedValue = 0;
+    if expected { expectedValue = 1; }
+    assert(result.ok && result.isBool && result.value == expectedValue, label + " must return the expected bool value");
+    assert(result.steps == 4, label + " must preserve instruction and terminator step accounting");
+}
+
+func main(): void {
+    var maximum = 9223372036854775807;
+    var minimum = -9223372036854775807 - 1;
+
+    requireArithmetic(InstructionKind::SubCheckedI64, 10, 3, 7, "positive subtraction");
+    requireArithmetic(InstructionKind::SubCheckedI64, 3, 10, -7, "negative subtraction");
+    requireArithmetic(InstructionKind::SubCheckedI64, minimum, minimum, 0, "minimum minus minimum");
+    requireArithmetic(InstructionKind::SubCheckedI64, maximum, maximum, 0, "maximum minus maximum");
+    requireArithmeticError(InstructionKind::SubCheckedI64, maximum, -1, "overflow", "maximum minus negative one");
+    requireArithmeticError(InstructionKind::SubCheckedI64, minimum, 1, "overflow", "minimum minus one");
+    requireArithmeticError(InstructionKind::SubCheckedI64, maximum, minimum, "overflow", "maximum minus minimum");
+    requireArithmeticError(InstructionKind::SubCheckedI64, minimum, maximum, "overflow", "minimum minus maximum");
+
+    requireArithmetic(InstructionKind::MulCheckedI64, 0, minimum, 0, "zero times minimum");
+    requireArithmetic(InstructionKind::MulCheckedI64, maximum, 1, maximum, "maximum times one");
+    requireArithmetic(InstructionKind::MulCheckedI64, minimum, 1, minimum, "minimum times one");
+    requireArithmetic(InstructionKind::MulCheckedI64, maximum, -1, -maximum, "maximum times negative one");
+    requireArithmetic(InstructionKind::MulCheckedI64, -3, -4, 12, "negative times negative");
+    requireArithmetic(InstructionKind::MulCheckedI64, -3, 4, -12, "negative times positive");
+    requireArithmetic(InstructionKind::MulCheckedI64, 3, -4, -12, "positive times negative");
+    requireArithmeticError(InstructionKind::MulCheckedI64, -1, minimum, "overflow", "negative one times minimum");
+    requireArithmeticError(InstructionKind::MulCheckedI64, minimum, -1, "overflow", "minimum times negative one");
+    requireArithmeticError(InstructionKind::MulCheckedI64, 2, maximum, "overflow", "two times maximum");
+    requireArithmeticError(InstructionKind::MulCheckedI64, -2, maximum, "overflow", "negative two times maximum");
+    requireArithmeticError(InstructionKind::MulCheckedI64, minimum, -2, "overflow", "minimum times negative two");
+
+    requireArithmetic(InstructionKind::DivCheckedI64, -17, 5, -3, "negative dividend truncates toward zero");
+    requireArithmetic(InstructionKind::DivCheckedI64, 17, -5, -3, "negative divisor truncates toward zero");
+    requireArithmetic(InstructionKind::DivCheckedI64, -17, -5, 3, "two negative division operands");
+    requireArithmetic(InstructionKind::DivCheckedI64, 17, 5, 3, "positive division operands");
+    requireArithmetic(InstructionKind::DivCheckedI64, maximum, 1, maximum, "maximum divided by one");
+    requireArithmetic(InstructionKind::DivCheckedI64, minimum, 1, minimum, "minimum divided by one");
+    requireArithmeticError(InstructionKind::DivCheckedI64, 7, 0, "division by zero", "division by zero");
+    requireArithmeticError(InstructionKind::DivCheckedI64, minimum, -1, "overflow", "minimum divided by negative one");
+
+    requireArithmetic(InstructionKind::RemCheckedI64, -17, 5, -2, "negative dividend remainder");
+    requireArithmetic(InstructionKind::RemCheckedI64, 17, -5, 2, "negative divisor remainder");
+    requireArithmetic(InstructionKind::RemCheckedI64, -17, -5, -2, "two negative remainder operands");
+    requireArithmetic(InstructionKind::RemCheckedI64, 17, 5, 2, "positive remainder operands");
+    requireArithmetic(InstructionKind::RemCheckedI64, minimum, 2, 0, "minimum remainder by two");
+    requireArithmetic(InstructionKind::RemCheckedI64, maximum, 2, 1, "maximum remainder by two");
+    requireArithmeticError(InstructionKind::RemCheckedI64, 7, 0, "remainder by zero", "remainder by zero");
+    requireArithmeticError(InstructionKind::RemCheckedI64, minimum, -1, "overflow", "minimum remainder by negative one");
+
+    requireBoolComparison(ir.compareEq(), true, true, true, "true equals true");
+    requireBoolComparison(ir.compareEq(), false, false, true, "false equals false");
+    requireBoolComparison(ir.compareEq(), true, false, false, "true differs from false under equality");
+    requireBoolComparison(ir.compareEq(), false, true, false, "false differs from true under equality");
+    requireBoolComparison(ir.compareNe(), true, false, true, "true differs from false under inequality");
+    requireBoolComparison(ir.compareNe(), false, true, true, "false differs from true under inequality");
+    requireBoolComparison(ir.compareNe(), true, true, false, "true equals true under inequality");
+    requireBoolComparison(ir.compareNe(), false, false, false, "false equals false under inequality");
+
+    var validArithmeticKinds = [InstructionKind::SubCheckedI64, InstructionKind::MulCheckedI64, InstructionKind::DivCheckedI64, InstructionKind::RemCheckedI64];
+    var kindIndex = 0;
+    loop {
+        if kindIndex >= validArithmeticKinds.len() { break; }
+        var instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        assert(verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must accept its exact valid shape");
+        instruction.operands = [0];
+        assert(!verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must reject wrong arity");
+        instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        instruction.immediate = 1;
+        assert(!verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must reject populated unused fields");
+        instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        instruction.ty = ir.irBool();
+        assert(!verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must reject a bool result type");
+        instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        assert(!verifyInstruction(instruction, true, false).ok, "each checked i64 arithmetic tag must reject a bool operand");
+        instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        instruction.functionId = 0;
+        assert(!verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must reject populated function fields");
+        instruction = binaryInstruction(validArithmeticKinds[kindIndex], 2, 0, 1);
+        instruction.comparison = ir.compareNe();
+        assert(!verifyInstruction(instruction, false, false).ok, "each checked i64 arithmetic tag must reject populated comparison fields");
+        kindIndex = kindIndex + 1;
+    }
+
+    var boolEqual = ir.compareBool(2, ir.compareEq(), 0, 1, ir.sourceRef("verify-arithmetic.rey", 5, 8));
+    assert(verifyInstruction(boolEqual, true, true).ok, "bool equality with two bool operands must verify");
+    var boolNotEqual = ir.compareBool(2, ir.compareNe(), 0, 1, ir.sourceRef("verify-arithmetic.rey", 5, 8));
+    assert(verifyInstruction(boolNotEqual, true, true).ok, "bool inequality with two bool operands must verify");
+    var boolOrdering = ir.compareBool(2, ir.compareSlt(), 0, 1, ir.sourceRef("verify-arithmetic.rey", 5, 8));
+    assert(!verifyInstruction(boolOrdering, true, true).ok, "bool comparisons must reject ordering predicates");
+    assert(!verifyInstruction(boolEqual, true, false).ok, "bool comparisons must reject a non-bool operand");
+    boolEqual.ty = ir.irI64();
+    assert(!verifyInstruction(boolEqual, true, true).ok, "bool comparisons must reject an i64 result type");
+    boolEqual.operands = [0];
+    assert(!verifyInstruction(boolEqual, true, true).ok, "bool comparisons must reject wrong arity");
+    boolEqual = ir.compareBool(2, ir.compareEq(), 0, 1, ir.sourceRef("verify-arithmetic.rey", 5, 8));
+    boolEqual.functionId = 0;
+    assert(!verifyInstruction(boolEqual, true, true).ok, "bool comparisons must reject populated unused fields");
+
+    var inferred = inferEffects(binaryProgram(InstructionKind::DivCheckedI64, 8, 0));
+    var effects = inferred.functions[0].effects;
+    assert(effects.readsMemory == ir.factNo() && effects.writesMemory == ir.factNo() && effects.allocates == ir.factNo() && effects.unresolvedCallees == ir.factNo(), "checked arithmetic has no memory effects");
+    print("v04 scalar arithmetic verification and evaluation passed");
+}

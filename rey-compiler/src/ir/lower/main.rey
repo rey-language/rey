@@ -1,8 +1,8 @@
 // Lower the checked scalar source slice into the v0.4 SSA IR.
 import ir;
-import ir::{IRProgram, IRFunction, IRType, IRTypeKind, IRValue, SourceRef, EffectSummary, Escape, BasicBlock, Instruction, Terminator, irProgram, irFunction, irValue, irI64, irBool, irVoid, functionKey, functionSignature, effectSummary, factUnknown, escapeUnknown, sourceRef, constI64, constBool, addCheckedI64, compareI64, call, jump, branch, returnValue, returnVoid, basicBlock, withFunction};
+import ir::{IRProgram, IRFunction, IRType, IRTypeKind, IRValue, SourceRef, EffectSummary, Escape, BasicBlock, Instruction, Terminator, irProgram, irFunction, irValue, irI64, irBool, irVoid, functionKey, functionSignature, effectSummary, factUnknown, escapeUnknown, sourceRef, constI64, constBool, addCheckedI64, subCheckedI64, mulCheckedI64, divCheckedI64, remCheckedI64, compareI64, compareBool, call, jump, branch, returnValue, returnVoid, basicBlock, withFunction};
 import typecheck::{CheckedProgram, CheckedExprInfo, CheckedBindingInfo, ResolvedSymbol, Type};
-import parser::ast::{Program, Stmt, Expr, FuncDeclStmt, FuncParam, VarDeclStmt, ConstDeclStmt, AssignStmt, IfStmt, WhileStmt, ReturnStmt, BlockStmt, ExprStmt, BinaryExpr, LiteralExpr, IdentExpr, CallExpr, LiteralKind, StmtKind, ExprKind, stmtSpan, exprSpan};
+import parser::ast::{Program, Stmt, Expr, FuncDeclStmt, FuncParam, VarDeclStmt, ConstDeclStmt, AssignStmt, IfStmt, WhileStmt, ReturnStmt, BlockStmt, ExprStmt, BinaryExpr, UnaryExpr, LiteralExpr, IdentExpr, CallExpr, LiteralKind, StmtKind, ExprKind, stmtSpan, exprSpan};
 import lexer::{Span};
 
 struct FunctionPlan {
@@ -124,7 +124,7 @@ func findPlanForSymbol(plans: Vec<FunctionPlan>, symbol: ResolvedSymbol): int {
     return -1;
 }
 
-func preflightFunction(checked: CheckedProgram, sourcePath: string, moduleId: string, declaration: FuncDeclStmt, declarationIndex: int, id: int): Result<FunctionPlan, string> {
+func preflightFunction(checked: CheckedProgram, sourcePath: string, moduleId: string, declaration: FuncDeclStmt, declarationIndex: int, id: int, isEntrySource: bool): Result<FunctionPlan, string> {
     var maybeSymbol = findFunctionSymbol(checked, sourcePath, moduleId, declarationIndex);
     if maybeSymbol != null {
     var symbol: ResolvedSymbol = maybeSymbol;
@@ -154,7 +154,7 @@ func preflightFunction(checked: CheckedProgram, sourcePath: string, moduleId: st
         return Result.Err(lowerError(sourcePath, declaration.span.start, "function result has unsupported type " + resultType.kind));
     }
     var irResult = toIRType(resultType);
-    if declaration.name == "main" && (declaration.params.len() != 0 || irResult.kind != IRTypeKind::Void) {
+    if isEntrySource && declaration.name == "main" && (declaration.params.len() != 0 || irResult.kind != IRTypeKind::Void) {
         return Result.Err(lowerError(sourcePath, declaration.span.start, "IR entry main must take no parameters and return void"));
     }
     return Result.Ok(FunctionPlan {
@@ -401,7 +401,7 @@ func digitValue(digit: string): int {
     return -1;
 }
 
-func parseIntegerLiteral(text: string): Result<int, string> {
+func parseIntegerLiteral(text: string, negative: bool): Result<int, string> {
     var body = text;
     var base = 10;
     if body.len() > 2 && body.slice(0, 1) == "0" && (body.slice(1, 2) == "x" || body.slice(1, 2) == "X") {
@@ -426,15 +426,29 @@ func parseIntegerLiteral(text: string): Result<int, string> {
             if parsedDigit < 0 || parsedDigit >= base { return Result.Err("invalid digit in integer literal"); }
             sawDigit = true;
             previousWasDigit = true;
-            var maxI64 = 9223372036854775807;
-            if value > (maxI64 - parsedDigit) / base { return Result.Err("integer literal exceeds signed i64 range"); }
-            value = value * base + parsedDigit;
+            if negative {
+                var minI64 = -9223372036854775807 - 1;
+                if value < (minI64 + parsedDigit) / base { return Result.Err("integer literal exceeds signed i64 range"); }
+                value = value * base - parsedDigit;
+            } else {
+                var maxI64 = 9223372036854775807;
+                if value > (maxI64 - parsedDigit) / base { return Result.Err("integer literal exceeds signed i64 range"); }
+                value = value * base + parsedDigit;
+            }
         }
         i = i + 1;
     }
     if !sawDigit { return Result.Err("integer literal has no digits"); }
     if !previousWasDigit { return Result.Err("misplaced underscore in integer literal"); }
     return Result.Ok(value);
+}
+
+func checkedArithmeticInstruction(op: string, resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    if op == "+" { return addCheckedI64(resultId, leftId, rightId, source); }
+    if op == "-" { return subCheckedI64(resultId, leftId, rightId, source); }
+    if op == "*" { return mulCheckedI64(resultId, leftId, rightId, source); }
+    if op == "/" { return divCheckedI64(resultId, leftId, rightId, source); }
+    return remCheckedI64(resultId, leftId, rightId, source);
 }
 
 func appendInstruction(lowerer: FunctionLowerer, instruction: Instruction) {
@@ -456,9 +470,6 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     var symbol: ResolvedSymbol = maybeSymbol;
     if symbol.kind != "Function" || symbol.receiverPassing != "None" || symbol.intrinsicId != "" {
         return failExpression(lowerer, expression, "only calls to top-level source functions are supported");
-    }
-    if symbol.sourcePath != lowerer.sourcePath || symbol.moduleId != lowerer.moduleId {
-        return failExpression(lowerer, expression, "cross-module calls are unsupported by single-unit scalar lowering");
     }
     var targetIndex = findPlanForSymbol(lowerer.plans, symbol);
     if targetIndex < 0 {
@@ -501,6 +512,107 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     return failExpression(lowerer, expression, "checked call metadata is missing");
 }
 
+func lowerShortCircuit(lowerer: FunctionLowerer, binary: BinaryExpr, left: LowerValue): LowerValue {
+    if left.id < 0 || left.ty.kind != IRTypeKind::Bool {
+        lowerer.error = lowerError(lowerer.sourcePath, binary.span.start, "logical operator requires a bool left operand");
+        return LowerValue { id: -1, ty: irVoid() };
+    }
+    var isAnd = binary.op == "&&";
+    var beforeScopes = cloneScopes(lowerer.scopes);
+    var rhsEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var mergeEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var resultParameter = allocateValue(lowerer, irBool());
+    var mergeParams: Vec<IRValue> = [];
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= mergeEnvironment.params.len() { break; }
+        mergeParams.push(mergeEnvironment.params[parameterIndex]);
+        parameterIndex = parameterIndex + 1;
+    }
+    mergeParams.push(resultParameter);
+    var rhsId = reserveBlock(lowerer, rhsEnvironment.params);
+    var mergeId = reserveBlock(lowerer, mergeParams);
+    var shortCircuitValue = allocateValue(lowerer, irBool());
+    var shortCircuitBool = !isAnd;
+    appendInstruction(lowerer, constBool(shortCircuitValue.id, shortCircuitBool, spanRef(lowerer.sourcePath, binary.span)));
+    var shortCircuitArgs: Vec<int> = [];
+    var argumentIndex = 0;
+    loop {
+        if argumentIndex >= mergeEnvironment.args.len() { break; }
+        shortCircuitArgs.push(mergeEnvironment.args[argumentIndex]);
+        argumentIndex = argumentIndex + 1;
+    }
+    shortCircuitArgs.push(shortCircuitValue.id);
+    var trueTarget = rhsId;
+    var trueArgs: Vec<int> = rhsEnvironment.args;
+    var falseTarget = mergeId;
+    var falseArgs: Vec<int> = shortCircuitArgs;
+    if !isAnd {
+        trueTarget = mergeId;
+        trueArgs = shortCircuitArgs;
+        falseTarget = rhsId;
+        falseArgs = rhsEnvironment.args;
+    }
+    finishBlock(lowerer, branch(left.id, trueTarget, trueArgs, falseTarget, falseArgs, spanRef(lowerer.sourcePath, binary.span)));
+
+    lowerer.scopes = cloneScopes(rhsEnvironment.scopes);
+    enterBlock(lowerer, rhsId, rhsEnvironment.params);
+    var right = lowerExpr(lowerer, binary.right);
+    if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+    if right.id < 0 || right.ty.kind != IRTypeKind::Bool {
+        lowerer.error = lowerError(lowerer.sourcePath, exprSpan(binary.right).start, "logical operator requires a bool right operand");
+        return LowerValue { id: -1, ty: irVoid() };
+    }
+    var rhsMergeArgs = blockArgsForKeys(lowerer, lowerer.scopes, mergeEnvironment.bindingKeys, binary.span.start);
+    if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+    rhsMergeArgs.push(right.id);
+    finishBlock(lowerer, jump(mergeId, rhsMergeArgs, spanRef(lowerer.sourcePath, binary.span)));
+
+    lowerer.scopes = cloneScopes(mergeEnvironment.scopes);
+    enterBlock(lowerer, mergeId, mergeParams);
+    return LowerValue { id: resultParameter.id, ty: irBool() };
+}
+
+func lowerUnary(lowerer: FunctionLowerer, expression: Expr, unary: UnaryExpr, resultType: IRType): LowerValue {
+    if unary.op == "!" {
+        var operand = lowerExpr(lowerer, unary.right);
+        if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+        if operand.id < 0 || operand.ty.kind != IRTypeKind::Bool || resultType.kind != IRTypeKind::Bool {
+            return failExpression(lowerer, expression, "logical negation requires a bool operand");
+        }
+        var falseValue = allocateValue(lowerer, irBool());
+        appendInstruction(lowerer, constBool(falseValue.id, false, spanRef(lowerer.sourcePath, unary.span)));
+        var compared = allocateValue(lowerer, irBool());
+        appendInstruction(lowerer, compareBool(compared.id, ir.compareEq(), operand.id, falseValue.id, spanRef(lowerer.sourcePath, unary.span)));
+        return LowerValue { id: compared.id, ty: compared.ty };
+    }
+    if unary.op == "-" {
+        match unary.right {
+            Expr::Literal(literal) => {
+                if literal.kind == LiteralKind::Int {
+                    var parsed = parseIntegerLiteral(literal.text, true);
+                    if parsed.isErr() { return failExpression(lowerer, expression, parsed.unwrapErr()); }
+                    var value = allocateValue(lowerer, irI64());
+                    appendInstruction(lowerer, constI64(value.id, parsed.unwrap(), spanRef(lowerer.sourcePath, unary.span)));
+                    return LowerValue { id: value.id, ty: value.ty };
+                }
+            },
+            _ => {},
+        }
+        var operand = lowerExpr(lowerer, unary.right);
+        if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+        if operand.id < 0 || operand.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::I64 {
+            return failExpression(lowerer, expression, "unary negation requires an i64 operand");
+        }
+        var zero = allocateValue(lowerer, irI64());
+        appendInstruction(lowerer, constI64(zero.id, 0, spanRef(lowerer.sourcePath, unary.span)));
+        var negated = allocateValue(lowerer, irI64());
+        appendInstruction(lowerer, subCheckedI64(negated.id, zero.id, operand.id, spanRef(lowerer.sourcePath, unary.span)));
+        return LowerValue { id: negated.id, ty: negated.ty };
+    }
+    return failExpression(lowerer, expression, "unary operator '" + unary.op + "' is unsupported by scalar IR lowering");
+}
+
 func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
     if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
     var maybeIRType = lowerTypeOfExpr(lowerer, expression);
@@ -512,7 +624,7 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
             var value = allocateValue(lowerer, resultType);
             var span = exprSpan(expression);
             if literal.kind == LiteralKind::Int {
-                var parsedInteger = parseIntegerLiteral(literal.text);
+                var parsedInteger = parseIntegerLiteral(literal.text, false);
                 if parsedInteger.isErr() { return failExpression(lowerer, expression, parsedInteger.unwrapErr()); }
                 appendInstruction(lowerer, constI64(value.id, parsedInteger.unwrap(), spanRef(lowerer.sourcePath, span)));
                 return LowerValue { id: value.id, ty: resultType };
@@ -535,22 +647,28 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
         Expr::Binary(binary) => {
             var left = lowerExpr(lowerer, binary.left);
             if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+            if binary.op == "&&" || binary.op == "||" { return lowerShortCircuit(lowerer, binary, left); }
             var right = lowerExpr(lowerer, binary.right);
             if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
-            if binary.op == "+" {
+            if binary.op == "+" || binary.op == "-" || binary.op == "*" || binary.op == "/" || binary.op == "%" {
                 if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::I64 {
-                    return failExpression(lowerer, expression, "checked addition lowering requires i64 operands and result");
+                    return failExpression(lowerer, expression, "checked arithmetic lowering requires i64 operands and result");
                 }
-                var added = allocateValue(lowerer, irI64());
-                appendInstruction(lowerer, addCheckedI64(added.id, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));
-                return LowerValue { id: added.id, ty: added.ty };
+                var computed = allocateValue(lowerer, irI64());
+                appendInstruction(lowerer, checkedArithmeticInstruction(binary.op, computed.id, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));
+                return LowerValue { id: computed.id, ty: computed.ty };
             }
             if binary.op == "==" || binary.op == "!=" || binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" {
-                if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::Bool {
-                    return failExpression(lowerer, expression, "scalar comparison lowering currently requires i64 operands");
-                }
                 var predicate = ir.compareEq();
                 if binary.op == "!=" { predicate = ir.compareNe(); }
+                if left.ty.kind == IRTypeKind::Bool && right.ty.kind == IRTypeKind::Bool && resultType.kind == IRTypeKind::Bool && (binary.op == "==" || binary.op == "!=") {
+                    var boolCompared = allocateValue(lowerer, irBool());
+                    appendInstruction(lowerer, compareBool(boolCompared.id, predicate, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));
+                    return LowerValue { id: boolCompared.id, ty: boolCompared.ty };
+                }
+                if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::Bool {
+                    return failExpression(lowerer, expression, "scalar comparison lowering requires i64 operands, or bool equality operands");
+                }
                 if binary.op == "<" { predicate = ir.compareSlt(); }
                 if binary.op == "<=" { predicate = ir.compareSle(); }
                 if binary.op == ">" { predicate = ir.compareSgt(); }
@@ -561,6 +679,7 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
             }
             return failExpression(lowerer, expression, "binary operator '" + binary.op + "' is unsupported by scalar IR lowering");
         },
+        Expr::Unary(unary) => { return lowerUnary(lowerer, expression, unary, resultType); },
         Expr::Call(callExpr) => { return lowerCall(lowerer, expression, callExpr); },
         _ => { return failExpression(lowerer, expression, "expression syntax is unsupported by scalar IR lowering"); },
     }
@@ -814,13 +933,14 @@ func lowerAssignment(lowerer: FunctionLowerer, statement: AssignStmt) {
             var right = lowerExpr(lowerer, statement.value);
             if lowerer.error != "" { return; }
             var newValue = right;
-            if statement.op == "+=" {
+            if statement.op == "+=" || statement.op == "-=" || statement.op == "*=" || statement.op == "/=" || statement.op == "%=" {
                 if location.binding.value.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || right.id < 0 {
-                    lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "checked += lowering requires i64 operands");
+                    lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "checked compound assignment requires i64 operands");
                     return;
                 }
                 var sum = allocateValue(lowerer, irI64());
-                finishAssignmentInstruction(lowerer, sum, location.binding.value.id, right.id, statement.span);
+                var operation = statement.op.slice(0, statement.op.len() - 1);
+                finishAssignmentInstruction(lowerer, sum, location.binding.value.id, right.id, operation, statement.span);
                 newValue = LowerValue { id: sum.id, ty: sum.ty };
             } else if statement.op != "=" {
                 lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "assignment operator '" + statement.op + "' is unsupported by scalar IR lowering");
@@ -836,8 +956,8 @@ func lowerAssignment(lowerer: FunctionLowerer, statement: AssignStmt) {
     }
 }
 
-func finishAssignmentInstruction(lowerer: FunctionLowerer, result: IRValue, leftId: int, rightId: int, span: Span) {
-    appendInstruction(lowerer, addCheckedI64(result.id, leftId, rightId, spanRef(lowerer.sourcePath, span)));
+func finishAssignmentInstruction(lowerer: FunctionLowerer, result: IRValue, leftId: int, rightId: int, op: string, span: Span) {
+    appendInstruction(lowerer, checkedArithmeticInstruction(op, result.id, leftId, rightId, spanRef(lowerer.sourcePath, span)));
 }
 
 func lowerStmt(lowerer: FunctionLowerer, statement: Stmt) {
@@ -857,7 +977,7 @@ func lowerStmt(lowerer: FunctionLowerer, statement: Stmt) {
         },
         Stmt::Assign(assignStmt) => { lowerAssignment(lowerer, assignStmt); },
         Stmt::FuncDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "nested function declarations are unsupported by scalar IR lowering"); },
-        Stmt::Import(importStmt) => { lowerer.error = lowerError(lowerer.sourcePath, importStmt.span.start, "imports are unsupported by single-unit scalar IR lowering"); },
+        Stmt::Import(importStmt) => { lowerer.error = lowerError(lowerer.sourcePath, importStmt.span.start, "nested imports are unsupported by scalar IR lowering"); },
         Stmt::StructDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "struct declarations are unsupported by scalar IR lowering"); },
         Stmt::EnumDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "enum declarations are unsupported by scalar IR lowering"); },
         Stmt::While(whileStmt) => { lowerWhile(lowerer, whileStmt); },
@@ -936,42 +1056,48 @@ func lowerFunction(checked: CheckedProgram, plan: FunctionPlan, plans: Vec<Funct
 }
 
 pub func lowerProgram(checked: CheckedProgram): Result<IRProgram, string> {
-    if checked.units.len() != 1 {
-        return Result.Err(lowerError(checked.entryPath, 0, "scalar IR lowering requires exactly one checked source unit"));
+    if checked.units.len() == 0 {
+        return Result.Err(lowerError(checked.entryPath, 0, "checked source graph contains no source units"));
     }
-    var unit = checked.units[0];
     var plans: Vec<FunctionPlan> = [];
-    var statementIndex = 0;
+    var unitIndex = 0;
     loop {
-        if statementIndex >= unit.program.statements.len() { break; }
-        var statement = unit.program.statements[statementIndex];
-        match statement {
-            Stmt::FuncDecl(declaration) => {
-                var maybePlan = preflightFunction(checked, unit.sourcePath, unit.moduleId, declaration, statementIndex, plans.len());
-                if maybePlan.isErr() { return Result.Err(maybePlan.unwrapErr()); }
-                plans.push(maybePlan.unwrap());
-            },
-            Stmt::VarDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level variable declarations are unsupported by scalar IR lowering")); },
-            Stmt::ConstDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level constant declarations are unsupported by scalar IR lowering")); },
-            Stmt::Import(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "imports are unsupported by single-unit scalar IR lowering")); },
-            Stmt::StructDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "struct declarations are unsupported by scalar IR lowering")); },
-            Stmt::EnumDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "enum declarations are unsupported by scalar IR lowering")); },
-            _ => { return Result.Err(lowerError(unit.sourcePath, stmtSpan(statement).start, "only top-level function declarations are supported by scalar IR lowering")); },
+        if unitIndex >= checked.units.len() { break; }
+        var unit = checked.units[unitIndex];
+        var statementIndex = 0;
+        loop {
+            if statementIndex >= unit.program.statements.len() { break; }
+            var statement = unit.program.statements[statementIndex];
+            match statement {
+                Stmt::FuncDecl(declaration) => {
+                    var isEntrySource = unit.sourcePath == checked.entryPath;
+                    var maybePlan = preflightFunction(checked, unit.sourcePath, unit.moduleId, declaration, statementIndex, plans.len(), isEntrySource);
+                    if maybePlan.isErr() { return Result.Err(maybePlan.unwrapErr()); }
+                    plans.push(maybePlan.unwrap());
+                },
+                Stmt::Import(_) => {},
+                Stmt::VarDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level variable declarations are unsupported by scalar IR lowering")); },
+                Stmt::ConstDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level constant declarations are unsupported by scalar IR lowering")); },
+                Stmt::StructDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "struct declarations are unsupported by scalar IR lowering")); },
+                Stmt::EnumDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "enum declarations are unsupported by scalar IR lowering")); },
+                _ => { return Result.Err(lowerError(unit.sourcePath, stmtSpan(statement).start, "only top-level function declarations are supported by scalar IR lowering")); },
+            }
+            statementIndex = statementIndex + 1;
         }
-        statementIndex = statementIndex + 1;
+        unitIndex = unitIndex + 1;
     }
-    if plans.len() == 0 { return Result.Err(lowerError(unit.sourcePath, 0, "checked source unit contains no scalar functions")); }
+    if plans.len() == 0 { return Result.Err(lowerError(checked.entryPath, 0, "checked source graph contains no scalar functions")); }
     var entryFunctionId = -1;
     var planIndex = 0;
     loop {
         if planIndex >= plans.len() { break; }
-        if plans[planIndex].sourceName == "main" {
-            if entryFunctionId >= 0 { return Result.Err(lowerError(unit.sourcePath, plans[planIndex].declaration.span.start, "multiple scalar entry functions named main")); }
+        if plans[planIndex].sourcePath == checked.entryPath && plans[planIndex].sourceName == "main" {
+            if entryFunctionId >= 0 { return Result.Err(lowerError(checked.entryPath, plans[planIndex].declaration.span.start, "multiple scalar entry functions named main")); }
             entryFunctionId = plans[planIndex].id;
         }
         planIndex = planIndex + 1;
     }
-    if entryFunctionId < 0 { return Result.Err(lowerError(unit.sourcePath, 0, "checked source unit has no scalar entry function main")); }
+    if entryFunctionId < 0 { return Result.Err(lowerError(checked.entryPath, 0, "checked source graph has no scalar entry function main")); }
 
     var result = irProgram(entryFunctionId, []);
     var functionIndex = 0;

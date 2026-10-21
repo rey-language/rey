@@ -167,6 +167,53 @@ func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, dept
                 if right.value > 0 && left.value > maximum - right.value { return failAt("signed i64 addition overflow", instruction.source, currentSteps); }
                 if right.value < 0 && left.value < minimum - right.value { return failAt("signed i64 addition overflow", instruction.source, currentSteps); }
                 writeValue(frame, instruction.resultId, left.value + right.value);
+            } else if instruction.kind == InstructionKind::SubCheckedI64 {
+                if instruction.operands.len() != 2 { return failAt("checked subtraction has malformed operands", instruction.source, currentSteps); }
+                var leftSub = readValue(frame, instruction.operands[0]);
+                var rightSub = readValue(frame, instruction.operands[1]);
+                if !leftSub.found || !rightSub.found { return failAt("checked subtraction references an unavailable SSA value", instruction.source, currentSteps); }
+                var maximum = 9223372036854775807;
+                var minimum = -9223372036854775807 - 1;
+                if rightSub.value > 0 && leftSub.value < minimum + rightSub.value { return failAt("signed i64 subtraction overflow", instruction.source, currentSteps); }
+                if rightSub.value < 0 && leftSub.value > maximum + rightSub.value { return failAt("signed i64 subtraction overflow", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, leftSub.value - rightSub.value);
+            } else if instruction.kind == InstructionKind::MulCheckedI64 {
+                if instruction.operands.len() != 2 { return failAt("checked multiplication has malformed operands", instruction.source, currentSteps); }
+                var leftMul = readValue(frame, instruction.operands[0]);
+                var rightMul = readValue(frame, instruction.operands[1]);
+                if !leftMul.found || !rightMul.found { return failAt("checked multiplication references an unavailable SSA value", instruction.source, currentSteps); }
+                var maximum = 9223372036854775807;
+                var minimum = -9223372036854775807 - 1;
+                var multiplicationOverflow = false;
+                if leftMul.value != 0 && rightMul.value != 0 {
+                    if leftMul.value > 0 {
+                        if rightMul.value > 0 && leftMul.value > maximum / rightMul.value { multiplicationOverflow = true; }
+                        else if rightMul.value < 0 && rightMul.value < minimum / leftMul.value { multiplicationOverflow = true; }
+                    } else {
+                        if rightMul.value > 0 && leftMul.value < minimum / rightMul.value { multiplicationOverflow = true; }
+                        else if rightMul.value < 0 && leftMul.value < maximum / rightMul.value { multiplicationOverflow = true; }
+                    }
+                }
+                if multiplicationOverflow { return failAt("signed i64 multiplication overflow", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, leftMul.value * rightMul.value);
+            } else if instruction.kind == InstructionKind::DivCheckedI64 {
+                if instruction.operands.len() != 2 { return failAt("checked division has malformed operands", instruction.source, currentSteps); }
+                var leftDiv = readValue(frame, instruction.operands[0]);
+                var rightDiv = readValue(frame, instruction.operands[1]);
+                if !leftDiv.found || !rightDiv.found { return failAt("checked division references an unavailable SSA value", instruction.source, currentSteps); }
+                if rightDiv.value == 0 { return failAt("integer division by zero", instruction.source, currentSteps); }
+                var minimum = -9223372036854775807 - 1;
+                if leftDiv.value == minimum && rightDiv.value == -1 { return failAt("signed i64 division overflow", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, leftDiv.value / rightDiv.value);
+            } else if instruction.kind == InstructionKind::RemCheckedI64 {
+                if instruction.operands.len() != 2 { return failAt("checked remainder has malformed operands", instruction.source, currentSteps); }
+                var leftRem = readValue(frame, instruction.operands[0]);
+                var rightRem = readValue(frame, instruction.operands[1]);
+                if !leftRem.found || !rightRem.found { return failAt("checked remainder references an unavailable SSA value", instruction.source, currentSteps); }
+                if rightRem.value == 0 { return failAt("integer remainder by zero", instruction.source, currentSteps); }
+                var minimum = -9223372036854775807 - 1;
+                if leftRem.value == minimum && rightRem.value == -1 { return failAt("signed i64 remainder overflow", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, leftRem.value % rightRem.value);
             } else if instruction.kind == InstructionKind::CompareI64 {
                 if instruction.operands.len() != 2 { return failAt("comparison has malformed operands", instruction.source, currentSteps); }
                 var leftCompare = readValue(frame, instruction.operands[0]);
@@ -176,6 +223,17 @@ func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, dept
                 var encodedComparison = 0;
                 if comparisonValue { encodedComparison = 1; }
                 writeValue(frame, instruction.resultId, encodedComparison);
+            } else if instruction.kind == InstructionKind::CompareBool {
+                if instruction.operands.len() != 2 { return failAt("boolean comparison has malformed operands", instruction.source, currentSteps); }
+                var leftBool = readValue(frame, instruction.operands[0]);
+                var rightBool = readValue(frame, instruction.operands[1]);
+                if !leftBool.found || !rightBool.found { return failAt("boolean comparison references an unavailable SSA value", instruction.source, currentSteps); }
+                var comparisonBool = false;
+                if instruction.comparison == CompareI64Predicate::Eq { comparisonBool = leftBool.value == rightBool.value; }
+                else if instruction.comparison == CompareI64Predicate::Ne { comparisonBool = leftBool.value != rightBool.value; }
+                var encodedBoolComparison = 0;
+                if comparisonBool { encodedBoolComparison = 1; }
+                writeValue(frame, instruction.resultId, encodedBoolComparison);
             } else if instruction.kind == InstructionKind::Call {
                 var callArguments: Vec<int> = [];
                 var argumentIndex = 0;

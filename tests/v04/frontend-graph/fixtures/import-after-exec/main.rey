@@ -1,0 +1,9 @@
+if true {
+    println("ready");
+}
+
+import "lib.rey";
+
+func main(): void {
+    return;
+}

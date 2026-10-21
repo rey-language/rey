@@ -89,6 +89,25 @@ func checkI64Operand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: i
     }
 }
 
+func checkBoolOperand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
+    var definition = findDefinition(definitions, valueId);
+    if definition.id >= 0 && definition.ty.kind != IRTypeKind::Bool {
+        errors.push(context + ": operand must have type bool");
+    }
+}
+
+func checkCheckedI64Instruction(errors: Vec<string>, definitions: Vec<ValueDef>, instruction: Instruction, context: string, name: string): void {
+    if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": " + name + " requires an i64 result"); }
+    if instruction.operands.len() != 2 { errors.push(context + ": " + name + " requires exactly two operands"); }
+    if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": " + name + " has invalid unused fields"); }
+    var operandIndex = 0;
+    loop {
+        if operandIndex >= instruction.operands.len() { break; }
+        checkI64Operand(errors, definitions, instruction.operands[operandIndex], context);
+        operandIndex = operandIndex + 1;
+    }
+}
+
 func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
     var errors: Vec<string> = [];
     var functionLabel = "function %f" + function.id.toString() + " (" + functionKeyName(function.key) + ")";
@@ -304,15 +323,15 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 if instruction.immediate != 0 && instruction.immediate != 1 { errors.push(context + ": bool immediate must be 0 or 1"); }
                 if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.bool has invalid unused fields"); }
             } else if instruction.kind == InstructionKind::AddCheckedI64 {
-                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": add.checked.i64 requires an i64 result"); }
-                if operandCount != 2 { errors.push(context + ": add.checked.i64 requires exactly two operands"); }
-                if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": add.checked.i64 has invalid unused fields"); }
-                var addIndex = 0;
-                loop {
-                    if addIndex >= operandCount { break; }
-                    checkI64Operand(errors, definitions, instruction.operands[addIndex], context);
-                    addIndex = addIndex + 1;
-                }
+                checkCheckedI64Instruction(errors, definitions, instruction, context, "add.checked.i64");
+            } else if instruction.kind == InstructionKind::SubCheckedI64 {
+                checkCheckedI64Instruction(errors, definitions, instruction, context, "sub.checked.i64");
+            } else if instruction.kind == InstructionKind::MulCheckedI64 {
+                checkCheckedI64Instruction(errors, definitions, instruction, context, "mul.checked.i64");
+            } else if instruction.kind == InstructionKind::DivCheckedI64 {
+                checkCheckedI64Instruction(errors, definitions, instruction, context, "div.checked.i64");
+            } else if instruction.kind == InstructionKind::RemCheckedI64 {
+                checkCheckedI64Instruction(errors, definitions, instruction, context, "rem.checked.i64");
             } else if instruction.kind == InstructionKind::CompareI64 {
                 if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": compare.i64 requires a bool result"); }
                 if operandCount != 2 { errors.push(context + ": compare.i64 requires exactly two operands"); }
@@ -322,6 +341,17 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                     if compareIndex >= operandCount { break; }
                     checkI64Operand(errors, definitions, instruction.operands[compareIndex], context);
                     compareIndex = compareIndex + 1;
+                }
+            } else if instruction.kind == InstructionKind::CompareBool {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": compare.bool requires a bool result"); }
+                if operandCount != 2 { errors.push(context + ": compare.bool requires exactly two operands"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 { errors.push(context + ": compare.bool has invalid unused fields"); }
+                if instruction.comparison != CompareI64Predicate::Eq && instruction.comparison != CompareI64Predicate::Ne { errors.push(context + ": compare.bool permits only eq or ne predicates"); }
+                var boolCompareIndex = 0;
+                loop {
+                    if boolCompareIndex >= operandCount { break; }
+                    checkBoolOperand(errors, definitions, instruction.operands[boolCompareIndex], context);
+                    boolCompareIndex = boolCompareIndex + 1;
                 }
             } else if instruction.kind == InstructionKind::Call {
                 if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": call has invalid unused fields"); }

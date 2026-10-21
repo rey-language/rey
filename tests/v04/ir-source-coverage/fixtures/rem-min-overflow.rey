@@ -1,0 +1,2 @@
+func main(): void { return; }
+func remainderMinimumByNegativeOne(): int { return -9223372036854775808 % -1; }
