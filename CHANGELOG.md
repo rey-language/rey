@@ -1,6 +1,7 @@
 # Changelog
 
 ## [unreleased] — v0.4 implementation
+- Added the direct Linux x86-64 scalar emitter, SysV ABI and pure Rey ELF64 writer. Execution caught and fixed a division-guard relocation bug. The x64 gate passes 64 source and two direct-IR executables under emulation in the ARM64 Linux VM; the same 64 sources pass on matching Linux arm64 (196 checks per backend). Native x64 hardware and other x64 platforms remain unverified.
 - Extended checked scalar arithmetic, unary/boolean operators, short-circuit CFGs and module-graph function lowering. The expanded native gate passes 238 checks and 59 macOS arm64 executions; an independent 55-program arithmetic oracle passes 227 process checks. Nine emitted ELF programs pass 31 checks in a Linux arm64 VM. These are correctness results, not performance or release claims.
 - Added explicit-seed capability/baseline runners, matched seven-language numeric/vector benchmark fixtures, and a scalar typed IR model with deterministic printing.
 - Added the checked scalar frontend/IR pipeline with conservative effects, mutable local/while CFG lowering, precise memory/runtime ABI contract, and parallel implementation ledger. Scalar integration passes 26 checks. Pure Rey byte encoding and SHA-256 pass standard/binary/padding-boundary cases.

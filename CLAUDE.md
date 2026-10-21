@@ -8,6 +8,7 @@
 - The `codex-v0.4` contributor branch contains an experimental direct ARM64 backend and Mach-O/ELF writer written in Rey. `rey-compiler/ir-main.rey` checks/dumps/evaluates scalar IR; `native-main.rey` emits native images. See `docs/V0.4-PARALLEL-PHASES.md` and `docs/V0.4-NATIVE-CONTRACT.md`.
 - The arithmetic/module-graph gate passes 238 coordinator checks, including 59 real macOS arm64 executions and source builds with compiler tools absent from PATH. A separate Python arithmetic oracle passes 55 generated programs and 227 process records; nine emitted ELF programs pass 31 Linux arm64 VM checks. macOS startup uses dyld/libSystem; images import no Rey C runtime. This is a scalar bring-up slice, not a completed v0.4 or self-hosted runtime.
 - User authorized narrowly scoped GPT-6 Luna medium workers, three at a time, writing their entire assigned code/fixtures before testing. Coordinator owns shared interfaces, integration and Git. Current branch differs from the divergent historical `codex` branch deliberately; preserve both.
+- The new `linux-x64` scalar target and ELF64 writer pass 64 source and two direct-IR executions under x64 emulation in the ARM64 Linux VM. Native x64 hardware, Windows and macOS Intel remain gates. Raw-memory work is a separate next wave, not a collector claim.
 
 ## Core Rules
 

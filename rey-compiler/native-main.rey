@@ -7,16 +7,18 @@ import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::arm64::{emitArm64};
 import native::image::{buildMachOArm64, buildElfArm64};
+import native::x64::{emitProgram};
+import native::image::x64::{buildElfX64};
 import native::bytes::{byteString};
 
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64> [--std-root <directory>]");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>]");
         return;
     }
     if (argv.len() != 7 && argv.len() != 9) || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64> [--std-root <directory>]");
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>]");
         exit(2);
         return;
     }
@@ -29,6 +31,7 @@ func main(): void {
     var os = "";
     if target == "darwin-arm64" { os = "darwin"; }
     else if target == "linux-arm64" { os = "linux"; }
+    else if target == "linux-x64" { os = "linux"; }
     else { eprintln("unsupported native target: " + target); exit(2); return; }
     var path = argv[2];
     var output = argv[4];
@@ -42,11 +45,17 @@ func main(): void {
     var verified = verifyProgram(program);
     if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); return; }
     program = inferEffects(program);
-    var code = emitArm64(program, os);
-    if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
     var image: Result<Vec<int>, string> = Result.Err("unsupported target");
-    if os == "darwin" { image = buildMachOArm64(code.unwrap()); }
-    else { image = buildElfArm64(code.unwrap()); }
+    if target == "linux-x64" {
+        var code = emitProgram(program, target);
+        if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
+        image = buildElfX64(code.unwrap());
+    } else {
+        var code = emitArm64(program, os);
+        if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
+        if os == "darwin" { image = buildMachOArm64(code.unwrap()); }
+        else { image = buildElfArm64(code.unwrap()); }
+    }
     if image.isErr() { eprintln(image.unwrapErr()); exit(1); return; }
     var encoded = byteString(image.unwrap());
     if encoded.isErr() { eprintln(encoded.unwrapErr()); exit(1); return; }

@@ -1,0 +1,76 @@
+import native::x64::{X64Code};
+import native::bytes::{appendU32Le, appendU64Le};
+
+func zeros(bytes: Vec<int>, count: int) {
+    var i = 0;
+    while i < count { bytes.push(0); i += 1; }
+}
+
+func u16(bytes: Vec<int>, value: int) {
+    bytes.push(value % 256);
+    bytes.push(value / 256);
+}
+
+func u32(bytes: Vec<int>, value: int): bool { return appendU32Le(bytes, value).isOk(); }
+func u64(bytes: Vec<int>, value: int): bool { return appendU64Le(bytes, value).isOk(); }
+
+pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
+    if code.bytes.len() == 0 { return Result.Err("x64 ELF: instruction stream is empty"); }
+    if code.entryOffset < 0 || code.entryOffset >= code.bytes.len() {
+        return Result.Err("x64 ELF: entry offset is outside instruction stream");
+    }
+    var i = 0;
+    while i < code.bytes.len() {
+        if code.bytes[i] < 0 || code.bytes[i] > 255 { return Result.Err("x64 ELF: invalid code byte"); }
+        i += 1;
+    }
+    i = 0;
+    while i < code.functions.len() {
+        var function = code.functions[i];
+        if function.functionId < 0 || function.offset < 0 || function.offset >= code.bytes.len() {
+            return Result.Err("x64 ELF: invalid function metadata");
+        }
+        var previous = 0;
+        while previous < i {
+            if code.functions[previous].functionId == function.functionId { return Result.Err("x64 ELF: duplicate function id"); }
+            previous += 1;
+        }
+        i += 1;
+    }
+    var codeOffset = 4096;
+    var base = 4194304;
+    if code.bytes.len() > 9223372036854775807 - base - codeOffset {
+        return Result.Err("x64 ELF: image size overflow");
+    }
+    var size = codeOffset + code.bytes.len();
+    var image: Vec<int> = [127, 69, 76, 70, 2, 1, 1];
+    zeros(image, 9);
+    u16(image, 2);
+    u16(image, 62);
+    if !u32(image, 1) || !u64(image, base + codeOffset + code.entryOffset)
+        || !u64(image, 64) || !u64(image, 0) || !u32(image, 0) {
+        return Result.Err("x64 ELF: header encoding failed");
+    }
+    u16(image, 64);
+    u16(image, 56);
+    u16(image, 2);
+    u16(image, 0);
+    u16(image, 0);
+    u16(image, 0);
+    if !u32(image, 1) || !u32(image, 5) || !u64(image, 0)
+        || !u64(image, base) || !u64(image, base) || !u64(image, size)
+        || !u64(image, size) || !u64(image, 4096) {
+        return Result.Err("x64 ELF: load segment encoding failed");
+    }
+    // explicit non-executable read/write stack
+    if !u32(image, 1685382481) || !u32(image, 6) || !u64(image, 0)
+        || !u64(image, 0) || !u64(image, 0) || !u64(image, 0)
+        || !u64(image, 0) || !u64(image, 16) {
+        return Result.Err("x64 ELF: stack segment encoding failed");
+    }
+    if image.len() != 176 { return Result.Err("x64 ELF: header size mismatch"); }
+    zeros(image, codeOffset - image.len());
+    i = 0;
+    while i < code.bytes.len() { image.push(code.bytes[i]); i += 1; }
+    return Result.Ok(image);
+}

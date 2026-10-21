@@ -1,0 +1,156 @@
+import ir;
+import ir::{IRType, IRValue, IRFunction, BasicBlock, Instruction, EffectSummary, IRProgram, Escape, SourceRef};
+import native::x64::{emitProgram, X64Code};
+import native::bytes::{byteString};
+import native::image::x64::{buildElfX64};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("x64-scalar.rey", 0, 0); }
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func function(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("x64-scalar", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func scalarProgram(): IRProgram {
+    var intTypes: Vec<IRType> = [];
+    var sumParams: Vec<IRValue> = [];
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        intTypes.push(ir.irI64());
+        sumParams.push(ir.irValue(100 + i, ir.irI64()));
+        i = i + 1;
+    }
+    var sumInstructions: Vec<Instruction> = [];
+    sumInstructions.push(ir.addCheckedI64(120, 100, 101, source()));
+    sumInstructions.push(ir.addCheckedI64(121, 120, 102, source()));
+    sumInstructions.push(ir.addCheckedI64(122, 121, 103, source()));
+    sumInstructions.push(ir.addCheckedI64(123, 122, 104, source()));
+    sumInstructions.push(ir.addCheckedI64(124, 123, 105, source()));
+    sumInstructions.push(ir.addCheckedI64(125, 124, 106, source()));
+    sumInstructions.push(ir.addCheckedI64(126, 125, 107, source()));
+    var sumFunction = function(1, "sum8", sumParams, intTypes, ir.irI64(), [ir.basicBlock(0, [], sumInstructions, ir.returnValue(126, source()))]);
+
+    var factorialParameters: Vec<IRValue> = [ir.irValue(200, ir.irI64())];
+    var factorialTypes: Vec<IRType> = [ir.irI64()];
+    var factorialEntry: Vec<Instruction> = [ir.constI64(201, 1, source()), ir.compareI64(202, ir.compareSle(), 200, 201, source())];
+    var factorialRecurse: Vec<Instruction> = [ir.subCheckedI64(203, 200, 201, source()), ir.call(204, ir.irI64(), 2, [203], source()), ir.mulCheckedI64(205, 200, 204, source())];
+    var factorialBlocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], factorialEntry, ir.branch(202, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [], ir.returnValue(201, source())),
+        ir.basicBlock(2, [], factorialRecurse, ir.returnValue(205, source()))
+    ];
+    var factorialFunction = function(2, "factorial", factorialParameters, factorialTypes, ir.irI64(), factorialBlocks);
+
+    var opsParameters: Vec<IRValue> = [ir.irValue(300, ir.irI64()), ir.irValue(301, ir.irI64())];
+    var opsTypes: Vec<IRType> = [ir.irI64(), ir.irI64()];
+    var opsInstructions: Vec<Instruction> = [
+        ir.addCheckedI64(302, 300, 301, source()),
+        ir.subCheckedI64(303, 300, 301, source()),
+        ir.mulCheckedI64(304, 300, 301, source()),
+        ir.divCheckedI64(305, 300, 301, source()),
+        ir.remCheckedI64(306, 300, 301, source()),
+        ir.compareI64(310, ir.compareEq(), 300, 301, source()),
+        ir.compareI64(311, ir.compareNe(), 300, 301, source()),
+        ir.compareI64(312, ir.compareSlt(), 300, 301, source()),
+        ir.compareI64(313, ir.compareSle(), 300, 301, source()),
+        ir.compareI64(314, ir.compareSgt(), 300, 301, source()),
+        ir.compareI64(315, ir.compareSge(), 300, 301, source()),
+        ir.constBool(320, true, source()),
+        ir.constBool(321, false, source()),
+        ir.compareBool(322, ir.compareNe(), 320, 321, source())
+    ];
+    var opsFunction = function(3, "ops", opsParameters, opsTypes, ir.irI64(), [ir.basicBlock(0, [], opsInstructions, ir.returnValue(306, source()))]);
+    var voidFunction = function(4, "voidLeaf", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+
+    var entryInstructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()), ir.constI64(1, 2, source()), ir.constI64(2, 3, source()), ir.constI64(3, 4, source()),
+        ir.constI64(4, 5, source()), ir.constI64(5, 6, source()), ir.constI64(6, 7, source()), ir.constI64(7, 8, source()),
+        ir.call(10, ir.irI64(), 1, [0, 1, 2, 3, 4, 5, 6, 7], source()),
+        ir.constI64(11, 5, source()), ir.call(12, ir.irI64(), 2, [11], source()),
+        ir.constI64(13, 17, source()), ir.constI64(14, 5, source()), ir.call(15, ir.irI64(), 3, [13, 14], source()),
+        ir.call(-1, ir.irVoid(), 4, [], source()),
+        ir.constBool(16, true, source()), ir.constBool(17, false, source()), ir.compareBool(18, ir.compareNe(), 16, 17, source())
+    ];
+    var entryBlocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], entryInstructions, ir.branch(18, 1, [10, 12], 2, [12, 10], source())),
+        ir.basicBlock(1, [ir.irValue(20, ir.irI64()), ir.irValue(21, ir.irI64())], [], ir.jump(3, [20, 21], source())),
+        ir.basicBlock(2, [ir.irValue(22, ir.irI64()), ir.irValue(23, ir.irI64())], [], ir.jump(3, [22, 23], source())),
+        ir.basicBlock(3, [ir.irValue(30, ir.irI64()), ir.irValue(31, ir.irI64())], [ir.addCheckedI64(32, 30, 31, source())], ir.returnValue(32, source()))
+    ];
+    var entryFunction = function(0, "entry", [], [], ir.irI64(), entryBlocks);
+    var functions: Vec<IRFunction> = [entryFunction, sumFunction, factorialFunction, opsFunction, voidFunction];
+    return ir.irProgram(0, functions);
+}
+
+func save(directory: string, name: string, code: X64Code): void {
+    var encoded = byteString(code.bytes);
+    require(encoded.isOk(), name + ": byte encoding failed");
+    var path = directory + "/" + name + ".bin";
+    var bytes = encoded.unwrap();
+    writeFile(path, bytes);
+    require(fileExists(path) && readFile(path) == bytes, name + ": output write check failed");
+    var manifest = "entry=" + code.entryOffset.toString() + "\n";
+    var i = 0;
+    loop {
+        if i >= code.functions.len() { break; }
+        manifest = manifest + "function=" + code.functions[i].functionId.toString() + "," + code.functions[i].offset.toString() + "\n";
+        i = i + 1;
+    }
+    manifest = manifest + "overflow=" + (code.bytes.len() - 12).toString() + "\n";
+    writeFile(directory + "/" + name + ".map", manifest);
+    var image = buildElfX64(code);
+    require(image.isOk(), name + ": ELF image generation failed");
+    var elfBytes = byteString(image.unwrap());
+    require(elfBytes.isOk(), name + ": ELF encoding failed");
+    writeFile(directory + "/" + name + ".elf", elfBytes.unwrap());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "x64 fixture expects an output directory");
+    var program = scalarProgram();
+    var emitted = emitProgram(program, "linux-x64");
+    if emitted.isErr() { eprintln("linux x64 emission failed: " + emitted.unwrapErr()); exit(1); }
+    var code = emitted.unwrap();
+    require(code.entryOffset == 0 && code.bytes.len() > 128 && code.functions.len() == 5, "unexpected x64 image shape");
+    require(code.bytes[0] == 232, "entry wrapper must begin with CALL rel32");
+    save(argv[1], "scalar", code);
+
+    var voidEntry = function(0, "voidEntry", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+    var voidProgram = ir.irProgram(0, [voidEntry]);
+    var voidCode = emitProgram(voidProgram, "linux-x64");
+    require(voidCode.isOk(), "void entry emission failed");
+    save(argv[1], "void", voidCode.unwrap());
+
+    var unsupported = emitProgram(program, "windows-x64");
+    require(unsupported.isErr(), "windows x64 must fail explicitly until process-exit imports exist");
+    var malformed = function(9, "malformed", [], [], ir.irI64(), []);
+    require(emitProgram(ir.irProgram(9, [malformed]), "linux-x64").isErr(), "malformed IR must be rejected");
+    var nineTypes: Vec<IRType> = [];
+    var nineParameters: Vec<IRValue> = [];
+    var i = 0;
+    loop {
+        if i >= 9 { break; }
+        nineTypes.push(ir.irI64());
+        nineParameters.push(ir.irValue(500 + i, ir.irI64()));
+        i = i + 1;
+    }
+    var tooManyArgs = function(10, "tooManyArgs", nineParameters, nineTypes, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(500, source()))]);
+    require(emitProgram(ir.irProgram(10, [tooManyArgs]), "linux-x64").isErr(), "more than eight function arguments must be rejected");
+    println("x64 scalar emission fixtures ready");
+}

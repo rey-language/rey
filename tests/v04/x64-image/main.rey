@@ -1,0 +1,40 @@
+import native::x64::{X64Code, X64FunctionOffset};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, label: string) {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func main(): void {
+    // nop; mov edi,42; mov eax,60; syscall
+    var code = X64Code { bytes: [144, 191, 42, 0, 0, 0, 184, 60, 0, 0, 0, 15, 5], entryOffset: 1,
+        functions: [X64FunctionOffset { functionId: 4, offset: 1 }] };
+    var image = buildElfX64(code);
+    require(image.isOk(), "unaligned x64 instruction offsets are valid");
+    var again = buildElfX64(code);
+    var bytes = byteString(image.unwrap());
+    require(bytes.isOk() && again.isOk(), "binary encoding succeeds");
+    require(bytes.unwrap() == byteString(again.unwrap()).unwrap(), "deterministic image");
+    var argv = args();
+    require(argv.len() == 2, "output path argument required");
+    writeFile(argv[1], bytes.unwrap());
+    require(readFile(argv[1]) == bytes.unwrap(), "file preserves exact bytes");
+    code.entryOffset = -1;
+    require(buildElfX64(code).isErr(), "negative entry rejected");
+    code.entryOffset = code.bytes.len();
+    require(buildElfX64(code).isErr(), "outside entry rejected");
+    code.entryOffset = 1;
+    code.functions.push(X64FunctionOffset { functionId: 4, offset: 2 });
+    require(buildElfX64(code).isErr(), "duplicate function ids rejected");
+    code.functions = [X64FunctionOffset { functionId: -1, offset: 1 }];
+    require(buildElfX64(code).isErr(), "negative function id rejected");
+    code.functions = [X64FunctionOffset { functionId: 1, offset: code.bytes.len() }];
+    require(buildElfX64(code).isErr(), "outside function offset rejected");
+    code.functions = [];
+    code.bytes.set(0, 256);
+    require(buildElfX64(code).isErr(), "invalid byte rejected");
+    code.bytes = [];
+    require(buildElfX64(code).isErr(), "empty code rejected");
+    println("x64 ELF image fixtures passed");
+}
