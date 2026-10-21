@@ -1,0 +1,6 @@
+func main(): void {
+    var safe: int = 19 + 23;
+    var deadOverflow: int = 9223372036854775807 + 1;
+    var deadDivide: int = 1 / 0;
+    return;
+}

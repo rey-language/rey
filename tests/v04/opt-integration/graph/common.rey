@@ -1,0 +1,3 @@
+pub func bump(input: int): int {
+    return input + 1;
+}

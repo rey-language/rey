@@ -1,0 +1,242 @@
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, FunctionKey, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, SourceRef, Terminator, constBool, constI64};
+import ir::verify::{VerifyResult, verifyProgram};
+
+struct KnownValue {
+    pub id: int,
+    pub ty: IRTypeKind,
+    pub value: int,
+}
+
+struct KnownLookup {
+    pub found: bool,
+    pub ty: IRTypeKind,
+    pub value: int,
+}
+
+struct FoldResult {
+    pub folded: bool,
+    pub traps: bool,
+    pub value: int,
+    pub ty: IRTypeKind,
+}
+
+func knownLookup(values: Vec<KnownValue>, id: int): KnownLookup {
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if values[i].id == id {
+            return KnownLookup { found: true, ty: values[i].ty, value: values[i].value };
+        }
+        i = i + 1;
+    }
+    return KnownLookup { found: false, ty: IRTypeKind::Void, value: 0 };
+}
+
+func rememberKnown(values: Vec<KnownValue>, id: int, ty: IRTypeKind, value: int) {
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if values[i].id == id {
+            values.set(i, KnownValue { id: id, ty: ty, value: value });
+            return;
+        }
+        i = i + 1;
+    }
+    values.push(KnownValue { id: id, ty: ty, value: value });
+}
+
+func i64Bounds(): Vec<int> {
+    return [-9223372036854775807 - 1, 9223372036854775807];
+}
+
+func foldI64(kind: InstructionKind, left: int, right: int): FoldResult {
+    var bounds = i64Bounds();
+    var minimum = bounds[0];
+    var maximum = bounds[1];
+    if kind == InstructionKind::AddCheckedI64 {
+        if right > 0 && left > maximum - right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        if right < 0 && left < minimum - right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        return FoldResult { folded: true, traps: false, value: left + right, ty: IRTypeKind::I64 };
+    }
+    if kind == InstructionKind::SubCheckedI64 {
+        if right < 0 && left > maximum + right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        if right > 0 && left < minimum + right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        return FoldResult { folded: true, traps: false, value: left - right, ty: IRTypeKind::I64 };
+    }
+    if kind == InstructionKind::MulCheckedI64 {
+        if left == 0 || right == 0 { return FoldResult { folded: true, traps: false, value: 0, ty: IRTypeKind::I64 }; }
+        if left > 0 {
+            if right > 0 && left > maximum / right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+            if right < 0 && right < minimum / left { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        } else {
+            if right > 0 && left < minimum / right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+            if right < 0 && left < maximum / right { return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 }; }
+        }
+        return FoldResult { folded: true, traps: false, value: left * right, ty: IRTypeKind::I64 };
+    }
+    if kind == InstructionKind::DivCheckedI64 || kind == InstructionKind::RemCheckedI64 {
+        if right == 0 || (left == minimum && right == -1) {
+            return FoldResult { folded: false, traps: true, value: 0, ty: IRTypeKind::I64 };
+        }
+        if kind == InstructionKind::DivCheckedI64 {
+            return FoldResult { folded: true, traps: false, value: left / right, ty: IRTypeKind::I64 };
+        }
+        return FoldResult { folded: true, traps: false, value: left % right, ty: IRTypeKind::I64 };
+    }
+    return FoldResult { folded: false, traps: false, value: 0, ty: IRTypeKind::I64 };
+}
+
+func compareI64Values(predicate: CompareI64Predicate, left: int, right: int): bool {
+    if predicate == CompareI64Predicate::Eq { return left == right; }
+    if predicate == CompareI64Predicate::Ne { return left != right; }
+    if predicate == CompareI64Predicate::Slt { return left < right; }
+    if predicate == CompareI64Predicate::Sle { return left <= right; }
+    if predicate == CompareI64Predicate::Sgt { return left > right; }
+    return left >= right;
+}
+
+func foldInstruction(instructionValue: Instruction, values: Vec<KnownValue>): FoldResult {
+    if instructionValue.kind == InstructionKind::AddCheckedI64 || instructionValue.kind == InstructionKind::SubCheckedI64 || instructionValue.kind == InstructionKind::MulCheckedI64 || instructionValue.kind == InstructionKind::DivCheckedI64 || instructionValue.kind == InstructionKind::RemCheckedI64 {
+        var left = knownLookup(values, instructionValue.operands[0]);
+        var right = knownLookup(values, instructionValue.operands[1]);
+        if left.found && right.found && left.ty == IRTypeKind::I64 && right.ty == IRTypeKind::I64 {
+            return foldI64(instructionValue.kind, left.value, right.value);
+        }
+    } else if instructionValue.kind == InstructionKind::CompareI64 || instructionValue.kind == InstructionKind::CompareBool {
+        var left = knownLookup(values, instructionValue.operands[0]);
+        var right = knownLookup(values, instructionValue.operands[1]);
+        var wantedType = IRTypeKind::I64;
+        if instructionValue.kind == InstructionKind::CompareBool { wantedType = IRTypeKind::Bool; }
+        if left.found && right.found && left.ty == wantedType && right.ty == wantedType {
+            var answer = false;
+            if wantedType == IRTypeKind::Bool {
+                if instructionValue.comparison == CompareI64Predicate::Eq { answer = left.value == right.value; }
+                else { answer = left.value != right.value; }
+            } else {
+                answer = compareI64Values(instructionValue.comparison, left.value, right.value);
+            }
+            var encoded = 0;
+            if answer { encoded = 1; }
+            return FoldResult { folded: true, traps: false, value: encoded, ty: IRTypeKind::Bool };
+        }
+    }
+    return FoldResult { folded: false, traps: false, value: 0, ty: IRTypeKind::Void };
+}
+
+func copyType(ty: IRType): IRType { return IRType { kind: ty.kind }; }
+func copySource(source: SourceRef): SourceRef { return SourceRef { unitId: source.unitId, start: source.start, end: source.end }; }
+func copyKey(key: FunctionKey): FunctionKey { return FunctionKey { module: key.module, owner: key.owner, name: key.name }; }
+
+func copyTypes(source: Vec<IRType>): Vec<IRType> {
+    var output: Vec<IRType> = [];
+    var i = 0;
+    loop { if i >= source.len() { break; } output.push(copyType(source[i])); i = i + 1; }
+    return output;
+}
+
+func copyEscapes(source: Vec<Escape>): Vec<Escape> {
+    var output: Vec<Escape> = [];
+    var i = 0;
+    loop { if i >= source.len() { break; } output.push(source[i]); i = i + 1; }
+    return output;
+}
+
+func copyIds(source: Vec<int>): Vec<int> {
+    var output: Vec<int> = [];
+    var i = 0;
+    loop { if i >= source.len() { break; } output.push(source[i]); i = i + 1; }
+    return output;
+}
+
+func copyValues(source: Vec<IRValue>): Vec<IRValue> {
+    var output: Vec<IRValue> = [];
+    var i = 0;
+    loop { if i >= source.len() { break; } output.push(IRValue { id: source[i].id, ty: copyType(source[i].ty) }); i = i + 1; }
+    return output;
+}
+
+func copyInstruction(instructionValue: Instruction): Instruction {
+    return Instruction { kind: instructionValue.kind, resultId: instructionValue.resultId, ty: copyType(instructionValue.ty), operands: copyIds(instructionValue.operands), immediate: instructionValue.immediate, comparison: instructionValue.comparison, functionId: instructionValue.functionId, source: copySource(instructionValue.source) };
+}
+
+func copyTerminator(term: Terminator): Terminator {
+    return Terminator { kind: term.kind, targetBlockId: term.targetBlockId, targetArgs: copyIds(term.targetArgs), conditionValueId: term.conditionValueId, trueTargetBlockId: term.trueTargetBlockId, trueArgs: copyIds(term.trueArgs), falseTargetBlockId: term.falseTargetBlockId, falseArgs: copyIds(term.falseArgs), valueId: term.valueId, source: copySource(term.source) };
+}
+
+func copyEffects(effects: EffectSummary): EffectSummary {
+    return EffectSummary { readsMemory: effects.readsMemory, writesMemory: effects.writesMemory, allocates: effects.allocates, mayBlock: effects.mayBlock, synchronizes: effects.synchronizes, unresolvedCallees: effects.unresolvedCallees, argumentEscapes: copyEscapes(effects.argumentEscapes), resultEscape: effects.resultEscape };
+}
+
+func copyBlock(block: BasicBlock): BasicBlock {
+    var instructions: Vec<Instruction> = [];
+    var i = 0;
+    loop { if i >= block.instructions.len() { break; } instructions.push(copyInstruction(block.instructions[i])); i = i + 1; }
+    return BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) };
+}
+
+func copyFunction(function: IRFunction): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var i = 0;
+    loop { if i >= function.blocks.len() { break; } blocks.push(copyBlock(function.blocks[i])); i = i + 1; }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: copyType(function.signature.returnType) }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+func copyProgram(program: IRProgram): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } functions.push(copyFunction(program.functions[i])); i = i + 1; }
+    return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+}
+
+func verifyError(result: VerifyResult, label: string): string {
+    return label + ": " + result.errors.join("\n");
+}
+
+func foldBlock(block: BasicBlock): BasicBlock {
+    var known: Vec<KnownValue> = [];
+    var instructions: Vec<Instruction> = [];
+    var i = 0;
+    loop {
+        if i >= block.instructions.len() { break; }
+        var current = block.instructions[i];
+        if current.kind == InstructionKind::ConstI64 {
+            instructions.push(copyInstruction(current));
+            rememberKnown(known, current.resultId, IRTypeKind::I64, current.immediate);
+        } else if current.kind == InstructionKind::ConstBool {
+            instructions.push(copyInstruction(current));
+            rememberKnown(known, current.resultId, IRTypeKind::Bool, current.immediate);
+        } else {
+            var folded = foldInstruction(current, known);
+            if folded.folded && folded.ty == IRTypeKind::I64 {
+                instructions.push(constI64(current.resultId, folded.value, copySource(current.source)));
+                rememberKnown(known, current.resultId, IRTypeKind::I64, folded.value);
+            } else if folded.folded && folded.ty == IRTypeKind::Bool {
+                instructions.push(constBool(current.resultId, folded.value != 0, copySource(current.source)));
+                rememberKnown(known, current.resultId, IRTypeKind::Bool, folded.value);
+            } else {
+                instructions.push(copyInstruction(current));
+            }
+        }
+        i = i + 1;
+    }
+    return BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) };
+}
+
+func foldFunction(function: IRFunction): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var i = 0;
+    loop { if i >= function.blocks.len() { break; } blocks.push(foldBlock(function.blocks[i])); i = i + 1; }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: copyType(function.signature.returnType) }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+pub func foldConstants(program: IRProgram): Result<IRProgram, string> {
+    var inputVerification = verifyProgram(program);
+    if !inputVerification.ok { return Result.Err(verifyError(inputVerification, "input IR verification failed")); }
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } functions.push(foldFunction(program.functions[i])); i = i + 1; }
+    var output = IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+    var outputVerification = verifyProgram(output);
+    if !outputVerification.ok { return Result.Err(verifyError(outputVerification, "folded IR verification failed")); }
+    return Result.Ok(output);
+}

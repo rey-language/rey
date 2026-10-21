@@ -1,0 +1,8 @@
+import std::sample;
+
+func main(): void {
+    if sample.answer() != 9 {
+        var failure = 1 / 0;
+    }
+    return;
+}

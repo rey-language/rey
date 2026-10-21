@@ -1,0 +1,4 @@
+func main(): void {
+    var failure: int = 3037000500 * 3037000500;
+    return;
+}

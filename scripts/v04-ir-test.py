@@ -91,7 +91,7 @@ def main() -> int:
 
     if version["passed"]:
         suites = ["ir-core", "frontend", "ir-verify", "ir-lower", "ir-loops", "ir-eval", "native-bytes",
-                  "frontend-graph", "ir-arithmetic", "ir-source-coverage"]
+                  "frontend-graph", "ir-arithmetic", "ir-source-coverage", "ir-liveness"]
         if args.native:
             suites += ["arm64", "native-image", "native-crosscheck", "arm64-arithmetic"]
         markers = {"ir-core": "program entry=", "frontend": "v04 frontend ok",
@@ -101,7 +101,7 @@ def main() -> int:
                    "native-crosscheck": "native crosscheck images ready",
                    "frontend-graph": "v04 frontend graph ok",
                    "ir-arithmetic": "v04 scalar arithmetic verification and evaluation passed",
-                   "ir-source-coverage": "v04 ir source coverage ok",
+                   "ir-source-coverage": "v04 ir source coverage ok", "ir-liveness": "v04 ir liveness ok",
                    "arm64-arithmetic": "arm64 arithmetic fixture images ready"}
         for suite in suites:
             fixture_source = ROOT / "tests/v04" / suite / "fixtures" if suite in ("frontend-graph", "ir-source-coverage") else None

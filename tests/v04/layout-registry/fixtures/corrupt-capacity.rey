@@ -1,0 +1,7 @@
+import layout;
+
+func main(): void {
+    var registry = layout.layoutRegistryCreate(0);
+    __reyRawStoreI64(__reyRawOffset(registry, 8), -1);
+    layout.layoutCount(registry);
+}

@@ -6,23 +6,37 @@ import ir::lower::{lowerProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import ir::eval::{evaluateProgram};
+import ir::optimize::scalar::{foldConstants};
 
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-ir <check|dump|eval> <source.rey> [--std-root <directory>]");
+        println("Usage: rey-ir <check|dump|eval> <source.rey> [--std-root <directory>] [--fold-constants]");
         return;
     }
-    if argv.len() != 3 && argv.len() != 5 {
-        eprintln("Usage: rey-ir <check|dump|eval> <source.rey> [--std-root <directory>]");
+    if argv.len() < 3 {
+        eprintln("Usage: rey-ir <check|dump|eval> <source.rey> [--std-root <directory>] [--fold-constants]");
         exit(2);
         return;
     }
     var command = argv[1];
     var stdRoot = "";
-    if argv.len() == 5 {
-        if argv[3] != "--std-root" { eprintln("expected --std-root <directory>"); exit(2); return; }
-        stdRoot = argv[4];
+    var hasStdRoot = false;
+    var folding = false;
+    var optionIndex = 3;
+    while optionIndex < argv.len() {
+        if argv[optionIndex] == "--std-root" && !hasStdRoot {
+            if optionIndex + 1 >= argv.len() { eprintln("expected --std-root <directory>"); exit(2); return; }
+            if argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") { eprintln("expected --std-root <directory>"); exit(2); return; }
+            stdRoot = argv[optionIndex + 1];
+            hasStdRoot = true;
+            optionIndex = optionIndex + 2;
+        } else if argv[optionIndex] == "--fold-constants" && !folding {
+            folding = true;
+            optionIndex = optionIndex + 1;
+        } else {
+            eprintln("unknown or duplicate option: " + argv[optionIndex]); exit(2); return;
+        }
     }
     if command != "check" && command != "dump" && command != "eval" {
         eprintln("unknown scalar IR command: " + command);
@@ -55,6 +69,11 @@ func main(): void {
         return;
     }
     program = inferEffects(program);
+    if folding {
+        var folded = foldConstants(program);
+        if folded.isErr() { eprintln(folded.unwrapErr()); exit(1); return; }
+        program = folded.unwrap();
+    }
     var analyzed = verifyProgram(program);
     if !analyzed.ok {
         eprintln(analyzed.errors.join("\n"));

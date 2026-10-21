@@ -1,0 +1,100 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64, Arm64Code};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func exercise(fixtures: string, sourceDirectory: string, outputDirectory: string, name: string, expectedCode: int): void {
+    var entryPath = sourceDirectory + "/main.rey";
+    var runtimePath = sourceDirectory + "/layout/main.rey";
+    writeFile(entryPath, readFile(fixtures + "/" + name + ".rey"));
+    if name == "valid" {
+        var ordinary = checkSourceFileGraph(entryPath, "");
+        require(ordinary.isErr(), "ordinary checking must not authorize raw runtime units");
+    }
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [runtimePath, entryPath]);
+    if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var evaluated = evaluateProgram(program, 2000000, 64);
+    if expectedCode == 0 {
+        require(evaluated.ok && evaluated.isVoid, name + ": valid fixture must evaluate to void; evaluator=" + evaluated.error + " isVoid=" + evaluated.isVoid.toString());
+    } else {
+        require(!evaluated.ok, name + ": invalid operation must fail");
+        require(evaluated.error.contains("trusted runtime failure code " + expectedCode.toString()), name + ": evaluator must preserve raw failure code " + expectedCode.toString());
+    }
+
+    var darwin: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/darwin-" + name, macho.unwrap(), name + " Darwin");
+
+    var linux: Result<Arm64Code, string> = emitArm64(program, "linux");
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-" + name, elf.unwrap(), name + " Linux");
+    println("layout-registry-case " + name + " " + expectedCode.toString());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 4 || argv.len() == 5, "expected fixture directory, staged source directory, output directory, and optional fixture name");
+    var fixtures = argv[1];
+    var sourceDirectory = argv[2];
+    var outputDirectory = argv[3];
+    var selected = "";
+    if argv.len() == 5 { selected = argv[4]; }
+    var matched = false;
+    if selected == "" || selected == "valid" { exercise(fixtures, sourceDirectory, outputDirectory, "valid", 0); matched = true; }
+    if selected == "" || selected == "capacity-negative" { exercise(fixtures, sourceDirectory, outputDirectory, "capacity-negative", 1001); matched = true; }
+    if selected == "" || selected == "capacity-over-id-range" { exercise(fixtures, sourceDirectory, outputDirectory, "capacity-over-id-range", 1001); matched = true; }
+    if selected == "" || selected == "descriptor-size-overflow" { exercise(fixtures, sourceDirectory, outputDirectory, "descriptor-size-overflow", 1001); matched = true; }
+    if selected == "" || selected == "payload-negative" { exercise(fixtures, sourceDirectory, outputDirectory, "payload-negative", 1002); matched = true; }
+    if selected == "" || selected == "reference-count-negative" { exercise(fixtures, sourceDirectory, outputDirectory, "reference-count-negative", 1002); matched = true; }
+    if selected == "" || selected == "null-reference-offsets" { exercise(fixtures, sourceDirectory, outputDirectory, "null-reference-offsets", 1002); matched = true; }
+    if selected == "" || selected == "duplicate-offsets" { exercise(fixtures, sourceDirectory, outputDirectory, "duplicate-offsets", 1002); matched = true; }
+    if selected == "" || selected == "unsorted-offsets" { exercise(fixtures, sourceDirectory, outputDirectory, "unsorted-offsets", 1002); matched = true; }
+    if selected == "" || selected == "negative-offset" { exercise(fixtures, sourceDirectory, outputDirectory, "negative-offset", 1002); matched = true; }
+    if selected == "" || selected == "unaligned-offset" { exercise(fixtures, sourceDirectory, outputDirectory, "unaligned-offset", 1002); matched = true; }
+    if selected == "" || selected == "out-of-bounds-offset" { exercise(fixtures, sourceDirectory, outputDirectory, "out-of-bounds-offset", 1002); matched = true; }
+    if selected == "" || selected == "reference-count-exceeds-payload" { exercise(fixtures, sourceDirectory, outputDirectory, "reference-count-exceeds-payload", 1002); matched = true; }
+    if selected == "" || selected == "id-negative" { exercise(fixtures, sourceDirectory, outputDirectory, "id-negative", 1003); matched = true; }
+    if selected == "" || selected == "id-zero" { exercise(fixtures, sourceDirectory, outputDirectory, "id-zero", 1003); matched = true; }
+    if selected == "" || selected == "id-too-large" { exercise(fixtures, sourceDirectory, outputDirectory, "id-too-large", 1003); matched = true; }
+    if selected == "" || selected == "index-negative" { exercise(fixtures, sourceDirectory, outputDirectory, "index-negative", 1004); matched = true; }
+    if selected == "" || selected == "index-too-large" { exercise(fixtures, sourceDirectory, outputDirectory, "index-too-large", 1004); matched = true; }
+    if selected == "" || selected == "full-registry" { exercise(fixtures, sourceDirectory, outputDirectory, "full-registry", 1005); matched = true; }
+    if selected == "" || selected == "zero-capacity-full" { exercise(fixtures, sourceDirectory, outputDirectory, "zero-capacity-full", 1005); matched = true; }
+    if selected == "" || selected == "corrupt-magic" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-magic", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-capacity" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-capacity", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-count" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-count", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-length" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-length", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-reserved" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-reserved", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-descriptor-payload" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-descriptor-payload", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-descriptor-count" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-descriptor-count", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-descriptor-reserved" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-descriptor-reserved", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-descriptor-offset" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-descriptor-offset", 1006); matched = true; }
+    if selected == "" || selected == "corrupt-duplicate-slot" { exercise(fixtures, sourceDirectory, outputDirectory, "corrupt-duplicate-slot", 1006); matched = true; }
+    require(matched, "unknown fixture name: " + selected);
+    if selected == "" { println("layout registry source, IR, evaluator, and ARM64 fixtures passed"); }
+}

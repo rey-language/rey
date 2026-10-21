@@ -1,0 +1,313 @@
+import ir;
+import ir::{IRType, IRValue, IRFunction, BasicBlock, Instruction, EffectSummary, IRProgram, Escape, SourceRef};
+import ir::liveness::{ProgramLiveness, FunctionLiveness, BlockLiveness, InstructionLiveness, analyzeProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(start: int): SourceRef {
+    return ir.sourceRef("liveness-fixture.rey", start, start + 1);
+}
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+}
+
+func makeFunction(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("liveness-fixture", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func expectSet(actual: Vec<int>, expected: Vec<int>, label: string): void {
+    require(actual.len() == expected.len(), label + ": set length mismatch");
+    var i = 0;
+    loop {
+        if i >= actual.len() { break; }
+        require(actual[i] == expected[i], label + ": set differs at sorted index " + i.toString());
+        if i > 0 { require(actual[i - 1] < actual[i], label + ": set is not sorted and unique"); }
+        i = i + 1;
+    }
+}
+
+func expectedTransfer(instruction: Instruction, after: Vec<int>): Vec<int> {
+    var before: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= after.len() { break; }
+        if after[i] != instruction.resultId { before.push(after[i]); }
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= instruction.operands.len() { break; }
+        var valueId = instruction.operands[i];
+        var insertAt = before.len();
+        var j = 0;
+        loop {
+            if j >= before.len() { break; }
+            if before[j] == valueId { insertAt = -1; break; }
+            if before[j] > valueId { insertAt = j; break; }
+            j = j + 1;
+        }
+        if insertAt >= 0 {
+            var ordered: Vec<int> = [];
+            var k = 0;
+            loop {
+                if k >= before.len() { break; }
+                if k == insertAt { ordered.push(valueId); }
+                ordered.push(before[k]);
+                k = k + 1;
+            }
+            if insertAt == before.len() { ordered.push(valueId); }
+            before = ordered;
+        }
+        i = i + 1;
+    }
+    return before;
+}
+
+func findFunction(result: ProgramLiveness, functionId: int): FunctionLiveness {
+    var i = 0;
+    loop {
+        if i >= result.functions.len() { break; }
+        if result.functions[i].functionId == functionId { return result.functions[i]; }
+        i = i + 1;
+    }
+    return FunctionLiveness { functionId: -1, blocks: [] };
+}
+
+func findBlock(function: FunctionLiveness, blockId: int): BlockLiveness {
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].blockId == blockId { return function.blocks[i]; }
+        i = i + 1;
+    }
+    return BlockLiveness { blockId: -1, liveIn: [], liveOut: [], instructions: [], liveAtTerminator: [] };
+}
+
+func findInstruction(block: BlockLiveness, instructionIndex: int): InstructionLiveness {
+    var i = 0;
+    loop {
+        if i >= block.instructions.len() { break; }
+        if block.instructions[i].instructionIndex == instructionIndex { return block.instructions[i]; }
+        i = i + 1;
+    }
+    return InstructionLiveness { instructionIndex: -1, liveBefore: [], liveAfter: [] };
+}
+
+func checkInternalConsistency(program: IRProgram, result: ProgramLiveness): void {
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var inputFunction = program.functions[functionIndex];
+        var outputFunction = findFunction(result, inputFunction.id);
+        require(outputFunction.functionId == inputFunction.id, "missing function result");
+        var blockIndex = 0;
+        loop {
+            if blockIndex >= inputFunction.blocks.len() { break; }
+            var inputBlock = inputFunction.blocks[blockIndex];
+            var outputBlock = findBlock(outputFunction, inputBlock.id);
+            require(outputBlock.blockId == inputBlock.id, "missing block result");
+            require(outputBlock.instructions.len() == inputBlock.instructions.len(), "instruction snapshot count mismatch");
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= inputBlock.instructions.len() { break; }
+                var snapshot = findInstruction(outputBlock, instructionIndex);
+                require(snapshot.instructionIndex == instructionIndex, "missing instruction snapshot");
+                expectSet(snapshot.liveBefore, expectedTransfer(inputBlock.instructions[instructionIndex], snapshot.liveAfter), "independent transfer check");
+                if instructionIndex + 1 < outputBlock.instructions.len() {
+                    var nextSnapshot = findInstruction(outputBlock, instructionIndex + 1);
+                    expectSet(snapshot.liveAfter, nextSnapshot.liveBefore, "instruction chain");
+                } else {
+                    expectSet(snapshot.liveAfter, outputBlock.liveAtTerminator, "last instruction to terminator");
+                }
+                instructionIndex = instructionIndex + 1;
+            }
+            if outputBlock.instructions.len() == 0 {
+                expectSet(outputBlock.liveIn, outputBlock.liveAtTerminator, "empty block transfer");
+            } else {
+                expectSet(outputBlock.liveIn, outputBlock.instructions[0].liveBefore, "block input transfer");
+            }
+            blockIndex = blockIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+}
+
+func fixtureProgram(): IRProgram {
+    var entryInstructions: Vec<Instruction> = [
+        ir.constBool(11, true, source(10)),
+        ir.constI64(21, 1, source(20)),
+        ir.constI64(22, 2, source(30)),
+        ir.constI64(23, 3, source(40)),
+        ir.constI64(24, 4, source(50)),
+        ir.addCheckedI64(25, 23, 24, source(60))
+    ];
+    var entryBlocks: Vec<BasicBlock> = [
+        ir.basicBlock(900, [], entryInstructions, ir.branch(11, 100, [21, 22, 23], 500, [22, 21, 24], source(70))),
+        ir.basicBlock(100, [ir.irValue(31, ir.irI64()), ir.irValue(32, ir.irI64()), ir.irValue(33, ir.irI64())], [ir.constI64(40, 9, source(80))], ir.jump(9000, [32, 31, 33], source(90))),
+        ir.basicBlock(500, [ir.irValue(41, ir.irI64()), ir.irValue(42, ir.irI64()), ir.irValue(43, ir.irI64())], [], ir.jump(9000, [41, 42, 43], source(100))),
+        ir.basicBlock(9000, [ir.irValue(51, ir.irI64()), ir.irValue(52, ir.irI64()), ir.irValue(53, ir.irI64())], [ir.addCheckedI64(60, 51, 52, source(110))], ir.returnValue(60, source(120)))
+    ];
+    var entry = makeFunction(0, "diamond", [], [], ir.irI64(), entryBlocks);
+
+    var loopParameters: Vec<IRValue> = [ir.irValue(111, ir.irI64())];
+    var loopTypes: Vec<IRType> = [ir.irI64()];
+    var loopEntry = ir.basicBlock(0, [], [ir.constI64(150, 1, source(130)), ir.constI64(151, 10, source(140))], ir.jump(40, [111], source(150)));
+    var loopBody = ir.basicBlock(40, [ir.irValue(801, ir.irI64())], [
+        ir.addCheckedI64(802, 801, 150, source(160)),
+        ir.compareI64(803, ir.compareSlt(), 802, 151, source(170))
+    ], ir.branch(803, 40, [802], 80, [], source(180)));
+    var loopExit = ir.basicBlock(80, [], [], ir.returnValue(802, source(190)));
+    var loopFunction = makeFunction(1, "loop", loopParameters, loopTypes, ir.irI64(), [loopEntry, loopBody, loopExit]);
+
+    var recursiveParameters: Vec<IRValue> = [ir.irValue(700, ir.irI64())];
+    var recursiveTypes: Vec<IRType> = [ir.irI64()];
+    var recursiveBlock = ir.basicBlock(17, [], [ir.call(800, ir.irI64(), 2, [700], source(200))], ir.returnValue(700, source(210)));
+    var recursiveFunction = makeFunction(2, "recursive", recursiveParameters, recursiveTypes, ir.irI64(), [recursiveBlock]);
+
+    var rawParameters: Vec<IRValue> = [ir.irValue(901, ir.irRawAddress())];
+    var rawTypes: Vec<IRType> = [ir.irRawAddress()];
+    var rawFunction = makeFunction(3, "rawIdentity", rawParameters, rawTypes, ir.irRawAddress(), [ir.basicBlock(300, [], [], ir.returnValue(901, source(220)))]);
+
+    var rawCallerParameters: Vec<IRValue> = [ir.irValue(902, ir.irRawAddress())];
+    var rawCallerTypes: Vec<IRType> = [ir.irRawAddress()];
+    var rawCaller = makeFunction(4, "rawCaller", rawCallerParameters, rawCallerTypes, ir.irRawAddress(), [ir.basicBlock(301, [], [ir.call(903, ir.irRawAddress(), 3, [902], source(230))], ir.returnValue(903, source(240)))]);
+
+    var rawOpParameters: Vec<IRValue> = [ir.irValue(1001, ir.irRawAddress()), ir.irValue(1002, ir.irI64())];
+    var rawOpTypes: Vec<IRType> = [ir.irRawAddress(), ir.irI64()];
+    var rawInstructions: Vec<Instruction> = [
+        ir.rawNull(1400, source(250)),
+        ir.rawMap(1401, 1002, source(260)),
+        ir.rawOffset(1402, 1401, 1002, source(270)),
+        ir.rawLoadI64(1403, 1402, source(280)),
+        ir.rawStoreI64(1402, 1403, source(290)),
+        ir.rawLoadByte(1404, 1402, source(300)),
+        ir.rawStoreByte(1402, 1404, source(310)),
+        ir.rawEqual(1405, 1401, 1402, source(320)),
+        ir.rawLoadAddress(1406, 1401, source(330)),
+        ir.rawStoreAddress(1401, 1406, source(340)),
+        ir.rawUnmap(1401, 1002, source(350)),
+        ir.rawFail(1002, source(360)),
+        ir.rawLoadI64(1407, 1402, source(370)),
+        ir.rawStoreI64(1402, 1407, source(380))
+    ];
+    var rawOps = makeFunction(5, "rawOps", rawOpParameters, rawOpTypes, ir.irVoid(), [ir.basicBlock(302, [], rawInstructions, ir.returnVoid(source(390)))]);
+
+    var deadArithmeticParameters: Vec<IRValue> = [ir.irValue(1301, ir.irI64()), ir.irValue(1302, ir.irI64())];
+    var deadArithmeticTypes: Vec<IRType> = [ir.irI64(), ir.irI64()];
+    var deadArithmeticInstructions: Vec<Instruction> = [
+        ir.addCheckedI64(1303, 1301, 1302, source(400)),
+        ir.subCheckedI64(1304, 1301, 1302, source(410)),
+        ir.mulCheckedI64(1305, 1301, 1302, source(420)),
+        ir.divCheckedI64(1306, 1301, 1302, source(430)),
+        ir.remCheckedI64(1307, 1301, 1302, source(440)),
+        ir.compareI64(1308, ir.compareNe(), 1301, 1302, source(450))
+    ];
+    var deadArithmetic = makeFunction(6, "deadCheckedResult", deadArithmeticParameters, deadArithmeticTypes, ir.irVoid(), [ir.basicBlock(400, [], deadArithmeticInstructions, ir.returnVoid(source(460)))]);
+
+    var deadBoolParameters: Vec<IRValue> = [ir.irValue(1501, ir.irBool()), ir.irValue(1502, ir.irBool())];
+    var deadBoolTypes: Vec<IRType> = [ir.irBool(), ir.irBool()];
+    var deadBoolCompare = makeFunction(7, "deadBoolCompare", deadBoolParameters, deadBoolTypes, ir.irVoid(), [ir.basicBlock(401, [], [ir.compareBool(1503, ir.compareEq(), 1501, 1502, source(470))], ir.returnVoid(source(480)))]);
+
+    return ir.irProgram(0, [entry, loopFunction, recursiveFunction, rawFunction, rawCaller, rawOps, deadArithmetic, deadBoolCompare]);
+}
+
+func malformedProgram(): IRProgram {
+    var malformed = makeFunction(99, "badSource", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(ir.sourceRef("", 0, 0)))]);
+    return ir.irProgram(99, [malformed]);
+}
+
+func malformedValueProgram(): IRProgram {
+    var malformed = makeFunction(98, "undefinedValue", [], [], ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(7777, source(490)))]);
+    return ir.irProgram(98, [malformed]);
+}
+
+func main(): void {
+    var program = fixtureProgram();
+    var originalText = ir.printIR(program);
+    require(program.functions[0].blocks[0].instructions[0].source.start == 10, "fixture source span setup failed");
+    var analyzed = analyzeProgram(program);
+    var analysisError = "";
+    if analyzed.isErr() { analysisError = analyzed.unwrapErr(); }
+    require(analyzed.isOk(), "valid IR liveness failed: " + analysisError);
+    var result = analyzed.unwrap();
+    require(program.functions[0].blocks[0].instructions[0].source.start == 10, "analysis changed an input source span");
+    checkInternalConsistency(program, result);
+
+    var diamond = findFunction(result, 0);
+    var entry = findBlock(diamond, 900);
+    expectSet(entry.liveIn, [], "diamond entry liveIn");
+    expectSet(entry.liveOut, [21, 22], "diamond entry edge liveOut");
+    expectSet(entry.liveAtTerminator, [11, 21, 22], "branch condition and edge args");
+    expectSet(findInstruction(entry, 5).liveBefore, [11, 21, 22, 23, 24], "dead checked result still uses operands");
+    expectSet(findInstruction(entry, 5).liveAfter, [11, 21, 22], "checked instruction liveAfter");
+    var left = findBlock(diamond, 100);
+    expectSet(left.liveIn, [31, 32], "left live params only");
+    expectSet(left.liveOut, [31, 32], "left parallel swap liveOut");
+    expectSet(findInstruction(left, 0).liveBefore, [31, 32], "dead local result remains dead");
+    var right = findBlock(diamond, 500);
+    expectSet(right.liveIn, [41, 42], "right live params only");
+    var merge = findBlock(diamond, 9000);
+    expectSet(merge.liveIn, [51, 52], "merge excludes dead parameter");
+    expectSet(merge.liveAtTerminator, [60], "merge return use");
+
+    var loopFunctionResult = findFunction(result, 1);
+    var loopBodyResult = findBlock(loopFunctionResult, 40);
+    expectSet(loopBodyResult.liveIn, [150, 151, 801], "loop fixed point liveIn");
+    expectSet(loopBodyResult.liveOut, [150, 151, 802], "loop backedge and retained dominating values");
+    expectSet(loopBodyResult.liveAtTerminator, [150, 151, 802, 803], "loop branch and edge uses");
+    expectSet(findInstruction(loopBodyResult, 0).liveBefore, [150, 151, 801], "loop checked increment before");
+    expectSet(findInstruction(loopBodyResult, 0).liveAfter, [150, 151, 802], "loop checked increment after");
+    expectSet(findInstruction(loopBodyResult, 1).liveBefore, [150, 151, 802], "loop compare before");
+
+    var recursive = findBlock(findFunction(result, 2), 17);
+    expectSet(recursive.liveIn, [700], "recursive argument liveIn");
+    expectSet(findInstruction(recursive, 0).liveBefore, [700], "dead recursive call result still uses argument");
+    expectSet(findInstruction(recursive, 0).liveAfter, [700], "recursive return stays live after call");
+
+    var rawCaller = findBlock(findFunction(result, 4), 301);
+    expectSet(rawCaller.liveIn, [902], "raw-address call liveIn");
+    expectSet(findInstruction(rawCaller, 0).liveBefore, [902], "raw-address call argument");
+    expectSet(findInstruction(rawCaller, 0).liveAfter, [903], "raw-address call result");
+    var rawOps = findBlock(findFunction(result, 5), 302);
+    expectSet(rawOps.liveAtTerminator, [], "raw operations return");
+    expectSet(findInstruction(rawOps, 4).liveBefore, [1002, 1401, 1402, 1403], "raw store retains all operands");
+    expectSet(findInstruction(rawOps, 11).liveAfter, [1402], "RawFail retains following liveness conservatively");
+    expectSet(findInstruction(rawOps, 11).liveBefore, [1002, 1402], "RawFail operand and later raw address use");
+    expectSet(findInstruction(rawOps, 0).liveBefore, [1002], "raw.null dead result adds no operand use");
+    var deadArithmetic = findBlock(findFunction(result, 6), 400);
+    expectSet(deadArithmetic.liveIn, [1301, 1302], "dead checked arithmetic arguments");
+    expectSet(findInstruction(deadArithmetic, 0).liveBefore, [1301, 1302], "dead checked add operands");
+    expectSet(findInstruction(deadArithmetic, 1).liveBefore, [1301, 1302], "dead checked sub operands");
+    expectSet(findInstruction(deadArithmetic, 2).liveBefore, [1301, 1302], "dead checked mul operands");
+    expectSet(findInstruction(deadArithmetic, 3).liveBefore, [1301, 1302], "dead checked div operands");
+    expectSet(findInstruction(deadArithmetic, 4).liveBefore, [1301, 1302], "dead checked rem operands");
+    expectSet(findInstruction(deadArithmetic, 5).liveBefore, [1301, 1302], "dead compare operands");
+    expectSet(findInstruction(deadArithmetic, 0).liveAfter, [1301, 1302], "dead checked result is absent from liveAfter");
+    expectSet(findInstruction(deadArithmetic, 5).liveAfter, [], "last dead comparison result is absent from liveAfter");
+    var deadBoolCompare = findBlock(findFunction(result, 7), 401);
+    expectSet(deadBoolCompare.liveIn, [1501, 1502], "dead bool comparison operands");
+    expectSet(findInstruction(deadBoolCompare, 0).liveBefore, [1501, 1502], "dead bool comparison uses both inputs");
+
+    require(ir.printIR(program) == originalText, "analysis mutated input IR");
+    var repeated = analyzeProgram(program);
+    require(repeated.isOk(), "repeated analysis failed");
+    checkInternalConsistency(program, repeated.unwrap());
+    entry.liveIn.push(999999);
+    expectSet(findBlock(findFunction(repeated.unwrap(), 0), 900).liveIn, [], "analysis results are independent");
+    expectSet(findInstruction(entry, 0).liveBefore, [], "block and instruction sets do not alias");
+    require(ir.printIR(program) == originalText, "result mutation changed input IR");
+
+    require(analyzeProgram(malformedProgram()).isErr(), "malformed source IR was not rejected by verifier");
+    require(analyzeProgram(malformedValueProgram()).isErr(), "malformed SSA IR was not rejected by verifier");
+    println("v04 ir liveness ok");
+}

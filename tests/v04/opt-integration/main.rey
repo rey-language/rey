@@ -1,0 +1,48 @@
+func require(ok: bool): void {
+    if !ok {
+        var failure = 1 / 0;
+    }
+}
+
+func signedExtrema(): bool {
+    var maximum: int = 9223372036854775807;
+    var minimum: int = -9223372036854775807 - 1;
+    if maximum + 0 != maximum { return false; }
+    if minimum - 0 != minimum { return false; }
+    if minimum / 3 != -3074457345618258602 { return false; }
+    if minimum % 3 != -2 { return false; }
+    if maximum + minimum != -1 { return false; }
+    return 3037000499 * 3037000499 == 9223372030926249001;
+}
+
+func loopSum(): int {
+    var index: int = 1;
+    var total: int = 0;
+    while index <= 10 {
+        total += index;
+        index += 1;
+    }
+    return total;
+}
+
+func recurseEight(remaining: int, a: int, b: int, c: int, d: int, e: int, f: int, g: int): int {
+    if remaining == 0 { return a + b + c + d + e + f + g; }
+    return recurseEight(remaining - 1, a + 1, b + 1, c + 1, d + 1, e + 1, f + 1, g + 1);
+}
+
+func alwaysTrap(): bool {
+    var failure = 1 / 0;
+    return true;
+}
+
+func shortCircuitAnd(): bool { return false && alwaysTrap(); }
+func shortCircuitOr(): bool { return true || alwaysTrap(); }
+
+func main(): void {
+    require(signedExtrema());
+    require(loopSum() == 55);
+    require(recurseEight(4, 1, 2, 3, 4, 5, 6, 7) == 56);
+    require(!shortCircuitAnd());
+    require(shortCircuitOr());
+    return;
+}

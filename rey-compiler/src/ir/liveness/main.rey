@@ -1,0 +1,329 @@
+import ir::{IRProgram, IRFunction, BasicBlock, Instruction, TerminatorKind};
+import ir::verify::{verifyProgram};
+
+pub struct InstructionLiveness {
+    pub instructionIndex: int,
+    pub liveBefore: Vec<int>,
+    pub liveAfter: Vec<int>,
+}
+
+pub struct BlockLiveness {
+    pub blockId: int,
+    pub liveIn: Vec<int>,
+    pub liveOut: Vec<int>,
+    pub instructions: Vec<InstructionLiveness>,
+    pub liveAtTerminator: Vec<int>,
+}
+
+pub struct FunctionLiveness {
+    pub functionId: int,
+    pub blocks: Vec<BlockLiveness>,
+}
+
+pub struct ProgramLiveness {
+    pub functions: Vec<FunctionLiveness>,
+}
+
+struct BlockState {
+    pub liveIn: Vec<int>,
+    pub liveOut: Vec<int>,
+    pub liveAtTerminator: Vec<int>,
+}
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 {
+        budget.set(0, -1);
+        return false;
+    }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func copySet(values: Vec<int>, budget: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if !charge(budget) { return result; }
+        result.push(values[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+func mergeSets(left: Vec<int>, right: Vec<int>, budget: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var leftIndex = 0;
+    var rightIndex = 0;
+    loop {
+        if leftIndex >= left.len() && rightIndex >= right.len() { break; }
+        if !charge(budget) { return result; }
+        if leftIndex >= left.len() {
+            result.push(right[rightIndex]);
+            rightIndex = rightIndex + 1;
+        } else if rightIndex >= right.len() {
+            result.push(left[leftIndex]);
+            leftIndex = leftIndex + 1;
+        } else if left[leftIndex] < right[rightIndex] {
+            result.push(left[leftIndex]);
+            leftIndex = leftIndex + 1;
+        } else if right[rightIndex] < left[leftIndex] {
+            result.push(right[rightIndex]);
+            rightIndex = rightIndex + 1;
+        } else {
+            result.push(left[leftIndex]);
+            leftIndex = leftIndex + 1;
+            rightIndex = rightIndex + 1;
+        }
+    }
+    return result;
+}
+
+func addValue(values: Vec<int>, value: int, budget: Vec<int>): Vec<int> {
+    return mergeSets(values, [value], budget);
+}
+
+func removeValue(values: Vec<int>, value: int, budget: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if !charge(budget) { return result; }
+        if values[i] != value { result.push(values[i]); }
+        i = i + 1;
+    }
+    return result;
+}
+
+func setsEqual(left: Vec<int>, right: Vec<int>, budget: Vec<int>): bool {
+    if left.len() != right.len() { return false; }
+    var i = 0;
+    loop {
+        if i >= left.len() { break; }
+        if !charge(budget) { return false; }
+        if left[i] != right[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func findBlockIndex(function: IRFunction, blockId: int, budget: Vec<int>): int {
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if !charge(budget) { return -1; }
+        if function.blocks[i].id == blockId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findParameterIndex(block: BasicBlock, valueId: int, budget: Vec<int>): int {
+    var i = 0;
+    loop {
+        if i >= block.params.len() { break; }
+        if !charge(budget) { return -1; }
+        if block.params[i].id == valueId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func edgeLiveness(function: IRFunction, successorId: int, arguments: Vec<int>, states: Vec<BlockState>, budget: Vec<int>): Vec<int> {
+    var successorIndex = findBlockIndex(function, successorId, budget);
+    if budget[0] < 0 || successorIndex < 0 { return []; }
+    var successor = function.blocks[successorIndex];
+    var successorLive = states[successorIndex].liveIn;
+    var result: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= successorLive.len() { break; }
+        if !charge(budget) { return result; }
+        var valueId = successorLive[i];
+        var parameterIndex = findParameterIndex(successor, valueId, budget);
+        if budget[0] < 0 { return result; }
+        if parameterIndex >= 0 {
+            if parameterIndex < arguments.len() {
+                result = addValue(result, arguments[parameterIndex], budget);
+            }
+        } else {
+            result = addValue(result, valueId, budget);
+        }
+        if budget[0] < 0 { return result; }
+        i = i + 1;
+    }
+    return result;
+}
+
+func terminatorEdgeLiveness(function: IRFunction, block: BasicBlock, states: Vec<BlockState>, budget: Vec<int>): Vec<int> {
+    var terminator = block.terminator;
+    var result: Vec<int> = [];
+    if terminator.kind == TerminatorKind::Jump {
+        return edgeLiveness(function, terminator.targetBlockId, terminator.targetArgs, states, budget);
+    }
+    if terminator.kind == TerminatorKind::Branch {
+        var trueLive = edgeLiveness(function, terminator.trueTargetBlockId, terminator.trueArgs, states, budget);
+        if budget[0] < 0 { return []; }
+        var falseLive = edgeLiveness(function, terminator.falseTargetBlockId, terminator.falseArgs, states, budget);
+        if budget[0] < 0 { return []; }
+        result = mergeSets(trueLive, falseLive, budget);
+    }
+    return result;
+}
+
+func transferTerminatorUses(block: BasicBlock, edgeLive: Vec<int>, budget: Vec<int>): Vec<int> {
+    var live = copySet(edgeLive, budget);
+    var terminator = block.terminator;
+    if terminator.kind == TerminatorKind::Branch {
+        live = addValue(live, terminator.conditionValueId, budget);
+    } else if terminator.kind == TerminatorKind::Return && terminator.valueId >= 0 {
+        live = addValue(live, terminator.valueId, budget);
+    }
+    return live;
+}
+
+func transferInstructionUses(block: BasicBlock, afterTerminator: Vec<int>, budget: Vec<int>): Vec<int> {
+    var live = copySet(afterTerminator, budget);
+    var i = block.instructions.len();
+    loop {
+        if i <= 0 { break; }
+        i = i - 1;
+        if !charge(budget) { return live; }
+        var instruction = block.instructions[i];
+        if instruction.resultId >= 0 { live = removeValue(live, instruction.resultId, budget); }
+        var operandIndex = 0;
+        loop {
+            if operandIndex >= instruction.operands.len() { break; }
+            if !charge(budget) { return live; }
+            live = addValue(live, instruction.operands[operandIndex], budget);
+            operandIndex = operandIndex + 1;
+        }
+        if budget[0] < 0 { return live; }
+    }
+    return live;
+}
+
+func instructionSnapshots(block: BasicBlock, afterTerminator: Vec<int>, budget: Vec<int>): Vec<InstructionLiveness> {
+    var reversed: Vec<InstructionLiveness> = [];
+    var live = copySet(afterTerminator, budget);
+    var i = block.instructions.len();
+    loop {
+        if i <= 0 { break; }
+        i = i - 1;
+        if !charge(budget) { return []; }
+        var instruction = block.instructions[i];
+        var liveAfter = copySet(live, budget);
+        if instruction.resultId >= 0 { live = removeValue(live, instruction.resultId, budget); }
+        var operandIndex = 0;
+        loop {
+            if operandIndex >= instruction.operands.len() { break; }
+            if !charge(budget) { return []; }
+            live = addValue(live, instruction.operands[operandIndex], budget);
+            operandIndex = operandIndex + 1;
+        }
+        if budget[0] < 0 { return []; }
+        reversed.push(InstructionLiveness {
+            instructionIndex: i,
+            liveBefore: copySet(live, budget),
+            liveAfter: liveAfter,
+        });
+        if budget[0] < 0 { return []; }
+    }
+    var ordered: Vec<InstructionLiveness> = [];
+    i = reversed.len();
+    loop {
+        if i <= 0 { break; }
+        i = i - 1;
+        if !charge(budget) { return []; }
+        ordered.push(reversed[i]);
+    }
+    return ordered;
+}
+
+func validationError(errors: Vec<string>): string {
+    var message = "liveness: IR verification failed";
+    var i = 0;
+    loop {
+        if i >= errors.len() { break; }
+        message = message + "\n" + errors[i];
+        i = i + 1;
+    }
+    return message;
+}
+
+// RawFail is modeled as an instruction use. We do not infer that it terminates
+// execution, so values live after it remain conservatively live before it.
+pub func analyzeProgram(program: IRProgram): Result<ProgramLiveness, string> {
+    var verification = verifyProgram(program);
+    if !verification.ok { return Result.Err(validationError(verification.errors)); }
+
+    // One deterministic global cap bounds fixed-point and snapshot work without
+    // allocating work tables based on sparse function, block, or value IDs.
+    var budget: Vec<int> = [1000000];
+    var resultFunctions: Vec<FunctionLiveness> = [];
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+        var function = program.functions[functionIndex];
+        var states: Vec<BlockState> = [];
+        var blockIndex = 0;
+        loop {
+            if blockIndex >= function.blocks.len() { break; }
+            if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+            states.push(BlockState { liveIn: [], liveOut: [], liveAtTerminator: [] });
+            blockIndex = blockIndex + 1;
+        }
+
+        var changed = true;
+        loop {
+            if !changed { break; }
+            changed = false;
+            blockIndex = function.blocks.len();
+            loop {
+                if blockIndex <= 0 { break; }
+                blockIndex = blockIndex - 1;
+                if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+                var block = function.blocks[blockIndex];
+                var edgeLive = terminatorEdgeLiveness(function, block, states, budget);
+                if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                var atTerminator = transferTerminatorUses(block, edgeLive, budget);
+                var liveIn = transferInstructionUses(block, atTerminator, budget);
+                if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                if !setsEqual(states[blockIndex].liveIn, liveIn, budget) || !setsEqual(states[blockIndex].liveOut, edgeLive, budget) {
+                    if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                    states.set(blockIndex, BlockState { liveIn: liveIn, liveOut: edgeLive, liveAtTerminator: atTerminator });
+                    changed = true;
+                } else {
+                    if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                    // Even if the fixed-point sets are stable, retain a fresh
+                    // terminator snapshot for deterministic output construction.
+                    states.set(blockIndex, BlockState { liveIn: liveIn, liveOut: edgeLive, liveAtTerminator: atTerminator });
+                }
+            }
+        }
+
+        var outputBlocks: Vec<BlockLiveness> = [];
+        blockIndex = 0;
+        loop {
+            if blockIndex >= function.blocks.len() { break; }
+            if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+            var block = function.blocks[blockIndex];
+            var state = states[blockIndex];
+            var snapshots = instructionSnapshots(block, state.liveAtTerminator, budget);
+            if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+            outputBlocks.push(BlockLiveness {
+                blockId: block.id,
+                liveIn: copySet(state.liveIn, budget),
+                liveOut: copySet(state.liveOut, budget),
+                instructions: snapshots,
+                liveAtTerminator: copySet(state.liveAtTerminator, budget),
+            });
+            if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+            blockIndex = blockIndex + 1;
+        }
+        resultFunctions.push(FunctionLiveness { functionId: function.id, blocks: outputBlocks });
+        functionIndex = functionIndex + 1;
+    }
+    return Result.Ok(ProgramLiveness { functions: resultFunctions });
+}

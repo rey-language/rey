@@ -1,0 +1,376 @@
+import ir;
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, Instruction, InstructionKind, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, SourceRef, TerminatorKind};
+import ir::eval::{evaluateProgram};
+import ir::optimize::scalar::{foldConstants};
+import native::arm64::{Arm64Code, emitArm64};
+import native::bytes::{byteString};
+import native::image::{buildMachOArm64};
+
+func require(ok: bool, label: string): void {
+    if !ok { eprintln("ir-fold failure: " + label); exit(1); }
+}
+
+func sourceAt(start: int): SourceRef { return ir.sourceRef("fold-fixture.rey", start, start + 3); }
+
+func effectFor(arity: int, unknown: bool): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= arity { break; }
+        if unknown { escapes.push(ir.escapeUnknown()); }
+        else { escapes.push(ir.escapeNoEscape()); }
+        i = i + 1;
+    }
+    if unknown {
+        return ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func makeFunction(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>, unknownEffects: bool): IRFunction {
+    return ir.irFunction(id, ir.functionKey("ir-fold", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effectFor(parameterTypes.len(), unknownEffects));
+}
+
+func makeProgram(functions: Vec<IRFunction>, entryId: int): IRProgram { return ir.irProgram(entryId, functions); }
+
+func makeBinary(kind: InstructionKind, resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    if kind == InstructionKind::AddCheckedI64 { return ir.addCheckedI64(resultId, leftId, rightId, source); }
+    if kind == InstructionKind::SubCheckedI64 { return ir.subCheckedI64(resultId, leftId, rightId, source); }
+    if kind == InstructionKind::MulCheckedI64 { return ir.mulCheckedI64(resultId, leftId, rightId, source); }
+    if kind == InstructionKind::DivCheckedI64 { return ir.divCheckedI64(resultId, leftId, rightId, source); }
+    return ir.remCheckedI64(resultId, leftId, rightId, source);
+}
+
+func kindFor(op: int): InstructionKind {
+    if op == 0 { return InstructionKind::AddCheckedI64; }
+    if op == 1 { return InstructionKind::SubCheckedI64; }
+    if op == 2 { return InstructionKind::MulCheckedI64; }
+    if op == 3 { return InstructionKind::DivCheckedI64; }
+    return InstructionKind::RemCheckedI64;
+}
+
+func opName(op: int): string {
+    if op == 0 { return "add"; }
+    if op == 1 { return "sub"; }
+    if op == 2 { return "mul"; }
+    if op == 3 { return "div"; }
+    return "rem";
+}
+
+func oneBlockProgram(instructions: Vec<Instruction>, resultId: int, name: string): IRProgram {
+    var block = ir.basicBlock(40, [], instructions, ir.returnValue(resultId, sourceAt(90)));
+    var function = makeFunction(7, name, [], [], ir.irI64(), [block], false);
+    return makeProgram([function], 7);
+}
+
+func sameSource(left: SourceRef, right: SourceRef): bool {
+    return left.unitId == right.unitId && left.start == right.start && left.end == right.end;
+}
+
+func sameInstruction(left: Instruction, right: Instruction): bool {
+    if left.kind != right.kind || left.resultId != right.resultId || left.ty.kind != right.ty.kind || left.immediate != right.immediate || left.comparison != right.comparison || left.functionId != right.functionId || !sameSource(left.source, right.source) || left.operands.len() != right.operands.len() { return false; }
+    var i = 0;
+    loop {
+        if i >= left.operands.len() { break; }
+        if left.operands[i] != right.operands[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func requireSameEvaluation(left: IRProgram, right: IRProgram, label: string): void {
+    var before = evaluateProgram(left, 100000, 64);
+    var after = evaluateProgram(right, 100000, 64);
+    require(before.ok == after.ok, label + " success state preserved");
+    require(before.value == after.value && before.isBool == after.isBool && before.isVoid == after.isVoid, label + " result preserved");
+    require(before.error == after.error, label + " error and source preserved");
+}
+
+func runArithmeticCase(op: int, leftValue: int, rightValue: int): void {
+    var source = sourceAt(17);
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(81, leftValue, sourceAt(1)));
+    instructions.push(ir.constI64(5, rightValue, sourceAt(5)));
+    instructions.push(makeBinary(kindFor(op), 900, 81, 5, source));
+    var input = oneBlockProgram(instructions, 900, "arithmetic");
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "verify/fold " + opName(op));
+    var output = result.unwrap();
+    requireSameEvaluation(input, output, opName(op));
+    require(output.functions[0].blocks[0].instructions.len() == 3, "instruction count retained " + opName(op));
+    require(output.functions[0].blocks[0].instructions[0].kind == InstructionKind::ConstI64, "first explicit constant retained");
+    require(output.functions[0].blocks[0].instructions[0].resultId == 81, "sparse input ID retained");
+    require(output.functions[0].blocks[0].instructions[1].resultId == 5, "low input ID retained");
+    var folded = output.functions[0].blocks[0].instructions[2];
+    if folded.kind == InstructionKind::ConstI64 {
+        require(folded.resultId == 900 && folded.ty.kind == IRTypeKind::I64, "fold result ID and type retained");
+        require(sameSource(folded.source, source), "fold source span retained");
+    } else {
+        require(folded.kind == kindFor(op), "trapping checked operation retained");
+        require(sameInstruction(folded, input.functions[0].blocks[0].instructions[2]), "trapping instruction preserved exactly");
+        require(sameSource(folded.source, source), "trapping source span retained");
+    }
+    var evaluated = evaluateProgram(output, 100000, 64);
+    if evaluated.ok {
+        println("FOLD_CASE," + opName(op) + "," + leftValue.toString() + "," + rightValue.toString() + ",value," + evaluated.value.toString());
+    } else {
+        println("FOLD_CASE," + opName(op) + "," + leftValue.toString() + "," + rightValue.toString() + ",trap," + evaluated.error);
+    }
+}
+
+func testArithmeticOracleCases(): void {
+    var minimum = -9223372036854775807 - 1;
+    var maximum = 9223372036854775807;
+    var pairs: Vec<int> = [minimum, 0, minimum, 1, minimum, -1, minimum, 2, minimum, -2,
+        minimum + 1, -1, minimum + 1, 1, maximum, 0, maximum, 1, maximum, -1,
+        maximum, 2, maximum, -2, maximum - 1, 1, maximum - 1, -1,
+        -1, 0, -1, 1, -1, -1, -1, 3, -7, 3, 7, -3, -7, -3, 7, 3,
+        3037000499, 3037000499, -3037000500, -3037000500,
+        3037000500, 3037000500, -3037000500, 3037000500,
+        3037000500, -3037000500, 0, minimum, minimum, maximum, maximum, minimum];
+    var op = 0;
+    loop {
+        if op >= 5 { break; }
+        var pair = 0;
+        loop {
+            if pair >= pairs.len() { break; }
+            runArithmeticCase(op, pairs[pair], pairs[pair + 1]);
+            pair = pair + 2;
+        }
+        op = op + 1;
+    }
+}
+
+func testChainedFold(): void {
+    var instructions: Vec<Instruction> = [ir.constI64(100, 10, sourceAt(20)), ir.constI64(3, 20, sourceAt(21)), ir.addCheckedI64(500, 100, 3, sourceAt(22)), ir.mulCheckedI64(8, 500, 3, sourceAt(23))];
+    var input = oneBlockProgram(instructions, 8, "chained-fold");
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "chained fold verifies");
+    var output = result.unwrap();
+    require(output.functions[0].blocks[0].instructions.len() == 4, "chained fold retains every instruction");
+    require(output.functions[0].blocks[0].instructions[2].kind == InstructionKind::ConstI64 && output.functions[0].blocks[0].instructions[2].immediate == 30, "first operation folds");
+    require(output.functions[0].blocks[0].instructions[3].kind == InstructionKind::ConstI64 && output.functions[0].blocks[0].instructions[3].immediate == 600, "folded result feeds the next operation");
+    require(output.functions[0].blocks[0].instructions[3].resultId == 8 && sameSource(output.functions[0].blocks[0].instructions[3].source, sourceAt(23)), "chained result identity and source retained");
+    requireSameEvaluation(input, output, "chained fold");
+}
+
+func runI64Compare(predicate: CompareI64Predicate, leftValue: int, rightValue: int, label: string): void {
+    var source = sourceAt(31);
+    var instructions: Vec<Instruction> = [ir.constI64(11, leftValue, sourceAt(8)), ir.constI64(3, rightValue, sourceAt(9)), ir.compareI64(75, predicate, 11, 3, source)];
+    var block = ir.basicBlock(40, [], instructions, ir.returnValue(75, sourceAt(90)));
+    var function = makeFunction(7, "compare", [], [], ir.irBool(), [block], false);
+    var input = makeProgram([function], 7);
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), label + " verifies");
+    var output = result.unwrap();
+    require(output.functions[0].blocks[0].instructions.len() == 3, label + " instruction count retained");
+    require(output.functions[0].blocks[0].instructions[2].kind == InstructionKind::ConstBool, label + " comparison folded");
+    require(sameSource(output.functions[0].blocks[0].instructions[2].source, source), label + " source retained");
+    requireSameEvaluation(input, output, label);
+}
+
+func runBoolCompare(predicate: CompareI64Predicate, left: bool, right: bool, label: string): void {
+    var source = sourceAt(33);
+    var instructions: Vec<Instruction> = [ir.constBool(31, left, sourceAt(10)), ir.constBool(7, right, sourceAt(11)), ir.compareBool(88, predicate, 31, 7, source)];
+    var block = ir.basicBlock(40, [], instructions, ir.returnValue(88, sourceAt(90)));
+    var function = makeFunction(7, "bool-compare", [], [], ir.irBool(), [block], false);
+    var input = makeProgram([function], 7);
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), label + " verifies");
+    var output = result.unwrap();
+    require(output.functions[0].blocks[0].instructions[2].kind == InstructionKind::ConstBool, label + " comparison folded");
+    require(output.functions[0].blocks[0].instructions[2].resultId == 88 && sameSource(output.functions[0].blocks[0].instructions[2].source, source), label + " result and source retained");
+    requireSameEvaluation(input, output, label);
+}
+
+func testComparisons(): void {
+    var predicates: Vec<CompareI64Predicate> = [ir.compareEq(), ir.compareNe(), ir.compareSlt(), ir.compareSle(), ir.compareSgt(), ir.compareSge()];
+    var samples: Vec<int> = [-9223372036854775807 - 1, -1, 0, 1, 9223372036854775807];
+    var i = 0;
+    loop {
+        if i >= predicates.len() { break; }
+        var j = 0;
+        loop {
+            if j >= samples.len() { break; }
+            var k = 0;
+            loop {
+                if k >= samples.len() { break; }
+                runI64Compare(predicates[i], samples[j], samples[k], "i64 comparison " + i.toString() + "/" + j.toString() + "/" + k.toString());
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    runBoolCompare(ir.compareEq(), false, false, "bool eq false false");
+    runBoolCompare(ir.compareEq(), false, true, "bool eq false true");
+    runBoolCompare(ir.compareNe(), true, false, "bool ne true false");
+    runBoolCompare(ir.compareNe(), true, true, "bool ne true true");
+}
+
+func testCallAndParameterUnknown(): void {
+    var helperInstructions: Vec<Instruction> = [ir.constI64(2, 1, sourceAt(42)), ir.addCheckedI64(3, 1, 2, sourceAt(43))];
+    var helperBlock = ir.basicBlock(8, [], helperInstructions, ir.returnValue(3, sourceAt(44)));
+    var helperParameters: Vec<IRValue> = [ir.irValue(1, ir.irI64())];
+    var helper = makeFunction(22, "helper", helperParameters, [ir.irI64()], ir.irI64(), [helperBlock], true);
+    var mainInstructions: Vec<Instruction> = [ir.constI64(90, 20, sourceAt(45)), ir.constI64(4, 22, sourceAt(46)), ir.call(17, ir.irI64(), 22, [90], sourceAt(47)), ir.addCheckedI64(30, 90, 4, sourceAt(48))];
+    var mainBlock = ir.basicBlock(40, [], mainInstructions, ir.returnValue(30, sourceAt(49)));
+    var mainFunction = makeFunction(7, "main", [], [], ir.irI64(), [mainBlock], true);
+    var input = makeProgram([mainFunction, helper], 7);
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "call/parameter program verifies");
+    var output = result.unwrap();
+    require(sameInstruction(output.functions[0].blocks[0].instructions[2], input.functions[0].blocks[0].instructions[2]), "call retained exactly in its original position");
+    require(output.functions[0].blocks[0].instructions[3].kind == InstructionKind::ConstI64, "same-block constants remain known across calls");
+    require(output.functions[1].blocks[0].instructions[1].kind == InstructionKind::AddCheckedI64, "parameter-dependent operation is unknown");
+    require(output.functions[1].effects.argumentEscapes[0] == ir.escapeUnknown(), "effect summary preserved");
+    requireSameEvaluation(input, output, "call and unknown parameter");
+}
+
+func testJoinUnknownAndNoCfgChange(): void {
+    var entryInstructions: Vec<Instruction> = [ir.constBool(0, true, sourceAt(50)), ir.constI64(1, 17, sourceAt(51)), ir.constI64(2, 25, sourceAt(52))];
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.branch(0, 9, [1], 2, [2], sourceAt(53)));
+    var left = ir.basicBlock(9, [ir.irValue(3, ir.irI64())], [], ir.jump(7, [3], sourceAt(54)));
+    var right = ir.basicBlock(2, [ir.irValue(4, ir.irI64())], [], ir.jump(7, [4], sourceAt(55)));
+    var joinInstructions: Vec<Instruction> = [ir.constI64(6, 8, sourceAt(56)), ir.addCheckedI64(7, 5, 6, sourceAt(57))];
+    var join = ir.basicBlock(7, [ir.irValue(5, ir.irI64())], joinInstructions, ir.returnValue(7, sourceAt(58)));
+    var blocks: Vec<BasicBlock> = [entry, left, right, join];
+    var function = makeFunction(7, "join", [], [], ir.irI64(), blocks, false);
+    var input = makeProgram([function], 7);
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "join input verifies");
+    var output = result.unwrap();
+    require(output.functions[0].blocks.len() == 4, "CFG blocks retained");
+    require(output.functions[0].blocks[0].terminator.kind == TerminatorKind::Branch, "constant branch retained");
+    require(output.functions[0].blocks[3].instructions[1].kind == InstructionKind::AddCheckedI64, "join parameter does not gain a cross-block constant");
+    requireSameEvaluation(input, output, "join unknown");
+    var copiedBranch = output.functions[0].blocks[0].terminator;
+    copiedBranch.trueArgs.set(0, 99);
+    require(input.functions[0].blocks[0].terminator.trueArgs[0] == 1, "branch argument vector is deep-copied");
+    output.functions[0].blocks[1].params.set(0, ir.irValue(33, ir.irI64()));
+    require(input.functions[0].blocks[1].params[0].id == 3, "block parameter vector is deep-copied");
+}
+
+func testRawInstructions(): void {
+    var source = sourceAt(61);
+    var instructions: Vec<Instruction> = [ir.constI64(0, 16, sourceAt(60)), ir.rawMap(1, 0, sourceAt(62)), ir.constI64(2, 77, sourceAt(63)), ir.rawStoreI64(1, 2, sourceAt(64)), ir.rawLoadI64(3, 1, sourceAt(65)), ir.addCheckedI64(4, 3, 2, source)];
+    var input = oneBlockProgram(instructions, 4, "raw");
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "raw memory input verifies");
+    var output = result.unwrap();
+    var i = 0;
+    loop {
+        if i >= instructions.len() { break; }
+        require(sameInstruction(output.functions[0].blocks[0].instructions[i], instructions[i]), "raw and dependent instruction retained exactly " + i.toString());
+        i = i + 1;
+    }
+    require(output.functions[0].blocks[0].instructions[4].kind == InstructionKind::RawLoadI64, "raw load result is never constant");
+    requireSameEvaluation(input, output, "raw write/read");
+
+    var failBlock = ir.basicBlock(40, [], [ir.constI64(9, 5, sourceAt(66)), ir.rawFail(9, sourceAt(67))], ir.returnVoid(sourceAt(68)));
+    var failInput = makeProgram([makeFunction(7, "raw-fail", [], [], ir.irVoid(), [failBlock], false)], 7);
+    var failFolded: Result<IRProgram, string> = foldConstants(failInput);
+    require(failFolded.isOk(), "raw fail input verifies");
+    require(sameInstruction(failFolded.unwrap().functions[0].blocks[0].instructions[1], failInput.functions[0].blocks[0].instructions[1]), "RawFail retained exactly");
+    requireSameEvaluation(failInput, failFolded.unwrap(), "RawFail error");
+}
+
+func testInputImmutability(): void {
+    var aliasedInstructions: Vec<Instruction> = [ir.constI64(1, 20, sourceAt(70)), ir.constI64(2, 22, sourceAt(71)), ir.addCheckedI64(3, 1, 2, sourceAt(72))];
+    var input = oneBlockProgram(aliasedInstructions, 3, "alias-input");
+    var inputText = ir.printIR(input);
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isOk(), "aliased input verifies");
+    var output = result.unwrap();
+    var outputText = ir.printIR(output);
+    output.functions[0].blocks[0].instructions.set(0, ir.constI64(1, 99, sourceAt(73)));
+    require(ir.printIR(input) == inputText, "mutating optimized instruction vector does not mutate input");
+
+    var secondInstructions: Vec<Instruction> = [ir.constI64(10, 3, sourceAt(74)), ir.constI64(11, 4, sourceAt(75)), ir.addCheckedI64(12, 10, 11, sourceAt(76))];
+    var secondInput = oneBlockProgram(secondInstructions, 12, "alias-input-two");
+    var secondResult: Result<IRProgram, string> = foldConstants(secondInput);
+    require(secondResult.isOk(), "second aliased input verifies");
+    var secondOutput = secondResult.unwrap();
+    var secondOutputText = ir.printIR(secondOutput);
+    secondInstructions.set(0, ir.constI64(10, 100, sourceAt(77)));
+    require(ir.printIR(secondOutput) == secondOutputText, "mutating original aliased instruction vector does not mutate output");
+    require(outputText != "" && secondOutput.functions[0].blocks[0].instructions[2].kind == InstructionKind::ConstI64, "folded output stays independent and valid");
+
+    var retainedInstructions: Vec<Instruction> = [ir.constI64(42, 7, sourceAt(78)), ir.addCheckedI64(77, 31, 42, sourceAt(79))];
+    var retainedBlock = ir.basicBlock(8, [], retainedInstructions, ir.returnValue(77, sourceAt(80)));
+    var retainedParameters: Vec<IRValue> = [ir.irValue(31, ir.irI64())];
+    var retainedFunction = makeFunction(22, "copy-probe", retainedParameters, [ir.irI64()], ir.irI64(), [retainedBlock], false);
+    var emptyMain = ir.basicBlock(40, [], [], ir.returnVoid(sourceAt(81)));
+    var mainFunction = makeFunction(7, "copy-main", [], [], ir.irVoid(), [emptyMain], false);
+    var retainedInput = makeProgram([mainFunction, retainedFunction], 7);
+    var retainedResult: Result<IRProgram, string> = foldConstants(retainedInput);
+    require(retainedResult.isOk(), "nested alias input verifies");
+    var retainedOutput = retainedResult.unwrap();
+    retainedInstructions[1].operands.set(0, 99);
+    require(retainedOutput.functions[1].blocks[0].instructions[1].operands[0] == 31, "instruction operand vector is deep-copied");
+    retainedOutput.functions[1].blocks[0].instructions[1].operands.set(0, 42);
+    require(retainedInput.functions[1].blocks[0].instructions[1].operands[0] == 99, "output operand mutation does not reach input");
+    retainedOutput.functions[1].signature.parameterTypes.set(0, ir.irBool());
+    require(retainedInput.functions[1].signature.parameterTypes[0].kind == IRTypeKind::I64, "signature type vector is deep-copied");
+    retainedOutput.functions[1].parameters.set(0, ir.irValue(33, ir.irI64()));
+    require(retainedInput.functions[1].parameters[0].id == 31, "function parameter vector is deep-copied");
+    retainedOutput.functions[1].effects.argumentEscapes.set(0, ir.escapeUnknown());
+    require(retainedInput.functions[1].effects.argumentEscapes[0] == ir.escapeNoEscape(), "effect escape vector is deep-copied");
+    retainedOutput.functions[1].blocks.set(0, ir.basicBlock(99, [], [], ir.returnVoid(sourceAt(82))));
+    require(retainedInput.functions[1].blocks[0].id == 8, "function block vector is deep-copied");
+    retainedOutput.functions.set(1, retainedOutput.functions[0]);
+    require(retainedInput.functions[1].id == 22, "program function vector is deep-copied");
+}
+
+func testInvalidInputError(): void {
+    var invalidSource = ir.sourceRef("", 0, -1);
+    var instructions: Vec<Instruction> = [ir.constI64(1, 2, invalidSource)];
+    var input = oneBlockProgram(instructions, 1, "invalid");
+    var result: Result<IRProgram, string> = foldConstants(input);
+    require(result.isErr(), "invalid input IR returned as Err");
+    require(result.unwrapErr().indexOf("input IR verification failed") >= 0, "input verifier error is preserved");
+}
+
+func emitNative(directory: string, name: string, input: IRProgram): void {
+    var foldedResult: Result<IRProgram, string> = foldConstants(input);
+    require(foldedResult.isOk(), name + " native IR verifies");
+    var programs: Vec<IRProgram> = [input, foldedResult.unwrap()];
+    var suffixes: Vec<string> = ["original", "folded"];
+    var i = 0;
+    loop {
+        if i >= programs.len() { break; }
+        var emitted: Result<Arm64Code, string> = emitArm64(programs[i], "darwin");
+        require(emitted.isOk(), name + " ARM64 emission " + suffixes[i]);
+        var image = buildMachOArm64(emitted.unwrap());
+        require(image.isOk(), name + " Mach-O image " + suffixes[i]);
+        var encoded = byteString(image.unwrap());
+        require(encoded.isOk(), name + " byte string " + suffixes[i]);
+        var path = directory + "/" + name + "-" + suffixes[i] + ".macho";
+        writeFile(path, encoded.unwrap());
+        println("NATIVE_CASE," + name + "-" + suffixes[i]);
+        i = i + 1;
+    }
+}
+
+func testNative(directory: string): void {
+    var safe = oneBlockProgram([ir.constI64(80, 73, sourceAt(80)), ir.constI64(5, 49, sourceAt(81)), ir.addCheckedI64(700, 80, 5, sourceAt(82))], 700, "native-safe");
+    emitNative(directory, "safe", safe);
+    var overflow = oneBlockProgram([ir.constI64(80, 9223372036854775807, sourceAt(83)), ir.constI64(5, 1, sourceAt(84)), ir.addCheckedI64(700, 80, 5, sourceAt(85))], 700, "native-overflow");
+    emitNative(directory, "overflow", overflow);
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 2 { eprintln("Usage: ir-fold <output-directory>"); exit(2); return; }
+    mkdir(argv[1]);
+    testArithmeticOracleCases();
+    testChainedFold();
+    testComparisons();
+    testCallAndParameterUnknown();
+    testJoinUnknownAndNoCfgChange();
+    testRawInstructions();
+    testInputImmutability();
+    testInvalidInputError();
+    testNative(argv[1]);
+    println("ir-fold: all fixture assertions passed");
+}
