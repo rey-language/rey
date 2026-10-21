@@ -1,0 +1,49 @@
+tests/v04/x64-image/main.rey
+  s_3868795c391050::t_d33393fc675fc6 1-40
+scripts/v04-linux-test.py
+  s_3868795c391050::t_038487d7b08dcc 11,34,47-63,91-92,101,104,110,127-128,134
+  s_3868795c391050::t_e5dcb52f8a8468 33,95-96,100,117-120
+rey-compiler/src/native/x64/main.rey
+  s_3868795c391050::t_344237bac74d43 1-606
+tests/v04/x64/main.rey
+  s_3868795c391050::t_5729ffa5e8d3e5 1-156
+rey-compiler/src/native/image/x64/main.rey
+  s_3868795c391050::t_d33393fc675fc6 1-76
+CHANGELOG.md
+  s_3868795c391050::t_5827506961adf5 4
+docs/V0.4-PARALLEL-PHASES.md
+  s_3868795c391050::t_5827506961adf5 60-61
+  s_3868795c391050::t_ef903aff380720 58-59,62
+CLAUDE.md
+  s_3868795c391050::t_ef903aff380720 11
+primer.md
+  s_3868795c391050::t_ef903aff380720 8
+docs/V0.4-NATIVE-CONTRACT.md
+  s_3868795c391050::t_ef903aff380720 104-130
+tests/v04/x64/verify.py
+  s_3868795c391050::t_f6944ecda361c8 1-217
+rey-compiler/native-main.rey
+  s_3868795c391050::t_d6262692291b7c 10-11,17,21,34,49-58
+scripts/v04-x64-test.py
+  s_3868795c391050::t_b06ea1800cfbbc 1-98
+tests/v04/x64-image/verify.py
+  s_3868795c391050::t_d33393fc675fc6 1-21
+tests/v04/x64/run.sh
+  s_3868795c391050::t_e3b9159b04fcd7 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6b369819b53d910d2c558c89fe47209a987d9f2f",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
