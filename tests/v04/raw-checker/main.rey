@@ -1,0 +1,252 @@
+import lexer;
+import lexer::{Span};
+import parser;
+import parser::ast::{ImportSourceKind};
+import typecheck::{CheckedProgram, ImportEdge, ResolvedSymbol, SourceGraph, SourceUnit, Type, TypecheckResult, typecheckGraph, typecheckGraphWithRuntime};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func parseUnit(source: string, path: string, moduleId: string, isEntry: bool): SourceUnit {
+    var lexed = lexer.tokenize(source, path);
+    require(lexed.errors.len() == 0, "fixture lexes: " + path);
+    var parsed = parser.parse(lexed.tokens, path);
+    require(parsed.errors.len() == 0, "fixture parses: " + path);
+    return SourceUnit { sourcePath: path, moduleId: moduleId, source: source, isEntry: isEntry, program: parsed.program };
+}
+
+func oneUnitGraph(unit: SourceUnit): SourceGraph {
+    return SourceGraph { entryPath: unit.sourcePath, units: [unit], edges: [], errors: [] };
+}
+
+func printErrors(result: TypecheckResult) {
+    var i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        println("  " + result.errors[i].sourcePath + ": " + result.errors[i].message);
+        i = i + 1;
+    }
+}
+
+func requireKind(ty: Type, kind: string, label: string) {
+    require(ty.kind == kind, label + " has kind " + kind);
+}
+
+func checkRawIntrinsicSignature(symbol: ResolvedSymbol) {
+    var signature = symbol.signature;
+    requireKind(signature, "Function", symbol.sourceName + " signature");
+    require(symbol.intrinsicId == symbol.sourceName, symbol.sourceName + " keeps exact intrinsic identity");
+    var result = signature.ret;
+    if result != null {
+        var resultType: Type = result;
+        if symbol.sourceName == "__reyRawNull" || symbol.sourceName == "__reyRawMap" || symbol.sourceName == "__reyRawOffset" || symbol.sourceName == "__reyRawLoadAddress" {
+            requireKind(resultType, "RawAddress", symbol.sourceName + " result");
+        } else if symbol.sourceName == "__reyRawLoadI64" || symbol.sourceName == "__reyRawLoadByte" {
+            requireKind(resultType, "Int", symbol.sourceName + " result");
+        } else if symbol.sourceName == "__reyRawEqual" {
+            requireKind(resultType, "Bool", symbol.sourceName + " result");
+        } else {
+            requireKind(resultType, "Void", symbol.sourceName + " result");
+        }
+    } else {
+        require(false, symbol.sourceName + " has a result type");
+    }
+    if symbol.sourceName == "__reyRawNull" {
+        require(signature.params.len() == 0, "RawNull takes no parameters");
+    } else if symbol.sourceName == "__reyRawMap" {
+        require(signature.params.len() == 1, "RawMap takes one parameter");
+        requireKind(signature.params[0], "Int", "RawMap size");
+    } else if symbol.sourceName == "__reyRawUnmap" || symbol.sourceName == "__reyRawOffset" || symbol.sourceName == "__reyRawStoreI64" || symbol.sourceName == "__reyRawStoreByte" || symbol.sourceName == "__reyRawStoreAddress" {
+        require(signature.params.len() == 2, symbol.sourceName + " takes two parameters");
+        requireKind(signature.params[0], "RawAddress", symbol.sourceName + " address");
+        if symbol.sourceName == "__reyRawUnmap" || symbol.sourceName == "__reyRawOffset" {
+            requireKind(signature.params[1], "Int", symbol.sourceName + " size or offset");
+        } else if symbol.sourceName == "__reyRawStoreAddress" {
+            requireKind(signature.params[1], "RawAddress", "RawStoreAddress stored value");
+        } else {
+            requireKind(signature.params[1], "Int", symbol.sourceName + " stored value");
+        }
+    } else if symbol.sourceName == "__reyRawEqual" {
+        require(signature.params.len() == 2, "RawEqual takes two parameters");
+        requireKind(signature.params[0], "RawAddress", "RawEqual left operand");
+        requireKind(signature.params[1], "RawAddress", "RawEqual right operand");
+    } else {
+        require(signature.params.len() == 1, symbol.sourceName + " takes one parameter");
+        requireKind(signature.params[0], "RawAddress", symbol.sourceName + " address");
+    }
+}
+
+func hasErrorContaining(result: TypecheckResult, needle: string): bool {
+    var i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        if result.errors[i].message.contains(needle) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func hasUserRawFunction(program: CheckedProgram): bool {
+    var i = 0;
+    loop {
+        if i >= program.symbols.len() { break; }
+        var symbol = program.symbols[i];
+        if symbol.kind == "Function" && (symbol.sourceName == "__reyRawNull" || symbol.sourceName == "__reyRawMap" || symbol.sourceName == "__reyRawUnmap" || symbol.sourceName == "__reyRawOffset" || symbol.sourceName == "__reyRawLoadI64" || symbol.sourceName == "__reyRawStoreI64" || symbol.sourceName == "__reyRawLoadByte" || symbol.sourceName == "__reyRawStoreByte" || symbol.sourceName == "__reyRawEqual" || symbol.sourceName == "__reyRawLoadAddress" || symbol.sourceName == "__reyRawStoreAddress") { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func checkRawCallMetadata(maybeProgram: CheckedProgram?) {
+    if maybeProgram != null {
+        var program: CheckedProgram = maybeProgram;
+        var found = 0;
+        var unique = 0;
+        var seen: Vec<string> = [];
+        var i = 0;
+        loop {
+            if i >= program.expressions.len() { break; }
+            var info = program.expressions[i];
+            var maybeSymbol = info.symbol;
+            if maybeSymbol != null {
+                var symbol: ResolvedSymbol = maybeSymbol;
+                if symbol.intrinsicId.startsWith("__reyRaw") {
+                    require(symbol.kind == "Builtin", symbol.sourceName + " resolves as builtin");
+                    checkRawIntrinsicSignature(symbol);
+                    found = found + 1;
+                    var alreadySeen = false;
+                    var seenIndex = 0;
+                    loop {
+                        if seenIndex >= seen.len() { break; }
+                        if seen[seenIndex] == symbol.intrinsicId { alreadySeen = true; }
+                        seenIndex = seenIndex + 1;
+                    }
+                    if !alreadySeen { seen.push(symbol.intrinsicId); unique = unique + 1; }
+                }
+            }
+            i = i + 1;
+        }
+        require(found == 12, "all raw intrinsic calls are recorded");
+        require(unique == 11, "all eleven exact raw intrinsic identities are recorded");
+    } else {
+        require(false, "checker returns checked program for intrinsic metadata");
+    }
+}
+
+func checkAuthorizedPrimitives() {
+    var path = "/virtual/runtime.rey";
+    var source = "func relay(value: __rey_raw_address): __rey_raw_address \x7B var local: __rey_raw_address = value; if true \x7B local = __reyRawOffset(local, 0); \x7D return local; \x7D func main(): void \x7B var base: __rey_raw_address = __reyRawMap(16); var pointer: __rey_raw_address = __reyRawOffset(base, 0); __reyRawStoreI64(pointer, -9223372036854775807); var loaded: int = __reyRawLoadI64(pointer); __reyRawStoreByte(pointer, 255); var byte: int = __reyRawLoadByte(pointer); var same: bool = __reyRawEqual(pointer, pointer); var zero: __rey_raw_address = __reyRawNull(); var stored: __rey_raw_address = __reyRawLoadAddress(pointer); __reyRawStoreAddress(pointer, stored); __reyRawUnmap(base, 16); \x7D";
+    var unit = parseUnit(source, path, path, true);
+    var graph = oneUnitGraph(unit);
+    var result = typecheckGraphWithRuntime(graph, [path]);
+    if !result.ok { printErrors(result); }
+    require(result.ok, "authorized raw locals, calls, function flow, and branches typecheck");
+    checkRawCallMetadata(result.checkedProgram);
+    var ordinary = typecheckGraph(graph);
+    require(!ordinary.ok, "ordinary graph API grants no raw authority");
+}
+
+func checkUnauthorizedAndIdentity() {
+    var path = "/virtual/untrusted.rey";
+    var source = "func main(): void \x7B var raw: __rey_raw_address = __reyRawNull(); \x7D";
+    var unit = parseUnit(source, path, path, true);
+    var denied = typecheckGraphWithRuntime(oneUnitGraph(unit), []);
+    require(!denied.ok, "unauthorized raw type and intrinsic use are rejected");
+    require(hasErrorContaining(denied, "reserved type"), "unauthorized raw spelling has reserved-type diagnostic");
+
+    var mismatchPath = "/virtual/identity.rey";
+    var mismatchUnit = parseUnit("func main(): void \x7B var raw: __rey_raw_address = __reyRawNull(); \x7D", mismatchPath, "/virtual/other-module.rey", true);
+    var pathOnly = typecheckGraphWithRuntime(oneUnitGraph(mismatchUnit), [mismatchPath]);
+    var moduleOnly = typecheckGraphWithRuntime(oneUnitGraph(mismatchUnit), ["/virtual/other-module.rey"]);
+    require(!pathOnly.ok && !moduleOnly.ok, "authorization requires exact sourcePath and moduleId identity");
+}
+
+func checkSpoofRejected() {
+    var path = "/virtual/spoof-runtime.rey";
+    var source = "func __reyRawNull(): int \x7B return 9; \x7D func __reyRawLoadAddress(value: __rey_raw_address): __rey_raw_address \x7B return value; \x7D func main(): void \x7B var value: int = __reyRawNull(); \x7D";
+    var graph = oneUnitGraph(parseUnit(source, path, path, true));
+    var result = typecheckGraphWithRuntime(graph, [path]);
+    require(!result.ok, "user declaration cannot replace a raw intrinsic");
+    require(hasErrorContaining(result, "reserved raw intrinsic name"), "spoof declaration reports reserved name");
+    var maybeProgram = result.checkedProgram;
+    if maybeProgram != null {
+        var program: CheckedProgram = maybeProgram;
+        require(!hasUserRawFunction(program), "spoofed declaration does not receive Function symbol identity");
+        var sawBuiltin = false;
+        var i = 0;
+        loop {
+            if i >= program.expressions.len() { break; }
+            var maybeSymbol = program.expressions[i].symbol;
+            if maybeSymbol != null {
+                var symbol: ResolvedSymbol = maybeSymbol;
+                if symbol.sourceName == "__reyRawNull" && symbol.intrinsicId == "__reyRawNull" && symbol.kind == "Builtin" { sawBuiltin = true; }
+            }
+            i = i + 1;
+        }
+        require(sawBuiltin, "the reserved name still resolves only to its checker builtin");
+    } else { require(false, "spoof result retains symbols for review"); }
+}
+
+func checkNoErasureOrAggregates() {
+    var path = "/virtual/raw-misuse.rey";
+    var source = "func rawIdentity(value: __rey_raw_address): __rey_raw_address \x7B return value; \x7D func functionValue(): void \x7B var callback = rawIdentity; \x7D func capture(value: __rey_raw_address): void \x7B var callback = (unused: int) => __reyRawUnmap(value, 8); \x7D func leakAny(value: __rey_raw_address): any \x7B return value; \x7D func castInt(value: __rey_raw_address): int \x7B return int(value); \x7D func castString(value: __rey_raw_address): string \x7B return string(value); \x7D func erase(value: any): __rey_raw_address \x7B return value; \x7D func vector(value: __rey_raw_address): void \x7B var values = [value]; \x7D func tuple(value: __rey_raw_address): void \x7B var values = (value, 1); \x7D func dictionary(value: __rey_raw_address): void \x7B var values = \x7B\"raw\": value\x7D; \x7D func compare(value: __rey_raw_address): bool \x7B return value == value; \x7D func arithmetic(value: __rey_raw_address): __rey_raw_address \x7B return value + 1; \x7D func rawVector(values: Vec<__rey_raw_address>): int \x7B return 0; \x7D func rawNullable(value: __rey_raw_address?): int \x7B return 0; \x7D func rawTuple(value: (__rey_raw_address, int)): int \x7B return 0; \x7D func rawCallback(callback: (__rey_raw_address)->int): int \x7B return 0; \x7D";
+    var graph = oneUnitGraph(parseUnit(source, path, path, true));
+    var result = typecheckGraphWithRuntime(graph, [path]);
+    if result.ok { println("expected misuse fixture to fail"); }
+    require(!result.ok, "raw-to-any/int/string conversions, aggregates, operators, and nested types are rejected");
+    require(hasErrorContaining(result, "__reyRawEqual"), "raw equality requires explicit intrinsic");
+    require(hasErrorContaining(result, "raw address cannot be stored in"), "raw aggregate storage has a direct diagnostic");
+    require(hasErrorContaining(result, "local bindings"), "raw-bearing helper function values are rejected");
+    require(hasErrorContaining(result, "cannot be captured by closures"), "closures cannot capture raw addresses");
+
+    var labels: Vec<string> = ["raw-to-any", "any-to-raw", "int-cast", "string-cast", "function-value", "closure-capture", "array-literal", "tuple-literal", "dict-literal", "raw-equality", "raw-arithmetic"];
+    var cases: Vec<string> = [
+        "func bad(value: __rey_raw_address): any \x7B return value; \x7D",
+        "func bad(value: any): __rey_raw_address \x7B return value; \x7D",
+        "func bad(value: __rey_raw_address): int \x7B return int(value); \x7D",
+        "func bad(value: __rey_raw_address): string \x7B return string(value); \x7D",
+        "func helper(value: __rey_raw_address): __rey_raw_address \x7B return value; \x7D func bad(): void \x7B var callback = helper; \x7D",
+        "func bad(value: __rey_raw_address): void \x7B var callback = (unused: int) => __reyRawUnmap(value, 8); \x7D",
+        "func bad(value: __rey_raw_address): void \x7B var values = [value]; \x7D",
+        "func bad(value: __rey_raw_address): void \x7B var values = (value, 1); \x7D",
+        "func bad(value: __rey_raw_address): void \x7B var values = \x7B\"raw\": value\x7D; \x7D",
+        "func bad(value: __rey_raw_address): bool \x7B return value == value; \x7D",
+        "func bad(value: __rey_raw_address): __rey_raw_address \x7B return value + 1; \x7D",
+    ];
+    var caseIndex = 0;
+    loop {
+        if caseIndex >= cases.len() { break; }
+        var casePath = "/virtual/raw-misuse-" + labels[caseIndex] + ".rey";
+        var caseUnit = parseUnit(cases[caseIndex], casePath, casePath, true);
+        var caseResult = typecheckGraphWithRuntime(oneUnitGraph(caseUnit), [casePath]);
+        if caseResult.ok { println("unexpected raw misuse accepted: " + labels[caseIndex]); }
+        require(!caseResult.ok, "independent rejection: " + labels[caseIndex]);
+        caseIndex = caseIndex + 1;
+    }
+}
+
+func checkImportedSignaturesRejected() {
+    var runtimePath = "/virtual/public-raw.rey";
+    var callerPath = "/virtual/public-caller.rey";
+    var runtimeSource = "pub func rawIdentity(value: __rey_raw_address): __rey_raw_address \x7B return value; \x7D pub func rawVector(values: Vec<__rey_raw_address>): int \x7B return 0; \x7D pub func rawNullable(value: __rey_raw_address?): int \x7B return 0; \x7D pub func rawTuple(value: (__rey_raw_address, int)): int \x7B return 0; \x7D pub func rawCallback(callback: (__rey_raw_address)->int): int \x7B return 0; \x7D pub func rawMap(values: HashMap<string, __rey_raw_address>): int \x7B return 0; \x7D pub func rawOption(value: Option<__rey_raw_address>): int \x7B return 0; \x7D pub func rawResult(value: Result<__rey_raw_address, int>): int \x7B return 0; \x7D pub struct RawApi \x7B pub func borrow(value: __rey_raw_address): __rey_raw_address \x7B return value; \x7D \x7D";
+    var callerSource = "import public_raw::\x7BrawIdentity, rawVector, rawNullable, rawTuple, rawCallback, rawMap, rawOption, rawResult, RawApi\x7D; func main(): void \x7B var api = RawApi \x7B\x7D; var denied = api.borrow(0); \x7D";
+    var runtime = parseUnit(runtimeSource, runtimePath, runtimePath, false);
+    var caller = parseUnit(callerSource, callerPath, callerPath, true);
+    var edge = ImportEdge { fromPath: callerPath, toPath: runtimePath, sourceKind: ImportSourceKind::Module, namespaceName: "", items: ["rawIdentity", "rawVector", "rawNullable", "rawTuple", "rawCallback", "rawMap", "rawOption", "rawResult", "RawApi"], span: Span { start: 0, end: 0, line: 1, column: 0 } };
+    var graph = SourceGraph { entryPath: callerPath, units: [runtime, caller], edges: [edge], errors: [] };
+    var result = typecheckGraphWithRuntime(graph, [runtimePath]);
+    require(!result.ok, "untrusted caller cannot import public signatures that expose raw transitively");
+    require(hasErrorContaining(result, "exposes a private type"), "imported raw signatures report visibility rejection");
+    if !hasErrorContaining(result, "public method 'borrow' exposes a private type") { printErrors(result); }
+    require(hasErrorContaining(result, "public method 'borrow' exposes a private type"), "untrusted callers cannot invoke methods with raw signatures");
+}
+
+func main(): void {
+    checkAuthorizedPrimitives();
+    checkUnauthorizedAndIdentity();
+    checkSpoofRejected();
+    checkNoErasureOrAggregates();
+    checkImportedSignaturesRejected();
+    println("v0.4 raw checker fixtures passed");
+}

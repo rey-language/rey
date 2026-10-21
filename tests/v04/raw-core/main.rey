@@ -1,0 +1,38 @@
+import ir;
+import ir::{Instruction, IRTypeKind};
+
+func require(ok: bool, label: string) {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func main(): void {
+    var source = ir.sourceRef("runtime.rey", 0, 12);
+    require(ir.irTypeName(ir.irRawAddress()) == "raw.address", "distinct printed raw type");
+    require(!ir.irTypeIsScalar(ir.irRawAddress()), "raw address is not an ordinary scalar");
+    var operations: Vec<Instruction> = [
+        ir.rawNull(0, source), ir.rawMap(1, 20, source), ir.rawUnmap(1, 20, source),
+        ir.rawOffset(2, 1, 20, source), ir.rawLoadI64(3, 2, source), ir.rawStoreI64(2, 3, source),
+        ir.rawLoadByte(4, 2, source), ir.rawStoreByte(2, 4, source), ir.rawEqual(5, 0, 1, source),
+        ir.rawLoadAddress(6, 2, source), ir.rawStoreAddress(2, 6, source)
+    ];
+    var arities: Vec<int> = [0, 1, 2, 2, 1, 2, 1, 2, 2, 1, 2];
+    var names: Vec<string> = ["raw.null", "raw.map", "raw.unmap", "raw.offset", "raw.load.i64", "raw.store.i64", "raw.load.byte", "raw.store.byte", "raw.equal", "raw.load.address", "raw.store.address"];
+    var i = 0;
+    while i < operations.len() {
+        var operation = operations[i];
+        require(operation.operands.len() == arities[i], "constructor operand arity");
+        require(ir.rawInstructionName(operation.kind) == names[i], "instruction name");
+        require(operation.immediate == 0 && operation.functionId == -1, "unused fields canonical");
+        require(operation.source.unitId == "runtime.rey", "source retained");
+        if i == 2 || i == 5 || i == 7 || i == 10 {
+            require(operation.resultId == -1 && operation.ty.kind == IRTypeKind::Void, "stores and unmap are void");
+        }
+        i += 1;
+    }
+    var function = ir.irFunction(0, ir.functionKey("runtime", "", "sample"), ir.functionSignature([], ir.irVoid()), [],
+        [ir.basicBlock(0, [], operations, ir.returnVoid(source))], ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), [], ir.escapeUnknown()));
+    var printed = ir.printIR(ir.irProgram(0, [function]));
+    i = 0;
+    while i < names.len() { require(printed.contains(names[i] + "("), "raw printer tag"); i += 1; }
+    println("raw IR core fixtures passed");
+}

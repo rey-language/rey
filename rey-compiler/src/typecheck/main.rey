@@ -23,6 +23,7 @@ pub enum TypeKind {
     Nullable,
     Union,
     Unknown,
+    RawAddress,
 }
 
 pub struct Type {
@@ -254,6 +255,7 @@ struct TypecheckContext {
     pub moduleId: string,
     pub moduleIndex: int,
     pub isEntry: bool,
+    pub rawAuthorized: bool,
     pub currentStruct: string,
     pub globalDeclSpans: HashMap<string, int>,
     pub program: Program,
@@ -352,6 +354,7 @@ func newContext(): TypecheckContext {
         moduleId: "",
         moduleIndex: 0,
         isEntry: false,
+        rawAuthorized: false,
         currentStruct: "",
         globalDeclSpans: HashMap.new(),
         program: Program { statements: [], span: Span { start: -1, end: -1, line: 0, column: 0 } },
@@ -421,6 +424,7 @@ func typeName(ty: Type): string {
     }
     if ty.kind == "Function" { return "function"; }
     if ty.kind == "Int" { return "int"; }
+    if ty.kind == "RawAddress" { return "__rey_raw_address"; }
     if ty.kind == "Float" { return "float"; }
     if ty.kind == "Bool" { return "bool"; }
     if ty.kind == "String" { return "string"; }
@@ -433,6 +437,7 @@ func typeName(ty: Type): string {
 
 func diagnosticTypeName(ty: Type): string {
     if ty.kind == "Int" { return "Int"; }
+    if ty.kind == "RawAddress" { return "__rey_raw_address"; }
     if ty.kind == "Float" { return "Float"; }
     if ty.kind == "Bool" { return "Bool"; }
     if ty.kind == "String" { return "String"; }
@@ -530,6 +535,41 @@ func isUnknown(ty: Type): bool {
     return ty.kind == "Unknown";
 }
 
+func typeContainsRawAddress(ty: Type): bool {
+    if ty.kind == "RawAddress" { return true; }
+    var inner = ty.inner;
+    if inner != null {
+        var innerType: Type = inner;
+        if typeContainsRawAddress(innerType) { return true; }
+    }
+    var key = ty.key;
+    if key != null {
+        var keyType: Type = key;
+        if typeContainsRawAddress(keyType) { return true; }
+    }
+    var value = ty.value;
+    if value != null {
+        var valueType: Type = value;
+        if typeContainsRawAddress(valueType) { return true; }
+    }
+    var i = 0;
+    loop {
+        if i >= ty.params.len() { break; }
+        if typeContainsRawAddress(ty.params[i]) { return true; }
+        i = i + 1;
+    }
+    var ret = ty.ret;
+    if ret != null {
+        var returnType: Type = ret;
+        if typeContainsRawAddress(returnType) { return true; }
+    }
+    return false;
+}
+
+func rejectRawAggregate(ctx: TypecheckContext, ty: Type, span: int, label: string) {
+    if typeContainsRawAddress(ty) { addError(ctx, "raw address cannot be stored in " + label, span); }
+}
+
 func isNumeric(ty: Type): bool {
     return ty.kind == "Int" || ty.kind == "Float";
 }
@@ -558,6 +598,7 @@ func isRenderable(ty: Type): bool {
 }
 
 func canAssign(target: Type, source: Type): bool {
+    if typeContainsRawAddress(target) || typeContainsRawAddress(source) { return typeEqual(target, source); }
     if target.kind == "Any" || source.kind == "Any" { return true; }
     if target.kind == "Unknown" || source.kind == "Unknown" { return false; }
     if typeEqual(target, source) { return true; }
@@ -646,10 +687,14 @@ func canAssign(target: Type, source: Type): bool {
     return false;
 }
 
-func joinTypes(a: Type, b: Type): Type {
+func joinTypes(ctx: TypecheckContext, a: Type, b: Type, span: int): Type {
     if isUnknown(a) { return b; }
     if isUnknown(b) { return a; }
     if typeEqual(a, b) { return a; }
+    if typeContainsRawAddress(a) || typeContainsRawAddress(b) {
+        addError(ctx, "raw address cannot be joined with another type", span);
+        return makeType("Unknown");
+    }
     if a.kind == "Any" || b.kind == "Any" { return makeType("Any"); }
     var items: Vec<Type> = [];
     if a.kind == "Union" {
@@ -691,6 +736,11 @@ func joinTypes(a: Type, b: Type): Type {
 
 func resolveNamedType(ctx: TypecheckContext, name: string, span: int, allowVoid: bool): Type {
     if name == "int" { return makeType("Int"); }
+    if name == "__rey_raw_address" {
+        if ctx.rawAuthorized { return makeType("RawAddress"); }
+        addError(ctx, "reserved type '__rey_raw_address' is only available in an authorized runtime unit", span);
+        return makeType("Unknown");
+    }
     if name == "float" { return makeType("Float"); }
     if name == "bool" { return makeType("Bool"); }
     if name == "string" { return makeType("String"); }
@@ -742,6 +792,7 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
                 var innerTypeExpr: TypeExpr = innerExpr;
                 var inner = resolveTypeExpr(ctx, innerTypeExpr, false);
                 if inner.kind == "Void" || inner.kind == "Null" { addError(ctx, "invalid nullable inner type", expr.span.start); return makeType("Unknown"); }
+                rejectRawAggregate(ctx, inner, expr.span.start, "nullable types");
                 return nullableType(inner);
             }
             addError(ctx, "nullable type is missing its inner type", expr.span.start);
@@ -749,14 +800,25 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
         },
         TypeExprKind::Union => {
             var union = makeType("Union");
+            var members: Vec<Type> = [];
+            var sawRaw = false;
             var i = 0;
             loop {
                 if i >= expr.members.len() { break; }
                 var member = makeType("Unknown");
                 if isNullNamedTypeExpr(expr.members[i]) { member = makeType("Null"); }
                 else { member = resolveTypeExpr(ctx, expr.members[i], false); }
-                if !isUnknown(member) { union = joinTypes(union, member); }
+                if typeContainsRawAddress(member) { sawRaw = true; }
+                if !isUnknown(member) {
+                    members.push(member);
+                    if !sawRaw { union = joinTypes(ctx, union, member, expr.span.start); }
+                }
                 i = i + 1;
+            }
+            if sawRaw {
+                addError(ctx, "raw address cannot be stored in union types", expr.span.start);
+                union.params = members;
+                return union;
             }
             if union.kind == "Union" && union.params.len() == 0 { return makeType("Unknown"); }
             if union.kind == "Union" && union.params.len() == 1 { return union.params[0]; }
@@ -767,7 +829,9 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
             var i2 = 0;
             loop {
                 if i2 >= expr.members.len() { break; }
-                tuple.params.push(resolveTypeExpr(ctx, expr.members[i2], false));
+                var memberType = resolveTypeExpr(ctx, expr.members[i2], false);
+                rejectRawAggregate(ctx, memberType, expr.span.start, "tuple types");
+                tuple.params.push(memberType);
                 i2 = i2 + 1;
             }
             return tuple;
@@ -785,27 +849,39 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
                 var resultTypeExpr: TypeExpr = resultExpr;
                 fn.ret = resolveTypeExpr(ctx, resultTypeExpr, true);
             } else { fn.ret = makeType("Void"); }
+            rejectRawAggregate(ctx, fn, expr.span.start, "function types");
             return fn;
         },
         TypeExprKind::Applied => {
             if expr.name == "Vec" {
                 if expr.members.len() > 1 { addError(ctx, "Vec accepts at most one type argument", expr.span.start); return makeType("Unknown"); }
                 if expr.members.len() == 0 { return arrayType(makeType("Any")); }
-                return arrayType(resolveTypeExpr(ctx, expr.members[0], false));
+                var elementType = resolveTypeExpr(ctx, expr.members[0], false);
+                rejectRawAggregate(ctx, elementType, expr.span.start, "vector types");
+                return arrayType(elementType);
             }
             if expr.name == "HashMap" {
                 if expr.members.len() != 2 { addError(ctx, "HashMap requires key and value type arguments", expr.span.start); return makeType("Unknown"); }
                 var keyType = resolveTypeExpr(ctx, expr.members[0], false);
                 if keyType.kind != "String" && keyType.kind != "Any" { addError(ctx, "HashMap keys must be string", expr.span.start); }
-                return dictType(resolveTypeExpr(ctx, expr.members[1], false));
+                var valueType = resolveTypeExpr(ctx, expr.members[1], false);
+                rejectRawAggregate(ctx, keyType, expr.span.start, "dictionary types");
+                rejectRawAggregate(ctx, valueType, expr.span.start, "dictionary types");
+                return dictType(valueType);
             }
             if expr.name == "Option" {
                 if expr.members.len() != 1 { addError(ctx, "Option requires one type argument", expr.span.start); return makeType("Unknown"); }
-                return optionType(resolveTypeExpr(ctx, expr.members[0], false));
+                var optionValue = resolveTypeExpr(ctx, expr.members[0], false);
+                rejectRawAggregate(ctx, optionValue, expr.span.start, "option types");
+                return optionType(optionValue);
             }
             if expr.name == "Result" {
                 if expr.members.len() != 2 { addError(ctx, "Result requires two type arguments", expr.span.start); return makeType("Unknown"); }
-                return resultType(resolveTypeExpr(ctx, expr.members[0], false), resolveTypeExpr(ctx, expr.members[1], false));
+                var resultOk = resolveTypeExpr(ctx, expr.members[0], false);
+                var resultErr = resolveTypeExpr(ctx, expr.members[1], false);
+                rejectRawAggregate(ctx, resultOk, expr.span.start, "result types");
+                rejectRawAggregate(ctx, resultErr, expr.span.start, "result types");
+                return resultType(resultOk, resultErr);
             }
             addError(ctx, "unsupported applied type '" + expr.name + "'", expr.span.start);
             return makeType("Unknown");
@@ -837,11 +913,14 @@ func resolveTypeTag(ctx: TypecheckContext, expr: TypeExpr?, tag: string, span: i
     if tag.endsWith("?") {
         var innerTag = tag.slice(0, tag.len() - 1);
         var inner = resolveNamedType(ctx, innerTag, span, false);
+        rejectRawAggregate(ctx, inner, span, "nullable types");
         return nullableType(inner);
     }
     if tag.startsWith("[") && tag.endsWith("]") {
         var innerTag2 = tag.slice(1, tag.len() - 1);
-        return arrayType(resolveNamedType(ctx, innerTag2, span, false));
+        var elementType = resolveNamedType(ctx, innerTag2, span, false);
+        rejectRawAggregate(ctx, elementType, span, "vector types");
+        return arrayType(elementType);
     }
     return resolveNamedType(ctx, tag, span, allowVoid);
 }
@@ -959,6 +1038,32 @@ func registerBuiltins(ctx: TypecheckContext) {
     addBuiltin(ctx, "cos", makeSignature([any], 1, false, any, makeType("Float")));
     addBuiltin(ctx, "tan", makeSignature([any], 1, false, any, makeType("Float")));
     addBuiltin(ctx, "random", makeSignature([], 0, false, any, makeType("Float")));
+    if ctx.rawAuthorized { registerRawBuiltins(ctx); }
+}
+
+func isRawIntrinsicName(name: string): bool {
+    return name == "__reyRawNull" || name == "__reyRawMap" || name == "__reyRawUnmap" ||
+        name == "__reyRawOffset" || name == "__reyRawLoadI64" || name == "__reyRawStoreI64" ||
+        name == "__reyRawLoadByte" || name == "__reyRawStoreByte" || name == "__reyRawEqual" ||
+        name == "__reyRawLoadAddress" || name == "__reyRawStoreAddress";
+}
+
+func registerRawBuiltins(ctx: TypecheckContext) {
+    var raw = makeType("RawAddress");
+    var int = makeType("Int");
+    var bool = makeType("Bool");
+    var void = makeType("Void");
+    addBuiltin(ctx, "__reyRawNull", makeSignature([], 0, false, makeType("Unknown"), raw));
+    addBuiltin(ctx, "__reyRawMap", makeSignature([int], 1, false, makeType("Unknown"), raw));
+    addBuiltin(ctx, "__reyRawUnmap", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
+    addBuiltin(ctx, "__reyRawOffset", makeSignature([raw, int], 2, false, makeType("Unknown"), raw));
+    addBuiltin(ctx, "__reyRawLoadI64", makeSignature([raw], 1, false, makeType("Unknown"), int));
+    addBuiltin(ctx, "__reyRawStoreI64", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
+    addBuiltin(ctx, "__reyRawLoadByte", makeSignature([raw], 1, false, makeType("Unknown"), int));
+    addBuiltin(ctx, "__reyRawStoreByte", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
+    addBuiltin(ctx, "__reyRawEqual", makeSignature([raw, raw], 2, false, makeType("Unknown"), bool));
+    addBuiltin(ctx, "__reyRawLoadAddress", makeSignature([raw], 1, false, makeType("Unknown"), raw));
+    addBuiltin(ctx, "__reyRawStoreAddress", makeSignature([raw, raw], 2, false, makeType("Unknown"), void));
 }
 
 func llvmSymbolNameAt(moduleIndex: int, sourceName: string, owner: string): string {
@@ -989,6 +1094,7 @@ func signatureForDecl(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, 
         if param.variadic {
             if i != decl.params.len() - 1 { addError(ctx, "variadic parameter must be last", decl.span.start); }
             if variadic { addError(ctx, "only one variadic parameter is allowed", decl.span.start); }
+            rejectRawAggregate(ctx, paramType, decl.span.start, "variadic function parameters");
             variadic = true;
             variadicType = paramType;
             params.push(arrayType(paramType));
@@ -1008,6 +1114,10 @@ func signatureForDecl(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, 
 }
 
 func registerFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, declarationIndex: int) {
+    if isRawIntrinsicName(decl.name) {
+        addError(ctx, "reserved raw intrinsic name '" + decl.name + "' cannot be declared", decl.span.start);
+        return;
+    }
     var key = decl.name;
     if owner != "" { key = owner + "." + decl.name; }
     if owner == "" && ctx.namespaces.has(decl.name) { addError(ctx, "function name collides with imported namespace '" + decl.name + "'", decl.span.start); }
@@ -1235,6 +1345,7 @@ func importFunctionBinding(ctx: TypecheckContext, name: string, sig: FunctionSig
 }
 
 func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
+    if ty.kind == "RawAddress" { return ctx.rawAuthorized; }
     if ty.kind == "Struct" {
         if ty.moduleId == "" || ty.moduleId == ctx.moduleId { return true; }
         if !ctx.moduleSummaries.has(ty.moduleId) { return false; }
@@ -1401,7 +1512,7 @@ func validateDeclarations(ctx: TypecheckContext, program: Program) {
                 if seenFields.has(field.name) { addError(ctx, "duplicate field '" + field.name + "' on " + decl.name, decl.span.start); }
                 seenFields.set(field.name, true);
                 var fieldType = resolveTypeTag(ctx, field.typeExpr, field.typeTag, decl.span.start, false);
-                if fieldType.kind == "Unknown" { }
+                rejectRawAggregate(ctx, fieldType, decl.span.start, "struct fields");
                 j = j + 1;
             }
             var m = 0;
@@ -1429,7 +1540,8 @@ func validateDeclarations(ctx: TypecheckContext, program: Program) {
                         if variant.payloadNames[p] == "" { positionalPayload = true; }
                         else { namedPayload = true; }
                     }
-                    resolveTypeExpr(ctx, variant.payloadTypes[p], false);
+                    var payloadType = resolveTypeExpr(ctx, variant.payloadTypes[p], false);
+                    rejectRawAggregate(ctx, payloadType, variant.span.start, "enum payloads");
                     p = p + 1;
                 }
                 if namedPayload && positionalPayload { addError(ctx, "enum variant payloads must be all named or all positional", variant.span.start); }
@@ -1548,7 +1660,12 @@ func lookupIdentifier(ctx: TypecheckContext, env: TypeEnv, name: string, span: i
         return makeType("Unknown");
     }
     var found = lookupEnv(env, name);
-    if found.found { return found.symbol.ty; }
+    if found.found {
+        if found.crossedLambda && typeContainsRawAddress(found.symbol.ty) {
+            addError(ctx, "raw addresses cannot be captured by closures", span);
+        }
+        return found.symbol.ty;
+    }
     if ctx.functions.has(name) {
         var sig: FunctionSig = ctx.functions.get(name);
         return functionType(sig.params, sig.ret);
@@ -2293,6 +2410,10 @@ func uniqueEnumVariant(ctx: TypecheckContext, variantName: string): string {
 }
 
 func conversionResult(ctx: TypecheckContext, name: string, source: Type, span: int): Type {
+    if typeContainsRawAddress(source) {
+        addError(ctx, name + "() cannot convert a raw address", span);
+        return makeType("Unknown");
+    }
     var allowed = false;
     var result = makeType("Unknown");
     if name == "int" {
@@ -2360,7 +2481,7 @@ func inferCall(ctx: TypecheckContext, env: TypeEnv, expr: CallExpr, original: Ex
                 if ((name == "min" || name == "max" || name == "pow") && numericArgs.len() != 2) { addError(ctx, name + " expects 2 arguments", expr.span.start); }
                 var numericResult = makeType("Unknown");
                 if name == "abs" && numericArgs.len() > 0 { numericResult = numericArgs[0]; }
-                if ((name == "min" || name == "max") && numericArgs.len() > 1) { numericResult = joinTypes(numericArgs[0], numericArgs[1]); }
+                if ((name == "min" || name == "max") && numericArgs.len() > 1) { numericResult = joinTypes(ctx, numericArgs[0], numericArgs[1], expr.span.start); }
                 if name == "floor" || name == "ceil" || name == "round" { numericResult = makeType("Int"); }
                 if name == "sqrt" || name == "pow" || name == "log" || name == "sin" || name == "cos" || name == "tan" { numericResult = makeType("Float"); }
                 var numericSymbol = resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType("Unknown"));
@@ -2735,20 +2856,25 @@ func inferUpdateTarget(ctx: TypecheckContext, env: TypeEnv, target: Expr, span: 
 
 func inferArray(ctx: TypecheckContext, env: TypeEnv, expr: ArrayExpr): Type {
     var element = makeType("Unknown");
+    var sawRaw = false;
     var i = 0;
     loop {
         if i >= expr.elements.len() { break; }
         var actual = inferExpr(ctx, env, expr.elements[i]);
+        if typeContainsRawAddress(actual) { sawRaw = true; }
         if isUnknown(element) { element = actual; }
-        else { element = joinTypes(element, actual); }
+        else { element = joinTypes(ctx, element, actual, expr.span.start); }
         i = i + 1;
     }
     if isUnknown(element) { element = makeType("Any"); }
+    if sawRaw { addError(ctx, "raw address cannot be stored in vector values", expr.span.start); }
+    rejectRawAggregate(ctx, element, expr.span.start, "vector values");
     return arrayType(element);
 }
 
 func inferDict(ctx: TypecheckContext, env: TypeEnv, expr: DictExpr): Type {
     var valueType = makeType("Unknown");
+    var sawRaw = false;
     var i = 0;
     loop {
         if i >= expr.entries.len() { break; }
@@ -2763,11 +2889,14 @@ func inferDict(ctx: TypecheckContext, env: TypeEnv, expr: DictExpr): Type {
             expectType(ctx, makeType("String"), keyType, "dictionary keys must be strings", entry.span.start);
         }
         var actual = inferExpr(ctx, env, entry.value);
+        if typeContainsRawAddress(actual) { sawRaw = true; }
         if isUnknown(valueType) { valueType = actual; }
-        else { valueType = joinTypes(valueType, actual); }
+        else { valueType = joinTypes(ctx, valueType, actual, expr.span.start); }
         i = i + 1;
     }
     if isUnknown(valueType) { valueType = makeType("Any"); }
+    if sawRaw { addError(ctx, "raw address cannot be stored in dictionary values", expr.span.start); }
+    rejectRawAggregate(ctx, valueType, expr.span.start, "dictionary values");
     return dictType(valueType);
 }
 
@@ -2807,14 +2936,16 @@ func inferLambda(ctx: TypecheckContext, env: TypeEnv, expr: LambdaExpr, original
     }
     else {
         checkStatements(ctx, child, expr.body);
-        ret = joinReturnTypes(ctx.returnTypes);
+        ret = joinReturnTypes(ctx, ctx.returnTypes, expr.span.start);
     }
     ctx.inFunction = oldInFunction;
     ctx.currentReturn = oldReturn;
     ctx.returnTypes = oldReturns;
     ctx.loopDepth = oldLoop;
     if isUnknown(ret) { addError(ctx, "cannot infer lambda return type", expr.span.start); }
-    return functionType(paramTypes, ret);
+    var functionValueType = functionType(paramTypes, ret);
+    rejectRawAggregate(ctx, functionValueType, expr.span.start, "function values");
+    return functionValueType;
 }
 
 func exprVariantName(expr: Expr): string {
@@ -3073,6 +3204,10 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
             if isAssignmentOp(binary.op) { return inferAssignExpr(ctx, env, binary); }
             if binary.op == "instanceof" {
                 var leftType = inferExpr(ctx, env, binary.left);
+                if typeContainsRawAddress(leftType) {
+                    addError(ctx, "raw addresses do not support source operators", binary.span.start);
+                    return makeType("Bool");
+                }
                 var rightPayload = identifierPayload(binary.right);
                 if rightPayload != null {
                     var right: IdentExpr = rightPayload;
@@ -3087,6 +3222,17 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
             }
             var left = inferExpr(ctx, env, binary.left);
             var rightType = inferExpr(ctx, env, binary.right);
+            if typeContainsRawAddress(left) || typeContainsRawAddress(rightType) {
+                if binary.op == "==" || binary.op == "!=" {
+                    addError(ctx, "raw addresses must be compared with __reyRawEqual", binary.span.start);
+                    return makeType("Bool");
+                }
+                addError(ctx, "raw addresses do not support source operators", binary.span.start);
+                if binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" || binary.op == "&&" || binary.op == "||" {
+                    return makeType("Bool");
+                }
+                return makeType("Unknown");
+            }
             if binary.op == "&&" || binary.op == "||" {
                 expectType(ctx, makeType("Bool"), left, "logical operator requires bool operands", binary.span.start);
                 expectType(ctx, makeType("Bool"), rightType, "logical operator requires bool operands", binary.span.start);
@@ -3169,12 +3315,13 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
             expectType(ctx, makeType("Bool"), inferExpr(ctx, env, ifExpr.condition), "if condition must be bool", ifExpr.span.start);
             var thenType = inferExpr(ctx, newEnv(env, false), ifExpr.thenBranch);
             var elseType = inferExpr(ctx, newEnv(env, false), ifExpr.elseBranch);
-            return joinTypes(thenType, elseType);
+            return joinTypes(ctx, thenType, elseType, ifExpr.span.start);
         },
         Expr::Tuple(tupleExpr) => {
             var tuple = makeType("Tuple");
             var i = 0;
             loop { if i >= tupleExpr.elements.len() { break; } tuple.params.push(inferExpr(ctx, env, tupleExpr.elements[i])); i = i + 1; }
+            rejectRawAggregate(ctx, tuple, tupleExpr.span.start, "tuple values");
             return tuple;
         },
         Expr::Array(arrayExpr) => { return inferArray(ctx, env, arrayExpr); },
@@ -3184,7 +3331,7 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
     return makeType("Unknown");
 }
 
-func joinReturnTypes(types: Vec<Type>): Type {
+func joinReturnTypes(ctx: TypecheckContext, types: Vec<Type>, span: int): Type {
     if types.len() == 0 { return makeType("Void"); }
     var result = makeType("Unknown");
     var sawUnknown = false;
@@ -3193,7 +3340,7 @@ func joinReturnTypes(types: Vec<Type>): Type {
         if i >= types.len() { break; }
         if isUnknown(types[i]) { sawUnknown = true; }
         else if isUnknown(result) { result = types[i]; }
-        else { result = joinTypes(result, types[i]); }
+        else { result = joinTypes(ctx, result, types[i], span); }
         i = i + 1;
     }
     if isUnknown(result) && sawUnknown { return makeType("Unknown"); }
@@ -3532,6 +3679,15 @@ func checkBinding(ctx: TypecheckContext, env: TypeEnv, declaration: Stmt, name: 
         declared = resolveTypeTag(ctx, typeExpr, tag, span, false);
         expectType(ctx, declared, actual, "initializer type mismatch for '" + name + "'", span);
     }
+    if typeContainsRawAddress(declared) && declared.kind != "RawAddress" {
+        rejectRawAggregate(ctx, declared, span, "local bindings");
+    }
+    if typeContainsRawAddress(actual) && actual.kind != "RawAddress" {
+        rejectRawAggregate(ctx, actual, span, "local bindings");
+    }
+    if typeContainsRawAddress(declared) && !ctx.rawAuthorized {
+        addError(ctx, "raw address is only available in an authorized runtime unit", span);
+    }
     defineSymbol(ctx, env, name, declared, isConst, span);
     recordBinding(ctx, declaration, stmtNodeKey(declaration), name, declared, "Local", isConst, -1);
 }
@@ -3549,6 +3705,9 @@ func checkGlobalBinding(ctx: TypecheckContext, declaration: Stmt, name: string, 
     if typeExpr != null || tag != "" {
         ty = resolveTypeTag(ctx, typeExpr, tag, span, false);
         expectType(ctx, ty, actual, "initializer type mismatch for '" + name + "'", span);
+    }
+    if typeContainsRawAddress(ty) || typeContainsRawAddress(actual) {
+        addError(ctx, "raw address cannot be stored in a global binding", span);
     }
     if isUnknown(ty) { addError(ctx, "cannot infer type of '" + name + "'", span); }
     ctx.globals.symbols.set(name, Symbol { name: name, ty: ty, isConst: isConst });
@@ -3780,7 +3939,7 @@ func inferFunctionReturn(ctx: TypecheckContext, decl: FuncDeclStmt, owner: strin
         defineSymbol(ctx, env, "self", resolveNamedType(ctx, owner, decl.span.start, false), false, decl.span.start);
     }
     checkBody(ctx, env, decl.body);
-    var result = joinReturnTypes(ctx.returnTypes);
+    var result = joinReturnTypes(ctx, ctx.returnTypes, decl.span.start);
     ctx.suppressErrors = oldSuppress;
     ctx.inFunction = oldInFunction;
     ctx.currentReturn = oldReturn;
@@ -3894,6 +4053,7 @@ func statementsDefinitelyReturn(statements: Vec<Stmt>): bool {
 }
 
 func checkFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, declaration, declarationKey: string) {
+    if isRawIntrinsicName(decl.name) { return; }
     var key = decl.name;
     if owner != "" { key = owner + "." + decl.name; }
     if !ctx.functions.has(key) { return; }
@@ -4138,13 +4298,14 @@ func collectNominalLayouts(ctx: TypecheckContext): Vec<CheckedNominalLayout> {
     return layouts;
 }
 
-func typecheckSingle(unit: SourceUnit, graph: SourceGraph, summaries: HashMap<string, ModuleSummary>, moduleIndex: int): TypecheckResult {
+func typecheckSingle(unit: SourceUnit, graph: SourceGraph, summaries: HashMap<string, ModuleSummary>, moduleIndex: int, rawAuthorized: bool): TypecheckResult {
     var program = unit.program;
     var ctx = newContext();
     ctx.sourcePath = unit.sourcePath;
     ctx.moduleId = unit.moduleId;
     ctx.moduleIndex = moduleIndex;
     ctx.isEntry = unit.isEntry;
+    ctx.rawAuthorized = rawAuthorized;
     ctx.program = program;
     ctx.moduleSummaries = summaries;
     var importIndex = 0;
@@ -4218,7 +4379,18 @@ func stableModuleIndex(graph: SourceGraph, moduleId: string): int {
     return index;
 }
 
-pub func typecheckGraph(graph: SourceGraph): TypecheckResult {
+func runtimeUnitAuthorized(unit: SourceUnit, runtimeUnits: Vec<string>): bool {
+    var i = 0;
+    loop {
+        if i >= runtimeUnits.len() { break; }
+        var identity = runtimeUnits[i];
+        if identity == unit.sourcePath && identity == unit.moduleId { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func typecheckGraphInternal(graph: SourceGraph, runtimeUnits: Vec<string>): TypecheckResult {
     if graph.errors.len() > 0 {
         var loadErrors: Vec<TypeError> = [];
         var loadIndex = 0;
@@ -4258,7 +4430,7 @@ pub func typecheckGraph(graph: SourceGraph): TypecheckResult {
         if unitIndex >= graph.units.len() { break; }
         var unit = graph.units[unitIndex];
         var moduleIndex = stableModuleIndex(graph, unit.moduleId);
-        var result = typecheckSingle(unit, graph, summaries, moduleIndex);
+        var result = typecheckSingle(unit, graph, summaries, moduleIndex, runtimeUnitAuthorized(unit, runtimeUnits));
         var errorIndex = 0;
         loop { if errorIndex >= result.errors.len() { break; } errors.push(result.errors[errorIndex]); errorIndex = errorIndex + 1; }
         var maybeCheckedUnit = result.checkedProgram;
@@ -4280,6 +4452,14 @@ pub func typecheckGraph(graph: SourceGraph): TypecheckResult {
     }
     var checked = CheckedProgram { entryPath: graph.entryPath, units: graph.units, edges: graph.edges, expressions: expressions, bindings: bindings, fieldInitializers: fieldInitializers, symbols: symbols, nominalLayouts: nominalLayouts };
     return TypecheckResult { ok: errors.len() == 0, errors: errors, checkedProgram: checked };
+}
+
+pub func typecheckGraph(graph: SourceGraph): TypecheckResult {
+    return typecheckGraphInternal(graph, []);
+}
+
+pub func typecheckGraphWithRuntime(graph: SourceGraph, runtimeUnits: Vec<string>): TypecheckResult {
+    return typecheckGraphInternal(graph, runtimeUnits);
 }
 
 pub func typecheckAt(program: Program, sourcePath: string, source: string): TypecheckResult {

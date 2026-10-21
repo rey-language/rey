@@ -78,17 +78,18 @@ func spanRef(path: string, span: Span): SourceRef {
     return sourceRef(path, span.start, span.end);
 }
 
-func checkedTypeIsScalar(ty: Type): bool {
-    return ty.kind == "Int" || ty.kind == "Bool";
+func checkedTypeIsValue(ty: Type): bool {
+    return ty.kind == "Int" || ty.kind == "Bool" || ty.kind == "RawAddress";
 }
 
 func checkedTypeIsSupported(ty: Type): bool {
-    return checkedTypeIsScalar(ty) || ty.kind == "Void";
+    return checkedTypeIsValue(ty) || ty.kind == "Void";
 }
 
 func toIRType(ty: Type): IRType {
     if ty.kind == "Int" { return irI64(); }
     if ty.kind == "Bool" { return irBool(); }
+    if ty.kind == "RawAddress" { return ir.irRawAddress(); }
     return irVoid();
 }
 
@@ -143,7 +144,7 @@ func preflightFunction(checked: CheckedProgram, sourcePath: string, moduleId: st
             return Result.Err(lowerError(sourcePath, declaration.span.start, "default and variadic parameters are unsupported by scalar IR lowering"));
         }
         var checkedParameterType = symbol.signature.params[parameterIndex];
-        if !checkedTypeIsScalar(checkedParameterType) {
+        if !checkedTypeIsValue(checkedParameterType) {
             return Result.Err(lowerError(sourcePath, declaration.span.start, "parameter '" + parameter.name + "' has unsupported type " + checkedParameterType.kind));
         }
         parameterTypes.push(toIRType(checkedParameterType));
@@ -468,6 +469,9 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     var maybeSymbol = info.symbol;
     if maybeSymbol != null {
     var symbol: ResolvedSymbol = maybeSymbol;
+    if symbol.kind == "Builtin" && symbol.intrinsicId.startsWith("__reyRaw") {
+        return lowerRawIntrinsic(lowerer, expression, callExpr, info, symbol);
+    }
     if symbol.kind != "Function" || symbol.receiverPassing != "None" || symbol.intrinsicId != "" {
         return failExpression(lowerer, expression, "only calls to top-level source functions are supported");
     }
@@ -510,6 +514,52 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     return failExpression(lowerer, expression, "call has no checked resolved symbol");
     }
     return failExpression(lowerer, expression, "checked call metadata is missing");
+}
+
+func lowerRawIntrinsic(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr, info: CheckedExprInfo, symbol: ResolvedSymbol): LowerValue {
+    var id = symbol.intrinsicId;
+    var parameterTypes: Vec<IRType> = [];
+    var resultType = irVoid();
+    if id == "__reyRawNull" { resultType = ir.irRawAddress(); }
+    else if id == "__reyRawMap" { parameterTypes = [irI64()]; resultType = ir.irRawAddress(); }
+    else if id == "__reyRawUnmap" { parameterTypes = [ir.irRawAddress(), irI64()]; }
+    else if id == "__reyRawOffset" { parameterTypes = [ir.irRawAddress(), irI64()]; resultType = ir.irRawAddress(); }
+    else if id == "__reyRawLoadI64" || id == "__reyRawLoadByte" { parameterTypes = [ir.irRawAddress()]; resultType = irI64(); }
+    else if id == "__reyRawStoreI64" || id == "__reyRawStoreByte" { parameterTypes = [ir.irRawAddress(), irI64()]; }
+    else if id == "__reyRawEqual" { parameterTypes = [ir.irRawAddress(), ir.irRawAddress()]; resultType = irBool(); }
+    else if id == "__reyRawLoadAddress" { parameterTypes = [ir.irRawAddress()]; resultType = ir.irRawAddress(); }
+    else if id == "__reyRawStoreAddress" { parameterTypes = [ir.irRawAddress(), ir.irRawAddress()]; }
+    else { return failExpression(lowerer, expression, "unknown trusted raw intrinsic"); }
+    if callExpr.args.len() != parameterTypes.len() || toIRType(info.ty).kind != resultType.kind {
+        return failExpression(lowerer, expression, "trusted raw intrinsic signature mismatch");
+    }
+    var operands: Vec<int> = [];
+    var index = 0;
+    while index < parameterTypes.len() {
+        var argument = lowerExpr(lowerer, callExpr.args[index]);
+        if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+        if argument.id < 0 || argument.ty.kind != parameterTypes[index].kind {
+            return failExpression(lowerer, expression, "trusted raw intrinsic operand type mismatch");
+        }
+        operands.push(argument.id);
+        index += 1;
+    }
+    var resultId = -1;
+    if resultType.kind != IRTypeKind::Void { resultId = allocateValue(lowerer, resultType).id; }
+    var source = spanRef(lowerer.sourcePath, exprSpan(expression));
+    var instruction = ir.rawNull(resultId, source);
+    if id == "__reyRawMap" { instruction = ir.rawMap(resultId, operands[0], source); }
+    else if id == "__reyRawUnmap" { instruction = ir.rawUnmap(operands[0], operands[1], source); }
+    else if id == "__reyRawOffset" { instruction = ir.rawOffset(resultId, operands[0], operands[1], source); }
+    else if id == "__reyRawLoadI64" { instruction = ir.rawLoadI64(resultId, operands[0], source); }
+    else if id == "__reyRawStoreI64" { instruction = ir.rawStoreI64(operands[0], operands[1], source); }
+    else if id == "__reyRawLoadByte" { instruction = ir.rawLoadByte(resultId, operands[0], source); }
+    else if id == "__reyRawStoreByte" { instruction = ir.rawStoreByte(operands[0], operands[1], source); }
+    else if id == "__reyRawEqual" { instruction = ir.rawEqual(resultId, operands[0], operands[1], source); }
+    else if id == "__reyRawLoadAddress" { instruction = ir.rawLoadAddress(resultId, operands[0], source); }
+    else if id == "__reyRawStoreAddress" { instruction = ir.rawStoreAddress(operands[0], operands[1], source); }
+    appendInstruction(lowerer, instruction);
+    return LowerValue { id: resultId, ty: resultType };
 }
 
 func lowerShortCircuit(lowerer: FunctionLowerer, binary: BinaryExpr, left: LowerValue): LowerValue {
@@ -750,7 +800,7 @@ func lowerDeclaration(lowerer: FunctionLowerer, statement: Stmt, name: string, i
     var maybeBinding = bindingForDeclaration(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, statement, name);
     if maybeBinding != null {
         var binding: CheckedBindingInfo = maybeBinding;
-        if !checkedTypeIsScalar(binding.ty) {
+        if !checkedTypeIsValue(binding.ty) {
             lowerer.error = lowerError(lowerer.sourcePath, span.start, "local '" + name + "' has unsupported type " + binding.ty.kind);
             return;
         }

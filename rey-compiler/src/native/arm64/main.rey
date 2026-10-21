@@ -235,7 +235,37 @@ func emitDivGuard(emitter: Emitter, leftRegister: int, rightRegister: int, overf
     patchRelative(emitter, Fixup { offset: safeBranch, kind: 4, targetFunctionId: -1, targetBlockId: -1, targetOffset: 0, condition: 1 }, emitter.bytes.len());
 }
 
-func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, instruction: Instruction, overflowOffset: int): void {
+func emitRawSyscall(emitter: Emitter, targetOS: string, number: int): void {
+    if targetOS == "darwin" {
+        putMovImm16(emitter, 16, number, 0, false);
+        emitWord(emitter, 3556773889);
+    } else {
+        putMovImm16(emitter, 8, number, 0, false);
+        emitWord(emitter, 3556769793);
+    }
+}
+
+func emitSyscallFailureCheck(emitter: Emitter, targetOS: string, overflowOffset: int): void {
+    if targetOS == "darwin" {
+        emitTrapBranch(emitter, 2, overflowOffset);
+    } else {
+        emitWord(emitter, 4043309087);
+        emitTrapBranch(emitter, 11, overflowOffset);
+    }
+}
+
+func emitRawAddressCheck(emitter: Emitter, addressRegister: int, aligned: bool, overflowOffset: int): void {
+    emitWord(emitter, 4043309087 + addressRegister * 32);
+    emitTrapBranch(emitter, 13, overflowOffset);
+    if aligned {
+        putMovImm16(emitter, 12, 7, 0, false);
+        emitWord(emitter, 2315255808 + 12 * 65536 + addressRegister * 32 + 11);
+        emitWord(emitter, 4043309087 + 11 * 32);
+        emitTrapBranch(emitter, 1, overflowOffset);
+    }
+}
+
+func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, instruction: Instruction, overflowOffset: int, targetOS: string): void {
     if instruction.kind == InstructionKind::ConstI64 {
         putConstant(emitter, 9, instruction.immediate);
         putStore(emitter, 9, slotOffset(slots, instruction.resultId));
@@ -292,6 +322,93 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
         emitWord(emitter, 3942645791 + 10 * 65536 + 9 * 32);
         var condition = predicateCondition(instruction.comparison);
         emitWord(emitter, 2594113504 + (condition - condition % 2 + (1 - condition % 2)) * 4096 + 11);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawNull {
+        putMovImm16(emitter, 9, 0, 0, false);
+        putStore(emitter, 9, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawMap {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        emitWord(emitter, 4043309087 + 9 * 32);
+        emitTrapBranch(emitter, 13, overflowOffset);
+        putMovImm16(emitter, 0, 0, 0, false);
+        putLoad(emitter, 1, slotOffset(slots, instruction.operands[0]));
+        putMovImm16(emitter, 2, 3, 0, false);
+        if targetOS == "darwin" { putConstant(emitter, 3, 4098); }
+        else { putConstant(emitter, 3, 34); }
+        putConstant(emitter, 4, -1);
+        putMovImm16(emitter, 5, 0, 0, false);
+        var syscallNumber = 197;
+        if targetOS == "linux" { syscallNumber = 222; }
+        emitRawSyscall(emitter, targetOS, syscallNumber);
+        emitSyscallFailureCheck(emitter, targetOS, overflowOffset);
+        emitWord(emitter, 4043309087);
+        emitTrapBranch(emitter, 13, overflowOffset);
+        putStore(emitter, 0, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawUnmap {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitRawAddressCheck(emitter, 9, false, overflowOffset);
+        emitWord(emitter, 4043309087 + 10 * 32);
+        emitTrapBranch(emitter, 13, overflowOffset);
+        putLoad(emitter, 0, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 1, slotOffset(slots, instruction.operands[1]));
+        var syscallNumber = 73;
+        if targetOS == "linux" { syscallNumber = 215; }
+        emitRawSyscall(emitter, targetOS, syscallNumber);
+        emitSyscallFailureCheck(emitter, targetOS, overflowOffset);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawOffset {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitRawAddressCheck(emitter, 9, false, overflowOffset);
+        emitWord(emitter, 4043309087 + 10 * 32);
+        emitTrapBranch(emitter, 11, overflowOffset);
+        emitWord(emitter, 2868903936 + 10 * 65536 + 9 * 32 + 11);
+        emitTrapBranch(emitter, 6, overflowOffset);
+        emitWord(emitter, 4043309087 + 11 * 32);
+        emitTrapBranch(emitter, 11, overflowOffset);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress || instruction.kind == InstructionKind::RawLoadByte {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        emitRawAddressCheck(emitter, 9, instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress, overflowOffset);
+        if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress {
+            emitWord(emitter, 4181721088 + 9 * 32 + 11);
+        } else {
+            emitWord(emitter, 960495616 + 9 * 32 + 11);
+        }
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreAddress || instruction.kind == InstructionKind::RawStoreByte {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitRawAddressCheck(emitter, 9, instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreAddress, overflowOffset);
+        if instruction.kind == InstructionKind::RawStoreByte {
+            emitWord(emitter, 4043309087 + 10 * 32);
+            emitTrapBranch(emitter, 11, overflowOffset);
+            putMovImm16(emitter, 12, 255, 0, false);
+            emitWord(emitter, 3942645791 + 12 * 65536 + 10 * 32);
+            emitTrapBranch(emitter, 12, overflowOffset);
+            emitWord(emitter, 956301312 + 9 * 32 + 10);
+        } else {
+            emitWord(emitter, 4177526784 + 9 * 32 + 10);
+        }
+        return;
+    }
+    if instruction.kind == InstructionKind::RawEqual {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitWord(emitter, 3942645791 + 10 * 65536 + 9 * 32);
+        emitWord(emitter, 2594113504 + 4096 + 11);
         putStore(emitter, 11, slotOffset(slots, instruction.resultId));
         return;
     }
@@ -406,7 +523,7 @@ func resolveFunctionFixups(emitter: Emitter, function: IRFunction, localFixups: 
     }
 }
 
-func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int): void {
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string): void {
     if function.parameters.len() > 8 {
         emitter.error = "native arm64: functions with more than eight scalar arguments are unsupported";
         return;
@@ -442,7 +559,7 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int): 
         var instructionIndex = 0;
         loop {
             if instructionIndex >= block.instructions.len() { break; }
-            emitInstruction(emitter, function, slots, block.instructions[instructionIndex], overflowOffset);
+            emitInstruction(emitter, function, slots, block.instructions[instructionIndex], overflowOffset, targetOS);
             instructionIndex = instructionIndex + 1;
         }
         var before = emitter.fixups.len();
@@ -505,6 +622,9 @@ pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, stri
     if entryFunction.parameters.len() != 0 {
         return Result.Err("native arm64: program entry function must have zero scalar arguments");
     }
+    if entryFunction.signature.returnType.kind == IRTypeKind::RawAddress {
+        return Result.Err("native arm64: program entry function cannot return a raw address");
+    }
     var i = 0;
     loop {
         if i >= program.functions.len() { break; }
@@ -532,7 +652,7 @@ pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, stri
     i = 0;
     loop {
         if i >= program.functions.len() { break; }
-        emitFunction(emitter, program.functions[i], overflowOffset);
+        emitFunction(emitter, program.functions[i], overflowOffset, targetOS);
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }

@@ -1,0 +1,46 @@
+func require(ok: bool): void {
+    if !ok { var maximum = 9223372036854775807; var failure = maximum + 1; }
+}
+
+func mapped(size: int): __rey_raw_address { return __reyRawMap(size); }
+func readAt(base: __rey_raw_address, offset: int): int {
+    return __reyRawLoadI64(__reyRawOffset(base, offset));
+}
+
+func main(): void {
+    var size = 4096;
+    var first = mapped(size);
+    var second = mapped(size);
+    var empty = __reyRawNull();
+    require(!__reyRawEqual(first, empty));
+    require(!__reyRawEqual(first, second));
+    require(__reyRawEqual(empty, __reyRawNull()));
+    require(readAt(first, 0) == 0);
+    __reyRawStoreI64(first, -9223372036854775808);
+    __reyRawStoreI64(__reyRawOffset(first, 8), 9223372036854775807);
+    require(readAt(first, 0) == -9223372036854775808);
+    require(readAt(first, 8) == 9223372036854775807);
+    require(readAt(second, 0) == 0);
+    var byte = 0;
+    while byte < 256 {
+        var address = __reyRawOffset(first, byte + 16);
+        __reyRawStoreByte(address, byte);
+        require(__reyRawLoadByte(address) == byte);
+        byte += 1;
+    }
+    var selected = empty;
+    if __reyRawEqual(empty, __reyRawNull()) { selected = second; }
+    else { selected = first; }
+    __reyRawStoreI64(selected, 42);
+    require(readAt(second, 0) == 42);
+    var pointerCell = __reyRawOffset(second, 16);
+    require(__reyRawEqual(__reyRawLoadAddress(pointerCell), empty));
+    __reyRawStoreAddress(pointerCell, first);
+    var recovered = __reyRawLoadAddress(pointerCell);
+    require(__reyRawEqual(recovered, first));
+    require(readAt(recovered, 0) == -9223372036854775808);
+    __reyRawStoreAddress(pointerCell, empty);
+    require(__reyRawEqual(__reyRawLoadAddress(pointerCell), empty));
+    __reyRawUnmap(second, size);
+    __reyRawUnmap(first, size);
+}

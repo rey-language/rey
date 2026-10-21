@@ -1,0 +1,4 @@
+func main(): void {
+    var address = __reyRawMap(4096);
+    __reyRawStoreByte(address, 256);
+}

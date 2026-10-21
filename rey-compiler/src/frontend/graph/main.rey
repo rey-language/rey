@@ -2,7 +2,7 @@ import lexer::{LexError};
 import lexer;
 import parser;
 import parser::ast::{ImportStmt, ImportSourceKind, Program, Stmt};
-import typecheck::{CheckedProgram, ImportEdge, SourceGraph, SourceUnit, TypeError, typecheckGraph};
+import typecheck::{CheckedProgram, ImportEdge, SourceGraph, SourceUnit, TypeError, typecheckGraphWithRuntime};
 import diagnostics::{Diagnostic, Severity, formatDiagnostic, spanFromOffsets, unknownSpan};
 
 struct GraphLoadState {
@@ -433,6 +433,10 @@ func typeErrorsToString(units: Vec<SourceUnit>, errors: Vec<TypeError>): string 
 }
 
 pub func checkSourceFileGraph(entryPath: string, stdRoot: string): Result<CheckedProgram, string> {
+    return checkSourceFileGraphWithRuntime(entryPath, stdRoot, []);
+}
+
+pub func checkSourceFileGraphWithRuntime(entryPath: string, stdRoot: string, runtimeUnits: Vec<string>): Result<CheckedProgram, string> {
     var normalizedEntry = normalizePath(entryPath);
     var graph = SourceGraph { entryPath: normalizedEntry, units: [], edges: [], errors: [] };
     var state = GraphLoadState {
@@ -445,7 +449,7 @@ pub func checkSourceFileGraph(entryPath: string, stdRoot: string): Result<Checke
     if state.stdRoot != "" { state.stdRoot = normalizePath(state.stdRoot); }
     loadUnit(state, normalizedEntry, "", "", -1, -1);
 
-    var checked = typecheckGraph(state.graph);
+    var checked = typecheckGraphWithRuntime(state.graph, runtimeUnits);
     if state.graph.errors.len() > 0 {
         var loadErrors = "";
         var i = 0;

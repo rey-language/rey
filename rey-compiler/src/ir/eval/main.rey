@@ -20,6 +20,26 @@ struct EvalFrame {
     pub values: Vec<int>,
 }
 
+struct RawAddressCell {
+    pub offset: int,
+    pub value: int,
+    pub valid: bool,
+}
+
+struct RawMapping {
+    pub base: int,
+    pub size: int,
+    pub bytes: Vec<int>,
+    pub written: Vec<int>,
+    pub addressCells: Vec<RawAddressCell>,
+    pub live: bool,
+}
+
+struct RawState {
+    pub mappings: Vec<RawMapping>,
+    pub nextBase: Vec<int>,
+}
+
 struct EdgeTransfer {
     pub ok: bool,
     pub block: BasicBlock,
@@ -65,6 +85,170 @@ func writeValue(frame: EvalFrame, valueId: int, value: int) {
     }
     frame.ids.push(valueId);
     frame.values.push(value);
+}
+
+func emptyRawMapping(): RawMapping {
+    return RawMapping { base: 0, size: 0, bytes: [], written: [], addressCells: [], live: false };
+}
+
+func newRawState(): RawState {
+    var mappings: Vec<RawMapping> = [];
+    var i = 0;
+    loop {
+        if i >= 256 { break; }
+        mappings.push(emptyRawMapping());
+        i = i + 1;
+    }
+    return RawState { mappings: mappings, nextBase: [4096] };
+}
+
+func findRawMappingByBase(state: RawState, base: int): int {
+    var i = 0;
+    loop {
+        if i >= state.mappings.len() { break; }
+        var mapping = state.mappings[i];
+        if mapping.live && mapping.base == base { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findRawMappingForAccess(state: RawState, address: int, extent: int): int {
+    var i = 0;
+    loop {
+        if i >= state.mappings.len() { break; }
+        var mapping = state.mappings[i];
+        if mapping.live && address >= mapping.base && extent > 0 && mapping.size >= extent {
+            var offset = address - mapping.base;
+            if offset <= mapping.size - extent { return i; }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findFreeRawMapping(state: RawState): int {
+    var i = 0;
+    loop {
+        if i >= state.mappings.len() { break; }
+        if !state.mappings[i].live { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func totalRawBytes(state: RawState): int {
+    var total = 0;
+    var i = 0;
+    loop {
+        if i >= state.mappings.len() { break; }
+        var mapping = state.mappings[i];
+        if mapping.live { total = total + mapping.size; }
+        i = i + 1;
+    }
+    return total;
+}
+
+func zeroBytes(size: int): Vec<int> {
+    var bytes: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= size { break; }
+        bytes.push(0);
+        i = i + 1;
+    }
+    return bytes;
+}
+
+func findRawAddressCell(mapping: RawMapping, byteOffset: int): int {
+    var i = 0;
+    loop {
+        if i >= mapping.addressCells.len() { break; }
+        if mapping.addressCells[i].offset == byteOffset { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func invalidateRawAddressCells(mapping: RawMapping, byteOffset: int, extent: int) {
+    var writeEnd = byteOffset + extent;
+    var i = 0;
+    loop {
+        if i >= mapping.addressCells.len() { break; }
+        var cell = mapping.addressCells[i];
+        var cellEnd = cell.offset + 8;
+        if cell.valid && cell.offset < writeEnd && byteOffset < cellEnd {
+            cell.valid = false;
+            mapping.addressCells.set(i, cell);
+        }
+        i = i + 1;
+    }
+}
+
+func markRawWrite(mapping: RawMapping, byteOffset: int, extent: int): RawMapping {
+    invalidateRawAddressCells(mapping, byteOffset, extent);
+    var i = 0;
+    loop {
+        if i >= extent { break; }
+        mapping.written.set(byteOffset + i, 1);
+        i = i + 1;
+    }
+    return mapping;
+}
+
+func rawLoadAddress(mapping: RawMapping, byteOffset: int): ValueLookup {
+    var cellIndex = findRawAddressCell(mapping, byteOffset);
+    if cellIndex >= 0 {
+        var cell = mapping.addressCells[cellIndex];
+        if cell.valid { return ValueLookup { found: true, value: cell.value }; }
+    }
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        if mapping.written[byteOffset + i] != 0 { return ValueLookup { found: false, value: 0 }; }
+        i = i + 1;
+    }
+    return ValueLookup { found: true, value: 0 };
+}
+
+func rawStoreI64(mapping: RawMapping, byteOffset: int, value: int): RawMapping {
+    var remaining = value;
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        var byteValue = remaining % 256;
+        var quotient = remaining / 256;
+        if byteValue < 0 {
+            byteValue = byteValue + 256;
+            quotient = quotient - 1;
+        }
+        mapping.bytes.set(byteOffset + i, byteValue);
+        remaining = quotient;
+        i = i + 1;
+    }
+    return mapping;
+}
+
+func rawStoreAddress(mapping: RawMapping, byteOffset: int, value: int): RawMapping {
+    mapping = markRawWrite(mapping, byteOffset, 8);
+    mapping = rawStoreI64(mapping, byteOffset, value);
+    var cellIndex = findRawAddressCell(mapping, byteOffset);
+    var cell = RawAddressCell { offset: byteOffset, value: value, valid: true };
+    if cellIndex >= 0 { mapping.addressCells.set(cellIndex, cell); }
+    else { mapping.addressCells.push(cell); }
+    return mapping;
+}
+
+func rawLoadI64(mapping: RawMapping, byteOffset: int): int {
+    var value = mapping.bytes[byteOffset + 7];
+    if value >= 128 { value = value - 256; }
+    var i = 6;
+    loop {
+        if i < 0 { break; }
+        value = value * 256 + mapping.bytes[byteOffset + i];
+        i = i - 1;
+    }
+    return value;
 }
 
 func findFunctionIndex(program: IRProgram, functionId: int): int {
@@ -122,7 +306,7 @@ func comparisonResult(predicate: CompareI64Predicate, left: int, right: int): bo
     return left >= right;
 }
 
-func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, depth: int, steps: int, maxSteps: int, maxDepth: int): EvalResult {
+func evalFunction(program: IRProgram, state: RawState, functionId: int, arguments: Vec<int>, depth: int, steps: int, maxSteps: int, maxDepth: int): EvalResult {
     var functionIndex = findFunctionIndex(program, functionId);
     if functionIndex < 0 { return evalFailure("call references a missing function", steps); }
     var function = program.functions[functionIndex];
@@ -234,6 +418,126 @@ func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, dept
                 var encodedBoolComparison = 0;
                 if comparisonBool { encodedBoolComparison = 1; }
                 writeValue(frame, instruction.resultId, encodedBoolComparison);
+            } else if instruction.kind == InstructionKind::RawNull {
+                writeValue(frame, instruction.resultId, 0);
+            } else if instruction.kind == InstructionKind::RawMap {
+                if instruction.operands.len() != 1 { return failAt("raw.map has malformed operands", instruction.source, currentSteps); }
+                var mapSize = readValue(frame, instruction.operands[0]);
+                if !mapSize.found { return failAt("raw.map references an unavailable SSA value", instruction.source, currentSteps); }
+                if mapSize.value <= 0 { return failAt("raw.map size must be positive", instruction.source, currentSteps); }
+                var maximumBytes = 1048576;
+                var liveBytes = totalRawBytes(state);
+                if mapSize.value > maximumBytes || mapSize.value > maximumBytes - liveBytes { return failAt("raw.map simulated byte limit exceeded (maximum 1048576 live bytes)", instruction.source, currentSteps); }
+                var mappingSlot = findFreeRawMapping(state);
+                if mappingSlot < 0 { return failAt("raw.map live mapping limit exceeded (maximum 256 mappings)", instruction.source, currentSteps); }
+                var maximum = 9223372036854775807;
+                var base = state.nextBase[0];
+                if base <= 0 || base > maximum - mapSize.value { return failAt("raw.map synthetic address space exhausted", instruction.source, currentSteps); }
+                var mapping = RawMapping { base: base, size: mapSize.value, bytes: zeroBytes(mapSize.value), written: zeroBytes(mapSize.value), addressCells: [], live: true };
+                state.mappings.set(mappingSlot, mapping);
+                writeValue(frame, instruction.resultId, base);
+                var stride = 2097152;
+                if base > maximum - stride { state.nextBase.set(0, -1); }
+                else { state.nextBase.set(0, base + stride); }
+            } else if instruction.kind == InstructionKind::RawUnmap {
+                if instruction.operands.len() != 2 { return failAt("raw.unmap has malformed operands", instruction.source, currentSteps); }
+                var unmapBase = readValue(frame, instruction.operands[0]);
+                var unmapSize = readValue(frame, instruction.operands[1]);
+                if !unmapBase.found || !unmapSize.found { return failAt("raw.unmap references an unavailable SSA value", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingByBase(state, unmapBase.value);
+                if mappingSlot < 0 { return failAt("raw.unmap requires a live mapping base", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                if unmapSize.value <= 0 || unmapSize.value != mapping.size { return failAt("raw.unmap size must exactly match the original mapping size", instruction.source, currentSteps); }
+                state.mappings.set(mappingSlot, emptyRawMapping());
+            } else if instruction.kind == InstructionKind::RawOffset {
+                if instruction.operands.len() != 2 { return failAt("raw.offset has malformed operands", instruction.source, currentSteps); }
+                var offsetBase = readValue(frame, instruction.operands[0]);
+                var offsetAmount = readValue(frame, instruction.operands[1]);
+                if !offsetBase.found || !offsetAmount.found { return failAt("raw.offset references an unavailable SSA value", instruction.source, currentSteps); }
+                if offsetBase.value <= 0 { return failAt("raw.offset requires a non-null nonnegative base", instruction.source, currentSteps); }
+                if offsetAmount.value < 0 { return failAt("raw.offset amount must be nonnegative", instruction.source, currentSteps); }
+                var maximum = 9223372036854775807;
+                if offsetBase.value > maximum - offsetAmount.value { return failAt("raw.offset address overflow", instruction.source, currentSteps); }
+                var derivedAddress = offsetBase.value + offsetAmount.value;
+                if derivedAddress < 0 { return failAt("raw.offset address must be nonnegative", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, derivedAddress);
+            } else if instruction.kind == InstructionKind::RawLoadI64 {
+                if instruction.operands.len() != 1 { return failAt("raw.load.i64 has malformed operands", instruction.source, currentSteps); }
+                var loadAddress = readValue(frame, instruction.operands[0]);
+                if !loadAddress.found { return failAt("raw.load.i64 references an unavailable SSA value", instruction.source, currentSteps); }
+                if loadAddress.value % 8 != 0 { return failAt("raw.load.i64 address must be 8-byte aligned", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, loadAddress.value, 8);
+                if mappingSlot < 0 { return failAt("raw.load.i64 access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                var byteOffset = loadAddress.value - mapping.base;
+                writeValue(frame, instruction.resultId, rawLoadI64(mapping, byteOffset));
+            } else if instruction.kind == InstructionKind::RawStoreI64 {
+                if instruction.operands.len() != 2 { return failAt("raw.store.i64 has malformed operands", instruction.source, currentSteps); }
+                var storeAddress = readValue(frame, instruction.operands[0]);
+                var storeValue = readValue(frame, instruction.operands[1]);
+                if !storeAddress.found || !storeValue.found { return failAt("raw.store.i64 references an unavailable SSA value", instruction.source, currentSteps); }
+                if storeAddress.value % 8 != 0 { return failAt("raw.store.i64 address must be 8-byte aligned", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, storeAddress.value, 8);
+                if mappingSlot < 0 { return failAt("raw.store.i64 access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                var byteOffset = storeAddress.value - mapping.base;
+                mapping = markRawWrite(mapping, byteOffset, 8);
+                mapping = rawStoreI64(mapping, byteOffset, storeValue.value);
+                state.mappings.set(mappingSlot, mapping);
+            } else if instruction.kind == InstructionKind::RawLoadAddress {
+                if instruction.operands.len() != 1 { return failAt("raw.load.address has malformed operands", instruction.source, currentSteps); }
+                var loadAddressCell = readValue(frame, instruction.operands[0]);
+                if !loadAddressCell.found { return failAt("raw.load.address references an unavailable SSA value", instruction.source, currentSteps); }
+                if loadAddressCell.value % 8 != 0 { return failAt("raw.load.address address must be 8-byte aligned", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, loadAddressCell.value, 8);
+                if mappingSlot < 0 { return failAt("raw.load.address access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                var byteOffset = loadAddressCell.value - mapping.base;
+                var loadedAddress = rawLoadAddress(mapping, byteOffset);
+                if !loadedAddress.found { return failAt("raw.load.address requires a fresh zero slot or an intact address store", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, loadedAddress.value);
+            } else if instruction.kind == InstructionKind::RawStoreAddress {
+                if instruction.operands.len() != 2 { return failAt("raw.store.address has malformed operands", instruction.source, currentSteps); }
+                var storeAddressCell = readValue(frame, instruction.operands[0]);
+                var storeAddressValue = readValue(frame, instruction.operands[1]);
+                if !storeAddressCell.found || !storeAddressValue.found { return failAt("raw.store.address references an unavailable SSA value", instruction.source, currentSteps); }
+                if storeAddressCell.value % 8 != 0 { return failAt("raw.store.address address must be 8-byte aligned", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, storeAddressCell.value, 8);
+                if mappingSlot < 0 { return failAt("raw.store.address access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                var byteOffset = storeAddressCell.value - mapping.base;
+                mapping = rawStoreAddress(mapping, byteOffset, storeAddressValue.value);
+                state.mappings.set(mappingSlot, mapping);
+            } else if instruction.kind == InstructionKind::RawLoadByte {
+                if instruction.operands.len() != 1 { return failAt("raw.load.byte has malformed operands", instruction.source, currentSteps); }
+                var loadByteAddress = readValue(frame, instruction.operands[0]);
+                if !loadByteAddress.found { return failAt("raw.load.byte references an unavailable SSA value", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, loadByteAddress.value, 1);
+                if mappingSlot < 0 { return failAt("raw.load.byte access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                writeValue(frame, instruction.resultId, mapping.bytes[loadByteAddress.value - mapping.base]);
+            } else if instruction.kind == InstructionKind::RawStoreByte {
+                if instruction.operands.len() != 2 { return failAt("raw.store.byte has malformed operands", instruction.source, currentSteps); }
+                var storeByteAddress = readValue(frame, instruction.operands[0]);
+                var storeByteValue = readValue(frame, instruction.operands[1]);
+                if !storeByteAddress.found || !storeByteValue.found { return failAt("raw.store.byte references an unavailable SSA value", instruction.source, currentSteps); }
+                if storeByteValue.value < 0 || storeByteValue.value > 255 { return failAt("raw.store.byte value must be in 0..255", instruction.source, currentSteps); }
+                var mappingSlot = findRawMappingForAccess(state, storeByteAddress.value, 1);
+                if mappingSlot < 0 { return failAt("raw.store.byte access is outside a live mapping", instruction.source, currentSteps); }
+                var mapping = state.mappings[mappingSlot];
+                var byteOffset = storeByteAddress.value - mapping.base;
+                mapping = markRawWrite(mapping, byteOffset, 1);
+                mapping.bytes.set(byteOffset, storeByteValue.value);
+                state.mappings.set(mappingSlot, mapping);
+            } else if instruction.kind == InstructionKind::RawEqual {
+                if instruction.operands.len() != 2 { return failAt("raw.equal has malformed operands", instruction.source, currentSteps); }
+                var leftAddress = readValue(frame, instruction.operands[0]);
+                var rightAddress = readValue(frame, instruction.operands[1]);
+                if !leftAddress.found || !rightAddress.found { return failAt("raw.equal references an unavailable SSA value", instruction.source, currentSteps); }
+                var equal = leftAddress.value == rightAddress.value;
+                var encodedEqual = 0;
+                if equal { encodedEqual = 1; }
+                writeValue(frame, instruction.resultId, encodedEqual);
             } else if instruction.kind == InstructionKind::Call {
                 var callArguments: Vec<int> = [];
                 var argumentIndex = 0;
@@ -245,7 +549,7 @@ func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, dept
                     argumentIndex = argumentIndex + 1;
                 }
                 if depth + 1 > maxDepth { return failAt("call depth limit exceeded", instruction.source, currentSteps); }
-                var callResult = evalFunction(program, instruction.functionId, callArguments, depth + 1, currentSteps, maxSteps, maxDepth);
+                var callResult = evalFunction(program, state, instruction.functionId, callArguments, depth + 1, currentSteps, maxSteps, maxDepth);
                 if !callResult.ok { return callResult; }
                 currentSteps = callResult.steps;
                 if !callResult.isVoid { writeValue(frame, instruction.resultId, callResult.value); }
@@ -279,7 +583,7 @@ func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, dept
             var returnValue = readValue(frame, terminator.valueId);
             if !returnValue.found { return failAt("return references an unavailable SSA value", terminator.source, currentSteps); }
             if function.signature.returnType.kind == IRTypeKind::Bool { return evalSuccess(returnValue.value, true, false, currentSteps); }
-            if function.signature.returnType.kind == IRTypeKind::I64 { return evalSuccess(returnValue.value, false, false, currentSteps); }
+            if function.signature.returnType.kind == IRTypeKind::I64 || function.signature.returnType.kind == IRTypeKind::RawAddress { return evalSuccess(returnValue.value, false, false, currentSteps); }
             return failAt("scalar return in void function", terminator.source, currentSteps);
         } else {
             return failAt("invalid or unsupported IR terminator", terminator.source, currentSteps);
@@ -293,5 +597,5 @@ pub func evaluateProgram(program: IRProgram, maxSteps: int, maxDepth: int): Eval
     if !verification.ok { return evalFailure("invalid IR program: verifier rejected the program", 0); }
     if maxSteps <= 0 { return evalFailure("maxSteps must be positive", 0); }
     if maxDepth < 0 { return evalFailure("maxDepth must be nonnegative", 0); }
-    return evalFunction(program, program.entryFunctionId, [], 0, 0, maxSteps, maxDepth);
+    return evalFunction(program, newRawState(), program.entryFunctionId, [], 0, 0, maxSteps, maxDepth);
 }

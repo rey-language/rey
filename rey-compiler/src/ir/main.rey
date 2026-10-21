@@ -5,6 +5,7 @@ pub enum IRTypeKind {
     I64,
     Bool,
     Void,
+    RawAddress,
 }
 
 pub enum InstructionKind {
@@ -18,6 +19,17 @@ pub enum InstructionKind {
     DivCheckedI64,
     RemCheckedI64,
     CompareBool,
+    RawNull,
+    RawMap,
+    RawUnmap,
+    RawOffset,
+    RawLoadI64,
+    RawStoreI64,
+    RawLoadByte,
+    RawStoreByte,
+    RawEqual,
+    RawLoadAddress,
+    RawStoreAddress,
 }
 
 pub enum TerminatorKind {
@@ -146,9 +158,12 @@ pub func irVoid(): IRType {
     return IRType { kind: IRTypeKind::Void };
 }
 
+pub func irRawAddress(): IRType { return IRType { kind: IRTypeKind::RawAddress }; }
+
 pub func irTypeName(ty: IRType): string {
     if ty.kind == IRTypeKind::I64 { return "i64"; }
     if ty.kind == IRTypeKind::Bool { return "bool"; }
+    if ty.kind == IRTypeKind::RawAddress { return "raw.address"; }
     return "void";
 }
 
@@ -320,6 +335,39 @@ pub func call(resultId: int, returnType: IRType, targetFunctionId: int, argument
     return instruction;
 }
 
+func rawInstruction(kind: InstructionKind, resultId: int, ty: IRType, operands: Vec<int>, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(kind, resultId, ty, source);
+    instruction.operands = operands;
+    return instruction;
+}
+
+pub func rawNull(resultId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawNull, resultId, irRawAddress(), [], source); }
+pub func rawMap(resultId: int, sizeId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawMap, resultId, irRawAddress(), [sizeId], source); }
+pub func rawUnmap(baseId: int, sizeId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawUnmap, -1, irVoid(), [baseId, sizeId], source); }
+pub func rawOffset(resultId: int, baseId: int, offsetId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawOffset, resultId, irRawAddress(), [baseId, offsetId], source); }
+pub func rawLoadI64(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawLoadI64, resultId, irI64(), [addressId], source); }
+pub func rawStoreI64(addressId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawStoreI64, -1, irVoid(), [addressId, valueId], source); }
+pub func rawLoadByte(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawLoadByte, resultId, irI64(), [addressId], source); }
+pub func rawStoreByte(addressId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawStoreByte, -1, irVoid(), [addressId, valueId], source); }
+pub func rawEqual(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawEqual, resultId, irBool(), [leftId, rightId], source); }
+pub func rawLoadAddress(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawLoadAddress, resultId, irRawAddress(), [addressId], source); }
+pub func rawStoreAddress(addressId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawStoreAddress, -1, irVoid(), [addressId, valueId], source); }
+
+pub func rawInstructionName(kind: InstructionKind): string {
+    if kind == InstructionKind::RawNull { return "raw.null"; }
+    if kind == InstructionKind::RawMap { return "raw.map"; }
+    if kind == InstructionKind::RawUnmap { return "raw.unmap"; }
+    if kind == InstructionKind::RawOffset { return "raw.offset"; }
+    if kind == InstructionKind::RawLoadI64 { return "raw.load.i64"; }
+    if kind == InstructionKind::RawStoreI64 { return "raw.store.i64"; }
+    if kind == InstructionKind::RawLoadByte { return "raw.load.byte"; }
+    if kind == InstructionKind::RawStoreByte { return "raw.store.byte"; }
+    if kind == InstructionKind::RawEqual { return "raw.equal"; }
+    if kind == InstructionKind::RawLoadAddress { return "raw.load.address"; }
+    if kind == InstructionKind::RawStoreAddress { return "raw.store.address"; }
+    return "";
+}
+
 pub func jump(targetBlockId: int, targetArgs: Vec<int>, source: SourceRef): Terminator {
     return Terminator { kind: TerminatorKind::Jump, targetBlockId: targetBlockId, targetArgs: targetArgs, conditionValueId: -1, trueTargetBlockId: -1, trueArgs: [], falseTargetBlockId: -1, falseArgs: [], valueId: -1, source: source };
 }
@@ -479,6 +527,8 @@ func instructionText(instruction: Instruction): string {
         args = args + valueText(instruction.operands[i]);
         i = i + 1;
     }
+    var rawName = rawInstructionName(instruction.kind);
+    if rawName != "" { return prefix + rawName + "(" + args + ") " + sourceText(instruction.source); }
     return prefix + "call %f" + instruction.functionId.toString() + "(" + args + ") " + sourceText(instruction.source);
 }
 

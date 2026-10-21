@@ -96,6 +96,19 @@ func checkBoolOperand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: 
     }
 }
 
+func checkRawAddressOperand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
+    var definition = findDefinition(definitions, valueId);
+    if definition.id >= 0 && definition.ty.kind != IRTypeKind::RawAddress {
+        errors.push(context + ": operand must have type raw.address");
+    }
+}
+
+func checkRawUnusedFields(errors: Vec<string>, instruction: Instruction, context: string, name: string): void {
+    if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq || instruction.functionId != -1 {
+        errors.push(context + ": " + name + " has invalid unused fields");
+    }
+}
+
 func checkCheckedI64Instruction(errors: Vec<string>, definitions: Vec<ValueDef>, instruction: Instruction, context: string, name: string): void {
     if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": " + name + " requires an i64 result"); }
     if instruction.operands.len() != 2 { errors.push(context + ": " + name + " requires exactly two operands"); }
@@ -353,6 +366,70 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                     checkBoolOperand(errors, definitions, instruction.operands[boolCompareIndex], context);
                     boolCompareIndex = boolCompareIndex + 1;
                 }
+            } else if instruction.kind == InstructionKind::RawNull {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.null requires a raw.address result"); }
+                if operandCount != 0 { errors.push(context + ": raw.null requires no operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.null");
+            } else if instruction.kind == InstructionKind::RawMap {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.map requires a raw.address result"); }
+                if operandCount != 1 { errors.push(context + ": raw.map requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.map");
+                if operandCount > 0 { checkI64Operand(errors, definitions, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawUnmap {
+                if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.unmap requires a void result and ID -1"); }
+                if operandCount != 2 { errors.push(context + ": raw.unmap requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.unmap");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+            } else if instruction.kind == InstructionKind::RawOffset {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.offset requires a raw.address result"); }
+                if operandCount != 2 { errors.push(context + ": raw.offset requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.offset");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+            } else if instruction.kind == InstructionKind::RawLoadI64 {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.load.i64 requires an i64 result"); }
+                if operandCount != 1 { errors.push(context + ": raw.load.i64 requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.load.i64");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawStoreI64 {
+                if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.i64 requires a void result and ID -1"); }
+                if operandCount != 2 { errors.push(context + ": raw.store.i64 requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.store.i64");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+            } else if instruction.kind == InstructionKind::RawLoadAddress {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.load.address requires a raw.address result"); }
+                if operandCount != 1 { errors.push(context + ": raw.load.address requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.load.address");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawStoreAddress {
+                if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.address requires a void result and ID -1"); }
+                if operandCount != 2 { errors.push(context + ": raw.store.address requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.store.address");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 1 { checkRawAddressOperand(errors, definitions, instruction.operands[1], context); }
+            } else if instruction.kind == InstructionKind::RawLoadByte {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.load.byte requires an i64 result"); }
+                if operandCount != 1 { errors.push(context + ": raw.load.byte requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.load.byte");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawStoreByte {
+                if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.byte requires a void result and ID -1"); }
+                if operandCount != 2 { errors.push(context + ": raw.store.byte requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.store.byte");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+            } else if instruction.kind == InstructionKind::RawEqual {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": raw.equal requires a bool result"); }
+                if operandCount != 2 { errors.push(context + ": raw.equal requires exactly two operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.equal");
+                var rawEqualIndex = 0;
+                loop {
+                    if rawEqualIndex >= operandCount { break; }
+                    checkRawAddressOperand(errors, definitions, instruction.operands[rawEqualIndex], context);
+                    rawEqualIndex = rawEqualIndex + 1;
+                }
             } else if instruction.kind == InstructionKind::Call {
                 if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": call has invalid unused fields"); }
                 var calleeIndex = findFunctionIndex(program, instruction.functionId);
@@ -557,6 +634,9 @@ pub func verifyProgram(program: IRProgram): VerifyResult {
         var entry = program.functions[entryIndex];
         if entry.parameters.len() != 0 || entry.signature.parameterTypes.len() != 0 {
             errors.push("program: entry function must have no arguments");
+        }
+        if entry.signature.returnType.kind == IRTypeKind::RawAddress {
+            errors.push("program: entry function result must be scalar or void");
         }
     }
 

@@ -20,6 +20,10 @@ func typeIsScalar(ty: IRType): bool {
     return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool;
 }
 
+func typeIsSupportedValue(ty: IRType): bool {
+    return typeIsScalar(ty) || ty.kind == IRTypeKind::RawAddress;
+}
+
 func emptyEscapeFacts(function: IRFunction): EffectSummary {
     var argumentEscapes: Vec<Escape> = [];
     var i = 0;
@@ -46,6 +50,16 @@ func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
     if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 || instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
         return instruction.resultId >= 0 && instruction.operands.len() == 2;
     }
+    if instruction.kind == InstructionKind::RawNull { return instruction.resultId >= 0 && instruction.operands.len() == 0; }
+    if instruction.kind == InstructionKind::RawMap || instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadByte || instruction.kind == InstructionKind::RawLoadAddress {
+        return instruction.resultId >= 0 && instruction.operands.len() == 1;
+    }
+    if instruction.kind == InstructionKind::RawUnmap || instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte || instruction.kind == InstructionKind::RawStoreAddress {
+        return instruction.resultId == -1 && instruction.operands.len() == 2;
+    }
+    if instruction.kind == InstructionKind::RawOffset || instruction.kind == InstructionKind::RawEqual {
+        return instruction.resultId >= 0 && instruction.operands.len() == 2;
+    }
     if instruction.kind == InstructionKind::Call {
         var targetIndex = functionIndex(program, instruction.functionId);
         if targetIndex < 0 { return false; }
@@ -63,10 +77,10 @@ func baseEffects(function: IRFunction, program: IRProgram): EffectSummary {
     loop {
         if signatureIndex >= function.signature.parameterTypes.len() || signatureIndex >= function.parameters.len() { break; }
         var parameterType = function.signature.parameterTypes[signatureIndex];
-        if !typeIsScalar(parameterType) || parameterType.kind != function.parameters[signatureIndex].ty.kind { unknown = true; }
+        if !typeIsSupportedValue(parameterType) || parameterType.kind != function.parameters[signatureIndex].ty.kind { unknown = true; }
         signatureIndex = signatureIndex + 1;
     }
-    if function.signature.returnType.kind != IRTypeKind::I64 && function.signature.returnType.kind != IRTypeKind::Bool && function.signature.returnType.kind != IRTypeKind::Void { unknown = true; }
+    if !typeIsSupportedValue(function.signature.returnType) && function.signature.returnType.kind != IRTypeKind::Void { unknown = true; }
     var blockIndex = 0;
     loop {
         if blockIndex >= function.blocks.len() { break; }
@@ -111,6 +125,14 @@ func derivedEffects(function: IRFunction, program: IRProgram): EffectSummary {
                         effects.resultEscape
                     );
                 }
+            } else if instruction.kind == InstructionKind::RawMap {
+                effects = effectSummary(effects.readsMemory, factJoin(effects.writesMemory, Fact::Yes), factJoin(effects.allocates, Fact::Yes), factJoin(effects.mayBlock, Fact::Yes), effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
+            } else if instruction.kind == InstructionKind::RawUnmap {
+                effects = effectSummary(effects.readsMemory, factJoin(effects.writesMemory, Fact::Yes), effects.allocates, factJoin(effects.mayBlock, Fact::Yes), effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
+            } else if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadByte || instruction.kind == InstructionKind::RawLoadAddress {
+                effects = effectSummary(factJoin(effects.readsMemory, Fact::Yes), effects.writesMemory, effects.allocates, effects.mayBlock, effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
+            } else if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte || instruction.kind == InstructionKind::RawStoreAddress {
+                effects = effectSummary(effects.readsMemory, factJoin(effects.writesMemory, Fact::Yes), effects.allocates, effects.mayBlock, effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
             }
             instructionIndex = instructionIndex + 1;
         }
