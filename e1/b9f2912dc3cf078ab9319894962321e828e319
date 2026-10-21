@@ -1,0 +1,234 @@
+rey-compiler/src/native/arm64/main.rey
+  s_3868795c391050::t_ec1a0ea14a8e12 4,533,539-548,550,570,622,667-673,679-684,704-711
+runtime-rey/gc/main.rey
+  s_3868795c391050::t_5ebfe0505bc4c4 1-241
+tests/v04/fixed-heap/main.rey
+  s_3868795c391050::t_1dc60329620406 116-117
+  s_3868795c391050::t_b649efcd94ca5a 118
+  s_3868795c391050::t_0bd2c5f578cad3 32,35,39,41,43,54,62
+  s_3868795c391050::t_96ede849579ceb 105
+  s_3868795c391050::t_3df770e447afd0 1-31,33-34,36-38,40,42,44-53,55-61,63-104,106-115,119-123
+rey-compiler/src/ir/storage/main.rey
+  s_3868795c391050::t_e46f2d3a0cdc19 1-329
+tests/v04/ir-storage/main.rey
+  s_3868795c391050::t_a2d23637df23fc 366,368,374
+  s_3868795c391050::t_b3ff18e981b1bc 382-383
+  s_3868795c391050::t_63aae33a865508 3
+  s_3868795c391050::t_380122bc7fa3eb 2,306,336-340
+  s_3868795c391050::t_da5dcc35ff3b0e 5-8,364-365,367,369-373,375-379,381,384
+  s_3868795c391050::t_ae7e571b162137 1,4,9-305,307-335,341-363,380,385-444
+CHANGELOG.md
+  s_3868795c391050::t_ad64abca46911f 4
+tests/v04/fixed-gc/cases.json
+  s_3868795c391050::t_527fd9b3243ff8 3,7
+  s_3868795c391050::t_60940d1684c1bc 1-2,4-6,8-12
+tests/v04/fixed-gc/fixtures/bad-create-capacity.rey
+  s_3868795c391050::t_60940d1684c1bc 1-9
+tests/v04/fixed-gc/fixtures/bad-root-index.rey
+  s_3868795c391050::t_60940d1684c1bc 1-10
+rey-compiler/src/native/bytes/main.rey
+  s_3868795c391050::t_cdae354ac84421 25-38
+tests/v04/fixed-gc/fixtures/bad-root-order.rey
+  s_3868795c391050::t_60940d1684c1bc 1-12
+tests/v04/opt-integration/storage.rey
+  s_3868795c391050::t_8ddda66e7519df 1-50
+tests/v04/fixed-gc/fixtures/construction-roots.rey
+  s_3868795c391050::t_60940d1684c1bc 1-38
+tests/v04/fixed-heap/fixtures/empty-counters.rey
+  s_3868795c391050::t_cf2272b85b1f07 1-38
+rey-compiler/src/native/x64/main.rey
+  s_3868795c391050::t_bb9be942b6b180 4,585-591,630-637
+  s_3868795c391050::t_ec1a0ea14a8e12 466,472-481,484,508,544,598-603
+tests/v04/fixed-gc/fixtures/native-collection-stress-128.rey
+  s_3868795c391050::t_d64113039408ac 1-70
+docs/V0.4-MEMORY-ABI.md
+  s_3868795c391050::t_d8e198f610c18b 3
+docs/V0.4-STACK-SLOT-CONTRACT.md
+  s_3868795c391050::t_400a98561b1e03 3,57,63-73
+  s_3868795c391050::t_84782785e41b1b 56,58-62
+  s_3868795c391050::t_c7fcf65ef1a112 1-2,4-55
+docs/V0.4-PARALLEL-PHASES.md
+  s_3868795c391050::t_ad64abca46911f 108-111,142-144
+  s_3868795c391050::t_3103736f7f6a1e 105-107,114
+  s_3868795c391050::t_4aa7bddd2b0ff0 104,112-113,115-141,145-164
+primer.md
+  s_3868795c391050::t_5d647d455c2ec2 6
+  s_3868795c391050::t_ad64abca46911f 5
+scripts/v04-memory-test.py
+  s_3868795c391050::t_7e080111352400 39,114-117,199
+  s_3868795c391050::t_4fd6a8f2e908ac 124,134-135,138,166,168
+  s_3868795c391050::t_8843676ea6f2a4 198
+  s_3868795c391050::t_e7b9930c8654a1 1-21,23-33,35-38,40-113,118-123,141-165,169-196,200,203-209
+  s_3868795c391050::t_08a0ca1d9434b1 22,125-133,136-137,139-140,167,201-202
+  s_3868795c391050::t_f9cbbf98d7c020 34,197
+tests/v04/native-storage/run.py
+  s_3868795c391050::t_8d507b2a5187f5 1-137
+tests/v04/fixed-gc/main.rey
+  s_3868795c391050::t_21e2eae0a28cc4 1,3-15,17-22,28-67,71,80-95
+  s_3868795c391050::t_5c29ac31debfe0 23,25-27
+  s_3868795c391050::t_570dd68dd5c140 24
+  s_3868795c391050::t_ca0309911fe834 2
+  s_3868795c391050::t_527fd9b3243ff8 16,68-70,72-79
+tests/v04/native-bytes/main.rey
+  s_3868795c391050::t_cdae354ac84421 43-63
+  s_3868795c391050::t_df14427fe80a0f 41-42
+tests/v04/native-storage/main.rey
+  s_3868795c391050::t_6dd274019dd9b0 1-173
+tests/v04/ir-storage/run.sh
+  s_3868795c391050::t_f7b5d065f72dda 1-4
+rey-compiler/native-main.rey
+  s_3868795c391050::t_bb9be942b6b180 8,10,18,22,30,42-44,73-75,79-81
+tests/v04/fixed-gc/fixtures/corrupt-context.rey
+  s_3868795c391050::t_60940d1684c1bc 1-11
+tests/v04/ir-storage/run.py
+  s_3868795c391050::t_aa79a83ab3741e 102,126
+  s_3868795c391050::t_4601e17829ba81 224-226,240
+  s_3868795c391050::t_f7b5d065f72dda 1-101,103-125,127-181,184-193,195-200,203-223,227-239,241-261
+  s_3868795c391050::t_e2d365c811b2fb 182-183,194,201-202
+tests/v04/fixed-gc/fixtures/collect-before-8.rey
+  s_3868795c391050::t_527fd9b3243ff8 1-41
+tests/v04/fixed-heap/fixtures/multi-slab-16384.rey
+  s_3868795c391050::t_aae14530c2d36b 1-43
+scripts/v04-opt-test.py
+  s_3868795c391050::t_8ddda66e7519df 49-50,79-80,95-96,223-224,342-343,352,378,434,531
+  s_3868795c391050::t_84782785e41b1b 286-288
+tests/v04/fixed-gc/fixtures/raw-pointer-shape.rey
+  s_3868795c391050::t_60940d1684c1bc 1-30
+docs/V0.4-FIXED-HEAP-CONTRACT.md
+  s_3868795c391050::t_f48c16df4ac604 86-87,91-94
+  s_3868795c391050::t_74a91cdfd1c92b 88-90
+  s_3868795c391050::t_4eab4be6c89fd4 1-85,95-193
+  s_3868795c391050::t_08a0ca1d9434b1 194-204
+tests/v04/fixed-heap/cases.json
+  s_3868795c391050::t_1dc60329620406 40-41
+  s_3868795c391050::t_3df770e447afd0 1-28,30-39,43-46
+  s_3868795c391050::t_b649efcd94ca5a 42
+  s_3868795c391050::t_96ede849579ceb 29
+runtime-rey/heap/main.rey
+  s_3868795c391050::t_b00f68feab2178 334-337
+  s_3868795c391050::t_cdb979c5264531 362,420,425
+  s_3868795c391050::t_6bc9411e2bbb63 251-252,256,264
+  s_3868795c391050::t_367484f447961c 72-76,80-83,365-366,369,377-398,494
+  s_3868795c391050::t_1c6ab4603b52c9 419,472
+  s_3868795c391050::t_467537e9719bb5 258-259,261-262,266
+  s_3868795c391050::t_467e1e6db00d57 128-129
+  s_3868795c391050::t_673ed3c13edd93 44-45,49-50,90,131-132,524
+  s_3868795c391050::t_b649efcd94ca5a 260
+  s_3868795c391050::t_dbd148e6660da4 1-43,46-48,51-71,77-79,84-89,91-95,97-127,130,133-214,216,218-250,253-255,257,263,265,267-333,338-361,363-364,367-368,370-376,399-418,421-424,426-471,473-493,495-523,525-573
+  s_3868795c391050::t_96ede849579ceb 96
+  s_3868795c391050::t_58292248e4b774 215,217
+tests/v04/fixed-gc/fixtures/graph-cycle-growth.rey
+  s_3868795c391050::t_60940d1684c1bc 1-26,29-45,47-48,50-61,63-70
+  s_3868795c391050::t_09b93a8d0a2e70 27,49,62
+  s_3868795c391050::t_3aa3d8c7a9fdb5 28
+  s_3868795c391050::t_83ec73d990f878 46
+tests/v04/fixed-heap/fixtures/object-zero-and-typed-nulls.rey
+  s_3868795c391050::t_aae14530c2d36b 1-26,28-29,31,33-42
+  s_3868795c391050::t_8b04f4b0279bd8 27,30,32
+tests/v04/fixed-heap/fixtures/slot-reuse-reset.rey
+  s_3868795c391050::t_8b04f4b0279bd8 27,47-48
+  s_3868795c391050::t_aae14530c2d36b 1-26,28-46,49-51
+tests/v04/fixed-heap/fixtures/corrupt-small-block-free-head-out-of-range-allocation.rey
+  s_3868795c391050::t_1dc60329620406 1-21
+CLAUDE.md
+  s_3868795c391050::t_ad64abca46911f 7
+  s_3868795c391050::t_5d647d455c2ec2 15
+tests/v04/fixed-heap/fixtures/corrupt-small-block-free-head-negative-allocation.rey
+  s_3868795c391050::t_1dc60329620406 1-21
+tests/v04/fixed-gc/fixtures/context-cycles.rey
+  s_3868795c391050::t_60940d1684c1bc 1-16
+tests/v04/fixed-heap/fixtures/corrupt-small-block-free-self-link-allocation.rey
+  s_3868795c391050::t_b649efcd94ca5a 1-16
+tests/v04/fixed-heap/fixtures/allocation-mapping-length-overflow.rey
+  s_3868795c391050::t_51e6d339e921ac 1-32
+tests/v04/fixed-heap/fixtures/allocation-size-overflow.rey
+  s_3868795c391050::t_0f3d6ab5ee0051 1-32
+tests/v04/fixed-heap/fixtures/class-1024-boundary.rey
+  s_3868795c391050::t_12d5bdb515dfb0 1-41
+tests/v04/fixed-heap/fixtures/class-128-boundary.rey
+  s_3868795c391050::t_cb2b19b866c55d 1-41
+tests/v04/fixed-heap/fixtures/class-16-boundary.rey
+  s_3868795c391050::t_2b40d6c11b963a 1-41
+tests/v04/fixed-heap/fixtures/class-16384-boundary.rey
+  s_3868795c391050::t_d1efcba14be7fd 1-41
+tests/v04/fixed-heap/fixtures/class-2048-boundary.rey
+  s_3868795c391050::t_f84bfe4aeeee7b 1-41
+tests/v04/fixed-heap/fixtures/class-256-boundary.rey
+  s_3868795c391050::t_128fbad1dc125d 1-41
+tests/v04/fixed-heap/fixtures/class-32-boundary.rey
+  s_3868795c391050::t_3a4cd9e6f448b7 1-41
+tests/v04/fixed-heap/fixtures/class-4096-boundary.rey
+  s_3868795c391050::t_26c439da28dcbd 1-41
+tests/v04/fixed-heap/fixtures/class-512-boundary.rey
+  s_3868795c391050::t_325264d77c7354 1-41
+tests/v04/fixed-heap/fixtures/class-64-boundary.rey
+  s_3868795c391050::t_a4a70c1c68a8f4 1-41
+tests/v04/fixed-heap/fixtures/class-8192-boundary.rey
+  s_3868795c391050::t_dfd1137adc84e7 1-41
+tests/v04/fixed-heap/fixtures/context-cycles-300.rey
+  s_3868795c391050::t_f8113bc53c611b 1-37
+tests/v04/fixed-heap/fixtures/corrupt-context-counters.rey
+  s_3868795c391050::t_01dd781c60941d 1-31
+tests/v04/fixed-heap/fixtures/corrupt-context-magic.rey
+  s_3868795c391050::t_324a48618dfd53 1-31
+tests/v04/fixed-heap/fixtures/corrupt-context-reserved.rey
+  s_3868795c391050::t_a00a5a46fc91f4 1-31
+tests/v04/fixed-heap/fixtures/corrupt-large-block-metadata.rey
+  s_3868795c391050::t_29d5f6524f7351 1-33
+tests/v04/fixed-heap/fixtures/corrupt-live-count.rey
+  s_3868795c391050::t_db93ccd87feb73 1-32
+tests/v04/fixed-heap/fixtures/corrupt-object-header.rey
+  s_3868795c391050::t_93323babf21eb7 1-32
+tests/v04/fixed-heap/fixtures/corrupt-object-payload-size.rey
+  s_3868795c391050::t_b55823f59cf633 1-32
+tests/v04/fixed-heap/fixtures/corrupt-small-block-class.rey
+  s_3868795c391050::t_3c159ce9f57f63 1-33
+tests/v04/fixed-heap/fixtures/corrupt-small-block-flag.rey
+  s_3868795c391050::t_a985f8a479c649 1-33
+tests/v04/fixed-heap/fixtures/corrupt-small-block-free-head.rey
+  s_3868795c391050::t_2b36ac4ac16e16 1-33
+tests/v04/fixed-heap/fixtures/corrupt-small-block-length.rey
+  s_3868795c391050::t_be84daa4abc5a1 1-33
+tests/v04/fixed-heap/fixtures/corrupt-small-block-live-count.rey
+  s_3868795c391050::t_1a7cae9fb3120b 1-33
+tests/v04/fixed-heap/fixtures/corrupt-small-block-magic.rey
+  s_3868795c391050::t_18dde6348c4f50 1-33
+tests/v04/fixed-heap/fixtures/destroy-marked.rey
+  s_3868795c391050::t_083c65fd2e9d0a 1-34
+tests/v04/fixed-heap/fixtures/empty-slab-trim-mixed.rey
+  s_3868795c391050::t_f66b0af1fe6f7a 1-40
+tests/v04/fixed-heap/fixtures/empty-sweep-count.rey
+  s_3868795c391050::t_e2023d1b2ac86e 1-35
+tests/v04/fixed-heap/fixtures/independent-heaps.rey
+  s_3868795c391050::t_e8446f932a5c79 1-42
+tests/v04/fixed-heap/fixtures/invalid-layout-id.rey
+  s_3868795c391050::t_4990f2661fe456 1-32
+tests/v04/fixed-heap/fixtures/large-block-size.rey
+  s_3868795c391050::t_51cb7a3afae50d 1-38
+tests/v04/fixed-heap/fixtures/large-block-trim.rey
+  s_3868795c391050::t_ef1144a07b59e1 1-36
+tests/v04/fixed-heap/fixtures/mark-sweep-stats.rey
+  s_3868795c391050::t_e463b553a1197e 1-47
+tests/v04/fixed-heap/fixtures/registry-borrowed.rey
+  s_3868795c391050::t_cc386b04e20ea2 1-35
+tests/v04/fixed-heap/fixtures/retained-address.rey
+  s_3868795c391050::t_e7a9bac19bddcf 1-40
+tests/v04/ir-storage/safe.rey
+  s_3868795c391050::t_ee74cc6cb7dce1 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e1b9f2912dc3cf078ab9319894962321e828e319",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
