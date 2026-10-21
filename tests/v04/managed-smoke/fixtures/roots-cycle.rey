@@ -1,0 +1,10 @@
+struct Node { pub value: int, pub next: Node?, }
+func main(): void {
+    var root: Node = Node { value: 7, next: null };
+    root.next = root;
+    var other: Node = Node { value: 9, next: null };
+    if root.value != 7 || root.next != root || other.value != 9 {
+        var zero: int = 0; var fail: int = 1 / zero;
+    }
+    return;
+}

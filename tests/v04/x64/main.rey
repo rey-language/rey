@@ -141,16 +141,18 @@ func main(): void {
     require(unsupported.isErr(), "windows x64 must fail explicitly until process-exit imports exist");
     var malformed = function(9, "malformed", [], [], ir.irI64(), []);
     require(emitProgram(ir.irProgram(9, [malformed]), "linux-x64").isErr(), "malformed IR must be rejected");
-    var nineTypes: Vec<IRType> = [];
-    var nineParameters: Vec<IRValue> = [];
+    var argumentTypes: Vec<IRType> = [];
+    var argumentParameters: Vec<IRValue> = [];
     var i = 0;
     loop {
-        if i >= 9 { break; }
-        nineTypes.push(ir.irI64());
-        nineParameters.push(ir.irValue(500 + i, ir.irI64()));
+        if i >= 17 { break; }
+        argumentTypes.push(ir.irI64());
+        argumentParameters.push(ir.irValue(500 + i, ir.irI64()));
         i = i + 1;
     }
-    var tooManyArgs = function(10, "tooManyArgs", nineParameters, nineTypes, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(500, source()))]);
-    require(emitProgram(ir.irProgram(10, [tooManyArgs]), "linux-x64").isErr(), "more than eight function arguments must be rejected");
+    var tooManyArgs = function(10, "tooManyArgs", argumentParameters, argumentTypes, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(500, source()))]);
+    var arityEntry = function(0, "arity-entry", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+    var arityRejected = emitProgram(ir.irProgram(0, [arityEntry, tooManyArgs]), "linux-x64");
+    require(arityRejected.isErr() && arityRejected.unwrapErr().contains("sixteen"), "more than sixteen function arguments must be rejected");
     println("x64 scalar emission fixtures ready");
 }

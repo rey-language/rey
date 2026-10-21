@@ -1,0 +1,18 @@
+import left.{makeCellOption, acceptCell};
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func main(): void {
+    var maybeCell = makeCellOption();
+    match maybeCell {
+        Some(cell) => { sourcecheck(acceptCell(cell)); },
+        None => { sourcecheck(false); },
+    }
+    return;
+}

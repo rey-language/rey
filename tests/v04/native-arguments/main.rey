@@ -1,0 +1,205 @@
+import ir;
+import ir::{IRProgram, IRFunction, IRValue, IRType, Instruction, BasicBlock, SourceRef, Escape};
+import ir::verify::{verifyProgram};
+import ir::eval::{evaluateProgram};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
+import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void { if !ok { eprintln(message); exit(1); } }
+func source(): SourceRef { return ir.sourceRef("native-arguments", 0, 1); }
+
+func wordAt(bytes: Vec<int>, offset: int): int {
+    return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536 + bytes[offset + 3] * 16777216;
+}
+
+func function(id: int, name: string, params: Vec<IRValue>, result: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    var types: Vec<IRType> = [];
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    while index < params.len() { types.push(params[index].ty); escapes.push(ir.escapeUnknown()); index += 1; }
+    return ir.irFunction(id, ir.functionKey("native-arguments", "", name), ir.functionSignature(types, result),
+        params, blocks, ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(),
+        ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown()));
+}
+
+func asserted(program: IRProgram, expected: int): IRProgram {
+    var id = ir.nextFunctionId(program);
+    var wrapper = function(id, "asserted", [], ir.irVoid(), [
+        ir.basicBlock(0, [], [ir.call(0, ir.irI64(), program.entryFunctionId, [], source()),
+            ir.constI64(1, expected, source()), ir.compareI64(2, ir.compareEq(), 0, 1, source())], ir.branch(2, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [], ir.returnVoid(source())),
+        ir.basicBlock(2, [], [ir.constI64(3, 1, source()), ir.constI64(4, 0, source()),
+            ir.divCheckedI64(5, 3, 4, source())], ir.returnVoid(source()))
+    ]);
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    while index < program.functions.len() { functions.push(program.functions[index]); index += 1; }
+    functions.push(wrapper);
+    return ir.irProgram(id, functions);
+}
+
+func weighted(count: int): IRFunction {
+    var params: Vec<IRValue> = [];
+    var code: Vec<Instruction> = [ir.constI64(1000, 0, source())];
+    var sum = 1000;
+    var index = 0;
+    while index < count {
+        params.push(ir.irValue(index * 7 + 10, ir.irI64()));
+        var base = 1001 + index * 3;
+        code.push(ir.constI64(base, index + 1, source()));
+        code.push(ir.mulCheckedI64(base + 1, params[index].id, base, source()));
+        code.push(ir.addCheckedI64(base + 2, sum, base + 1, source()));
+        sum = base + 2;
+        index += 1;
+    }
+    return function(1, "weighted", params, ir.irI64(), [ir.basicBlock(0, [], code, ir.returnValue(sum, source()))]);
+}
+
+func scalarCase(count: int): IRProgram {
+    var code: Vec<Instruction> = [];
+    var arguments: Vec<int> = [];
+    var reversed: Vec<int> = [];
+    var index = 0;
+    while index < count { code.push(ir.constI64(index, index + 1, source())); arguments.push(index); index += 1; }
+    index = count - 1;
+    while index >= 0 { reversed.push(index); index -= 1; }
+    code.push(ir.call(100, ir.irI64(), 1, arguments, source()));
+    code.push(ir.call(101, ir.irI64(), 1, reversed, source()));
+    code.push(ir.addCheckedI64(102, 100, 101, source()));
+    return ir.irProgram(0, [function(0, "entry", [], ir.irI64(), [ir.basicBlock(0, [], code, ir.returnValue(102, source()))]), weighted(count)]);
+}
+
+func hiddenPointersCase(): IRProgram {
+    var params: Vec<IRValue> = [];
+    var arguments: Vec<int> = [];
+    var caller: Vec<Instruction> = [];
+    var callee: Vec<Instruction> = [ir.constI64(20, 0, source())];
+    var sum = 20;
+    var index = 0;
+    while index < 8 {
+        params.push(ir.irValue(index, ir.irI64()));
+        caller.push(ir.constI64(index, index + 1, source())); arguments.push(index);
+        callee.push(ir.addCheckedI64(21 + index, sum, index, source())); sum = 21 + index;
+        index += 1;
+    }
+    params.push(ir.irValue(8, ir.irRawAddress())); params.push(ir.irValue(9, ir.irRawAddress()));
+    callee.push(ir.rawLoadI64(30, 8, source())); callee.push(ir.addCheckedI64(31, sum, 30, source()));
+    callee.push(ir.rawNull(32, source())); callee.push(ir.rawEqual(33, 9, 32, source()));
+    var target = function(1, "hidden", params, ir.irI64(), [
+        ir.basicBlock(0, [], callee, ir.branch(33, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [], ir.returnValue(31, source())),
+        ir.basicBlock(2, [], [ir.constI64(34, 9999, source()), ir.rawFail(34, source())], ir.returnValue(31, source()))
+    ]);
+    caller.push(ir.constI64(10, 8, source())); caller.push(ir.rawMap(11, 10, source()));
+    caller.push(ir.constI64(12, 101, source())); caller.push(ir.rawStoreI64(11, 12, source()));
+    caller.push(ir.rawNull(13, source())); arguments.push(11); arguments.push(13);
+    caller.push(ir.call(14, ir.irI64(), 1, arguments, source())); caller.push(ir.rawUnmap(11, 10, source()));
+    return ir.irProgram(0, [function(0, "entry", [], ir.irI64(), [ir.basicBlock(0, [], caller, ir.returnValue(14, source()))]), target]);
+}
+
+func highPressureCase(): IRProgram {
+    var code: Vec<Instruction> = [];
+    var index = 0;
+    while index < 600 { code.push(ir.constI64(index, index, source())); index += 1; }
+    var sum = 0;
+    index = 1;
+    while index < 600 {
+        code.push(ir.addCheckedI64(600 + index, sum, index, source()));
+        sum = 600 + index;
+        index += 1;
+    }
+    return ir.irProgram(0, [function(0, "large-frame", [], ir.irI64(), [ir.basicBlock(0, [], code, ir.returnValue(sum, source()))])]);
+}
+
+func largeFrameCase(): IRProgram {
+    var code: Vec<Instruction> = [ir.constI64(0, 0, source())];
+    var sum = 0;
+    var index = 1;
+    while index < 600 {
+        var valueId = index * 2 - 1;
+        code.push(ir.constI64(valueId, index, source()));
+        code.push(ir.addCheckedI64(valueId + 1, sum, valueId, source()));
+        sum = valueId + 1;
+        index += 1;
+    }
+    return ir.irProgram(0, [function(0, "large-frame", [], ir.irI64(), [ir.basicBlock(0, [], code, ir.returnValue(sum, source()))])]);
+}
+
+func writeImage(path: string, bytes: Result<Vec<int>, string>): void {
+    if bytes.isErr() { eprintln(bytes.unwrapErr()); exit(1); }
+    var encoded = byteString(bytes.unwrap()); require(encoded.isOk(), "encoding");
+    writeFile(path, encoded.unwrap()); require(readFile(path) == encoded.unwrap(), "exact image write");
+}
+
+func exercise(directory: string, name: string, input: IRProgram, expected: int, raw: bool): void {
+    var program = asserted(input, expected);
+    var verified = verifyProgram(program); require(verified.ok, verified.errors.join("\n"));
+    var evaluated = evaluateProgram(program, 100000, 64); require(evaluated.ok && evaluated.isVoid, evaluated.error);
+    var mode = 0;
+    while mode < 2 {
+        var label = "default"; if mode == 1 { label = "reuse"; }
+        var targets: Vec<string> = ["darwin", "linux"];
+        var index = 0;
+        while index < targets.len() {
+            var target = targets[index];
+            var code: Result<Arm64Code, string> = Result.Err("not emitted");
+            if mode == 0 { code = emitArm64(program, target); } else { code = emitArm64WithReuse(program, target); }
+            if code.isErr() { eprintln(code.unwrapErr()); exit(1); }
+            if name == "large-frame" && target == "darwin" {
+                var native = code.unwrap();
+                var offset = -1;
+                var functionIndex = 0;
+                while functionIndex < native.functions.len() {
+                    if native.functions[functionIndex].functionId == 0 { offset = native.functions[functionIndex].offset; }
+                    functionIndex += 1;
+                }
+                require(offset >= 0, "large frame function has an emitted offset");
+                if mode == 0 {
+                    require(wordAt(native.bytes, offset + 8) == 3506439167 + 4080 * 1024
+                        && wordAt(native.bytes, offset + 12) == 3506439167 + 4080 * 1024
+                        && wordAt(native.bytes, offset + 16) == 3506439167 + 1440 * 1024, "9600-byte frame uses three exact aligned adjustments");
+                    println("native-arguments-frame large-frame default 9600");
+                } else {
+                    require(wordAt(native.bytes, offset + 8) == 3506439167 + 16 * 1024, "reused large chain frame is sixteen bytes");
+                    println("native-arguments-frame large-frame reuse 16");
+                }
+            }
+            var image: Result<Vec<int>, string> = Result.Err("not emitted");
+            if target == "darwin" { image = buildMachOArm64(code.unwrap()); } else { image = buildElfArm64(code.unwrap()); }
+            writeImage(directory + "/" + name + "-" + label + "-" + target, image);
+            println("native-arguments-image " + name + " " + label + " " + target); index += 1;
+        }
+        var x64: Result<X64Code, string> = Result.Err("not emitted");
+        if mode == 0 { x64 = emitProgram(program, "linux-x64"); } else { x64 = emitProgramWithReuse(program, "linux-x64"); }
+        if raw { require(x64.isErr(), "x64 raw must reject"); }
+        else {
+            if x64.isErr() { eprintln(x64.unwrapErr()); exit(1); }
+            writeImage(directory + "/" + name + "-" + label + "-x64", buildElfX64(x64.unwrap()));
+            println("native-arguments-image " + name + " " + label + " x64");
+        }
+        mode += 1;
+    }
+}
+
+func main(): void {
+    var argv = args(); require(argv.len() == 2, "expected output directory");
+    exercise(argv[1], "eight", scalarCase(8), 324, false);
+    exercise(argv[1], "nine", scalarCase(9), 450, false);
+    exercise(argv[1], "ten", scalarCase(10), 605, false);
+    exercise(argv[1], "sixteen", scalarCase(16), 2312, false);
+    exercise(argv[1], "large-frame", largeFrameCase(), 179700, false);
+    exercise(argv[1], "hidden-pointers", hiddenPointersCase(), 137, true);
+    var bounded = emitArm64WithReuse(asserted(highPressureCase(), 179700), "darwin");
+    var boundedError = "";
+    if bounded.isErr() { boundedError = bounded.unwrapErr(); }
+    require(bounded.isErr() && boundedError.contains("liveness: analysis work budget exhausted")
+        && boundedError.contains("function 0") && boundedError.contains("phase "), "pathological live sets retain a contextual analysis bound");
+    var invalid = scalarCase(17);
+    require(verifyProgram(invalid).ok, "17 argument rejection fixture valid IR");
+    require(emitArm64(invalid, "darwin").isErr() && emitArm64WithReuse(invalid, "linux").isErr(), "arm64 17 args reject");
+    require(emitProgram(invalid, "linux-x64").isErr() && emitProgramWithReuse(invalid, "linux-x64").isErr(), "x64 17 args reject");
+    println("native arguments ready");
+}

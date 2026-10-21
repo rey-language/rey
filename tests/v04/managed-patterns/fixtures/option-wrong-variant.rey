@@ -1,0 +1,8 @@
+func main(): void {
+    var value: Option<int> = Option::None();
+    match value {
+        Option::Ok(payload) => { var observed: int = payload; },
+        None => { var absent: bool = true; },
+    }
+    return;
+}

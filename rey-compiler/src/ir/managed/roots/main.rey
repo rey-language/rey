@@ -1,0 +1,1037 @@
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, Fact, FunctionKey, FunctionSignature, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef, Terminator, TerminatorKind, constBool, constI64, functionKey, functionSignature, irBool, irI64, irRawAddress, irVoid, rawMap, rawNull, rawOffset, rawStoreI64, rawUnmap, returnVoid, sourceRef};
+import ir::managed::{ManagedFunction, ManagedLayout, ManagedProgram, ManagedVariableLayout, ManagedHook};
+import ir::managed::placement::{ManagedPlacement, ManagedStorage};
+import ir::liveness::{analyzeProgram, FunctionLiveness, InstructionLiveness};
+import ir::verify::{verifyProgram};
+
+pub struct ManagedHookBinding {
+    pub functionId: int,
+    pub runtimeFunctionId: int,
+    pub mayCollect: bool,
+}
+
+pub struct RuntimeBindings {
+    pub create: int,
+    pub destroy: int,
+    pub allocate: int,
+    pub collect: int,
+    pub rootPush: int,
+    pub rootSet: int,
+    pub rootPop: int,
+    pub storeReference: int,
+    pub regionCreate: int,
+    pub regionEnd: int,
+    pub regionAllocate: int,
+    pub allocateDestination: int,
+    pub layoutCreate: int,
+    pub layoutRegister: int,
+    pub layoutRegisterVariable: int,
+    pub layoutRelease: int,
+    pub hooks: Vec<ManagedHookBinding>,
+}
+
+struct RootSlot { pub valueId: int, pub indexValueId: int }
+struct RootColorPlan { pub colors: Vec<int>, pub colorCount: int }
+struct RootConflictGraph { pub neighbors: Vec<Vec<int>>, pub edges: HashMap<string, bool> }
+struct Definition { pub id: int, pub ty: IRType }
+
+func functionIndex(program: IRProgram, id: int): int {
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func managedIndex(functions: Vec<ManagedFunction>, id: int): int {
+    var i = 0;
+    loop { if i >= functions.len() { break; } if functions[i].functionId == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func managedHookIndex(hooks: Vec<ManagedHook>, id: int): int {
+    var i = 0;
+    loop { if i >= hooks.len() { break; } if hooks[i].functionId == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func hookBindingIndex(hooks: Vec<ManagedHookBinding>, id: int): int {
+    var i = 0;
+    loop { if i >= hooks.len() { break; } if hooks[i].functionId == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func variableLayoutIndex(layouts: Vec<ManagedVariableLayout>, id: int): int {
+    var i = 0;
+    loop { if i >= layouts.len() { break; } if layouts[i].layoutId == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func opaquePayloadKey(key: string): bool {
+    if key.len() >= 6 && key.slice(0, 6) == "$enum:" { return true; }
+    if key.len() >= 8 && key.slice(0, 8) == "$option:" { return true; }
+    if key.len() >= 8 && key.slice(0, 8) == "$result:" { return true; }
+    return false;
+}
+
+func blockIndex(function: IRFunction, id: int): int {
+    var i = 0;
+    loop { if i >= function.blocks.len() { break; } if function.blocks[i].id == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func isMember(values: Vec<int>, value: int): bool {
+    var i = 0;
+    loop { if i >= values.len() { break; } if values[i] == value { return true; } i = i + 1; }
+    return false;
+}
+
+func copyInts(values: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var i = 0;
+    loop { if i >= values.len() { break; } result.push(values[i]); i = i + 1; }
+    return result;
+}
+
+func sortedInts(values: Vec<int>): Vec<int> {
+    var result = copyInts(values);
+    var i = 1;
+    loop {
+        if i >= result.len() { break; }
+        var value = result[i];
+        var j = i;
+        loop { if j <= 0 || result[j - 1] <= value { break; } result.set(j, result[j - 1]); j = j - 1; }
+        result.set(j, value);
+        i = i + 1;
+    }
+    return result;
+}
+
+func copyTypes(values: Vec<IRType>): Vec<IRType> {
+    var result: Vec<IRType> = [];
+    var i = 0;
+    loop { if i >= values.len() { break; } result.push(IRType { kind: values[i].kind }); i = i + 1; }
+    return result;
+}
+
+func copyIRValues(values: Vec<IRValue>): Vec<IRValue> {
+    var result: Vec<IRValue> = [];
+    var i = 0;
+    loop { if i >= values.len() { break; } result.push(IRValue { id: values[i].id, ty: IRType { kind: values[i].ty.kind } }); i = i + 1; }
+    return result;
+}
+
+func copyInstruction(value: Instruction): Instruction {
+    return Instruction { kind: value.kind, resultId: value.resultId, ty: IRType { kind: value.ty.kind }, operands: copyInts(value.operands), immediate: value.immediate, comparison: value.comparison, functionId: value.functionId, source: SourceRef { unitId: value.source.unitId, start: value.source.start, end: value.source.end } };
+}
+
+func copyTerminator(value: Terminator): Terminator {
+    return Terminator { kind: value.kind, targetBlockId: value.targetBlockId, targetArgs: copyInts(value.targetArgs), conditionValueId: value.conditionValueId, trueTargetBlockId: value.trueTargetBlockId, trueArgs: copyInts(value.trueArgs), falseTargetBlockId: value.falseTargetBlockId, falseArgs: copyInts(value.falseArgs), valueId: value.valueId, source: SourceRef { unitId: value.source.unitId, start: value.source.start, end: value.source.end } };
+}
+
+func copyBlock(value: BasicBlock): BasicBlock {
+    var instructions: Vec<Instruction> = [];
+    var i = 0;
+    loop { if i >= value.instructions.len() { break; } instructions.push(copyInstruction(value.instructions[i])); i = i + 1; }
+    return BasicBlock { id: value.id, params: copyIRValues(value.params), instructions: instructions, terminator: copyTerminator(value.terminator) };
+}
+
+func copyBlocks(values: Vec<BasicBlock>): Vec<BasicBlock> {
+    var result: Vec<BasicBlock> = [];
+    var i = 0;
+    loop { if i >= values.len() { break; } result.push(copyBlock(values[i])); i = i + 1; }
+    return result;
+}
+
+func copyEscapes(values: Vec<Escape>): Vec<Escape> {
+    var result: Vec<Escape> = [];
+    var i = 0;
+    loop { if i >= values.len() { break; } result.push(values[i]); i = i + 1; }
+    return result;
+}
+
+func copyEffects(value: EffectSummary): EffectSummary {
+    return EffectSummary { readsMemory: value.readsMemory, writesMemory: value.writesMemory, allocates: value.allocates, mayBlock: value.mayBlock, synchronizes: value.synchronizes, unresolvedCallees: value.unresolvedCallees, argumentEscapes: copyEscapes(value.argumentEscapes), resultEscape: value.resultEscape };
+}
+
+func effectsWithHiddenParameters(value: EffectSummary): EffectSummary {
+    var escapes = copyEscapes(value.argumentEscapes);
+    escapes.push(Escape::NoEscape);
+    escapes.push(Escape::NoEscape);
+    return EffectSummary { readsMemory: value.readsMemory, writesMemory: value.writesMemory, allocates: value.allocates, mayBlock: value.mayBlock, synchronizes: value.synchronizes, unresolvedCallees: value.unresolvedCallees, argumentEscapes: escapes, resultEscape: value.resultEscape };
+}
+
+func copyFunction(value: IRFunction): IRFunction {
+    var signature = FunctionSignature { parameterTypes: copyTypes(value.signature.parameterTypes), returnType: IRType { kind: value.signature.returnType.kind } };
+    var key = FunctionKey { module: value.key.module, owner: value.key.owner, name: value.key.name };
+    return IRFunction { id: value.id, key: key, signature: signature, parameters: copyIRValues(value.parameters), blocks: copyBlocks(value.blocks), effects: copyEffects(value.effects) };
+}
+
+func copyProgram(program: IRProgram): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } functions.push(copyFunction(program.functions[i])); i = i + 1; }
+    return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+}
+
+func definitionType(function: IRFunction, valueId: int): IRType {
+    var i = 0;
+    loop { if i >= function.parameters.len() { break; } if function.parameters[i].id == valueId { return function.parameters[i].ty; } i = i + 1; }
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var pi = 0; loop { if pi >= block.params.len() { break; } if block.params[pi].id == valueId { return block.params[pi].ty; } pi = pi + 1; } var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].resultId == valueId { return block.instructions[ii].ty; } ii = ii + 1; } bi = bi + 1; }
+    return irVoid();
+}
+
+func maxValueId(function: IRFunction): int {
+    var maximum = -1;
+    var i = 0;
+    loop { if i >= function.parameters.len() { break; } if function.parameters[i].id > maximum { maximum = function.parameters[i].id; } i = i + 1; }
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var pi = 0; loop { if pi >= block.params.len() { break; } if block.params[pi].id > maximum { maximum = block.params[pi].id; } pi = pi + 1; } var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].resultId > maximum { maximum = block.instructions[ii].resultId; } ii = ii + 1; } bi = bi + 1; }
+    return maximum;
+}
+
+func nextValue(next: Vec<int>): int {
+    if next[0] < 0 || next[0] == 9223372036854775807 { next.set(0, -1); return -1; }
+    var result = next[0];
+    next.set(0, result + 1);
+    return result;
+}
+
+func instructionLiveness(functionLive: FunctionLiveness, blockId: int, index: int): InstructionLiveness {
+    var bi = 0;
+    loop { if bi >= functionLive.blocks.len() { break; } var block = functionLive.blocks[bi]; if block.blockId == blockId { var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].instructionIndex == index { return block.instructions[ii]; } ii = ii + 1; } } bi = bi + 1; }
+    return InstructionLiveness { instructionIndex: -1, liveBefore: [], liveAfter: [] };
+}
+
+func functionLiveness(programLive: Vec<FunctionLiveness>, functionId: int): int {
+    var i = 0;
+    loop { if i >= programLive.len() { break; } if programLive[i].functionId == functionId { return i; } i = i + 1; }
+    return -1;
+}
+
+func allocationPlacementIndex(placement: ManagedPlacement, functionId: int, resultId: int): int {
+    var i = 0;
+    loop { if i >= placement.allocations.len() { break; } if placement.allocations[i].functionId == functionId && placement.allocations[i].resultId == resultId { return i; } i = i + 1; }
+    return -1;
+}
+
+func callPlacementIndex(placement: ManagedPlacement, functionId: int, blockId: int, instructionIndex: int): int {
+    var i = 0;
+    loop { if i >= placement.calls.len() { break; } var value = placement.calls[i]; if value.functionId == functionId && value.blockId == blockId && value.instructionIndex == instructionIndex { return i; } i = i + 1; }
+    return -1;
+}
+
+func isUserFunction(functions: Vec<ManagedFunction>, functionId: int): bool { return managedIndex(functions, functionId) >= 0; }
+
+func bindingExists(program: IRProgram, id: int): bool { return functionIndex(program, id) >= 0; }
+
+func signatureMatches(program: IRProgram, id: int, parameters: Vec<IRTypeKind>, result: IRTypeKind): bool {
+    var fi = functionIndex(program, id);
+    if fi < 0 { return false; }
+    var function = program.functions[fi];
+    if function.signature.returnType.kind != result || function.parameters.len() != parameters.len() { return false; }
+    var i = 0;
+    loop { if i >= parameters.len() { break; } if function.signature.parameterTypes[i].kind != parameters[i] || function.parameters[i].ty.kind != parameters[i] { return false; } i = i + 1; }
+    return true;
+}
+
+func validateBindings(program: IRProgram, bindings: RuntimeBindings): string {
+    var ids: Vec<int> = [bindings.create, bindings.destroy, bindings.allocate, bindings.collect, bindings.rootPush, bindings.rootSet, bindings.rootPop, bindings.storeReference, bindings.regionCreate, bindings.regionEnd, bindings.regionAllocate, bindings.allocateDestination, bindings.layoutCreate, bindings.layoutRegister, bindings.layoutRegisterVariable, bindings.layoutRelease];
+    var i = 0;
+    loop { if i >= ids.len() { break; } if !bindingExists(program, ids[i]) { return "managed roots: runtime binding function ID is missing"; } var j = 0; loop { if j >= i { break; } if ids[j] == ids[i] { return "managed roots: runtime binding IDs must be unique"; } j = j + 1; } i = i + 1; }
+    if !signatureMatches(program, bindings.create, [IRTypeKind::RawAddress, IRTypeKind::Bool], IRTypeKind::RawAddress) { return "managed roots: create binding signature mismatch"; }
+    if !signatureMatches(program, bindings.destroy, [IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: destroy binding signature mismatch"; }
+    if !signatureMatches(program, bindings.allocate, [IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed roots: allocate binding signature mismatch"; }
+    if !signatureMatches(program, bindings.collect, [IRTypeKind::RawAddress], IRTypeKind::I64) { return "managed roots: collect binding signature mismatch"; }
+    if !signatureMatches(program, bindings.rootPush, [IRTypeKind::RawAddress], IRTypeKind::I64) { return "managed roots: rootPush binding signature mismatch"; }
+    if !signatureMatches(program, bindings.rootSet, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: rootSet binding signature mismatch"; }
+    if !signatureMatches(program, bindings.rootPop, [IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::Void) { return "managed roots: rootPop binding signature mismatch"; }
+    if !signatureMatches(program, bindings.storeReference, [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: storeReference binding signature mismatch"; }
+    if !signatureMatches(program, bindings.regionCreate, [IRTypeKind::RawAddress], IRTypeKind::RawAddress) { return "managed roots: regionCreate binding signature mismatch"; }
+    if !signatureMatches(program, bindings.regionEnd, [IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: regionEnd binding signature mismatch"; }
+    if !signatureMatches(program, bindings.regionAllocate, [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed roots: regionAllocate binding signature mismatch"; }
+    if !signatureMatches(program, bindings.allocateDestination, [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed roots: allocateDestination binding signature mismatch"; }
+    if !signatureMatches(program, bindings.layoutCreate, [IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed roots: layoutCreate binding signature mismatch"; }
+    if !signatureMatches(program, bindings.layoutRegister, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::I64) { return "managed roots: layoutRegister binding signature mismatch"; }
+    if !signatureMatches(program, bindings.layoutRegisterVariable, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::I64], IRTypeKind::I64) { return "managed roots: layoutRegisterVariable binding signature mismatch"; }
+    if !signatureMatches(program, bindings.layoutRelease, [IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: layoutRelease binding signature mismatch"; }
+    return "";
+}
+
+func validateLayouts(layouts: Vec<ManagedLayout>, variableLayouts: Vec<ManagedVariableLayout>): string {
+    var i = 0;
+    loop {
+        if i >= layouts.len() { break; }
+        var layout = layouts[i];
+        if layout.id != i + 1 || layout.key == "" || layout.payloadBytes < 0 || layout.payloadBytes % 8 != 0 { return "managed roots: invalid deterministic layout descriptor"; }
+        var opaquePayloadCount = 0;
+        var fi = 0;
+        loop {
+            if fi >= layout.fields.len() { break; }
+            var field = layout.fields[fi];
+            if field.offset < 0 || field.offset % 8 != 0 || field.offset > layout.payloadBytes - 8 { return "managed roots: field offset lies outside its layout"; }
+            if field.kind == IRTypeKind::Void { return "managed roots: void is not a valid layout field kind"; }
+            if field.kind == IRTypeKind::RawAddress {
+                if field.layoutId == -1 {
+                    if field.name != "$payload" || !opaquePayloadKey(layout.key) { return "managed roots: opaque payload sentinel is only valid for private tagged layouts"; }
+                    opaquePayloadCount = opaquePayloadCount + 1;
+                    if opaquePayloadCount > 1 { return "managed roots: tagged layout has duplicate opaque payload sentinels"; }
+                } else if field.layoutId <= 0 || field.layoutId > layouts.len() { return "managed roots: reference field requires a valid positive layout ID"; }
+            }
+            else if field.layoutId != 0 { return "managed roots: scalar field must have layout ID zero"; }
+            if field.name == "" { return "managed roots: layout field requires a name"; }
+            var fj = 0;
+            loop { if fj >= fi { break; } if layout.fields[fj].offset == field.offset { return "managed roots: duplicate field offset"; } if layout.fields[fj].name == field.name { return "managed roots: duplicate layout field name"; } fj = fj + 1; }
+            fi = fi + 1;
+        }
+        var prior = 0;
+        loop { if prior >= i { break; } if layouts[prior].key == layout.key { return "managed roots: duplicate nominal layout key"; } prior = prior + 1; }
+        i = i + 1;
+    }
+    var vi = 0;
+    loop {
+        if vi >= variableLayouts.len() { break; }
+        var variable = variableLayouts[vi];
+        if variable.layoutId <= 0 || variable.layoutId > layouts.len() || (variable.tailKind != 1 && variable.tailKind != 2) { return "managed roots: invalid variable-tail descriptor metadata"; }
+        var layout = layouts[variable.layoutId - 1];
+        if layout.payloadBytes < 8 || layout.payloadBytes % 8 != 0 { return "managed roots: variable-tail layout requires an aligned eight-byte minimum prefix"; }
+        var countField = false;
+        var fi = 0;
+        loop { if fi >= layout.fields.len() { break; } if layout.fields[fi].offset == 0 && layout.fields[fi].kind == IRTypeKind::I64 { countField = true; } fi = fi + 1; }
+        if !countField { return "managed roots: variable-tail layout must describe its i64 prefix count"; }
+        var prior = 0;
+        loop { if prior >= vi { break; } if variableLayouts[prior].layoutId == variable.layoutId { return "managed roots: duplicate variable-tail layout metadata"; } prior = prior + 1; }
+        vi = vi + 1;
+    }
+    return "";
+}
+
+func derivedUseDiagnostic(functionId: int, valueId: int, blockId: int, instructionIndex: int, source: SourceRef): string {
+    return "managed roots: derived address escapes its adjacent field access (functionId=" + functionId.toString() + ", derivedValueId=" + valueId.toString() + ", blockId=" + blockId.toString() + ", useInstructionIndex=" + instructionIndex.toString() + ", source=" + source.unitId + ":" + source.start.toString() + "-" + source.end.toString() + ")";
+}
+
+func validateReferences(module: ManagedProgram): string {
+    var mi = 0;
+    loop {
+        if mi >= module.functions.len() { break; }
+        var managed = module.functions[mi];
+        var priorManaged = 0;
+        loop { if priorManaged >= mi { break; } if module.functions[priorManaged].functionId == managed.functionId { return "managed roots: duplicate managed function metadata"; } priorManaged = priorManaged + 1; }
+        var fi = functionIndex(module.program, managed.functionId);
+        if fi < 0 { return "managed roots: annotated user function is missing"; }
+        var function = module.program.functions[fi];
+        if managed.parameterLayouts.len() != function.parameters.len() { return "managed roots: parameter layout metadata arity mismatch"; }
+        var layoutIndex = 0;
+        loop {
+            if layoutIndex >= function.parameters.len() { break; }
+            var parameter = function.parameters[layoutIndex];
+            var parameterLayout = managed.parameterLayouts[layoutIndex];
+            if parameter.ty.kind == IRTypeKind::RawAddress { if parameterLayout <= 0 || parameterLayout > module.layouts.len() { return "managed roots: reference parameter has no valid nominal layout"; } }
+            else if parameterLayout != 0 { return "managed roots: scalar parameter layout must be zero"; }
+            layoutIndex = layoutIndex + 1;
+        }
+        if function.signature.returnType.kind == IRTypeKind::RawAddress { if managed.returnLayout <= 0 || managed.returnLayout > module.layouts.len() { return "managed roots: reference result has no valid nominal layout"; } }
+        else if managed.returnLayout != 0 { return "managed roots: scalar or void result layout must be zero"; }
+        var refs = sortedInts(managed.referenceValues);
+        var ri = 0;
+        loop { if ri >= refs.len() { break; } if ri > 0 && refs[ri] == refs[ri - 1] { return "managed roots: duplicate canonical reference metadata"; } if definitionType(function, refs[ri]).kind != IRTypeKind::RawAddress { return "managed roots: canonical reference metadata does not name a raw definition"; } ri = ri + 1; }
+        var di = 0;
+        loop {
+            if di >= module.derived.len() { break; }
+            var derived = module.derived[di];
+            if derived.functionId == managed.functionId {
+                var priorDerived = 0;
+                loop { if priorDerived >= di { break; } if module.derived[priorDerived].functionId == derived.functionId && module.derived[priorDerived].valueId == derived.valueId { return "managed roots: duplicate derived-address metadata"; } priorDerived = priorDerived + 1; }
+                if isMember(refs, derived.valueId) || !isMember(refs, derived.ownerId) { return "managed roots: invalid derived address metadata"; }
+                var found = false;
+                var useCount = 0;
+                var bi = 0;
+                loop {
+                    if bi >= function.blocks.len() { break; }
+                    var block = function.blocks[bi];
+                    var ii = 0;
+                    loop {
+                        if ii >= block.instructions.len() { break; }
+                        var instruction = block.instructions[ii];
+                        if instruction.resultId == derived.valueId {
+                            found = true;
+                            if instruction.kind != InstructionKind::RawOffset || instruction.operands.len() != 2 || instruction.operands[0] != derived.ownerId { return "managed roots: derived address does not match its owner"; }
+                        }
+                        var oi = 0;
+                        loop {
+                            if oi >= instruction.operands.len() { break; }
+                            if instruction.operands[oi] == derived.valueId {
+                                useCount = useCount + 1;
+                                var isFieldAccess = instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress || instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreAddress || instruction.kind == InstructionKind::RawLoadByte || instruction.kind == InstructionKind::RawStoreByte;
+                                if useCount > 1 || !isFieldAccess || oi != 0 || ii == 0 || instruction.operands.len() == 0 || instruction.operands[0] != derived.valueId { return derivedUseDiagnostic(managed.functionId, derived.valueId, block.id, ii, instruction.source); }
+                                var previous = block.instructions[ii - 1];
+                                if previous.kind != InstructionKind::RawOffset || previous.resultId != derived.valueId || previous.operands.len() != 2 || previous.operands[0] != derived.ownerId { return derivedUseDiagnostic(managed.functionId, derived.valueId, block.id, ii, instruction.source); }
+                            }
+                            oi = oi + 1;
+                        }
+                        ii = ii + 1;
+                    }
+                    if block.terminator.kind == TerminatorKind::Return && block.terminator.valueId == derived.valueId { return "managed roots: derived address is returned"; }
+                    if block.terminator.kind == TerminatorKind::Jump { var ai = 0; loop { if ai >= block.terminator.targetArgs.len() { break; } if block.terminator.targetArgs[ai] == derived.valueId { return "managed roots: derived address crosses a CFG edge"; } ai = ai + 1; } }
+                    if block.terminator.kind == TerminatorKind::Branch { var ai = 0; loop { if ai >= block.terminator.trueArgs.len() { break; } if block.terminator.trueArgs[ai] == derived.valueId { return "managed roots: derived address crosses a CFG edge"; } ai = ai + 1; } ai = 0; loop { if ai >= block.terminator.falseArgs.len() { break; } if block.terminator.falseArgs[ai] == derived.valueId { return "managed roots: derived address crosses a CFG edge"; } ai = ai + 1; } }
+                    bi = bi + 1;
+                }
+                if !found || useCount != 1 || definitionType(function, derived.valueId).kind != IRTypeKind::RawAddress { return "managed roots: missing or multiply used derived address metadata"; }
+            }
+            di = di + 1;
+        }
+        // All raw definitions are canonical references except explicitly derived addresses.
+        var pi = 0;
+        loop { if pi >= function.parameters.len() { break; } var value = function.parameters[pi]; if value.ty.kind == IRTypeKind::RawAddress && !isMember(refs, value.id) { return "managed roots: raw formal parameter lacks canonical reference metadata"; } pi = pi + 1; }
+        var bi = 0;
+        loop {
+            if bi >= function.blocks.len() { break; }
+            var block = function.blocks[bi];
+            var pi = 0;
+            loop { if pi >= block.params.len() { break; } var value = block.params[pi]; if value.ty.kind == IRTypeKind::RawAddress && !isMember(refs, value.id) { return "managed roots: raw block parameter lacks canonical reference metadata"; } pi = pi + 1; }
+            var ii = 0;
+            loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.resultId >= 0 && instruction.ty.kind == IRTypeKind::RawAddress && !isMember(refs, instruction.resultId) { var isDerived = false; var di = 0; loop { if di >= module.derived.len() { break; } if module.derived[di].functionId == managed.functionId && module.derived[di].valueId == instruction.resultId { isDerived = true; } di = di + 1; } if !isDerived { return "managed roots: raw result lacks canonical reference metadata"; } } ii = ii + 1; }
+            bi = bi + 1;
+        }
+        mi = mi + 1;
+    }
+    return "";
+}
+
+func validateAllocations(module: ManagedProgram): string {
+    var ai = 0;
+    loop {
+        if ai >= module.allocations.len() { break; }
+        var allocation = module.allocations[ai];
+        var prior = 0;
+        loop { if prior >= ai { break; } if module.allocations[prior].functionId == allocation.functionId && module.allocations[prior].resultId == allocation.resultId { return "managed roots: duplicate allocation metadata"; } prior = prior + 1; }
+        var fi = functionIndex(module.program, allocation.functionId);
+        if fi < 0 { return "managed roots: allocation function is missing"; }
+        var function = module.program.functions[fi];
+        var found = false;
+        var bi = 0;
+        loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if block.id == allocation.blockId && instruction.resultId == allocation.resultId && instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId { found = true; if instruction.operands.len() != 1 || instruction.operands[0] < 0 { return "managed roots: allocation hook must receive a layout value"; } var constantFound = false; var cb = 0; loop { if cb >= function.blocks.len() { break; } var cblock = function.blocks[cb]; var ci = 0; loop { if ci >= cblock.instructions.len() { break; } var candidate = cblock.instructions[ci]; if candidate.resultId == instruction.operands[0] && candidate.kind == InstructionKind::ConstI64 && candidate.immediate == allocation.layoutId { constantFound = true; } ci = ci + 1; } cb = cb + 1; } if !constantFound { return "managed roots: allocation layout operand does not match its annotation"; } } ii = ii + 1; } bi = bi + 1; }
+        if !found || allocation.layoutId <= 0 || allocation.layoutId > module.layouts.len() { return "managed roots: allocation annotation does not match a valid layout hook"; }
+        if variableLayoutIndex(module.variableLayouts, allocation.layoutId) >= 0 { return "managed roots: fixed allocation hook cannot target a variable-tail layout"; }
+        ai = ai + 1;
+    }
+    if !signatureMatches(module.program, module.allocateFunctionId, [IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed roots: allocation hook signature mismatch"; }
+    if !signatureMatches(module.program, module.storeReferenceFunctionId, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed roots: reference-store hook signature mismatch"; }
+    if !signatureMatches(module.program, module.collectFunctionId, [], IRTypeKind::Void) { return "managed roots: collection hook signature mismatch"; }
+    var mi = 0;
+    loop {
+        if mi >= module.functions.len() { break; }
+        var managed = module.functions[mi];
+        var fi = functionIndex(module.program, managed.functionId);
+        var function = module.program.functions[fi];
+        var bi = 0;
+        loop {
+            if bi >= function.blocks.len() { break; }
+            var block = function.blocks[bi];
+            var ii = 0;
+            loop {
+                if ii >= block.instructions.len() { break; }
+                var instruction = block.instructions[ii];
+                if instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId {
+                    var annotationFound = false;
+                    var ai = 0;
+                    loop { if ai >= module.allocations.len() { break; } if module.allocations[ai].functionId == managed.functionId && module.allocations[ai].resultId == instruction.resultId && module.allocations[ai].blockId == block.id { annotationFound = true; } ai = ai + 1; }
+                    if !annotationFound { return "managed roots: allocation hook is missing its annotation"; }
+                }
+                if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() != 3 { return "managed roots: reference-store hook arity mismatch"; }
+                if instruction.kind == InstructionKind::Call && instruction.functionId == module.collectFunctionId && instruction.operands.len() != 0 { return "managed roots: collection hook arity mismatch"; }
+                ii = ii + 1;
+            }
+            bi = bi + 1;
+        }
+        mi = mi + 1;
+    }
+    return "";
+}
+
+func hookRuntimeSignatureMatches(program: IRProgram, stubId: int, runtimeId: int): bool {
+    var stubIndex = functionIndex(program, stubId);
+    var runtimeIndex = functionIndex(program, runtimeId);
+    if stubIndex < 0 || runtimeIndex < 0 { return false; }
+    var stub = program.functions[stubIndex];
+    var runtime = program.functions[runtimeIndex];
+    if runtime.parameters.len() != stub.parameters.len() + 1 || runtime.signature.parameterTypes.len() != runtime.parameters.len() { return false; }
+    if runtime.signature.returnType.kind != stub.signature.returnType.kind || runtime.parameters[0].ty.kind != IRTypeKind::RawAddress || runtime.signature.parameterTypes[0].kind != IRTypeKind::RawAddress { return false; }
+    var i = 0;
+    loop {
+        if i >= stub.parameters.len() { break; }
+        if runtime.parameters[i + 1].ty.kind != stub.parameters[i].ty.kind || runtime.signature.parameterTypes[i + 1].kind != stub.signature.parameterTypes[i].kind { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func validateHookSeparation(module: ManagedProgram, bindings: RuntimeBindings): string {
+    var hooks: Vec<int> = [module.allocateFunctionId, module.storeReferenceFunctionId, module.collectFunctionId];
+    var i = 0;
+    loop {
+        if i >= hooks.len() { break; }
+        if functionIndex(module.program, hooks[i]) < 0 { return "managed roots: private hook function is missing"; }
+        var j = 0;
+        loop { if j >= i { break; } if hooks[j] == hooks[i] { return "managed roots: private hook IDs must be unique"; } j = j + 1; }
+        var mi = 0;
+        loop { if mi >= module.functions.len() { break; } if module.functions[mi].functionId == hooks[i] { return "managed roots: private hooks cannot be user functions"; } mi = mi + 1; }
+        var bi = 0;
+        loop { if bi >= 16 { break; } if bindingsIdAt(bindings, bi) == hooks[i] { return "managed roots: private hook and runtime binding IDs overlap"; } bi = bi + 1; }
+        i = i + 1;
+    }
+    var mi = 0;
+    loop {
+        if mi >= module.functions.len() { break; }
+        var functionId = module.functions[mi].functionId;
+        var bi = 0;
+        loop { if bi >= 16 { break; } if bindingsIdAt(bindings, bi) == functionId { return "managed roots: user and runtime binding IDs overlap"; } bi = bi + 1; }
+        mi = mi + 1;
+    }
+    if module.hooks.len() != bindings.hooks.len() { return "managed roots: hook metadata and runtime binding counts differ"; }
+    var hi = 0;
+    loop {
+        if hi >= module.hooks.len() { break; }
+        var hook = module.hooks[hi];
+        if hook.functionId < 0 || hook.runtimeName == "" || managedHookIndex(module.hooks, hook.functionId) != hi { return "managed roots: invalid or duplicate managed hook metadata"; }
+        if hook.functionId == module.allocateFunctionId || hook.functionId == module.storeReferenceFunctionId || hook.functionId == module.collectFunctionId || managedIndex(module.functions, hook.functionId) >= 0 { return "managed roots: managed hook stub overlaps a private fixed hook or user function"; }
+        var stubIndex = functionIndex(module.program, hook.functionId);
+        if stubIndex < 0 { return "managed roots: managed hook stub function is missing"; }
+        var bindingIndex = hookBindingIndex(bindings.hooks, hook.functionId);
+        if bindingIndex < 0 { return "managed roots: managed hook runtime binding is missing or duplicated"; }
+        var hookBinding = bindings.hooks[bindingIndex];
+        if hookBinding.mayCollect != hook.mayCollect { return "managed roots: hook collection metadata does not match its runtime binding"; }
+        if functionIndex(module.program, hookBinding.runtimeFunctionId) < 0 { return "managed roots: resolved managed hook runtime function is missing"; }
+        if hookBinding.runtimeFunctionId == hook.functionId || hookBinding.runtimeFunctionId == module.allocateFunctionId || hookBinding.runtimeFunctionId == module.storeReferenceFunctionId || hookBinding.runtimeFunctionId == module.collectFunctionId || managedIndex(module.functions, hookBinding.runtimeFunctionId) >= 0 { return "managed roots: hook stub, runtime, and user function IDs overlap"; }
+        var runtimeFunction = module.program.functions[functionIndex(module.program, hookBinding.runtimeFunctionId)];
+        if runtimeFunction.key.name != hook.runtimeName { return "managed roots: hook runtime binding resolves to a different function name"; }
+        if !hookRuntimeSignatureMatches(module.program, hook.functionId, hookBinding.runtimeFunctionId) { return "managed roots: hook runtime signature must prepend one raw context parameter"; }
+        var bi = 0;
+        loop { if bi >= 16 { break; } if bindingsIdAt(bindings, bi) == hook.functionId || bindingsIdAt(bindings, bi) == hookBinding.runtimeFunctionId { return "managed roots: private hook IDs overlap runtime binding IDs"; } bi = bi + 1; }
+        var priorHook = 0;
+        loop {
+            if priorHook >= hi { break; }
+            var priorBindingIndex = hookBindingIndex(bindings.hooks, module.hooks[priorHook].functionId);
+            if priorBindingIndex < 0 { return "managed roots: managed hook runtime binding is missing"; }
+            var priorBinding = bindings.hooks[priorBindingIndex];
+            if priorBinding.functionId == hook.functionId || priorBinding.runtimeFunctionId == hookBinding.runtimeFunctionId || priorBinding.functionId == hookBinding.runtimeFunctionId || priorBinding.runtimeFunctionId == hook.functionId { return "managed roots: managed hook stub and runtime IDs must be unique"; }
+            priorHook = priorHook + 1;
+        }
+        hi = hi + 1;
+    }
+    var di = 0;
+    loop { if di >= module.derived.len() { break; } if managedIndex(module.functions, module.derived[di].functionId) < 0 { return "managed roots: derived-address metadata has no user function"; } di = di + 1; }
+    return "";
+}
+
+func bindingsIdAt(bindings: RuntimeBindings, index: int): int {
+    if index == 0 { return bindings.create; }
+    if index == 1 { return bindings.destroy; }
+    if index == 2 { return bindings.allocate; }
+    if index == 3 { return bindings.collect; }
+    if index == 4 { return bindings.rootPush; }
+    if index == 5 { return bindings.rootSet; }
+    if index == 6 { return bindings.rootPop; }
+    if index == 7 { return bindings.storeReference; }
+    if index == 8 { return bindings.regionCreate; }
+    if index == 9 { return bindings.regionEnd; }
+    if index == 10 { return bindings.regionAllocate; }
+    if index == 11 { return bindings.allocateDestination; }
+    if index == 12 { return bindings.layoutCreate; }
+    if index == 13 { return bindings.layoutRegister; }
+    if index == 14 { return bindings.layoutRegisterVariable; }
+    return bindings.layoutRelease;
+}
+
+func generatedSource(): SourceRef { return sourceRef("managed-roots", 0, 0); }
+
+func emitCall(instructions: Vec<Instruction>, next: Vec<int>, resultType: IRType, resultId: int, target: int, args: Vec<int>, source: SourceRef): bool {
+    if resultType.kind != IRTypeKind::Void && resultId < 0 { return false; }
+    instructions.push(Instruction { kind: InstructionKind::Call, resultId: resultId, ty: resultType, operands: args, immediate: 0, comparison: CompareI64Predicate::Eq, functionId: target, source: source });
+    if resultId >= next[0] { next.set(0, resultId + 1); }
+    return true;
+}
+
+func rootSetCall(instructions: Vec<Instruction>, contextId: int, indexId: int, objectId: int, target: int, source: SourceRef): void {
+    instructions.push(Instruction { kind: InstructionKind::Call, resultId: -1, ty: irVoid(), operands: [contextId, indexId, objectId], immediate: 0, comparison: CompareI64Predicate::Eq, functionId: target, source: source });
+}
+
+func insertPublication(instructions: Vec<Instruction>, slots: Vec<RootSlot>, rootIndices: Vec<int>, liveBefore: Vec<int>, contextId: int, nullId: int, rootSetId: int, source: SourceRef): void {
+    var si = 0;
+    loop {
+        if si >= rootIndices.len() { break; }
+        rootSetCall(instructions, contextId, rootIndices[si], nullId, rootSetId, source);
+        si = si + 1;
+    }
+    si = 0;
+    loop {
+        if si >= slots.len() { break; }
+        if isMember(liveBefore, slots[si].valueId) { rootSetCall(instructions, contextId, slots[si].indexValueId, slots[si].valueId, rootSetId, source); }
+        si = si + 1;
+    }
+}
+
+func rootColorBudgetCharge(budget: Vec<int>): bool {
+    if budget[0] <= 0 { budget.set(0, -1); return false; }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func rootConflictIndex(indexById: HashMap<string, int>, valueId: int): int {
+    var key = valueId.toString();
+    if !indexById.has(key) { return -1; }
+    return indexById.get(key);
+}
+
+func recordRootConflict(left: int, right: int, graph: RootConflictGraph, budget: Vec<int>): bool {
+    if left == right { return true; }
+    var first = left;
+    var second = right;
+    if first > second { first = right; second = left; }
+    if !rootColorBudgetCharge(budget) { return false; }
+    var key = first.toString() + ":" + second.toString();
+    if graph.edges.has(key) { return true; }
+    if !rootColorBudgetCharge(budget) || !rootColorBudgetCharge(budget) { return false; }
+    graph.edges.set(key, true);
+    var firstNeighbors = graph.neighbors[first];
+    firstNeighbors.push(second);
+    graph.neighbors.set(first, firstNeighbors);
+    var secondNeighbors = graph.neighbors[second];
+    secondNeighbors.push(first);
+    graph.neighbors.set(second, secondNeighbors);
+    return true;
+}
+
+func addRootSetConflicts(values: Vec<int>, indexById: HashMap<string, int>, graph: RootConflictGraph, active: Vec<bool>, budget: Vec<int>): bool {
+    var members: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if !rootColorBudgetCharge(budget) { return false; }
+        var index = rootConflictIndex(indexById, values[i]);
+        if index >= 0 {
+            active.set(index, true);
+            members.push(index);
+        }
+        i = i + 1;
+    }
+    var left = 0;
+    loop {
+        if left >= members.len() { break; }
+        var right = left + 1;
+        loop {
+            if right >= members.len() { break; }
+            if !rootColorBudgetCharge(budget) || !recordRootConflict(members[left], members[right], graph, budget) { return false; }
+            right = right + 1;
+        }
+        left = left + 1;
+    }
+    return true;
+}
+
+func uncoloredRootPlan(valueCount: int): RootColorPlan {
+    var colors: Vec<int> = [];
+    var i = 0;
+    loop { if i >= valueCount { break; } colors.push(i); i = i + 1; }
+    return RootColorPlan { colors: colors, colorCount: valueCount };
+}
+
+func rootPublicationSite(module: ManagedProgram, instruction: Instruction): bool {
+    if instruction.kind != InstructionKind::Call { return false; }
+    if instruction.functionId == module.allocateFunctionId || instruction.functionId == module.collectFunctionId
+        || instruction.functionId == module.storeReferenceFunctionId || isUserFunction(module.functions, instruction.functionId) {
+        return true;
+    }
+    var hookIndex = managedHookIndex(module.hooks, instruction.functionId);
+    if hookIndex >= 0 { return module.hooks[hookIndex].mayCollect; }
+    return true;
+}
+
+func compactRootSlots(module: ManagedProgram, function: IRFunction, refValues: Vec<int>, live: FunctionLiveness): Result<RootColorPlan, string> {
+    if live.functionId != function.id || live.blocks.len() != function.blocks.len() {
+        return Result.Err("managed roots: liveness result does not match root slot coloring input");
+    }
+    var budget: Vec<int> = [500000];
+    var indexById: HashMap<string, int> = HashMap.new();
+    var active: Vec<bool> = [];
+    var neighbors: Vec<Vec<int>> = [];
+    var i = 0;
+    loop {
+        if i >= refValues.len() { break; }
+        if !rootColorBudgetCharge(budget) { return Result.Err("managed roots: root slot coloring work budget exhausted"); }
+        var key = refValues[i].toString();
+        if indexById.has(key) { return Result.Err("managed roots: duplicate canonical reference in root slot coloring input"); }
+        indexById.set(key, i);
+        active.push(false);
+        neighbors.push([]);
+        i = i + 1;
+    }
+    var graph = RootConflictGraph { neighbors: neighbors, edges: HashMap.new() };
+    var bi = 0;
+    loop {
+        if bi >= function.blocks.len() { break; }
+        if !rootColorBudgetCharge(budget) { return Result.Err("managed roots: root slot coloring work budget exhausted"); }
+        var block = function.blocks[bi];
+        var liveBlock = live.blocks[bi];
+        if liveBlock.blockId != block.id { return Result.Err("managed roots: liveness block order does not match root slot coloring input"); }
+        var si = 0;
+        loop {
+            if si >= liveBlock.instructions.len() { break; }
+            var snapshot = liveBlock.instructions[si];
+            if snapshot.instructionIndex < 0 || snapshot.instructionIndex >= block.instructions.len() {
+                return Result.Err("managed roots: invalid liveness snapshot in root slot coloring input");
+            }
+            // Root slots only need to distinguish canonical references that
+            // are published together at a safepoint. Using these exact
+            // verified live-before sets avoids unrelated instruction ranges.
+            if rootPublicationSite(module, block.instructions[snapshot.instructionIndex]) {
+                if !addRootSetConflicts(snapshot.liveBefore, indexById, graph, active, budget) {
+                    return Result.Err("managed roots: root slot coloring work budget exhausted");
+                }
+            }
+            si = si + 1;
+        }
+        bi = bi + 1;
+    }
+    var colors: Vec<int> = [];
+    i = 0;
+    loop { if i >= refValues.len() { break; } colors.push(-1); i = i + 1; }
+    var colorCount = 0;
+    i = 0;
+    loop {
+        if i >= refValues.len() { break; }
+        if !rootColorBudgetCharge(budget) { return Result.Err("managed roots: root slot coloring work budget exhausted"); }
+        if !active[i] { i = i + 1; continue; }
+        var candidate = 0;
+        var chosen = false;
+        loop {
+            if chosen { break; }
+            var unavailable = false;
+            var ni = 0;
+            var adjacent = graph.neighbors[i];
+            loop {
+                if ni >= adjacent.len() { break; }
+                if !rootColorBudgetCharge(budget) { return Result.Err("managed roots: root slot coloring work budget exhausted"); }
+                var neighbor = adjacent[ni];
+                if neighbor < i && colors[neighbor] == candidate { unavailable = true; break; }
+                ni = ni + 1;
+            }
+            if !unavailable { chosen = true; }
+            else { candidate = candidate + 1; }
+        }
+        colors.set(i, candidate);
+        if candidate >= colorCount { colorCount = candidate + 1; }
+        i = i + 1;
+    }
+    return Result.Ok(RootColorPlan { colors: colors, colorCount: colorCount });
+}
+
+func storageForAllocation(placement: ManagedPlacement, functionId: int, resultId: int): ManagedStorage {
+    var i = allocationPlacementIndex(placement, functionId, resultId);
+    if i < 0 { return ManagedStorage::Heap; }
+    return placement.allocations[i].storage;
+}
+
+func regionFunction(placement: ManagedPlacement, functionId: int): bool { return isMember(placement.regionFunctions, functionId); }
+
+func callDestination(storage: ManagedStorage, regionId: int, destinationId: int, nullId: int): int {
+    if storage == ManagedStorage::Region { return regionId; }
+    if storage == ManagedStorage::Destination { return destinationId; }
+    return nullId;
+}
+
+func maxProgramFunctionId(program: IRProgram): int {
+    var maximum = -1;
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id > maximum { maximum = program.functions[i].id; } i = i + 1; }
+    return maximum;
+}
+
+func nextFunctionId(program: IRProgram): int {
+    var maximum = maxProgramFunctionId(program);
+    if maximum < 0 { return 0; }
+    if maximum == 9223372036854775807 { return -1; }
+    return maximum + 1;
+}
+
+func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bindings: RuntimeBindings, programLive: Vec<FunctionLiveness>, managed: ManagedFunction, stress: bool): Result<IRFunction, string> {
+    var fi = functionIndex(module.program, managed.functionId);
+    if fi < 0 { return Result.Err("managed roots: user function is missing"); }
+    var input = module.program.functions[fi];
+    var liveIndex = functionLiveness(programLive, input.id);
+    if liveIndex < 0 { return Result.Err("managed roots: semantic liveness is missing for a user function"); }
+    var live = programLive[liveIndex];
+    var maximum = maxValueId(input);
+    if maximum >= 9223372036854775805 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+    var next: Vec<int> = [maximum + 1];
+    var rootNullId = -1;
+    var contextId = nextValue(next);
+    var destinationId = nextValue(next);
+    if contextId < 0 || destinationId < 0 { return Result.Err("managed roots: cannot allocate hidden parameter IDs"); }
+    var parameters = copyIRValues(input.parameters);
+    parameters.push(IRValue { id: contextId, ty: irRawAddress() });
+    parameters.push(IRValue { id: destinationId, ty: irRawAddress() });
+    var parameterTypes = copyTypes(input.signature.parameterTypes);
+    parameterTypes.push(irRawAddress());
+    parameterTypes.push(irRawAddress());
+    var signature = FunctionSignature { parameterTypes: parameterTypes, returnType: IRType { kind: input.signature.returnType.kind } };
+    var refValues = sortedInts(managed.referenceValues);
+    var slots: Vec<RootSlot> = [];
+    var rootIndexValues: Vec<int> = [];
+    var colorResult = compactRootSlots(module, input, refValues, live);
+    var rootColors: RootColorPlan = uncoloredRootPlan(refValues.len());
+    if colorResult.isErr() {
+        if colorResult.unwrapErr() != "managed roots: root slot coloring work budget exhausted" { return Result.Err(colorResult.unwrapErr()); }
+    } else {
+        rootColors = colorResult.unwrap();
+    }
+    var regionId = -1;
+    var outputBlocks: Vec<BasicBlock> = [];
+    var bi = 0;
+    loop {
+        if bi >= input.blocks.len() { break; }
+        var originalBlock = input.blocks[bi];
+        var instructions: Vec<Instruction> = [];
+        if bi == 0 {
+            rootNullId = nextValue(next);
+            if rootNullId < 0 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+            instructions.push(rawNull(rootNullId, generatedSource()));
+            var ri = 0;
+            loop {
+                if ri >= rootColors.colorCount { break; }
+                var indexId = nextValue(next);
+                if indexId < 0 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+                var rootArgs: Vec<int> = [contextId];
+                if !emitCall(instructions, next, irI64(), indexId, bindings.rootPush, rootArgs, generatedSource()) { return Result.Err("managed roots: failed to emit rootPush"); }
+                rootIndexValues.push(indexId);
+                ri = ri + 1;
+            }
+            ri = 0;
+            loop {
+                if ri >= refValues.len() { break; }
+                var color = rootColors.colors[ri];
+                if color >= 0 && color < rootIndexValues.len() { slots.push(RootSlot { valueId: refValues[ri], indexValueId: rootIndexValues[color] }); }
+                ri = ri + 1;
+            }
+            ri = 0;
+            loop { if ri >= rootIndexValues.len() { break; } rootSetCall(instructions, contextId, rootIndexValues[ri], rootNullId, bindings.rootSet, generatedSource()); ri = ri + 1; }
+            if regionFunction(placement, input.id) {
+                regionId = nextValue(next);
+                if regionId < 0 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+                if !emitCall(instructions, next, irRawAddress(), regionId, bindings.regionCreate, [contextId], generatedSource()) { return Result.Err("managed roots: failed to emit regionCreate"); }
+            }
+        }
+        var ii = 0;
+        loop {
+            if ii >= originalBlock.instructions.len() { break; }
+            var instruction = originalBlock.instructions[ii];
+            var isAllocation = instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId;
+            var isPoll = instruction.kind == InstructionKind::Call && instruction.functionId == module.collectFunctionId;
+            var isUserCall = instruction.kind == InstructionKind::Call && isUserFunction(module.functions, instruction.functionId);
+            var isStore = instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId;
+            var managedHook = -1;
+            if instruction.kind == InstructionKind::Call { managedHook = managedHookIndex(module.hooks, instruction.functionId); }
+            var isManagedHook = managedHook >= 0;
+            var isCollectingHook = isManagedHook && module.hooks[managedHook].mayCollect;
+            var isUnknownCall = instruction.kind == InstructionKind::Call && !isAllocation && !isPoll && !isStore && !isUserCall && !isManagedHook;
+            if isUnknownCall {
+                if instruction.ty.kind == IRTypeKind::RawAddress { return Result.Err("managed roots: unclassified runtime helper returns a canonical reference"); }
+                var operandIndex = 0;
+                loop { if operandIndex >= instruction.operands.len() { break; } if definitionType(input, instruction.operands[operandIndex]).kind == IRTypeKind::RawAddress { return Result.Err("managed roots: unclassified runtime helper receives a canonical reference"); } operandIndex = operandIndex + 1; }
+            }
+            if isAllocation || isPoll || isStore || isUserCall || isUnknownCall || isCollectingHook {
+                var snapshot = instructionLiveness(live, originalBlock.id, ii);
+                if snapshot.instructionIndex < 0 { return Result.Err("managed roots: safepoint lacks a semantic liveness snapshot"); }
+                var ri = 0;
+                loop {
+                    if ri >= snapshot.liveBefore.len() { break; }
+                    var liveType = definitionType(input, snapshot.liveBefore[ri]);
+                    if liveType.kind == IRTypeKind::RawAddress && !isMember(refValues, snapshot.liveBefore[ri]) { return Result.Err("managed roots: derived or unannotated raw address is live across a safepoint"); }
+                    ri = ri + 1;
+                }
+                if rootNullId < 0 { return Result.Err("managed roots: root frame null initializer is missing"); }
+                insertPublication(instructions, slots, rootIndexValues, snapshot.liveBefore, contextId, rootNullId, bindings.rootSet, instruction.source);
+                if stress && (isUserCall || isCollectingHook) {
+                    var stressResult = nextValue(next);
+                    if stressResult < 0 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+                    if !emitCall(instructions, next, irI64(), stressResult, bindings.collect, [contextId], instruction.source) { return Result.Err("managed roots: failed to emit stress collection"); }
+                }
+            }
+            if isAllocation {
+                if instruction.operands.len() != 1 { return Result.Err("managed roots: allocation hook must have one layout argument"); }
+                var storage = storageForAllocation(placement, input.id, instruction.resultId);
+                var args: Vec<int> = [contextId];
+                var target = bindings.allocate;
+                if storage == ManagedStorage::Region {
+                    if regionId < 0 { return Result.Err("managed roots: region placement has no function region"); }
+                    args.push(regionId);
+                    target = bindings.regionAllocate;
+                } else if storage == ManagedStorage::Destination {
+                    args.push(destinationId);
+                    target = bindings.allocateDestination;
+                }
+                args.push(instruction.operands[0]);
+                emitCall(instructions, next, irRawAddress(), instruction.resultId, target, args, instruction.source);
+            } else if isPoll {
+                var resultId = nextValue(next);
+                if resultId < 0 { return Result.Err("managed roots: SSA value ID space exhausted"); }
+                emitCall(instructions, next, irI64(), resultId, bindings.collect, [contextId], instruction.source);
+            } else if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId {
+                if instruction.operands.len() != 3 { return Result.Err("managed roots: reference-store hook arity mismatch"); }
+                emitCall(instructions, next, irVoid(), -1, bindings.storeReference, [contextId, instruction.operands[0], instruction.operands[1], instruction.operands[2]], instruction.source);
+            } else if isUserCall {
+                var args = copyInts(instruction.operands);
+                args.push(contextId);
+                var destination = -1;
+                var placementIndex = callPlacementIndex(placement, input.id, originalBlock.id, ii);
+                if placementIndex >= 0 { destination = callDestination(placement.calls[placementIndex].storage, regionId, destinationId, rootNullId); }
+                else { destination = rootNullId; }
+                if destination < 0 { return Result.Err("managed roots: call destination is unavailable"); }
+                args.push(destination);
+                emitCall(instructions, next, instruction.ty, instruction.resultId, instruction.functionId, args, instruction.source);
+            } else if isManagedHook {
+                var bindingIndex = hookBindingIndex(bindings.hooks, module.hooks[managedHook].functionId);
+                if bindingIndex < 0 { return Result.Err("managed roots: managed hook runtime binding disappeared after validation"); }
+                var args: Vec<int> = [contextId];
+                var operandIndex = 0;
+                loop { if operandIndex >= instruction.operands.len() { break; } args.push(instruction.operands[operandIndex]); operandIndex = operandIndex + 1; }
+                if !emitCall(instructions, next, instruction.ty, instruction.resultId, bindings.hooks[bindingIndex].runtimeFunctionId, args, instruction.source) { return Result.Err("managed roots: failed to rewrite managed hook call"); }
+            } else {
+                instructions.push(copyInstruction(instruction));
+            }
+            ii = ii + 1;
+        }
+        var term = copyTerminator(originalBlock.terminator);
+        if term.kind == TerminatorKind::Return {
+            if regionId >= 0 { emitCall(instructions, next, irVoid(), -1, bindings.regionEnd, [contextId, regionId], term.source); }
+            var ri = rootIndexValues.len();
+            loop { if ri <= 0 { break; } ri = ri - 1; emitCall(instructions, next, irVoid(), -1, bindings.rootPop, [contextId, rootIndexValues[ri]], term.source); }
+        }
+        outputBlocks.push(BasicBlock { id: originalBlock.id, params: copyIRValues(originalBlock.params), instructions: instructions, terminator: term });
+        bi = bi + 1;
+    }
+    return Result.Ok(IRFunction { id: input.id, key: FunctionKey { module: input.key.module, owner: input.key.owner, name: input.key.name }, signature: signature, parameters: parameters, blocks: outputBlocks, effects: effectsWithHiddenParameters(input.effects) });
+}
+
+func appendFunction(program: IRProgram, function: IRFunction): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } functions.push(copyFunction(program.functions[i])); i = i + 1; }
+    functions.push(copyFunction(function));
+    return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+}
+
+func emitWrapper(program: IRProgram, module: ManagedProgram, bindings: RuntimeBindings, mainFunctionId: int, stress: bool, wrapperId: int): Result<IRFunction, string> {
+    var source = generatedSource();
+    var instructions: Vec<Instruction> = [];
+    var next: Vec<int> = [0];
+    var registryId = nextValue(next);
+    var registryCapacity = nextValue(next);
+    instructions.push(constI64(registryCapacity, module.layouts.len(), source));
+    emitCall(instructions, next, irRawAddress(), registryId, bindings.layoutCreate, [registryCapacity], source);
+    var li = 0;
+    loop {
+        if li >= module.layouts.len() { break; }
+        var layout = module.layouts[li];
+        var references: Vec<int> = [];
+        var fi = 0;
+        loop { if fi >= layout.fields.len() { break; } if layout.fields[fi].kind == IRTypeKind::RawAddress { references.push(layout.fields[fi].offset); } fi = fi + 1; }
+        references = sortedInts(references);
+        var offsetsId = -1;
+        if references.len() == 0 {
+            offsetsId = nextValue(next);
+            instructions.push(rawNull(offsetsId, source));
+        } else {
+            var bytesId = nextValue(next);
+            var byteCountId = nextValue(next);
+            instructions.push(constI64(byteCountId, references.len() * 8, source));
+            instructions.push(rawMap(bytesId, byteCountId, source));
+            offsetsId = bytesId;
+            var oi = 0;
+            loop {
+                if oi >= references.len() { break; }
+                var addressId = nextValue(next);
+                var offsetId = nextValue(next);
+                var valueId = nextValue(next);
+                instructions.push(constI64(offsetId, oi * 8, source));
+                instructions.push(rawOffset(addressId, bytesId, offsetId, source));
+                instructions.push(constI64(valueId, references[oi], source));
+                instructions.push(rawStoreI64(addressId, valueId, source));
+                oi = oi + 1;
+            }
+        }
+        var payloadId = nextValue(next);
+        var countId = nextValue(next);
+        var registeredId = nextValue(next);
+        instructions.push(constI64(payloadId, layout.payloadBytes, source));
+        instructions.push(constI64(countId, references.len(), source));
+        var registerArgs: Vec<int> = [registryId, payloadId, offsetsId, countId];
+        var registerTarget = bindings.layoutRegister;
+        var variableIndex = variableLayoutIndex(module.variableLayouts, layout.id);
+        if variableIndex >= 0 {
+            var tailKindId = nextValue(next);
+            instructions.push(constI64(tailKindId, module.variableLayouts[variableIndex].tailKind, source));
+            registerArgs.push(tailKindId);
+            registerTarget = bindings.layoutRegisterVariable;
+        }
+        emitCall(instructions, next, irI64(), registeredId, registerTarget, registerArgs, source);
+        if references.len() > 0 { var byteCountId = nextValue(next); instructions.push(constI64(byteCountId, references.len() * 8, source)); instructions.push(rawUnmap(offsetsId, byteCountId, source)); }
+        li = li + 1;
+    }
+    var stressId = nextValue(next);
+    var contextId = nextValue(next);
+    var mainDestinationId = nextValue(next);
+    var mainIndex = functionIndex(program, mainFunctionId);
+    if mainIndex < 0 { return Result.Err("managed roots: source main function does not exist"); }
+    if program.functions[mainIndex].signature.returnType.kind != IRTypeKind::Void { return Result.Err("managed roots: managed entry main must return void"); }
+    if program.functions[mainIndex].parameters.len() != 2 { return Result.Err("managed roots: source main must have no parameters before hidden parameters"); }
+    instructions.push(constBool(stressId, stress, source));
+    emitCall(instructions, next, irRawAddress(), contextId, bindings.create, [registryId, stressId], source);
+    instructions.push(rawNull(mainDestinationId, source));
+    emitCall(instructions, next, irVoid(), -1, mainFunctionId, [contextId, mainDestinationId], source);
+    emitCall(instructions, next, irVoid(), -1, bindings.destroy, [contextId], source);
+    emitCall(instructions, next, irVoid(), -1, bindings.layoutRelease, [registryId], source);
+    var block = BasicBlock { id: 0, params: [], instructions: instructions, terminator: returnVoid(source) };
+    var fn = IRFunction { id: wrapperId, key: functionKey("managed", "", "entry"), signature: functionSignature([], irVoid()), parameters: [], blocks: [block], effects: EffectSummary { readsMemory: Fact::Unknown, writesMemory: Fact::Unknown, allocates: Fact::Unknown, mayBlock: Fact::Unknown, synchronizes: Fact::Unknown, unresolvedCallees: Fact::No, argumentEscapes: [], resultEscape: Escape::NoEscape } };
+    return Result.Ok(fn);
+}
+
+pub func lowerManagedRoots(module: ManagedProgram, bindings: RuntimeBindings, placements: ManagedPlacement, stress: bool): Result<IRProgram, string> {
+    var verification = verifyProgram(module.program);
+    if !verification.ok { return Result.Err("managed roots: linked input IR verification failed"); }
+    var bindingError = validateBindings(module.program, bindings);
+    if bindingError != "" { return Result.Err(bindingError); }
+    var separationError = validateHookSeparation(module, bindings);
+    if separationError != "" { return Result.Err(separationError); }
+    var layoutError = validateLayouts(module.layouts, module.variableLayouts);
+    if layoutError != "" { return Result.Err(layoutError); }
+    var referenceError = validateReferences(module);
+    if referenceError != "" { return Result.Err(referenceError); }
+    var allocationError = validateAllocations(module);
+    if allocationError != "" { return Result.Err(allocationError); }
+    var mainIndex = functionIndex(module.program, module.program.entryFunctionId);
+    if mainIndex < 0 || managedIndex(module.functions, module.program.entryFunctionId) < 0 { return Result.Err("managed roots: program entry must be a managed user function"); }
+    var livenessResult = analyzeProgram(module.program);
+    if livenessResult.isErr() { return Result.Err("managed roots: " + livenessResult.unwrapErr()); }
+    var programLive = livenessResult.unwrap().functions;
+    var lowered = copyProgram(module.program);
+    var mi = 0;
+    loop {
+        if mi >= module.functions.len() { break; }
+        var functionResult = lowerUserFunction(module, placements, bindings, programLive, module.functions[mi], stress);
+        if functionResult.isErr() { return Result.Err(functionResult.unwrapErr()); }
+        var function = functionResult.unwrap();
+        var fi = functionIndex(lowered, function.id);
+        if fi < 0 { return Result.Err("managed roots: transformed user function disappeared"); }
+        lowered.functions.set(fi, function);
+        mi = mi + 1;
+    }
+    var wrapperId = nextFunctionId(lowered);
+    if wrapperId < 0 { return Result.Err("managed roots: function ID space exhausted"); }
+    var wrapperResult = emitWrapper(lowered, module, bindings, module.program.entryFunctionId, stress, wrapperId);
+    if wrapperResult.isErr() { return Result.Err(wrapperResult.unwrapErr()); }
+    var output = appendFunction(IRProgram { entryFunctionId: wrapperId, functions: lowered.functions }, wrapperResult.unwrap());
+    output.entryFunctionId = wrapperId;
+    var outputVerification = verifyProgram(output);
+    if !outputVerification.ok { return Result.Err("managed roots: lowered IR verification failed"); }
+    return Result.Ok(output);
+}

@@ -100,6 +100,14 @@ func putLoad(emitter: Emitter, target: int, offset: int): void {
     emitWord(emitter, 4181722080 + (offset / 8) * 1024 + target);
 }
 
+func putLoadIncoming(emitter: Emitter, target: int, offset: int): void {
+    if offset < 16 || offset > 32760 || offset % 8 != 0 {
+        emitter.error = "native arm64: incoming argument offset is not encodable";
+        return;
+    }
+    emitWord(emitter, 4181722016 + (offset / 8) * 1024 + target);
+}
+
 func putStore(emitter: Emitter, source: int, offset: int): void {
     if offset < 0 || offset > 32760 || offset % 8 != 0 {
         emitter.error = "native arm64: stack store offset is not encodable";
@@ -135,6 +143,15 @@ func putAddSp(emitter: Emitter, amount: int, subtract: bool): void {
     var base = 2432697343;
     if subtract { base = 3506439167; }
     emitWord(emitter, base + amount * 1024);
+}
+
+func putFrameAdjustment(emitter: Emitter, amount: int, subtract: bool): void {
+    var remaining = amount;
+    while remaining > 4080 {
+        putAddSp(emitter, 4080, subtract);
+        remaining = remaining - 4080;
+    }
+    if remaining > 0 { putAddSp(emitter, remaining, subtract); }
 }
 
 func appendDefinition(slots: Vec<ValueSlot>, valueId: int): void {
@@ -420,9 +437,15 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
         return;
     }
     if instruction.kind == InstructionKind::Call {
-        var argumentIndex = 0;
+        var argumentIndex = 8;
+        while argumentIndex < instruction.operands.len() {
+            putLoad(emitter, 9, slotOffset(slots, instruction.operands[argumentIndex]));
+            putStore(emitter, 9, (argumentIndex - 8) * 8);
+            argumentIndex = argumentIndex + 1;
+        }
+        argumentIndex = 0;
         loop {
-            if argumentIndex >= instruction.operands.len() { break; }
+            if argumentIndex >= instruction.operands.len() || argumentIndex >= 8 { break; }
             putLoad(emitter, argumentIndex, slotOffset(slots, instruction.operands[argumentIndex]));
             argumentIndex = argumentIndex + 1;
         }
@@ -530,9 +553,26 @@ func resolveFunctionFixups(emitter: Emitter, function: IRFunction, localFixups: 
     }
 }
 
+func maxCallArguments(function: IRFunction): int {
+    var maximum = 0;
+    var blockIndex = 0;
+    while blockIndex < function.blocks.len() {
+        var instructionIndex = 0;
+        while instructionIndex < function.blocks[blockIndex].instructions.len() {
+            var instruction = function.blocks[blockIndex].instructions[instructionIndex];
+            if instruction.kind == InstructionKind::Call && instruction.operands.len() > maximum {
+                maximum = instruction.operands.len();
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return maximum;
+}
+
 func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string, layout: FunctionSlots, reuse: bool): void {
-    if function.parameters.len() > 8 {
-        emitter.error = "native arm64: functions with more than eight scalar arguments are unsupported";
+    if function.parameters.len() > 16 {
+        emitter.error = "native arm64: functions with more than sixteen scalar arguments are unsupported";
         return;
     }
     var slots = collectSlots(function);
@@ -546,10 +586,21 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
         }
         slotCount = layout.slotCount;
     }
+    var outgoingSlots = maxCallArguments(function) - 8;
+    if outgoingSlots < 0 { outgoingSlots = 0; }
+    if outgoingSlots > 0 {
+        var shifted: Vec<ValueSlot> = [];
+        var slotIndex = 0;
+        while slotIndex < slots.len() {
+            shifted.push(ValueSlot { valueId: slots[slotIndex].valueId, index: slots[slotIndex].index + outgoingSlots });
+            slotIndex = slotIndex + 1;
+        }
+        slots = shifted;
+    }
     var scratchBytes = maxEdgeParams(function) * 8;
-    var rawFrame = slotCount * 8 + scratchBytes;
-    if rawFrame > 4080 {
-        emitter.error = "native arm64: stack frame exceeds the encodable 4080-byte limit";
+    var rawFrame = (slotCount + outgoingSlots) * 8 + scratchBytes;
+    if rawFrame > 32768 {
+        emitter.error = "native arm64: stack frame exceeds the supported 32768-byte limit";
         return;
     }
     var frameSize = rawFrame;
@@ -560,14 +611,19 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
     emitter.functions.push(NativeFunctionOffset { functionId: function.id, offset: functionStart });
     emitWord(emitter, 2847898621);
     emitWord(emitter, 2432697341);
-    if frameSize > 0 { putAddSp(emitter, frameSize, true); }
+    if frameSize > 0 { putFrameAdjustment(emitter, frameSize, true); }
     var parameterIndex = 0;
     loop {
         if parameterIndex >= function.parameters.len() { break; }
-        putStore(emitter, parameterIndex, slotOffset(slots, function.parameters[parameterIndex].id));
+        if parameterIndex < 8 {
+            putStore(emitter, parameterIndex, slotOffset(slots, function.parameters[parameterIndex].id));
+        } else {
+            putLoadIncoming(emitter, 9, 16 + (parameterIndex - 8) * 8);
+            putStore(emitter, 9, slotOffset(slots, function.parameters[parameterIndex].id));
+        }
         parameterIndex = parameterIndex + 1;
     }
-    var scratchOffset = slotCount * 8;
+    var scratchOffset = (slotCount + outgoingSlots) * 8;
     var blockIndex = 0;
     loop {
         if blockIndex >= function.blocks.len() { break; }
@@ -592,7 +648,7 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
         blockIndex = blockIndex + 1;
     }
     var epilogueOffset = emitter.bytes.len();
-    if frameSize > 0 { putAddSp(emitter, frameSize, false); }
+    if frameSize > 0 { putFrameAdjustment(emitter, frameSize, false); }
     emitWord(emitter, 2831252477);
     emitWord(emitter, 3596551104);
     resolveFunctionFixups(emitter, function, localFixups, blockOffsets, epilogueOffset);
@@ -645,8 +701,8 @@ func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Resul
     var i = 0;
     loop {
         if i >= program.functions.len() { break; }
-        if program.functions[i].parameters.len() > 8 {
-            return Result.Err("native arm64: functions with more than eight scalar arguments are unsupported");
+        if program.functions[i].parameters.len() > 16 {
+            return Result.Err("native arm64: functions with more than sixteen scalar arguments are unsupported");
         }
         var b = 0;
         loop {
@@ -655,8 +711,8 @@ func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Resul
             var n = 0;
             loop {
                 if n >= instructions.len() { break; }
-                if instructions[n].kind == InstructionKind::Call && instructions[n].operands.len() > 8 {
-                    return Result.Err("native arm64: calls with more than eight scalar arguments are unsupported");
+                if instructions[n].kind == InstructionKind::Call && instructions[n].operands.len() > 16 {
+                    return Result.Err("native arm64: calls with more than sixteen scalar arguments are unsupported");
                 }
                 n = n + 1;
             }

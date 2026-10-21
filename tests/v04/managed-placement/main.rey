@@ -1,0 +1,398 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram, ManagedVariableLayout, ManagedHook};
+import ir::managed::placement::{ManagedPlacement, ManagedStorage, planManagedPlacement};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-placement-fixture.rey", 0, 1); }
+
+func effects(parameterTypes: Vec<IRType>): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop { if i >= parameterTypes.len() { break; } escapes.push(Escape::Unknown); i = i + 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("managed-placement", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, effects(parameterTypes));
+}
+
+func allocationHook(): IRFunction {
+    var parameterTypes: Vec<IRType> = [ir.irI64()];
+    var parameters: Vec<IRValue> = [ir.irValue(10, ir.irI64())];
+    return makeFunction(20, "allocateHook", parameterTypes, ir.irRawAddress(), parameters, [ir.basicBlock(0, [], [ir.rawNull(0, source())], ir.returnValue(0, source()))]);
+}
+
+func storeHook(): IRFunction {
+    var parameterTypes: Vec<IRType> = [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()];
+    var parameters: Vec<IRValue> = [ir.irValue(10, ir.irRawAddress()), ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irRawAddress())];
+    return makeFunction(21, "storeHook", parameterTypes, ir.irVoid(), parameters, [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func pollHook(): IRFunction {
+    return makeFunction(22, "pollHook", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func unknownSink(): IRFunction {
+    var parameterTypes: Vec<IRType> = [ir.irRawAddress()];
+    var parameters: Vec<IRValue> = [ir.irValue(10, ir.irRawAddress())];
+    return makeFunction(30, "unknownSink", parameterTypes, ir.irVoid(), parameters, [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func opaqueReferenceHook(): IRFunction {
+    var parameterTypes: Vec<IRType> = [ir.irRawAddress()];
+    var parameters: Vec<IRValue> = [ir.irValue(10, ir.irRawAddress())];
+    return makeFunction(31, "opaqueReferenceHook", parameterTypes, ir.irVoid(), parameters, [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func hookEscapeFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.call(-1, ir.irVoid(), 31, [1], source())];
+    return makeFunction(14, "hookEscape", [], ir.irVoid(), [], [ir.basicBlock(0, [], instructions, ir.returnVoid(source()))]);
+}
+
+func mainFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(0, 1, source()));
+    instructions.push(ir.call(1, ir.irRawAddress(), 20, [0], source()));
+    instructions.push(ir.constI64(2, 0, source()));
+    instructions.push(ir.call(3, ir.irRawAddress(), 20, [0], source()));
+    instructions.push(ir.call(-1, ir.irVoid(), 21, [1, 2, 3], source()));
+    instructions.push(ir.call(-1, ir.irVoid(), 30, [1], source()));
+    instructions.push(ir.call(4, ir.irRawAddress(), 11, [], source()));
+    instructions.push(ir.rawEqual(5, 1, 4, source()));
+    instructions.push(ir.call(-1, ir.irVoid(), 13, [], source()));
+    return makeFunction(10, "main", [], ir.irVoid(), [], [ir.basicBlock(0, [], instructions, ir.returnVoid(source()))]);
+}
+
+func returnedAllocation(): IRFunction {
+    var entry = ir.basicBlock(0, [], [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())], ir.jump(1, [1], source()));
+    var returned = ir.basicBlock(1, [ir.irValue(2, ir.irRawAddress())], [], ir.returnValue(2, source()));
+    return makeFunction(11, "returnedAllocation", [], ir.irRawAddress(), [], [entry, returned]);
+}
+
+func loopAllocation(): IRFunction {
+    var loopInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constBool(2, true, source())];
+    var entry = ir.basicBlock(0, [], [], ir.jump(1, [], source()));
+    var body = ir.basicBlock(1, [], loopInstructions, ir.branch(2, 1, [], 2, [], source()));
+    var exitBlock = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    return makeFunction(12, "loopAllocation", [], ir.irVoid(), [], [entry, body, exitBlock]);
+}
+
+func localAllocation(): IRFunction {
+    return makeFunction(13, "localAllocation", [], ir.irVoid(), [], [ir.basicBlock(0, [], [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())], ir.returnVoid(source()))]);
+}
+
+func forwardingReturn(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 11, [], source())];
+    return makeFunction(15, "forwardingReturn", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(1, source()))]);
+}
+
+func variableFixedAllocation(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 2, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())];
+    return makeFunction(16, "variableFixedAllocation", [], ir.irVoid(), [], [ir.basicBlock(0, [], instructions, ir.returnVoid(source()))]);
+}
+
+func branchAliasFunction(): IRFunction {
+    var entry = ir.basicBlock(0, [], [ir.constBool(0, true, source())], ir.branch(0, 1, [], 2, [], source()));
+    var left = ir.basicBlock(1, [], [ir.constI64(1, 1, source()), ir.call(2, ir.irRawAddress(), 20, [1], source())], ir.jump(3, [2], source()));
+    var right = ir.basicBlock(2, [], [ir.constI64(3, 1, source()), ir.call(4, ir.irRawAddress(), 20, [3], source())], ir.jump(3, [4], source()));
+    var join = ir.basicBlock(3, [ir.irValue(5, ir.irRawAddress())], [ir.rawEqual(6, 5, 5, source())], ir.returnVoid(source()));
+    return makeFunction(17, "branchAlias", [], ir.irVoid(), [], [entry, left, right, join]);
+}
+
+func returnedChildGraph(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()),
+        ir.call(1, ir.irRawAddress(), 20, [0], source()),
+        ir.constI64(2, 1, source()),
+        ir.call(3, ir.irRawAddress(), 20, [2], source()),
+        ir.constI64(4, 0, source()),
+        ir.call(-1, ir.irVoid(), 21, [3, 4, 1], source()),
+    ];
+    return makeFunction(18, "returnedChildGraph", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(3, source()))]);
+}
+
+func heapEscapeCallee(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()),
+        ir.call(1, ir.irRawAddress(), 20, [0], source()),
+        ir.call(-1, ir.irVoid(), 30, [1], source()),
+    ];
+    return makeFunction(19, "heapEscapeCallee", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(1, source()))]);
+}
+
+func heapEscapeCaller(): IRFunction {
+    return makeFunction(32, "heapEscapeCaller", [], ir.irVoid(), [], [ir.basicBlock(0, [], [ir.call(0, ir.irRawAddress(), 19, [], source())], ir.returnVoid(source()))]);
+}
+
+func recursiveAliasA(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(100, ir.irBool())];
+    var entry = ir.basicBlock(0, [], [], ir.branch(100, 1, [], 2, [], source()));
+    var base = ir.basicBlock(1, [], [ir.constI64(1, 1, source()), ir.call(2, ir.irRawAddress(), 20, [1], source())], ir.jump(3, [2], source()));
+    var recursive = ir.basicBlock(2, [], [ir.call(3, ir.irRawAddress(), 34, [], source())], ir.jump(3, [3], source()));
+    var join = ir.basicBlock(3, [ir.irValue(4, ir.irRawAddress())], [], ir.returnValue(4, source()));
+    return makeFunction(33, "recursiveAliasA", [ir.irBool()], ir.irRawAddress(), parameters, [entry, base, recursive, join]);
+}
+
+func recursiveAliasB(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constBool(0, true, source()), ir.call(1, ir.irRawAddress(), 33, [0], source())];
+    return makeFunction(34, "recursiveAliasB", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(1, source()))]);
+}
+
+func identityReference(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(100, ir.irRawAddress())];
+    return makeFunction(35, "identityReference", [ir.irRawAddress()], ir.irRawAddress(), parameters, [ir.basicBlock(0, [], [], ir.returnValue(100, source()))]);
+}
+
+func localIdentityCaller(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.call(2, ir.irRawAddress(), 35, [1], source()), ir.rawEqual(3, 2, 2, source())];
+    return makeFunction(36, "localIdentityCaller", [], ir.irVoid(), [], [ir.basicBlock(0, [], instructions, ir.returnVoid(source()))]);
+}
+
+func returnedIdentityCaller(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.call(2, ir.irRawAddress(), 35, [1], source())];
+    return makeFunction(37, "returnedIdentityCaller", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(2, source()))]);
+}
+
+func forwardingIdentity(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(100, ir.irRawAddress())];
+    var instructions: Vec<Instruction> = [ir.call(101, ir.irRawAddress(), 35, [100], source())];
+    return makeFunction(38, "forwardingIdentity", [ir.irRawAddress()], ir.irRawAddress(), parameters, [ir.basicBlock(0, [], instructions, ir.returnValue(101, source()))]);
+}
+
+func returnedForwardedIdentityCaller(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.call(2, ir.irRawAddress(), 38, [1], source())];
+    return makeFunction(39, "returnedForwardedIdentityCaller", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(2, source()))]);
+}
+
+func cfgIdentityCaller(): IRFunction {
+    var entry = ir.basicBlock(0, [], [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())], ir.jump(1, [1], source()));
+    var alias = ir.basicBlock(1, [ir.irValue(2, ir.irRawAddress())], [ir.call(3, ir.irRawAddress(), 35, [2], source())], ir.returnValue(3, source()));
+    return makeFunction(40, "cfgIdentityCaller", [], ir.irRawAddress(), [], [entry, alias]);
+}
+
+func returnedStoredChildLoad(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()),
+        ir.call(1, ir.irRawAddress(), 20, [0], source()),
+        ir.constI64(2, 1, source()),
+        ir.call(3, ir.irRawAddress(), 20, [2], source()),
+        ir.constI64(4, 0, source()),
+        ir.call(-1, ir.irVoid(), 21, [3, 4, 1], source()),
+        ir.constI64(5, 16, source()),
+        ir.rawOffset(6, 3, 5, source()),
+        ir.rawLoadAddress(7, 6, source()),
+    ];
+    return makeFunction(41, "returnedStoredChildLoad", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(7, source()))]);
+}
+
+func recursiveForwardAliasA(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(100, ir.irRawAddress()), ir.irValue(101, ir.irBool())];
+    var entry = ir.basicBlock(0, [], [], ir.branch(101, 1, [], 2, [], source()));
+    var recursiveInstructions: Vec<Instruction> = [ir.constBool(102, false, source()), ir.call(103, ir.irRawAddress(), 43, [100, 102], source())];
+    var recursive = ir.basicBlock(1, [], recursiveInstructions, ir.returnValue(103, source()));
+    var base = ir.basicBlock(2, [], [], ir.returnValue(100, source()));
+    return makeFunction(42, "recursiveForwardAliasA", [ir.irRawAddress(), ir.irBool()], ir.irRawAddress(), parameters, [entry, recursive, base]);
+}
+
+func recursiveForwardAliasB(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(100, ir.irRawAddress()), ir.irValue(101, ir.irBool())];
+    var instructions: Vec<Instruction> = [ir.constBool(102, false, source()), ir.call(103, ir.irRawAddress(), 42, [100, 102], source())];
+    return makeFunction(43, "recursiveForwardAliasB", [ir.irRawAddress(), ir.irBool()], ir.irRawAddress(), parameters, [ir.basicBlock(0, [], instructions, ir.returnValue(103, source()))]);
+}
+
+func callerRecursiveForwardAlias(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constBool(2, true, source()), ir.call(3, ir.irRawAddress(), 42, [1, 2], source())];
+    return makeFunction(44, "callerRecursiveForwardAlias", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(3, source()))]);
+}
+
+func longChainFunction(functionId: int, loopBack: bool): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockId = 0;
+    loop {
+        if blockId >= 80 { break; }
+        var instructions: Vec<Instruction> = [];
+        if blockId == 10 {
+            instructions.push(ir.constI64(0, 1, source()));
+            instructions.push(ir.call(1, ir.irRawAddress(), 20, [0], source()));
+        }
+        if blockId == 50 {
+            instructions.push(ir.constI64(3, 1, source()));
+            instructions.push(ir.call(4, ir.irRawAddress(), 20, [3], source()));
+        }
+        var terminator = ir.returnVoid(source());
+        if blockId < 79 { terminator = ir.jump(blockId + 1, [], source()); }
+        else if loopBack { terminator = ir.jump(40, [], source()); }
+        blocks.push(ir.basicBlock(blockId, [], instructions, terminator));
+        blockId = blockId + 1;
+    }
+    return makeFunction(functionId, "longChain" + functionId.toString(), [], ir.irVoid(), [], blocks);
+}
+
+func programFunctionIndex(program: IRProgram, functionId: int): int {
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+func allocationStorage(placement: ManagedPlacement, functionId: int, resultId: int): ManagedStorage {
+    var index = 0;
+    loop { if index >= placement.allocations.len() { break; } var item = placement.allocations[index]; if item.functionId == functionId && item.resultId == resultId { return item.storage; } index = index + 1; }
+    return ManagedStorage::Heap;
+}
+
+func callStorage(placement: ManagedPlacement, functionId: int): ManagedStorage {
+    var index = 0;
+    loop { if index >= placement.calls.len() { break; } if placement.calls[index].functionId == functionId { return placement.calls[index].storage; } index = index + 1; }
+    return ManagedStorage::Heap;
+}
+
+func extendedModule(module: ManagedProgram): ManagedProgram {
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= module.program.functions.len() { break; } functions.push(module.program.functions[index]); index = index + 1; }
+    functions.push(branchAliasFunction());
+    functions.push(returnedChildGraph());
+    functions.push(heapEscapeCallee());
+    functions.push(heapEscapeCaller());
+    functions.push(recursiveAliasA());
+    functions.push(recursiveAliasB());
+    functions.push(identityReference());
+    functions.push(localIdentityCaller());
+    functions.push(returnedIdentityCaller());
+    functions.push(forwardingIdentity());
+    functions.push(returnedForwardedIdentityCaller());
+    functions.push(cfgIdentityCaller());
+    functions.push(returnedStoredChildLoad());
+    functions.push(recursiveForwardAliasA());
+    functions.push(recursiveForwardAliasB());
+    functions.push(callerRecursiveForwardAlias());
+    functions.push(longChainFunction(45, false));
+    functions.push(longChainFunction(46, true));
+    module.program = ir.irProgram(module.program.entryFunctionId, functions);
+    module.functions.push(ManagedFunction { functionId: 17, referenceValues: [2, 4, 5], parameterLayouts: [], returnLayout: 0 });
+    module.functions.push(ManagedFunction { functionId: 18, referenceValues: [1, 3], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 19, referenceValues: [1], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 32, referenceValues: [0], parameterLayouts: [], returnLayout: 0 });
+    module.functions.push(ManagedFunction { functionId: 33, referenceValues: [2, 3, 4], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 34, referenceValues: [1], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 35, referenceValues: [100], parameterLayouts: [1], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 36, referenceValues: [1, 2], parameterLayouts: [], returnLayout: 0 });
+    module.functions.push(ManagedFunction { functionId: 37, referenceValues: [1, 2], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 38, referenceValues: [100, 101], parameterLayouts: [1], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 39, referenceValues: [1, 2], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 40, referenceValues: [1, 2, 3], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 41, referenceValues: [1, 3, 7], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 42, referenceValues: [100, 103], parameterLayouts: [1, 0], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 43, referenceValues: [100, 103], parameterLayouts: [1, 0], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 44, referenceValues: [1, 3], parameterLayouts: [], returnLayout: 1 });
+    module.functions.push(ManagedFunction { functionId: 45, referenceValues: [1, 4], parameterLayouts: [], returnLayout: 0 });
+    module.functions.push(ManagedFunction { functionId: 46, referenceValues: [1, 4], parameterLayouts: [], returnLayout: 0 });
+    module.allocations.push(ManagedAllocation { functionId: 17, blockId: 1, resultId: 2, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 17, blockId: 2, resultId: 4, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 18, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 18, blockId: 0, resultId: 3, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 19, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 33, blockId: 1, resultId: 2, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 36, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 37, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 39, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 40, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 41, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 41, blockId: 0, resultId: 3, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 44, blockId: 0, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 45, blockId: 10, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 45, blockId: 50, resultId: 4, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 46, blockId: 10, resultId: 1, layoutId: 1 });
+    module.allocations.push(ManagedAllocation { functionId: 46, blockId: 50, resultId: 4, layoutId: 1 });
+    module.derived.push(ManagedDerived { functionId: 41, valueId: 6, ownerId: 3 });
+    return module;
+}
+
+func moduleUnderTest(): ManagedProgram {
+    var fields: Vec<ManagedField> = [ManagedField { name: "child", offset: 0, kind: IRTypeKind::RawAddress, layoutId: 1 }];
+    var tailFields: Vec<ManagedField> = [ManagedField { name: "length", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var layouts: Vec<ManagedLayout> = [ManagedLayout { id: 1, key: "fixture::Node", payloadBytes: 8, fields: fields }, ManagedLayout { id: 2, key: "fixture::Bytes", payloadBytes: 8, fields: tailFields }];
+    var functions: Vec<IRFunction> = [mainFunction(), returnedAllocation(), loopAllocation(), localAllocation(), hookEscapeFunction(), forwardingReturn(), allocationHook(), storeHook(), pollHook(), unknownSink(), opaqueReferenceHook()];
+    var program = ir.irProgram(10, functions);
+    var managedFunctions: Vec<ManagedFunction> = [
+        ManagedFunction { functionId: 10, referenceValues: [1, 3, 4], parameterLayouts: [], returnLayout: 0 },
+        ManagedFunction { functionId: 11, referenceValues: [1, 2], parameterLayouts: [], returnLayout: 1 },
+        ManagedFunction { functionId: 12, referenceValues: [1], parameterLayouts: [], returnLayout: 0 },
+        ManagedFunction { functionId: 13, referenceValues: [1], parameterLayouts: [], returnLayout: 0 },
+        ManagedFunction { functionId: 14, referenceValues: [1], parameterLayouts: [], returnLayout: 0 },
+        ManagedFunction { functionId: 15, referenceValues: [1], parameterLayouts: [], returnLayout: 1 },
+    ];
+    var allocations: Vec<ManagedAllocation> = [
+        ManagedAllocation { functionId: 10, blockId: 0, resultId: 1, layoutId: 1 },
+        ManagedAllocation { functionId: 10, blockId: 0, resultId: 3, layoutId: 1 },
+        ManagedAllocation { functionId: 11, blockId: 0, resultId: 1, layoutId: 1 },
+        ManagedAllocation { functionId: 12, blockId: 1, resultId: 1, layoutId: 1 },
+        ManagedAllocation { functionId: 13, blockId: 0, resultId: 1, layoutId: 1 },
+        ManagedAllocation { functionId: 14, blockId: 0, resultId: 1, layoutId: 1 },
+    ];
+    var derived: Vec<ManagedDerived> = [];
+    var variableLayouts: Vec<ManagedVariableLayout> = [ManagedVariableLayout { layoutId: 2, tailKind: 1 }];
+    var hooks: Vec<ManagedHook> = [ManagedHook { functionId: 31, runtimeName: "managedTestHook", mayCollect: false }];
+    return ManagedProgram { program: program, layouts: layouts, functions: managedFunctions, allocations: allocations, derived: derived, allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: variableLayouts, hooks: hooks };
+}
+
+func withVariableFixedAllocation(module: ManagedProgram): ManagedProgram {
+    var programFunctions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= module.program.functions.len() { break; } programFunctions.push(module.program.functions[i]); i = i + 1; }
+    programFunctions.push(variableFixedAllocation());
+    module.program = ir.irProgram(module.program.entryFunctionId, programFunctions);
+    var managedFunctions: Vec<ManagedFunction> = [];
+    i = 0;
+    loop { if i >= module.functions.len() { break; } managedFunctions.push(module.functions[i]); i = i + 1; }
+    managedFunctions.push(ManagedFunction { functionId: 16, referenceValues: [1], parameterLayouts: [], returnLayout: 0 });
+    module.functions = managedFunctions;
+    var allocations: Vec<ManagedAllocation> = [];
+    i = 0;
+    loop { if i >= module.allocations.len() { break; } allocations.push(module.allocations[i]); i = i + 1; }
+    allocations.push(ManagedAllocation { functionId: 16, blockId: 0, resultId: 1, layoutId: 2 });
+    module.allocations = allocations;
+    return module;
+}
+
+func main(): void {
+    var module = extendedModule(moduleUnderTest());
+    var longChainIndex = programFunctionIndex(module.program, 45);
+    var backedgeChainIndex = programFunctionIndex(module.program, 46);
+    var originalAllocationCount = module.allocations.len();
+    var originalLongChainBlockCount = module.program.functions[longChainIndex].blocks.len();
+    var originalBackedgeTarget = module.program.functions[backedgeChainIndex].blocks[79].terminator.targetBlockId;
+    var planned = planManagedPlacement(module);
+    if planned.isErr() { eprintln("FAIL placement analysis: " + planned.unwrapErr()); exit(1); }
+    var placement = planned.unwrap();
+    require(placement.allocations.len() == 23, "all allocation sites have placements");
+    require(placement.allocations[0].storage == ManagedStorage::Heap, "unknown call escape places its owner on the heap");
+    require(placement.allocations[1].storage == ManagedStorage::Heap, "heap owner escape propagates to stored child");
+    require(placement.allocations[2].storage == ManagedStorage::Destination, "fresh return-only allocation uses destination construction");
+    require(placement.allocations[3].storage == ManagedStorage::Heap, "cyclic allocation site falls back to heap");
+    require(placement.allocations[4].storage == ManagedStorage::Region, "non-cyclic local allocation uses a region");
+    require(placement.allocations[5].storage == ManagedStorage::Heap, "managed hook reference arguments conservatively escape to the heap");
+    require(placement.allocations[6].storage == ManagedStorage::Region && placement.allocations[7].storage == ManagedStorage::Region, "branch block-parameter aliases retain local region placement");
+    require(placement.allocations[8].storage == ManagedStorage::Destination && placement.allocations[9].storage == ManagedStorage::Destination, "returning a parent also gives its stored child a caller destination lifetime");
+    require(placement.allocations[10].storage == ManagedStorage::Heap, "unknown callee escape forces the callee allocation to heap");
+    require(placement.allocations[11].storage == ManagedStorage::Destination, "recursive return aliases preserve the base allocation in the caller destination");
+    require(placement.calls.len() == 13 && placement.calls[0].storage == ManagedStorage::Region && placement.calls[1].storage == ManagedStorage::Destination, "caller-local call results use a region while caller-returned results use destination construction");
+    require(placement.calls[2].storage == ManagedStorage::Heap, "a heap-escaping callee result propagates heap placement to its caller call site");
+    require(placement.calls[3].storage == ManagedStorage::Destination && placement.calls[4].storage == ManagedStorage::Destination, "mutually recursive aliases converge on destination lifetimes without assigning a shorter-lived region");
+    require(allocationStorage(placement, 36, 1) == ManagedStorage::Region && callStorage(placement, 36) == ManagedStorage::Region, "a callee's borrowed-parameter return does not promote a caller-local alias");
+    require(allocationStorage(placement, 37, 1) == ManagedStorage::Destination && callStorage(placement, 37) == ManagedStorage::Destination, "returning a caller allocation through an identity call preserves its destination lifetime");
+    require(callStorage(placement, 38) == ManagedStorage::Destination && allocationStorage(placement, 39, 1) == ManagedStorage::Destination && callStorage(placement, 39) == ManagedStorage::Destination, "forwarded returns propagate caller-owned allocation escape through multiple calls");
+    require(allocationStorage(placement, 40, 1) == ManagedStorage::Destination && callStorage(placement, 40) == ManagedStorage::Destination, "CFG block-parameter aliases preserve return escape provenance");
+    require(allocationStorage(placement, 41, 1) == ManagedStorage::Heap && allocationStorage(placement, 41, 3) == ManagedStorage::Heap, "returning a stored reference field makes its owner and child heap-safe");
+    require(callStorage(placement, 42) == ManagedStorage::Destination && callStorage(placement, 43) == ManagedStorage::Destination && allocationStorage(placement, 44, 1) == ManagedStorage::Destination && callStorage(placement, 44) == ManagedStorage::Destination, "mutually recursive forwarding preserves caller allocation escape provenance");
+    require(allocationStorage(placement, 45, 1) == ManagedStorage::Region && allocationStorage(placement, 45, 4) == ManagedStorage::Region, "two allocations in a long acyclic CFG remain region-backed");
+    require(allocationStorage(placement, 46, 1) == ManagedStorage::Region && allocationStorage(placement, 46, 4) == ManagedStorage::Heap, "a site that can reach a backedge loop stays region-backed while the loop site falls back to heap");
+    require(module.allocations.len() == originalAllocationCount && module.program.functions[longChainIndex].blocks.len() == originalLongChainBlockCount && module.program.functions[backedgeChainIndex].blocks[79].terminator.targetBlockId == originalBackedgeTarget, "cycle analysis leaves input allocations and CFGs unchanged");
+    require(placement.regionFunctions.len() == 6 && placement.regionFunctions[0] == 10 && placement.regionFunctions[1] == 13 && placement.regionFunctions[2] == 17 && placement.regionFunctions[3] == 36 && placement.regionFunctions[4] == 45 && placement.regionFunctions[5] == 46, "region functions are sorted and include local, aliased branch, and long-chain allocations");
+    require(planManagedPlacement(withVariableFixedAllocation(module)).isErr(), "variable-tail layouts cannot use the fixed allocation hook or region placement");
+    println("managed-placement: static assertions passed");
+}

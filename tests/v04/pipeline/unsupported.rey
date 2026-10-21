@@ -1,1 +1,1 @@
-func main(): void { var value = "heap strings are outside the scalar slice"; }
+func main(): void { var value: float = 1.5; }

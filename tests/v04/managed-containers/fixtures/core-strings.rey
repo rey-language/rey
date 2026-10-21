@@ -1,0 +1,303 @@
+import layout::{layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedAllocateSized, managedRootPush, managedRootSet, managedRootPop};
+import containers::{managedStringByte, managedStringCase, managedStringCompare, managedStringConcat, managedStringContains, managedStringEndsWith, managedStringEqual, managedStringFromInt, managedStringHash, managedStringIndexOf, managedStringLength, managedStringPad, managedStringRepeat, managedStringReplace, managedStringSlice, managedStringStartsWith, managedStringToInt, managedStringTrim};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func makeText(context: __rey_raw_address, layoutId: int, length: int, first: int, second: int, third: int, fourth: int): __rey_raw_address {
+    var value = managedAllocateSized(context, layoutId, length + 9);
+    __reyRawStoreI64(__reyRawOffset(value, 16), length);
+    if length > 0 { __reyRawStoreByte(__reyRawOffset(value, 24), first); }
+    if length > 1 { __reyRawStoreByte(__reyRawOffset(value, 25), second); }
+    if length > 2 { __reyRawStoreByte(__reyRawOffset(value, 26), third); }
+    if length > 3 { __reyRawStoreByte(__reyRawOffset(value, 27), fourth); }
+    __reyRawStoreByte(__reyRawOffset(value, 24 + length), 0);
+    return value;
+}
+
+func writeDecimalGroup(value: __rey_raw_address, offset: int, width: int, digits: int): void {
+    var cursor = width;
+    var remaining = digits;
+    while cursor > 0 {
+        cursor = cursor - 1;
+        __reyRawStoreByte(__reyRawOffset(value, offset + cursor), 48 + remaining % 10);
+        remaining = remaining / 10;
+    }
+}
+
+func makeHalfToOne(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var value = managedAllocateSized(context, layoutId, 65);
+    __reyRawStoreI64(__reyRawOffset(value, 16), 56);
+    __reyRawStoreByte(__reyRawOffset(value, 24), 48);
+    __reyRawStoreByte(__reyRawOffset(value, 25), 46);
+    writeDecimalGroup(value, 26, 9, 999999999);
+    writeDecimalGroup(value, 35, 9, 999999944);
+    writeDecimalGroup(value, 44, 9, 488848768);
+    writeDecimalGroup(value, 53, 9, 742172978);
+    writeDecimalGroup(value, 62, 9, 818416595);
+    writeDecimalGroup(value, 71, 9, 458984375);
+    __reyRawStoreByte(__reyRawOffset(value, 80), 0);
+    return value;
+}
+
+func makeHalfToThree(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var value = managedAllocateSized(context, layoutId, 65);
+    __reyRawStoreI64(__reyRawOffset(value, 16), 56);
+    __reyRawStoreByte(__reyRawOffset(value, 24), 50);
+    __reyRawStoreByte(__reyRawOffset(value, 25), 46);
+    writeDecimalGroup(value, 26, 9, 999999999);
+    writeDecimalGroup(value, 35, 9, 999999944);
+    writeDecimalGroup(value, 44, 9, 488848768);
+    writeDecimalGroup(value, 53, 9, 742172978);
+    writeDecimalGroup(value, 62, 9, 818416595);
+    writeDecimalGroup(value, 71, 9, 458984375);
+    __reyRawStoreByte(__reyRawOffset(value, 80), 0);
+    return value;
+}
+
+func makeNearThree(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var value = managedAllocateSized(context, layoutId, 63);
+    __reyRawStoreI64(__reyRawOffset(value, 16), 54);
+    __reyRawStoreByte(__reyRawOffset(value, 24), 50);
+    __reyRawStoreByte(__reyRawOffset(value, 25), 46);
+    writeDecimalGroup(value, 26, 9, 999999999);
+    writeDecimalGroup(value, 35, 9, 999999777);
+    writeDecimalGroup(value, 44, 9, 955395074);
+    writeDecimalGroup(value, 53, 9, 968691915);
+    writeDecimalGroup(value, 62, 9, 273666381);
+    writeDecimalGroup(value, 71, 7, 8359375);
+    __reyRawStoreByte(__reyRawOffset(value, 78), 0);
+    return value;
+}
+
+func makeRoundedMinimumInput(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var value = managedAllocateSized(context, layoutId, 29);
+    __reyRawStoreI64(__reyRawOffset(value, 16), 20);
+    __reyRawStoreByte(__reyRawOffset(value, 24), 45);
+    writeDecimalGroup(value, 25, 9, 922337203);
+    writeDecimalGroup(value, 34, 9, 685477580);
+    writeDecimalGroup(value, 43, 1, 9);
+    __reyRawStoreByte(__reyRawOffset(value, 44), 0);
+    return value;
+}
+
+func checkBinaryStrings(context: __rey_raw_address, stringLayout: int): void {
+    var binary = makeText(context, stringLayout, 3, 65, 0, 255, 0);
+    var binarySlot = managedRootPush(context);
+    managedRootSet(context, binarySlot, binary);
+    var same = makeText(context, stringLayout, 3, 65, 0, 255, 0);
+    var sameSlot = managedRootPush(context);
+    managedRootSet(context, sameSlot, same);
+    check(managedStringLength(context, binary) == 3);
+    check(managedStringByte(context, binary, 0) == 65 && managedStringByte(context, binary, 1) == 0 && managedStringByte(context, binary, 2) == 255);
+    check(managedStringEqual(context, binary, same));
+    check(managedStringCompare(context, binary, same) == 0);
+    check(managedStringHash(context, binary) == 65);
+    check(managedStringIndexOf(context, binary, same) == 0);
+    check(managedStringContains(context, binary, same));
+    check(managedStringStartsWith(context, binary, same) && managedStringEndsWith(context, binary, same));
+    managedRootPop(context, sameSlot);
+    managedRootPop(context, binarySlot);
+}
+
+func checkConcatenation(context: __rey_raw_address, stringLayout: int): void {
+    var left = makeText(context, stringLayout, 2, 97, 98, 0, 0);
+    var leftSlot = managedRootPush(context);
+    managedRootSet(context, leftSlot, left);
+    var right = makeText(context, stringLayout, 1, 99, 0, 0, 0);
+    var rightSlot = managedRootPush(context);
+    managedRootSet(context, rightSlot, right);
+    var joined = managedStringConcat(context, stringLayout, left, right);
+    var joinedSlot = managedRootPush(context);
+    managedRootSet(context, joinedSlot, joined);
+    check(managedStringLength(context, joined) == 3 && managedStringByte(context, joined, 2) == 99);
+    var sliced = managedStringSlice(context, stringLayout, joined, 1, 3);
+    check(managedStringLength(context, sliced) == 2 && managedStringByte(context, sliced, 0) == 98);
+    check(managedStringCompare(context, left, right) < 0);
+    check(managedStringStartsWith(context, joined, left) && managedStringEndsWith(context, joined, right));
+    check(managedStringIndexOf(context, joined, right) == 2 && managedStringContains(context, joined, right));
+    managedRootPop(context, joinedSlot);
+    managedRootPop(context, rightSlot);
+    managedRootPop(context, leftSlot);
+}
+
+func checkIntegerConversions(context: __rey_raw_address, stringLayout: int): void {
+    var number = managedStringFromInt(context, stringLayout, -9223372036854775807 - 1);
+    var numberSlot = managedRootPush(context);
+    managedRootSet(context, numberSlot, number);
+    check(managedStringLength(context, number) == 20);
+    check(managedStringToInt(context, number) == -9223372036854775807 - 1);
+    managedRootPop(context, numberSlot);
+    var zeroNumber = managedStringFromInt(context, stringLayout, 0);
+    var zeroNumberSlot = managedRootPush(context);
+    managedRootSet(context, zeroNumberSlot, zeroNumber);
+    check(managedStringLength(context, zeroNumber) == 1 && managedStringByte(context, zeroNumber, 0) == 48);
+    check(managedStringToInt(context, zeroNumber) == 0);
+    managedRootPop(context, zeroNumberSlot);
+    var positiveNumber = managedStringFromInt(context, stringLayout, 12345);
+    var positiveNumberSlot = managedRootPush(context);
+    managedRootSet(context, positiveNumberSlot, positiveNumber);
+    check(managedStringToInt(context, positiveNumber) == 12345);
+    managedRootPop(context, positiveNumberSlot);
+    var maximumNumber = managedStringFromInt(context, stringLayout, 9223372036854775807);
+    var maximumNumberSlot = managedRootPush(context);
+    managedRootSet(context, maximumNumberSlot, maximumNumber);
+    check(managedStringLength(context, maximumNumber) == 19 && managedStringByte(context, maximumNumber, 18) == 55);
+    managedRootPop(context, maximumNumberSlot);
+    var roundedInteger = managedStringFromInt(context, stringLayout, 9007199254740993);
+    var roundedIntegerSlot = managedRootPush(context);
+    managedRootSet(context, roundedIntegerSlot, roundedInteger);
+    check(managedStringToInt(context, roundedInteger) == 9007199254740992);
+    managedRootPop(context, roundedIntegerSlot);
+}
+
+func checkIntegerRounding(context: __rey_raw_address, stringLayout: int): void {
+    var nearTwo = managedAllocateSized(context, stringLayout, 27);
+    var nearTwoSlot = managedRootPush(context);
+    managedRootSet(context, nearTwoSlot, nearTwo);
+    __reyRawStoreI64(__reyRawOffset(nearTwo, 16), 18);
+    __reyRawStoreByte(__reyRawOffset(nearTwo, 24), 49);
+    __reyRawStoreByte(__reyRawOffset(nearTwo, 25), 46);
+    var nineIndex = 2;
+    while nineIndex < 18 { __reyRawStoreByte(__reyRawOffset(nearTwo, 24 + nineIndex), 57); nineIndex = nineIndex + 1; }
+    __reyRawStoreByte(__reyRawOffset(nearTwo, 42), 0);
+    check(managedStringToInt(context, nearTwo) == 2);
+    managedRootPop(context, nearTwoSlot);
+    var halfToOne = makeHalfToOne(context, stringLayout);
+    var halfToOneSlot = managedRootPush(context);
+    managedRootSet(context, halfToOneSlot, halfToOne);
+    check(managedStringToInt(context, halfToOne) == 1);
+    managedRootPop(context, halfToOneSlot);
+    var halfToThree = makeHalfToThree(context, stringLayout);
+    var halfToThreeSlot = managedRootPush(context);
+    managedRootSet(context, halfToThreeSlot, halfToThree);
+    check(managedStringToInt(context, halfToThree) == 3);
+    managedRootPop(context, halfToThreeSlot);
+    var nearThree = makeNearThree(context, stringLayout);
+    var nearThreeSlot = managedRootPush(context);
+    managedRootSet(context, nearThreeSlot, nearThree);
+    check(managedStringToInt(context, nearThree) == 3);
+    managedRootPop(context, nearThreeSlot);
+    var negativePowerOfTwo = managedStringFromInt(context, stringLayout, -4503599627370496);
+    var negativePowerOfTwoSlot = managedRootPush(context);
+    managedRootSet(context, negativePowerOfTwoSlot, negativePowerOfTwo);
+    check(managedStringToInt(context, negativePowerOfTwo) == -4503599627370496);
+    managedRootPop(context, negativePowerOfTwoSlot);
+    var roundedMinimumInput = makeRoundedMinimumInput(context, stringLayout);
+    var roundedMinimumInputSlot = managedRootPush(context);
+    managedRootSet(context, roundedMinimumInputSlot, roundedMinimumInput);
+    check(managedStringToInt(context, roundedMinimumInput) == -9223372036854775807 - 1);
+    managedRootPop(context, roundedMinimumInputSlot);
+    var decimal = makeText(context, stringLayout, 4, 49, 50, 46, 56);
+    var decimalSlot = managedRootPush(context);
+    managedRootSet(context, decimalSlot, decimal);
+    check(managedStringToInt(context, decimal) == 12);
+    managedRootPop(context, decimalSlot);
+}
+
+func checkCaseTrimRepeat(context: __rey_raw_address, stringLayout: int): void {
+    var text = makeText(context, stringLayout, 4, 65, 98, 90, 33);
+    var textSlot = managedRootPush(context);
+    managedRootSet(context, textSlot, text);
+    var upper = managedStringCase(context, stringLayout, text, true);
+    var upperSlot = managedRootPush(context);
+    managedRootSet(context, upperSlot, upper);
+    var lower = managedStringCase(context, stringLayout, text, false);
+    check(managedStringByte(context, upper, 0) == 65 && managedStringByte(context, upper, 1) == 66 && managedStringByte(context, lower, 0) == 97);
+    managedRootPop(context, upperSlot);
+    var spaces = makeText(context, stringLayout, 4, 32, 120, 9, 32);
+    var spacesSlot = managedRootPush(context);
+    managedRootSet(context, spacesSlot, spaces);
+    var trimmed = managedStringTrim(context, stringLayout, spaces);
+    check(managedStringLength(context, trimmed) == 1 && managedStringByte(context, trimmed, 0) == 120);
+    managedRootPop(context, spacesSlot);
+    var right = makeText(context, stringLayout, 1, 99, 0, 0, 0);
+    var rightSlot = managedRootPush(context);
+    managedRootSet(context, rightSlot, right);
+    var repeated = managedStringRepeat(context, stringLayout, right, 3);
+    check(managedStringLength(context, repeated) == 3 && managedStringByte(context, repeated, 2) == 99);
+
+    managedRootPop(context, rightSlot);
+    managedRootPop(context, textSlot);
+}
+
+func checkEmptyReplacement(context: __rey_raw_address, stringLayout: int): void {
+    var left = makeText(context, stringLayout, 2, 97, 98, 0, 0);
+    var leftSlot = managedRootPush(context);
+    managedRootSet(context, leftSlot, left);
+    var empty = makeText(context, stringLayout, 0, 0, 0, 0, 0);
+    var emptySlot = managedRootPush(context);
+    managedRootSet(context, emptySlot, empty);
+    var dash = makeText(context, stringLayout, 1, 45, 0, 0, 0);
+    var dashSlot = managedRootPush(context);
+    managedRootSet(context, dashSlot, dash);
+    var inserted = managedStringReplace(context, stringLayout, left, empty, dash);
+    check(managedStringLength(context, inserted) == 5 && managedStringByte(context, inserted, 0) == 45 && managedStringByte(context, inserted, 4) == 45);
+    managedRootPop(context, dashSlot);
+    managedRootPop(context, emptySlot);
+    managedRootPop(context, leftSlot);
+}
+
+func checkReplacement(context: __rey_raw_address, stringLayout: int): void {
+    var left = makeText(context, stringLayout, 2, 97, 98, 0, 0);
+    var leftSlot = managedRootPush(context);
+    managedRootSet(context, leftSlot, left);
+    var right = makeText(context, stringLayout, 1, 99, 0, 0, 0);
+    var rightSlot = managedRootPush(context);
+    managedRootSet(context, rightSlot, right);
+    var joined = managedStringConcat(context, stringLayout, left, right);
+    var joinedSlot = managedRootPush(context);
+    managedRootSet(context, joinedSlot, joined);
+    var replacement = makeText(context, stringLayout, 1, 88, 0, 0, 0);
+    var replacementSlot = managedRootPush(context);
+    managedRootSet(context, replacementSlot, replacement);
+    var replaced = managedStringReplace(context, stringLayout, joined, right, replacement);
+    check(managedStringLength(context, replaced) == 3 && managedStringByte(context, replaced, 2) == 88);
+    managedRootPop(context, replacementSlot);
+    managedRootPop(context, joinedSlot);
+    managedRootPop(context, rightSlot);
+    managedRootPop(context, leftSlot);
+}
+
+func checkPadding(context: __rey_raw_address, stringLayout: int): void {
+    var right = makeText(context, stringLayout, 1, 99, 0, 0, 0);
+    var rightSlot = managedRootPush(context);
+    managedRootSet(context, rightSlot, right);
+    var dash = makeText(context, stringLayout, 1, 45, 0, 0, 0);
+    var dashSlot = managedRootPush(context);
+    managedRootSet(context, dashSlot, dash);
+    var paddedLeft = managedStringPad(context, stringLayout, right, 4, dash, true);
+    var paddedLeftSlot = managedRootPush(context);
+    managedRootSet(context, paddedLeftSlot, paddedLeft);
+    var paddedRight = managedStringPad(context, stringLayout, right, 4, dash, false);
+    check(managedStringByte(context, paddedLeft, 0) == 45 && managedStringByte(context, paddedLeft, 3) == 99);
+    check(managedStringByte(context, paddedRight, 0) == 99 && managedStringByte(context, paddedRight, 3) == 45);
+
+    managedRootPop(context, paddedLeftSlot);
+    managedRootPop(context, dashSlot);
+    managedRootPop(context, rightSlot);
+}
+
+func checkReplacementAndPadding(context: __rey_raw_address, stringLayout: int): void {
+    checkEmptyReplacement(context, stringLayout);
+    checkReplacement(context, stringLayout);
+    checkPadding(context, stringLayout);
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var context = managedCreate(registry, false);
+
+    checkBinaryStrings(context, stringLayout);
+    checkConcatenation(context, stringLayout);
+    checkIntegerConversions(context, stringLayout);
+    checkIntegerRounding(context, stringLayout);
+    checkCaseTrimRepeat(context, stringLayout);
+    checkReplacementAndPadding(context, stringLayout);
+
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

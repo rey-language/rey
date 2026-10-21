@@ -1,0 +1,60 @@
+// Annotations carried alongside the ordinary verified scalar IR.
+import ir::{IRProgram, IRTypeKind};
+
+pub struct ManagedField {
+    pub name: string,
+    pub offset: int,
+    pub kind: IRTypeKind,
+    pub layoutId: int,
+}
+
+pub struct ManagedLayout {
+    pub id: int,
+    pub key: string,
+    pub payloadBytes: int,
+    pub fields: Vec<ManagedField>,
+}
+
+pub struct ManagedFunction {
+    pub functionId: int,
+    pub referenceValues: Vec<int>,
+    pub parameterLayouts: Vec<int>,
+    pub returnLayout: int,
+}
+
+pub struct ManagedAllocation {
+    pub functionId: int,
+    pub blockId: int,
+    pub resultId: int,
+    pub layoutId: int,
+}
+
+pub struct ManagedDerived {
+    pub functionId: int,
+    pub valueId: int,
+    pub ownerId: int,
+}
+
+pub struct ManagedVariableLayout {
+    pub layoutId: int,
+    pub tailKind: int,
+}
+
+pub struct ManagedHook {
+    pub functionId: int,
+    pub runtimeName: string,
+    pub mayCollect: bool,
+}
+
+pub struct ManagedProgram {
+    pub program: IRProgram,
+    pub layouts: Vec<ManagedLayout>,
+    pub functions: Vec<ManagedFunction>,
+    pub allocations: Vec<ManagedAllocation>,
+    pub derived: Vec<ManagedDerived>,
+    pub allocateFunctionId: int,
+    pub storeReferenceFunctionId: int,
+    pub collectFunctionId: int,
+    pub variableLayouts: Vec<ManagedVariableLayout>,
+    pub hooks: Vec<ManagedHook>,
+}

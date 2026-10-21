@@ -26,7 +26,21 @@ func layoutDescriptorValidate(descriptor: __rey_raw_address, failureCode: int): 
         layoutFail(failureCode);
         return;
     }
-    if __reyRawLoadI64(layoutAddressAt(descriptor, 16)) != 0 || __reyRawLoadI64(layoutAddressAt(descriptor, 24)) != 0 {
+    var tailMagic = __reyRawLoadI64(layoutAddressAt(descriptor, 16));
+    var minimumPayloadBytes = __reyRawLoadI64(layoutAddressAt(descriptor, 24));
+    var variable = tailMagic == 1380273301 || tailMagic == 1380273302;
+    if (!variable && (tailMagic != 0 || minimumPayloadBytes != 0)) || (variable && (minimumPayloadBytes < 8 || minimumPayloadBytes != payloadBytes)) {
+        layoutFail(failureCode);
+        return;
+    }
+    // A reference tail starts at the payload boundary and advances by eight
+    // bytes. Keep that boundary aligned, and reserve payload offset zero for
+    // the initialized-element count used by the collector.
+    if tailMagic == 1380273302 && minimumPayloadBytes % 8 != 0 {
+        layoutFail(failureCode);
+        return;
+    }
+    if variable && referenceCount > minimumPayloadBytes / 8 {
         layoutFail(failureCode);
         return;
     }
@@ -34,7 +48,7 @@ func layoutDescriptorValidate(descriptor: __rey_raw_address, failureCode: int): 
     var previous = -1;
     while index < referenceCount {
         var offset = __reyRawLoadI64(layoutAddressAt(descriptor, 32 + index * 8));
-        if offset < 0 || offset / 8 * 8 != offset || payloadBytes < 8 || offset > payloadBytes - 8 {
+        if offset < 0 || offset / 8 * 8 != offset || payloadBytes < 8 || offset > payloadBytes - 8 || (tailMagic == 1380273302 && offset == 0) {
             layoutFail(failureCode);
             return;
         }
@@ -193,6 +207,51 @@ pub func layoutRegisterFixed(registry: __rey_raw_address, payloadBytes: int, ref
     return id;
 }
 
+pub func layoutRegisterVariable(registry: __rey_raw_address, minimumPayloadBytes: int, referenceOffsets: __rey_raw_address, referenceCount: int, tailKind: int): int {
+    layoutRegistryValidate(registry);
+    var capacity = __reyRawLoadI64(layoutAddressAt(registry, 8));
+    var count = __reyRawLoadI64(layoutAddressAt(registry, 16));
+    if count >= capacity { layoutFail(1005); return 0; }
+    if minimumPayloadBytes < 8 || referenceCount < 0 || (tailKind != 1 && tailKind != 2) {
+        layoutFail(1002);
+        return 0;
+    }
+    if tailKind == 2 && minimumPayloadBytes % 8 != 0 { layoutFail(1002); return 0; }
+    if referenceCount > 1152921504606846971 || referenceCount > minimumPayloadBytes / 8 {
+        layoutFail(1001);
+        return 0;
+    }
+    if referenceCount > 0 && __reyRawEqual(referenceOffsets, __reyRawNull()) { layoutFail(1002); return 0; }
+    var index = 0;
+    var previous = -1;
+    while index < referenceCount {
+        var offset = __reyRawLoadI64(layoutAddressAt(referenceOffsets, index * 8));
+        if offset < 0 || offset / 8 * 8 != offset || offset > minimumPayloadBytes - 8 || (tailKind == 2 && offset == 0) || (index > 0 && offset <= previous) {
+            layoutFail(1002);
+            return 0;
+        }
+        previous = offset;
+        index = index + 1;
+    }
+    var descriptorLength = 32 + referenceCount * 8;
+    if descriptorLength < 32 { layoutFail(1001); return 0; }
+    var descriptor = __reyRawMap(descriptorLength);
+    __reyRawStoreI64(layoutAddressAt(descriptor, 0), minimumPayloadBytes);
+    __reyRawStoreI64(layoutAddressAt(descriptor, 8), referenceCount);
+    if tailKind == 1 { __reyRawStoreI64(layoutAddressAt(descriptor, 16), 1380273301); }
+    else { __reyRawStoreI64(layoutAddressAt(descriptor, 16), 1380273302); }
+    __reyRawStoreI64(layoutAddressAt(descriptor, 24), minimumPayloadBytes);
+    index = 0;
+    while index < referenceCount {
+        __reyRawStoreI64(layoutAddressAt(descriptor, 32 + index * 8), __reyRawLoadI64(layoutAddressAt(referenceOffsets, index * 8)));
+        index = index + 1;
+    }
+    var id = count + 1;
+    __reyRawStoreAddress(layoutAddressAt(registry, 64 + count * 8), descriptor);
+    __reyRawStoreI64(layoutAddressAt(registry, 16), id);
+    return id;
+}
+
 pub func layoutCount(registry: __rey_raw_address): int {
     layoutRegistryValidate(registry);
     return __reyRawLoadI64(layoutAddressAt(registry, 16));
@@ -206,6 +265,29 @@ pub func layoutPayloadBytes(registry: __rey_raw_address, id: int): int {
         return 0;
     }
     return __reyRawLoadI64(layoutAddressAt(layoutDescriptorFor(registry, id), 0));
+}
+
+pub func layoutTailKind(registry: __rey_raw_address, id: int): int {
+    layoutRegistryValidate(registry);
+    var count = __reyRawLoadI64(layoutAddressAt(registry, 16));
+    if id < 1 || id > count { layoutFail(1003); return 0; }
+    var magic = __reyRawLoadI64(layoutAddressAt(layoutDescriptorFor(registry, id), 16));
+    if magic == 1380273301 { return 1; }
+    if magic == 1380273302 { return 2; }
+    return 0;
+}
+
+pub func layoutPayloadSizeValid(registry: __rey_raw_address, id: int, actualPayloadBytes: int): bool {
+    layoutRegistryValidate(registry);
+    var count = __reyRawLoadI64(layoutAddressAt(registry, 16));
+    if id < 1 || id > count || actualPayloadBytes < 0 { return false; }
+    var descriptor = layoutDescriptorFor(registry, id);
+    var minimumPayloadBytes = __reyRawLoadI64(layoutAddressAt(descriptor, 0));
+    var magic = __reyRawLoadI64(layoutAddressAt(descriptor, 16));
+    if magic == 0 { return actualPayloadBytes == minimumPayloadBytes; }
+    if actualPayloadBytes < minimumPayloadBytes { return false; }
+    if magic == 1380273302 && (actualPayloadBytes - minimumPayloadBytes) % 8 != 0 { return false; }
+    return true;
 }
 
 pub func layoutReferenceCount(registry: __rey_raw_address, id: int): int {

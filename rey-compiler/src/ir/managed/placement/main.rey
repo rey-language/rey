@@ -1,0 +1,643 @@
+import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
+import ir::managed::{ManagedProgram, ManagedFunction, ManagedAllocation, ManagedVariableLayout, ManagedHook};
+import ir::verify::{verifyProgram};
+
+pub enum ManagedStorage { Heap, Region, Destination }
+
+pub struct ManagedAllocationPlacement {
+    pub functionId: int,
+    pub resultId: int,
+    pub storage: ManagedStorage,
+}
+
+pub struct ManagedCallPlacement {
+    pub functionId: int,
+    pub blockId: int,
+    pub instructionIndex: int,
+    pub storage: ManagedStorage,
+}
+
+pub struct ManagedPlacement {
+    pub allocations: Vec<ManagedAllocationPlacement>,
+    pub calls: Vec<ManagedCallPlacement>,
+    pub regionFunctions: Vec<int>,
+}
+
+struct RefNode { pub functionId: int, pub valueId: int }
+struct ValueLink { pub from: int, pub to: int, pub escapeForward: int, pub escapeReverse: int }
+struct StoreLink { pub child: int, pub owner: int }
+struct CallSite { pub functionId: int, pub blockId: int, pub instructionIndex: int, pub resultNode: int }
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 { budget.set(0, -1); return false; }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func managedFunctionIndex(functions: Vec<ManagedFunction>, functionId: int): int {
+    var i = 0;
+    loop { if i >= functions.len() { break; } if functions[i].functionId == functionId { return i; } i = i + 1; }
+    return -1;
+}
+
+func managedHookIndex(hooks: Vec<ManagedHook>, functionId: int): int {
+    var i = 0;
+    loop { if i >= hooks.len() { break; } if hooks[i].functionId == functionId { return i; } i = i + 1; }
+    return -1;
+}
+
+func variableLayoutIndex(layouts: Vec<ManagedVariableLayout>, layoutId: int): int {
+    var i = 0;
+    loop { if i >= layouts.len() { break; } if layouts[i].layoutId == layoutId { return i; } i = i + 1; }
+    return -1;
+}
+
+func irFunctionIndex(program: IRProgram, functionId: int): int {
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id == functionId { return i; } i = i + 1; }
+    return -1;
+}
+
+func blockIndex(function: IRFunction, blockId: int): int {
+    var i = 0;
+    loop { if i >= function.blocks.len() { break; } if function.blocks[i].id == blockId { return i; } i = i + 1; }
+    return -1;
+}
+
+func valueNode(nodes: Vec<RefNode>, functionId: int, valueId: int): int {
+    var i = 0;
+    loop { if i >= nodes.len() { break; } if nodes[i].functionId == functionId && nodes[i].valueId == valueId { return i; } i = i + 1; }
+    return -1;
+}
+
+func hasInt(values: Vec<int>, value: int): bool {
+    var i = 0;
+    loop { if i >= values.len() { break; } if values[i] == value { return true; } i = i + 1; }
+    return false;
+}
+
+func addEscapeMask(existing: int, incoming: int): int {
+    var result = existing;
+    if incoming == 1 || incoming == 3 { if result != 1 && result != 3 { result = result + 1; } }
+    if incoming >= 2 { if result < 2 { result = result + 2; } }
+    return result;
+}
+
+func addLink(links: Vec<ValueLink>, from: int, to: int, escapeForward: int, escapeReverse: int): Vec<ValueLink> {
+    if from < 0 || to < 0 || from == to { return links; }
+    var i = 0;
+    loop { if i >= links.len() { break; } if links[i].from == from && links[i].to == to { var link = links[i]; link.escapeForward = addEscapeMask(link.escapeForward, escapeForward); link.escapeReverse = addEscapeMask(link.escapeReverse, escapeReverse); links.set(i, link); return links; } i = i + 1; }
+    links.push(ValueLink { from: from, to: to, escapeForward: escapeForward, escapeReverse: escapeReverse });
+    return links;
+}
+
+func escapeMaskAllows(mask: int, level: int): bool {
+    if level == 1 { return mask == 1 || mask == 3; }
+    if level == 2 { return mask == 2 || mask == 3; }
+    return false;
+}
+
+func addSource(sources: Vec<Vec<int>>, node: int, source: int, budget: Vec<int>): bool {
+    if node < 0 || source < 0 { return false; }
+    var set = sources[node];
+    if hasInt(set, source) { return false; }
+    if !charge(budget) { return false; }
+    set.push(source);
+    sources.set(node, set);
+    return true;
+}
+
+func addEscape(escapes: Vec<int>, source: int, level: int): bool {
+    if source < 0 || source >= escapes.len() || escapes[source] >= level { return false; }
+    escapes.set(source, level);
+    return true;
+}
+
+func isReference(function: ManagedFunction, valueId: int): bool {
+    return hasInt(function.referenceValues, valueId);
+}
+
+func allocationIndex(allocations: Vec<ManagedAllocation>, functionId: int, resultId: int): int {
+    var i = 0;
+    loop { if i >= allocations.len() { break; } if allocations[i].functionId == functionId && allocations[i].resultId == resultId { return i; } i = i + 1; }
+    return -1;
+}
+
+func validateMetadata(module: ManagedProgram): string {
+    var verification = verifyProgram(module.program);
+    if !verification.ok { return "placement: IR verification failed"; }
+    var budget: Vec<int> = [500000];
+    var fi = 0;
+    loop {
+        if fi >= module.functions.len() { break; }
+        var managed = module.functions[fi];
+        if managedFunctionIndex(module.functions, managed.functionId) != fi { return "placement: duplicate managed function metadata"; }
+        var functionIndexValue = irFunctionIndex(module.program, managed.functionId);
+        if functionIndexValue < 0 { return "placement: managed function does not exist"; }
+        var function = module.program.functions[functionIndexValue];
+        var pi = 0;
+        loop {
+            if pi >= managed.referenceValues.len() { break; }
+            if hasInt(managed.referenceValues, managed.referenceValues[pi]) && pi != 0 {
+                var prior = 0;
+                loop { if prior >= pi { break; } if managed.referenceValues[prior] == managed.referenceValues[pi] { return "placement: duplicate canonical reference metadata"; } prior = prior + 1; }
+            }
+            pi = pi + 1;
+        }
+        fi = fi + 1;
+    }
+    var vi = 0;
+    loop {
+        if vi >= module.variableLayouts.len() { break; }
+        var variable = module.variableLayouts[vi];
+        if variable.layoutId <= 0 || variable.layoutId > module.layouts.len() || (variable.tailKind != 1 && variable.tailKind != 2) { return "placement: invalid variable layout metadata"; }
+        var prior = 0;
+        loop { if prior >= vi { break; } if module.variableLayouts[prior].layoutId == variable.layoutId { return "placement: duplicate variable layout metadata"; } prior = prior + 1; }
+        vi = vi + 1;
+    }
+    var hi = 0;
+    loop {
+        if hi >= module.hooks.len() { break; }
+        var hook = module.hooks[hi];
+        if hook.functionId < 0 || hook.runtimeName == "" || managedHookIndex(module.hooks, hook.functionId) != hi { return "placement: invalid or duplicate managed hook metadata"; }
+        if hook.functionId == module.allocateFunctionId || hook.functionId == module.storeReferenceFunctionId || hook.functionId == module.collectFunctionId || managedFunctionIndex(module.functions, hook.functionId) >= 0 || irFunctionIndex(module.program, hook.functionId) < 0 { return "placement: managed hook stub ID is missing or overlaps a private hook/user function"; }
+        hi = hi + 1;
+    }
+    fi = 0;
+    loop {
+        if fi >= module.allocations.len() { break; }
+        var allocation = module.allocations[fi];
+        if managedFunctionIndex(module.functions, allocation.functionId) < 0 { return "placement: allocation has no managed function metadata"; }
+        if allocationIndex(module.allocations, allocation.functionId, allocation.resultId) != fi { return "placement: duplicate allocation metadata"; }
+        var functionIndexValue = irFunctionIndex(module.program, allocation.functionId);
+        if functionIndexValue < 0 { return "placement: allocation function does not exist"; }
+        var function = module.program.functions[functionIndexValue];
+        var found = false;
+        var bi = 0;
+        loop {
+            if bi >= function.blocks.len() { break; }
+            var block = function.blocks[bi];
+            var ii = 0;
+            loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.resultId == allocation.resultId && block.id == allocation.blockId && instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId { found = true; } ii = ii + 1; }
+            bi = bi + 1;
+        }
+        if !found { return "placement: allocation metadata does not match an allocation hook"; }
+        var managedIndex = managedFunctionIndex(module.functions, allocation.functionId);
+        if !isReference(module.functions[managedIndex], allocation.resultId) { return "placement: allocation result is missing canonical reference metadata"; }
+        if allocation.layoutId <= 0 { return "placement: allocation layout ID must be positive"; }
+        if variableLayoutIndex(module.variableLayouts, allocation.layoutId) >= 0 { return "placement: fixed allocation hook cannot use a variable-tail layout"; }
+        if !charge(budget) { return "placement: metadata work budget exhausted"; }
+        fi = fi + 1;
+    }
+    return "";
+}
+
+func addEdgeLinks(program: IRProgram, functions: Vec<ManagedFunction>, nodes: Vec<RefNode>, links: Vec<ValueLink>, budget: Vec<int>): Vec<ValueLink> {
+    var out = links;
+    var fi = 0;
+    loop {
+        if fi >= functions.len() { break; }
+        var managed = functions[fi];
+        var realIndex = irFunctionIndex(program, managed.functionId);
+        if realIndex >= 0 {
+            var function = program.functions[realIndex];
+            var bi = 0;
+            loop {
+                if bi >= function.blocks.len() { break; }
+                if !charge(budget) { return out; }
+                var block = function.blocks[bi];
+                var term = block.terminator;
+                if term.kind == TerminatorKind::Jump {
+                    var targetIndex = blockIndex(function, term.targetBlockId);
+                    if targetIndex >= 0 {
+                        var target = function.blocks[targetIndex];
+                        var ai = 0;
+                        loop { if ai >= target.params.len() || ai >= term.targetArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.targetArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; }
+                    }
+                } else if term.kind == TerminatorKind::Branch {
+                    var trueIndex = blockIndex(function, term.trueTargetBlockId);
+                    if trueIndex >= 0 { var target = function.blocks[trueIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.trueArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.trueArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
+                    var falseIndex = blockIndex(function, term.falseTargetBlockId);
+                    if falseIndex >= 0 { var target = function.blocks[falseIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.falseArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.falseArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
+                }
+                var ii = 0;
+                loop {
+                    if ii >= block.instructions.len() { break; }
+                    var instruction = block.instructions[ii];
+                    if instruction.kind == InstructionKind::Call {
+                        var calleeManaged = managedFunctionIndex(functions, instruction.functionId);
+                        var calleeIndex = irFunctionIndex(program, instruction.functionId);
+                        if calleeManaged >= 0 && calleeIndex >= 0 {
+                            var callee = program.functions[calleeIndex];
+                            var ai = 0;
+                            loop { if ai >= callee.parameters.len() || ai >= instruction.operands.len() { break; } if callee.parameters[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, instruction.operands[ai]), valueNode(nodes, instruction.functionId, callee.parameters[ai].id), 3, 2); } ai = ai + 1; }
+                            if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                                var ci = 0;
+                                loop {
+                                    if ci >= callee.blocks.len() { break; }
+                                    var cterm = callee.blocks[ci].terminator;
+                                    if cterm.kind == TerminatorKind::Return && cterm.valueId >= 0 { out = addLink(out, valueNode(nodes, instruction.functionId, cterm.valueId), valueNode(nodes, managed.functionId, instruction.resultId), 2, 3); }
+                                    ci = ci + 1;
+                                }
+                            }
+                        }
+                    }
+                    ii = ii + 1;
+                }
+                bi = bi + 1;
+            }
+        }
+        fi = fi + 1;
+    }
+    return out;
+}
+
+func cycleBlockIndex(indices: HashMap<string, int>, blockId: int, budget: Vec<int>): int {
+    if !charge(budget) { return -1; }
+    var key = blockId.toString();
+    if !indices.has(key) { return -1; }
+    return indices.get(key);
+}
+
+func siteInCycle(function: IRFunction, siteBlockId: int, budget: Vec<int>): bool {
+    var size = function.blocks.len();
+    if size > 2048 { return true; }
+    var blockIndices: HashMap<string, int> = HashMap.new();
+    var i = 0;
+    loop {
+        if i >= size { break; }
+        if !charge(budget) { return true; }
+        blockIndices.set(function.blocks[i].id.toString(), i);
+        i = i + 1;
+    }
+    var start = cycleBlockIndex(blockIndices, siteBlockId, budget);
+    if start < 0 || size == 0 { return true; }
+    var visited: Vec<bool> = [];
+    i = 0;
+    loop {
+        if i >= size { break; }
+        if !charge(budget) { return true; }
+        visited.push(false);
+        i = i + 1;
+    }
+    var worklist: Vec<int> = [];
+    var entryTerminator = function.blocks[start].terminator;
+    if entryTerminator.kind == TerminatorKind::Jump {
+        var next = cycleBlockIndex(blockIndices, entryTerminator.targetBlockId, budget);
+        if next == start { return true; }
+        if next >= 0 && !visited[next] { visited.set(next, true); worklist.push(next); }
+    } else if entryTerminator.kind == TerminatorKind::Branch {
+        var trueNext = cycleBlockIndex(blockIndices, entryTerminator.trueTargetBlockId, budget);
+        if trueNext == start { return true; }
+        if trueNext >= 0 && !visited[trueNext] { visited.set(trueNext, true); worklist.push(trueNext); }
+        var falseNext = cycleBlockIndex(blockIndices, entryTerminator.falseTargetBlockId, budget);
+        if falseNext == start { return true; }
+        if falseNext >= 0 && !visited[falseNext] { visited.set(falseNext, true); worklist.push(falseNext); }
+    }
+    loop {
+        if worklist.len() == 0 { break; }
+        if !charge(budget) { return true; }
+        var current = worklist.pop();
+        var terminator = function.blocks[current].terminator;
+        if terminator.kind == TerminatorKind::Jump {
+            var nextBlock = cycleBlockIndex(blockIndices, terminator.targetBlockId, budget);
+            if nextBlock == start { return true; }
+            if nextBlock >= 0 && !visited[nextBlock] { visited.set(nextBlock, true); worklist.push(nextBlock); }
+        } else if terminator.kind == TerminatorKind::Branch {
+            var trueBlock = cycleBlockIndex(blockIndices, terminator.trueTargetBlockId, budget);
+            if trueBlock == start { return true; }
+            if trueBlock >= 0 && !visited[trueBlock] { visited.set(trueBlock, true); worklist.push(trueBlock); }
+            var falseBlock = cycleBlockIndex(blockIndices, terminator.falseTargetBlockId, budget);
+            if falseBlock == start { return true; }
+            if falseBlock >= 0 && !visited[falseBlock] { visited.set(falseBlock, true); worklist.push(falseBlock); }
+        }
+    }
+    return false;
+}
+
+pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, string> {
+    var metadataError = validateMetadata(module);
+    if metadataError != "" { return Result.Err(metadataError); }
+    var program = module.program;
+    var budget: Vec<int> = [750000];
+    var nodes: Vec<RefNode> = [];
+    var fi = 0;
+    loop {
+        if fi >= module.functions.len() { break; }
+        var managed = module.functions[fi];
+        if !charge(budget) { return Result.Err("placement: reference census work budget exhausted"); }
+        var irIndex = irFunctionIndex(program, managed.functionId);
+        if irIndex >= 0 {
+            var function = program.functions[irIndex];
+            var pi = 0;
+            loop { if pi >= function.parameters.len() { break; } if isReference(managed, function.parameters[pi].id) { nodes.push(RefNode { functionId: managed.functionId, valueId: function.parameters[pi].id }); } pi = pi + 1; }
+            var bi = 0;
+            loop { if bi >= function.blocks.len() { break; } if !charge(budget) { return Result.Err("placement: reference census work budget exhausted"); } var block = function.blocks[bi]; var bp = 0; loop { if bp >= block.params.len() { break; } if isReference(managed, block.params[bp].id) { nodes.push(RefNode { functionId: managed.functionId, valueId: block.params[bp].id }); } bp = bp + 1; } var ii = 0; loop { if ii >= block.instructions.len() { break; } if !charge(budget) { return Result.Err("placement: reference census work budget exhausted"); } var instruction = block.instructions[ii]; if instruction.resultId >= 0 && isReference(managed, instruction.resultId) { nodes.push(RefNode { functionId: managed.functionId, valueId: instruction.resultId }); } ii = ii + 1; } bi = bi + 1; }
+        }
+        fi = fi + 1;
+    }
+    var sources: Vec<Vec<int>> = [];
+    var nodeEscapes: Vec<int> = [];
+    var ni = 0;
+    loop { if ni >= nodes.len() { break; } sources.push([]); nodeEscapes.push(0); ni = ni + 1; }
+    var ai = 0;
+    loop {
+        if ai >= module.allocations.len() { break; }
+        var allocation = module.allocations[ai];
+        var node = valueNode(nodes, allocation.functionId, allocation.resultId);
+        if node < 0 { return Result.Err("placement: allocation result has no canonical reference node"); }
+        addSource(sources, node, ai, budget);
+        ai = ai + 1;
+    }
+    var links: Vec<ValueLink> = [];
+    links = addEdgeLinks(program, module.functions, nodes, links, budget);
+    if budget[0] < 0 { return Result.Err("placement: alias analysis work budget exhausted"); }
+    var stores: Vec<StoreLink> = [];
+    var unsafeNodes: Vec<int> = [];
+    var callSites: Vec<CallSite> = [];
+    fi = 0;
+    loop {
+        if fi >= module.functions.len() { break; }
+        var managed = module.functions[fi];
+        var irIndex = irFunctionIndex(program, managed.functionId);
+        if irIndex >= 0 {
+            var function = program.functions[irIndex];
+            var bi = 0;
+            loop {
+                if bi >= function.blocks.len() { break; }
+                var block = function.blocks[bi];
+                var ii = 0;
+                loop {
+                    if ii >= block.instructions.len() { break; }
+                    if !charge(budget) { return Result.Err("placement: flow analysis work budget exhausted"); }
+                    var instruction = block.instructions[ii];
+                    var managedHook = -1;
+                    if instruction.kind == InstructionKind::Call { managedHook = managedHookIndex(module.hooks, instruction.functionId); }
+                    if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() == 3 {
+                        var owner = valueNode(nodes, managed.functionId, instruction.operands[0]);
+                        var child = valueNode(nodes, managed.functionId, instruction.operands[2]);
+                        if owner >= 0 && child >= 0 { stores.push(StoreLink { child: child, owner: owner }); }
+                    } else if managedHook >= 0 {
+                        var oi = 0;
+                        loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodes, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
+                        if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodes, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
+                    } else if instruction.kind == InstructionKind::Call {
+                        var calleeManaged = managedFunctionIndex(module.functions, instruction.functionId);
+                        if calleeManaged < 0 && instruction.functionId != module.allocateFunctionId && instruction.functionId != module.collectFunctionId {
+                            var oi = 0;
+                            loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodes, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
+                            if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodes, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
+                        } else if calleeManaged >= 0 && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                            callSites.push(CallSite { functionId: managed.functionId, blockId: block.id, instructionIndex: ii, resultNode: valueNode(nodes, managed.functionId, instruction.resultId) });
+                        }
+                    } else if instruction.kind == InstructionKind::RawStoreAddress && instruction.operands.len() == 2 {
+                        var storedNode = valueNode(nodes, managed.functionId, instruction.operands[1]);
+                        if storedNode >= 0 { unsafeNodes.push(storedNode); }
+                    } else if instruction.kind == InstructionKind::RawLoadAddress && instruction.resultId >= 0 {
+                        if !isReference(managed, instruction.resultId) { return Result.Err("placement: reference field load result is missing canonical reference metadata"); }
+                        var loadedNode = valueNode(nodes, managed.functionId, instruction.resultId);
+                        if loadedNode < 0 { return Result.Err("placement: reference field load result has no canonical reference node"); }
+                        unsafeNodes.push(loadedNode);
+                        var derivedFound = false;
+                        var derivedOwnerId = -1;
+                        var derivedIndex = 0;
+                        loop {
+                            if derivedIndex >= module.derived.len() { break; }
+                            if !charge(budget) { return Result.Err("placement: derived-owner lookup work budget exhausted"); }
+                            var derived = module.derived[derivedIndex];
+                            if derived.functionId == managed.functionId && instruction.operands.len() > 0 && derived.valueId == instruction.operands[0] {
+                                derivedFound = true;
+                                derivedOwnerId = derived.ownerId;
+                                break;
+                            }
+                            derivedIndex = derivedIndex + 1;
+                        }
+                        if !derivedFound { return Result.Err("placement: reference field load has no derived-owner metadata"); }
+                        var ownerNode = valueNode(nodes, managed.functionId, derivedOwnerId);
+                        if ownerNode < 0 { return Result.Err("placement: reference field load owner has no canonical reference node"); }
+                        // The loaded object may escape independently of its container. Taint the
+                        // exact owner so stored-child propagation keeps that referent off regions.
+                        unsafeNodes.push(ownerNode);
+                    }
+                    ii = ii + 1;
+                }
+                var term = block.terminator;
+                if term.kind == TerminatorKind::Return && term.valueId >= 0 {
+                    var returned = valueNode(nodes, managed.functionId, term.valueId);
+                    if returned >= 0 { unsafeNodes.push(-(returned + 2)); }
+                }
+                bi = bi + 1;
+            }
+        }
+        fi = fi + 1;
+    }
+    if budget[0] < 0 { return Result.Err("placement: flow analysis work budget exhausted"); }
+    var changed = true;
+    var pass = 0;
+    loop {
+        if !changed || pass >= nodes.len() + module.allocations.len() + 1 { break; }
+        changed = false;
+        var li = 0;
+        loop {
+            if li >= links.len() { break; }
+            var link = links[li];
+            var ss = sources[link.from];
+            var si = 0;
+            loop { if si >= ss.len() { break; } if addSource(sources, link.to, ss[si], budget) { changed = true; } si = si + 1; }
+            var forwardLevel = nodeEscapes[link.from];
+            if escapeMaskAllows(link.escapeForward, forwardLevel) && addEscape(nodeEscapes, link.to, forwardLevel) { changed = true; }
+            var reverseLevel = nodeEscapes[link.to];
+            if escapeMaskAllows(link.escapeReverse, reverseLevel) && addEscape(nodeEscapes, link.from, reverseLevel) { changed = true; }
+            li = li + 1;
+        }
+        var ui = 0;
+        loop {
+            if ui >= unsafeNodes.len() { break; }
+            var encoded = unsafeNodes[ui];
+            var level = 2;
+            var node = encoded;
+            if encoded <= -2 { node = -encoded - 2; level = 1; }
+            if addEscape(nodeEscapes, node, level) { changed = true; }
+            ui = ui + 1;
+        }
+        // A call result can alias a caller-owned allocation through a callee formal or
+        // CFG parameter. Propagate only this caller's result escape back to caller-local
+        // allocation sources. Callee-local return seeds alone must not escape borrowed args.
+        var callEscapeIndex = 0;
+        loop {
+            if callEscapeIndex >= callSites.len() { break; }
+            if !charge(budget) { return Result.Err("placement: return-alias propagation work budget exhausted"); }
+            var site = callSites[callEscapeIndex];
+            if site.resultNode >= 0 {
+                var resultEscape = nodeEscapes[site.resultNode];
+                if resultEscape > 0 {
+                    var resultSources = sources[site.resultNode];
+                    var sourceIndex = 0;
+                    loop {
+                        if sourceIndex >= resultSources.len() { break; }
+                        if !charge(budget) { return Result.Err("placement: return-alias propagation work budget exhausted"); }
+                        var allocationIndexValue = resultSources[sourceIndex];
+                        var allocation = module.allocations[allocationIndexValue];
+                        if allocation.functionId == site.functionId {
+                            var allocationNode = valueNode(nodes, allocation.functionId, allocation.resultId);
+                            if addEscape(nodeEscapes, allocationNode, resultEscape) { changed = true; }
+                        }
+                        sourceIndex = sourceIndex + 1;
+                    }
+                }
+            }
+            callEscapeIndex = callEscapeIndex + 1;
+        }
+        var st = 0;
+        loop {
+            if st >= stores.len() { break; }
+            var relation = stores[st];
+            var owners = sources[relation.owner];
+            var ownerEscape = nodeEscapes[relation.owner];
+            if owners.len() == 0 { ownerEscape = 2; }
+            if ownerEscape > 0 {
+                if addEscape(nodeEscapes, relation.child, ownerEscape) { changed = true; }
+            }
+            st = st + 1;
+        }
+        if budget[0] < 0 { return Result.Err("placement: alias propagation work budget exhausted"); }
+        pass = pass + 1;
+    }
+    if changed { return Result.Err("placement: alias propagation did not converge within its deterministic bound"); }
+    var storageByAllocation: Vec<int> = [];
+    ai = 0;
+    loop {
+        if ai >= module.allocations.len() { break; }
+        var allocation = module.allocations[ai];
+        var selected = 0;
+        var cyclic = true;
+        var irIndex = irFunctionIndex(program, allocation.functionId);
+        if irIndex >= 0 { cyclic = siteInCycle(program.functions[irIndex], allocation.blockId, budget); }
+        if !cyclic {
+            var allocationNode = valueNode(nodes, allocation.functionId, allocation.resultId);
+            if allocationNode < 0 { return Result.Err("placement: allocation reference node disappeared during escape analysis"); }
+            if nodeEscapes[allocationNode] == 1 { selected = 2; }
+            else if nodeEscapes[allocationNode] == 0 { selected = 1; }
+        }
+        storageByAllocation.push(selected);
+        ai = ai + 1;
+    }
+    if budget[0] < 0 { return Result.Err("placement: CFG cycle analysis work budget exhausted"); }
+    var nodeHeap: Vec<bool> = [];
+    ni = 0;
+    loop { if ni >= nodes.len() { break; } nodeHeap.push(false); ni = ni + 1; }
+    changed = true;
+    pass = 0;
+    loop {
+        if !changed || pass >= nodes.len() + module.allocations.len() + callSites.len() + 1 { break; }
+        changed = false;
+        var ci = 0;
+        loop {
+            if ci >= callSites.len() { break; }
+            var site = callSites[ci];
+            if site.resultNode >= 0 {
+                var heapResult = nodeEscapes[site.resultNode] >= 2;
+                var callerIndex = irFunctionIndex(program, site.functionId);
+                if !heapResult && callerIndex >= 0 && siteInCycle(program.functions[callerIndex], site.blockId, budget) { heapResult = true; }
+                var resultSources = sources[site.resultNode];
+                var si = 0;
+                loop { if si >= resultSources.len() { break; } if storageByAllocation[resultSources[si]] == 0 { heapResult = true; } si = si + 1; }
+                if heapResult && !nodeHeap[site.resultNode] { nodeHeap.set(site.resultNode, true); changed = true; }
+            }
+            ci = ci + 1;
+        }
+        ni = 0;
+        loop {
+            if ni >= nodes.len() { break; }
+            var nodeSources = sources[ni];
+            var si = 0;
+            loop { if si >= nodeSources.len() { break; } if storageByAllocation[nodeSources[si]] == 0 && !nodeHeap[ni] { nodeHeap.set(ni, true); changed = true; } si = si + 1; }
+            ni = ni + 1;
+        }
+        var li = 0;
+        loop {
+            if li >= links.len() { break; }
+            var link = links[li];
+            if nodeHeap[link.from] && !nodeHeap[link.to] { nodeHeap.set(link.to, true); changed = true; }
+            if nodeHeap[link.to] && !nodeHeap[link.from] { nodeHeap.set(link.from, true); changed = true; }
+            li = li + 1;
+        }
+        var st = 0;
+        loop {
+            if st >= stores.len() { break; }
+            var relation = stores[st];
+            var owners = sources[relation.owner];
+            var children = sources[relation.child];
+            var ownerHeap = nodeHeap[relation.owner];
+            var oi = 0;
+            loop { if oi >= owners.len() { break; } if storageByAllocation[owners[oi]] == 0 { ownerHeap = true; } oi = oi + 1; }
+            if owners.len() == 0 { ownerHeap = true; }
+            if ownerHeap {
+                var childIndex = 0;
+                loop {
+                    if childIndex >= children.len() { break; }
+                    var childAllocation = children[childIndex];
+                    if storageByAllocation[childAllocation] != 0 { storageByAllocation.set(childAllocation, 0); changed = true; }
+                    var childNode = valueNode(nodes, module.allocations[childAllocation].functionId, module.allocations[childAllocation].resultId);
+                    if childNode >= 0 && !nodeHeap[childNode] { nodeHeap.set(childNode, true); changed = true; }
+                    childIndex = childIndex + 1;
+                }
+            }
+            st = st + 1;
+        }
+        if budget[0] < 0 { return Result.Err("placement: heap propagation work budget exhausted"); }
+        pass = pass + 1;
+    }
+    if changed { return Result.Err("placement: stored-reference propagation did not converge"); }
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    ai = 0;
+    loop {
+        if ai >= module.allocations.len() { break; }
+        var allocation = module.allocations[ai];
+        var storage = ManagedStorage::Heap;
+        if storageByAllocation[ai] == 1 { storage = ManagedStorage::Region; }
+        else if storageByAllocation[ai] == 2 { storage = ManagedStorage::Destination; }
+        allocations.push(ManagedAllocationPlacement { functionId: allocation.functionId, resultId: allocation.resultId, storage: storage });
+        ai = ai + 1;
+    }
+    var calls: Vec<ManagedCallPlacement> = [];
+    var callUseIndex = 0;
+    loop {
+        if callUseIndex >= callSites.len() { break; }
+        var site = callSites[callUseIndex];
+        var storage = ManagedStorage::Heap;
+        if site.resultNode >= 0 {
+            var resultSources = sources[site.resultNode];
+            var level = nodeEscapes[site.resultNode];
+            if nodeHeap[site.resultNode] { level = 2; }
+            var sourceIndex = 0;
+            loop {
+                if sourceIndex >= resultSources.len() { break; }
+                if storageByAllocation[resultSources[sourceIndex]] == 0 { level = 2; }
+                sourceIndex = sourceIndex + 1;
+            }
+            var callerIndex = irFunctionIndex(program, site.functionId);
+            var cyclic = true;
+            if callerIndex >= 0 { cyclic = siteInCycle(program.functions[callerIndex], site.blockId, budget); }
+            if !cyclic { if level == 0 { storage = ManagedStorage::Region; } else if level == 1 { storage = ManagedStorage::Destination; } }
+        }
+        calls.push(ManagedCallPlacement { functionId: site.functionId, blockId: site.blockId, instructionIndex: site.instructionIndex, storage: storage });
+        callUseIndex = callUseIndex + 1;
+    }
+    if budget[0] < 0 { return Result.Err("placement: CFG cycle analysis work budget exhausted"); }
+    var regionFunctions: Vec<int> = [];
+    ai = 0;
+    loop { if ai >= allocations.len() { break; } var p = allocations[ai]; if p.storage == ManagedStorage::Region && !hasInt(regionFunctions, p.functionId) { regionFunctions.push(p.functionId); } ai = ai + 1; }
+    callUseIndex = 0;
+    loop { if callUseIndex >= calls.len() { break; } var p = calls[callUseIndex]; if p.storage == ManagedStorage::Region && !hasInt(regionFunctions, p.functionId) { regionFunctions.push(p.functionId); } callUseIndex = callUseIndex + 1; }
+    var sortIndex = 1;
+    loop {
+        if sortIndex >= regionFunctions.len() { break; }
+        var value = regionFunctions[sortIndex];
+        var position = sortIndex;
+        loop { if position <= 0 || regionFunctions[position - 1] <= value { break; } regionFunctions.set(position, regionFunctions[position - 1]); position = position - 1; }
+        regionFunctions.set(position, value);
+        sortIndex = sortIndex + 1;
+    }
+    return Result.Ok(ManagedPlacement { allocations: allocations, calls: calls, regionFunctions: regionFunctions });
+}

@@ -30,6 +30,15 @@ struct BlockState {
     pub liveAtTerminator: Vec<int>,
 }
 
+struct BlockTransfer {
+    pub localUses: Vec<int>,
+    pub localDefinitions: HashMap<string, bool>,
+}
+
+func budgetError(functionId: int, phase: string): string {
+    return "liveness: analysis work budget exhausted (function " + functionId.toString() + ", phase " + phase + ")";
+}
+
 func charge(budget: Vec<int>): bool {
     if budget[0] <= 0 {
         budget.set(0, -1);
@@ -182,6 +191,22 @@ func transferTerminatorUses(block: BasicBlock, edgeLive: Vec<int>, budget: Vec<i
     return live;
 }
 
+func transferInstruction(instruction: Instruction, after: Vec<int>, budget: Vec<int>): Vec<int> {
+    var surviving = after;
+    if instruction.resultId >= 0 { surviving = removeValue(surviving, instruction.resultId, budget); }
+    if budget[0] < 0 { return surviving; }
+    var uses: Vec<int> = [];
+    var operandIndex = 0;
+    loop {
+        if operandIndex >= instruction.operands.len() { break; }
+        if !charge(budget) { return uses; }
+        uses = addValue(uses, instruction.operands[operandIndex], budget);
+        if budget[0] < 0 { return uses; }
+        operandIndex = operandIndex + 1;
+    }
+    return mergeSets(surviving, uses, budget);
+}
+
 func transferInstructionUses(block: BasicBlock, afterTerminator: Vec<int>, budget: Vec<int>): Vec<int> {
     var live = copySet(afterTerminator, budget);
     var i = block.instructions.len();
@@ -189,18 +214,23 @@ func transferInstructionUses(block: BasicBlock, afterTerminator: Vec<int>, budge
         if i <= 0 { break; }
         i = i - 1;
         if !charge(budget) { return live; }
-        var instruction = block.instructions[i];
-        if instruction.resultId >= 0 { live = removeValue(live, instruction.resultId, budget); }
-        var operandIndex = 0;
-        loop {
-            if operandIndex >= instruction.operands.len() { break; }
-            if !charge(budget) { return live; }
-            live = addValue(live, instruction.operands[operandIndex], budget);
-            operandIndex = operandIndex + 1;
-        }
+        live = transferInstruction(block.instructions[i], live, budget);
         if budget[0] < 0 { return live; }
     }
     return live;
+}
+
+func removeDefinitions(values: Vec<int>, definitions: HashMap<string, bool>, budget: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= values.len() { break; }
+        if !charge(budget) { return result; }
+        var valueId = values[i];
+        if !definitions.has(valueId.toString()) { result.push(valueId); }
+        i = i + 1;
+    }
+    return result;
 }
 
 func instructionSnapshots(block: BasicBlock, afterTerminator: Vec<int>, budget: Vec<int>): Vec<InstructionLiveness> {
@@ -213,14 +243,7 @@ func instructionSnapshots(block: BasicBlock, afterTerminator: Vec<int>, budget: 
         if !charge(budget) { return []; }
         var instruction = block.instructions[i];
         var liveAfter = copySet(live, budget);
-        if instruction.resultId >= 0 { live = removeValue(live, instruction.resultId, budget); }
-        var operandIndex = 0;
-        loop {
-            if operandIndex >= instruction.operands.len() { break; }
-            if !charge(budget) { return []; }
-            live = addValue(live, instruction.operands[operandIndex], budget);
-            operandIndex = operandIndex + 1;
-        }
+        live = transferInstruction(instruction, live, budget);
         if budget[0] < 0 { return []; }
         reversed.push(InstructionLiveness {
             instructionIndex: i,
@@ -257,24 +280,50 @@ pub func analyzeProgram(program: IRProgram): Result<ProgramLiveness, string> {
     var verification = verifyProgram(program);
     if !verification.ok { return Result.Err(validationError(verification.errors)); }
 
-    // One deterministic global cap bounds fixed-point and snapshot work without
-    // allocating work tables based on sparse function, block, or value IDs.
-    var budget: Vec<int> = [1000000];
+    // Functions have independent fixed points. Bound each function's analysis
+    // without making unrelated library functions spend one shared allowance.
+    // Work tables still scale with definition counts, never sparse IDs.
     var resultFunctions: Vec<FunctionLiveness> = [];
     var functionIndex = 0;
     loop {
         if functionIndex >= program.functions.len() { break; }
-        if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+        var budget: Vec<int> = [1000000];
         var function = program.functions[functionIndex];
+        var phase = "fixed point setup";
+        if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
         var states: Vec<BlockState> = [];
         var blockIndex = 0;
         loop {
             if blockIndex >= function.blocks.len() { break; }
-            if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+            if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
             states.push(BlockState { liveIn: [], liveOut: [], liveAtTerminator: [] });
             blockIndex = blockIndex + 1;
         }
 
+        phase = "local transfer precompute";
+        var transfers: Vec<BlockTransfer> = [];
+        blockIndex = 0;
+        loop {
+            if blockIndex >= function.blocks.len() { break; }
+            if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
+            var block = function.blocks[blockIndex];
+            var localUses = transferInstructionUses(block, [], budget);
+            if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
+            var localDefinitions: HashMap<string, bool> = HashMap.new();
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= block.instructions.len() { break; }
+                if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
+                var resultId = block.instructions[instructionIndex].resultId;
+                if resultId >= 0 { localDefinitions.set(resultId.toString(), true); }
+                instructionIndex = instructionIndex + 1;
+            }
+            if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
+            transfers.push(BlockTransfer { localUses: localUses, localDefinitions: localDefinitions });
+            blockIndex = blockIndex + 1;
+        }
+
+        phase = "fixed point";
         var changed = true;
         loop {
             if !changed { break; }
@@ -283,19 +332,20 @@ pub func analyzeProgram(program: IRProgram): Result<ProgramLiveness, string> {
             loop {
                 if blockIndex <= 0 { break; }
                 blockIndex = blockIndex - 1;
-                if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+                if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
                 var block = function.blocks[blockIndex];
                 var edgeLive = terminatorEdgeLiveness(function, block, states, budget);
-                if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
                 var atTerminator = transferTerminatorUses(block, edgeLive, budget);
-                var liveIn = transferInstructionUses(block, atTerminator, budget);
-                if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                var surviving = removeDefinitions(atTerminator, transfers[blockIndex].localDefinitions, budget);
+                var liveIn = mergeSets(transfers[blockIndex].localUses, surviving, budget);
+                if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
                 if !setsEqual(states[blockIndex].liveIn, liveIn, budget) || !setsEqual(states[blockIndex].liveOut, edgeLive, budget) {
-                    if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                    if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
                     states.set(blockIndex, BlockState { liveIn: liveIn, liveOut: edgeLive, liveAtTerminator: atTerminator });
                     changed = true;
                 } else {
-                    if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+                    if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
                     // Even if the fixed-point sets are stable, retain a fresh
                     // terminator snapshot for deterministic output construction.
                     states.set(blockIndex, BlockState { liveIn: liveIn, liveOut: edgeLive, liveAtTerminator: atTerminator });
@@ -303,15 +353,16 @@ pub func analyzeProgram(program: IRProgram): Result<ProgramLiveness, string> {
             }
         }
 
+        phase = "output snapshots";
         var outputBlocks: Vec<BlockLiveness> = [];
         blockIndex = 0;
         loop {
             if blockIndex >= function.blocks.len() { break; }
-            if !charge(budget) { return Result.Err("liveness: analysis work budget exhausted"); }
+            if !charge(budget) { return Result.Err(budgetError(function.id, phase)); }
             var block = function.blocks[blockIndex];
             var state = states[blockIndex];
             var snapshots = instructionSnapshots(block, state.liveAtTerminator, budget);
-            if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+            if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
             outputBlocks.push(BlockLiveness {
                 blockId: block.id,
                 liveIn: copySet(state.liveIn, budget),
@@ -319,7 +370,7 @@ pub func analyzeProgram(program: IRProgram): Result<ProgramLiveness, string> {
                 instructions: snapshots,
                 liveAtTerminator: copySet(state.liveAtTerminator, budget),
             });
-            if budget[0] < 0 { return Result.Err("liveness: analysis work budget exhausted"); }
+            if budget[0] < 0 { return Result.Err(budgetError(function.id, phase)); }
             blockIndex = blockIndex + 1;
         }
         resultFunctions.push(FunctionLiveness { functionId: function.id, blocks: outputBlocks });

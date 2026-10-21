@@ -1,0 +1,75 @@
+import managed::{managedAllocate, managedAllocateDestination, managedCollect, managedCreate, managedDestroy, managedLiveObjects, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRootPop, managedRootPush, managedRootSet, managedStoreReference};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import gc::{gcRequestedRangeMetadataBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(2);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    var scalarLayout = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    __reyRawUnmap(offsets, 8);
+
+    var context = managedCreate(registry, false);
+    var outer = managedRegionCreate(context);
+    var inner = managedRegionCreate(context);
+    var older = managedRegionAllocate(context, outer, nodeLayout);
+    var newer = managedRegionAllocate(context, inner, nodeLayout);
+    var heapChild = managedAllocate(context, scalarLayout);
+    managedStoreReference(context, newer, 0, older);
+    managedStoreReference(context, older, 0, heapChild);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 64);
+    check(managedLiveObjects(context) == 1);
+    managedCollect(context);
+    check(managedLiveObjects(context) == 1);
+    check(managedRegionObjectCount(context) == 2);
+    check(managedRegionRequestedBytes(context) == 147968);
+    check(managedRegionUsedBytes(context) == 224);
+
+    var slot = managedRootPush(context);
+    managedRootSet(context, slot, heapChild);
+    var destinationObject = managedAllocateDestination(context, outer, nodeLayout);
+    check(!__reyRawEqual(destinationObject, __reyRawNull()));
+    check(managedRegionRequestedBytes(context) == 147968);
+    check(managedRegionUsedBytes(context) == 336);
+    var heapDestination = managedAllocateDestination(context, __reyRawNull(), scalarLayout);
+    check(!__reyRawEqual(heapDestination, __reyRawNull()));
+    var heapParent = managedAllocate(context, nodeLayout);
+    var heapLeaf = managedAllocate(context, scalarLayout);
+    managedStoreReference(context, heapParent, 0, heapLeaf);
+    var parentSlot = managedRootPush(context);
+    managedRootSet(context, parentSlot, heapParent);
+    check(managedLiveObjects(context) == 4);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 64);
+
+    managedRegionEnd(context, inner);
+    check(managedRegionObjectCount(context) == 2);
+    check(managedRegionRequestedBytes(context) == 73984);
+    check(managedRegionUsedBytes(context) == 224);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 32);
+    managedRegionEnd(context, outer);
+    check(managedRegionRequestedBytes(context) == 0);
+    check(managedRegionUsedBytes(context) == 0);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 0);
+    managedRootSet(context, slot, __reyRawNull());
+    managedRootSet(context, parentSlot, __reyRawNull());
+    check(managedCollect(context) > 0);
+    check(managedLiveObjects(context) == 0);
+    managedRootPop(context, parentSlot);
+    managedRootPop(context, slot);
+    managedDestroy(context);
+
+    var stressContext = managedCreate(registry, true);
+    var keep = managedAllocate(stressContext, scalarLayout);
+    var keepSlot = managedRootPush(stressContext);
+    managedRootSet(stressContext, keepSlot, keep);
+    managedAllocate(stressContext, scalarLayout);
+    check(managedLiveObjects(stressContext) == 2);
+    managedRootPop(stressContext, keepSlot);
+    managedDestroy(stressContext);
+    layoutRegistryRelease(registry);
+}

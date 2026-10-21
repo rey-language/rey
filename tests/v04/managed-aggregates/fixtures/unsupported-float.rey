@@ -1,0 +1,4 @@
+func main(): void {
+    var value: float = 1.5;
+    return;
+}

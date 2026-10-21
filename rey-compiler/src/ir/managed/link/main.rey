@@ -1,0 +1,333 @@
+import ir::{IRProgram, IRFunction, IRValue, IRType, BasicBlock, Instruction, InstructionKind, Terminator, SourceRef, EffectSummary, Escape};
+import ir;
+import ir::managed::{ManagedProgram, ManagedLayout, ManagedField, ManagedFunction, ManagedAllocation, ManagedDerived, ManagedVariableLayout, ManagedHook};
+import ir::managed::roots::{RuntimeBindings, ManagedHookBinding, lowerManagedRoots};
+import ir::managed::placement::{ManagedStorage, ManagedPlacement, ManagedAllocationPlacement, ManagedCallPlacement, planManagedPlacement};
+import ir::lower::{lowerProgram, lowerManagedProgram};
+import ir::verify::{verifyProgram};
+import frontend::graph::{canonicalSourcePath, checkSourceFileGraphWithRuntime};
+import typecheck::{CheckedProgram};
+
+pub struct LinkedManagedProgram {
+    pub module: ManagedProgram,
+    pub bindings: RuntimeBindings,
+}
+
+pub func findManagedRuntimeRoot(explicitRoot: string, executable: string): string {
+    if explicitRoot != "" { return canonicalSourcePath(explicitRoot); }
+    var directory = ".";
+    var index = executable.len() - 1;
+    while index >= 0 {
+        if executable.slice(index, index + 1) == "/" {
+            directory = executable.slice(0, index);
+            if directory == "" { directory = "/"; }
+            break;
+        }
+        index -= 1;
+    }
+    var candidates: Vec<string> = ["runtime-rey", directory + "/runtime-rey", directory + "/../runtime-rey", directory + "/runtime-rey-src"];
+    index = 0;
+    while index < candidates.len() {
+        var candidate = canonicalSourcePath(candidates[index]);
+        if fileExists(candidate + "/main.rey") && fileExists(candidate + "/managed/main.rey") { return candidate; }
+        index += 1;
+    }
+    return "";
+}
+
+func copyInts(values: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var index = 0;
+    while index < values.len() { result.push(values[index]); index += 1; }
+    return result;
+}
+
+func copySource(value: SourceRef): SourceRef {
+    return ir.sourceRef(value.unitId, value.start, value.end);
+}
+
+func copyValues(values: Vec<IRValue>): Vec<IRValue> {
+    var result: Vec<IRValue> = [];
+    var index = 0;
+    while index < values.len() {
+        result.push(ir.irValue(values[index].id, IRType { kind: values[index].ty.kind }));
+        index += 1;
+    }
+    return result;
+}
+
+func copyFunction(value: IRFunction, shift: int): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockIndex = 0;
+    while blockIndex < value.blocks.len() {
+        var block = value.blocks[blockIndex];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        while instructionIndex < block.instructions.len() {
+            var item = block.instructions[instructionIndex];
+            var target = item.functionId;
+            if item.kind == InstructionKind::Call { target += shift; }
+            instructions.push(Instruction {
+                kind: item.kind, resultId: item.resultId, ty: IRType { kind: item.ty.kind },
+                operands: copyInts(item.operands), immediate: item.immediate,
+                comparison: item.comparison, functionId: target, source: copySource(item.source),
+            });
+            instructionIndex += 1;
+        }
+        var term = block.terminator;
+        var copiedTerm = Terminator {
+            kind: term.kind, targetBlockId: term.targetBlockId, targetArgs: copyInts(term.targetArgs),
+            conditionValueId: term.conditionValueId, trueTargetBlockId: term.trueTargetBlockId,
+            trueArgs: copyInts(term.trueArgs), falseTargetBlockId: term.falseTargetBlockId,
+            falseArgs: copyInts(term.falseArgs), valueId: term.valueId, source: copySource(term.source),
+        };
+        blocks.push(ir.basicBlock(block.id, copyValues(block.params), instructions, copiedTerm));
+        blockIndex += 1;
+    }
+    var parameterTypes: Vec<IRType> = [];
+    var index = 0;
+    while index < value.signature.parameterTypes.len() {
+        parameterTypes.push(IRType { kind: value.signature.parameterTypes[index].kind }); index += 1;
+    }
+    var escapes: Vec<Escape> = [];
+    index = 0;
+    while index < value.effects.argumentEscapes.len() { escapes.push(value.effects.argumentEscapes[index]); index += 1; }
+    var effects = value.effects;
+    var copiedEffects = ir.effectSummary(effects.readsMemory, effects.writesMemory, effects.allocates,
+        effects.mayBlock, effects.synchronizes, effects.unresolvedCallees, escapes, effects.resultEscape);
+    return ir.irFunction(value.id + shift, ir.functionKey(value.key.module, value.key.owner, value.key.name),
+        ir.functionSignature(parameterTypes, IRType { kind: value.signature.returnType.kind }),
+        copyValues(value.parameters), blocks, copiedEffects);
+}
+
+func runtimeId(program: IRProgram, name: string, expectedModule: string): int {
+    var result = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if function.key.name == name && function.key.module == expectedModule {
+            if result >= 0 { return -1; }
+            result = function.id;
+        }
+        index += 1;
+    }
+    return result;
+}
+
+func runtimeHookId(program: IRProgram, name: string, root: string): int {
+    var result = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if function.key.name == name && (function.key.module == root + "/managed/main.rey" || function.key.module == root + "/containers/main.rey") {
+            if result >= 0 { return -1; }
+            result = function.id;
+        }
+        index += 1;
+    }
+    return result;
+}
+
+func containsId(ids: Vec<int>, id: int): bool {
+    var index = 0;
+    while index < ids.len() { if ids[index] == id { return true; } index += 1; }
+    return false;
+}
+
+func collectingRuntimeFunctions(program: IRProgram, root: string): Result<Vec<int>, string> {
+    var collector = runtimeId(program, "gcCollect", root + "/gc/main.rey");
+    if collector < 0 { return Result.Err("managed linker: collector safepoint function is missing"); }
+    var collecting: Vec<int> = [collector];
+    var changed = true;
+    var remaining = 5000000;
+    while changed {
+        changed = false;
+        var functionIndex = 0;
+        while functionIndex < program.functions.len() {
+            var function = program.functions[functionIndex];
+            if !containsId(collecting, function.id) {
+                var blockIndex = 0;
+                var found = false;
+                while blockIndex < function.blocks.len() && !found {
+                    var instructionIndex = 0;
+                    while instructionIndex < function.blocks[blockIndex].instructions.len() && !found {
+                        if remaining <= 0 { return Result.Err("managed linker: safepoint analysis work budget exhausted"); }
+                        remaining -= 1;
+                        var item = function.blocks[blockIndex].instructions[instructionIndex];
+                        if item.kind == InstructionKind::Call && containsId(collecting, item.functionId) { found = true; }
+                        instructionIndex += 1;
+                    }
+                    blockIndex += 1;
+                }
+                if found { collecting.push(function.id); changed = true; }
+            }
+            functionIndex += 1;
+        }
+    }
+    return Result.Ok(collecting);
+}
+
+func copyModule(input: ManagedProgram, program: IRProgram): ManagedProgram {
+    var layouts: Vec<ManagedLayout> = [];
+    var index = 0;
+    while index < input.layouts.len() {
+        var item = input.layouts[index];
+        var fields: Vec<ManagedField> = [];
+        var fieldIndex = 0;
+        while fieldIndex < item.fields.len() {
+            var field = item.fields[fieldIndex];
+            fields.push(ManagedField { name: field.name, offset: field.offset, kind: field.kind, layoutId: field.layoutId });
+            fieldIndex += 1;
+        }
+        layouts.push(ManagedLayout { id: item.id, key: item.key, payloadBytes: item.payloadBytes, fields: fields });
+        index += 1;
+    }
+    var functions: Vec<ManagedFunction> = [];
+    index = 0;
+    while index < input.functions.len() {
+        var item = input.functions[index];
+        functions.push(ManagedFunction { functionId: item.functionId, referenceValues: copyInts(item.referenceValues),
+            parameterLayouts: copyInts(item.parameterLayouts), returnLayout: item.returnLayout });
+        index += 1;
+    }
+    var allocations: Vec<ManagedAllocation> = [];
+    index = 0;
+    while index < input.allocations.len() {
+        var item = input.allocations[index];
+        allocations.push(ManagedAllocation { functionId: item.functionId, blockId: item.blockId, resultId: item.resultId, layoutId: item.layoutId });
+        index += 1;
+    }
+    var derived: Vec<ManagedDerived> = [];
+    index = 0;
+    while index < input.derived.len() {
+        var item = input.derived[index];
+        derived.push(ManagedDerived { functionId: item.functionId, valueId: item.valueId, ownerId: item.ownerId });
+        index += 1;
+    }
+    var variables: Vec<ManagedVariableLayout> = [];
+    index = 0;
+    while index < input.variableLayouts.len() {
+        var item = input.variableLayouts[index];
+        variables.push(ManagedVariableLayout { layoutId: item.layoutId, tailKind: item.tailKind }); index += 1;
+    }
+    var hooks: Vec<ManagedHook> = [];
+    index = 0;
+    while index < input.hooks.len() {
+        var item = input.hooks[index];
+        hooks.push(ManagedHook { functionId: item.functionId, runtimeName: item.runtimeName, mayCollect: item.mayCollect }); index += 1;
+    }
+    return ManagedProgram { program: program, layouts: layouts, functions: functions, allocations: allocations,
+        derived: derived, allocateFunctionId: input.allocateFunctionId,
+        storeReferenceFunctionId: input.storeReferenceFunctionId, collectFunctionId: input.collectFunctionId,
+        variableLayouts: variables, hooks: hooks };
+}
+
+pub func linkManagedRuntime(input: ManagedProgram, runtimeProgram: IRProgram, runtimeRoot: string): Result<LinkedManagedProgram, string> {
+    var userVerified = verifyProgram(input.program);
+    if !userVerified.ok { return Result.Err("managed linker: invalid user IR: " + userVerified.errors.join("\n")); }
+    var runtimeVerified = verifyProgram(runtimeProgram);
+    if !runtimeVerified.ok { return Result.Err("managed linker: invalid runtime IR: " + runtimeVerified.errors.join("\n")); }
+    var shift = ir.nextFunctionId(input.program);
+    if shift < 0 { return Result.Err("managed linker: exhausted function IDs"); }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    while index < input.program.functions.len() {
+        functions.push(copyFunction(input.program.functions[index], 0)); index += 1;
+    }
+    index = 0;
+    while index < runtimeProgram.functions.len() {
+        var function = runtimeProgram.functions[index];
+        if function.id > 9223372036854775807 - shift { return Result.Err("managed linker: exhausted function IDs"); }
+        functions.push(copyFunction(function, shift)); index += 1;
+    }
+    var root = canonicalSourcePath(runtimeRoot);
+    var managedModule = root + "/managed/main.rey";
+    var layoutModule = root + "/layout/main.rey";
+    var names: Vec<string> = ["managedCreate", "managedDestroy", "managedAllocate", "managedCollect", "managedRootPush",
+        "managedRootSet", "managedRootPop", "managedStoreReference", "managedRegionCreate", "managedRegionEnd",
+        "managedRegionAllocate", "managedAllocateDestination", "layoutRegistryCreate", "layoutRegisterFixed", "layoutRegistryRelease", "layoutRegisterVariable"];
+    var ids: Vec<int> = [];
+    index = 0;
+    while index < names.len() {
+        var moduleName = managedModule;
+        if index >= 12 { moduleName = layoutModule; }
+        var id = runtimeId(runtimeProgram, names[index], moduleName);
+        if id < 0 { return Result.Err("managed linker: missing or ambiguous runtime function " + names[index]); }
+        ids.push(id + shift); index += 1;
+    }
+    var safepoints = collectingRuntimeFunctions(runtimeProgram, root);
+    if safepoints.isErr() { return Result.Err(safepoints.unwrapErr()); }
+    var nongc: Vec<int> = [ids[4], ids[5], ids[6], ids[7], ids[8], ids[9], ids[10], ids[12], ids[13], ids[14], ids[15]];
+    index = 0;
+    while index < nongc.len() {
+        if containsId(safepoints.unwrap(), nongc[index] - shift) { return Result.Err("managed linker: a root/setup/region helper may collect"); }
+        index += 1;
+    }
+    var hooks: Vec<ManagedHookBinding> = [];
+    index = 0;
+    while index < input.hooks.len() {
+        var hook = input.hooks[index];
+        var id = runtimeHookId(runtimeProgram, hook.runtimeName, root);
+        if id < 0 { return Result.Err("managed linker: missing or ambiguous runtime hook " + hook.runtimeName); }
+        if !hook.mayCollect && containsId(safepoints.unwrap(), id) {
+            return Result.Err("managed linker: collecting runtime hook was declared non-collecting: " + hook.runtimeName);
+        }
+        hooks.push(ManagedHookBinding { functionId: hook.functionId, runtimeFunctionId: id + shift, mayCollect: hook.mayCollect });
+        index += 1;
+    }
+    var bindings = RuntimeBindings { create: ids[0], destroy: ids[1], allocate: ids[2], collect: ids[3], rootPush: ids[4],
+        rootSet: ids[5], rootPop: ids[6], storeReference: ids[7], regionCreate: ids[8], regionEnd: ids[9], regionAllocate: ids[10],
+        allocateDestination: ids[11], layoutCreate: ids[12], layoutRegister: ids[13], layoutRelease: ids[14],
+        layoutRegisterVariable: ids[15], hooks: hooks };
+    var program = ir.irProgram(input.program.entryFunctionId, functions);
+    return Result.Ok(LinkedManagedProgram { module: copyModule(input, program), bindings: bindings });
+}
+
+pub func loadManagedRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgram, string> {
+    var root = canonicalSourcePath(runtimeRoot);
+    var entry = root + "/main.rey";
+    var units: Vec<string> = [root + "/layout/main.rey", root + "/heap/main.rey", root + "/gc/main.rey", root + "/managed/main.rey", root + "/containers/main.rey"];
+    var checked = checkSourceFileGraphWithRuntime(entry, stdRoot, units);
+    if checked.isErr() { return Result.Err(checked.unwrapErr()); }
+    return lowerProgram(checked.unwrap());
+}
+
+pub func requiresManagedLowering(checked: CheckedProgram): bool {
+    var index = 0;
+    while index < checked.nominalLayouts.len() {
+        if checked.nominalLayouts[index].kind == "Struct" || checked.nominalLayouts[index].kind == "Enum" { return true; }
+        index += 1;
+    }
+    index = 0;
+    while index < checked.expressions.len() {
+        var kind = checked.expressions[index].ty.kind;
+        if kind == "Struct" || kind == "Nullable" || kind == "String" || kind == "Char" || kind == "Tuple" || kind == "Enum" || kind == "Option" || kind == "Result" || kind == "Array" || kind == "Vec" || kind == "HashMap" || kind == "Map" || kind == "Dict" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+pub func buildManagedProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, stress: bool, regions: bool): Result<IRProgram, string> {
+    var input = lowerManagedProgram(checked);
+    if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var runtime = loadManagedRuntime(runtimeRoot, stdRoot);
+    if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
+    var linked = linkManagedRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    if linked.isErr() { return Result.Err(linked.unwrapErr()); }
+    var module = linked.unwrap().module;
+    var placements = ManagedPlacement { allocations: [], calls: [], regionFunctions: [] };
+    if regions {
+        var planned = planManagedPlacement(module);
+        if planned.isErr() { return Result.Err(planned.unwrapErr()); }
+        placements = planned.unwrap();
+    } else {
+        var allocations: Vec<ManagedAllocationPlacement> = [];
+        var index = 0;
+        while index < module.allocations.len() {
+            var item = module.allocations[index];
+            allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: ManagedStorage::Heap }); index += 1;
+        }
+        placements = ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [] };
+    }
+    return lowerManagedRoots(module, linked.unwrap().bindings, placements, stress);
+}

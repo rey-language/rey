@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tarfile
 
@@ -25,10 +26,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--linux-docker", action="store_true")
+    parser.add_argument("--suite", choices=("storage", "arguments"), default="storage")
     args = parser.parse_args()
     output = args.output_dir.resolve()
-    if not output.is_relative_to(ROOT / "build/v04/native-storage"):
-        parser.error("output must be under build/v04/native-storage")
+    suite = "native-" + args.suite
+    cases = CASES if args.suite == "storage" else ("eight", "nine", "ten", "sixteen", "large-frame", "hidden-pointers")
+    raw_case = "raw-across-call" if args.suite == "storage" else "hidden-pointers"
+    if not output.is_relative_to(ROOT / "build/v04" / suite):
+        parser.error("output must be under build/v04/" + suite)
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         parser.error("output must be empty")
@@ -59,7 +64,7 @@ def main():
         raise SystemExit("seed/runtime mismatch")
     stage, images = output / "compiler", output / "images"
     shutil.copytree(ROOT / "rey-compiler/src", stage)
-    shutil.copyfile(Path(__file__).with_name("main.rey"), stage / "main.rey")
+    shutil.copyfile(ROOT / "tests/v04" / suite / "main.rey", stage / "main.rey")
     source_hashes = {str(p.relative_to(stage)): digest(p) for p in sorted(stage.rglob("*.rey"))}
     executable = output / "fixture"
     seed_env = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin")
@@ -70,21 +75,27 @@ def main():
     native_env = dict(os.environ, PATH=str(empty_path))
     for key in ("CC", "CXX", "CLANG", "LD", "LLVM_CONFIG", "REY_RUNTIME_DIR"):
         native_env[key] = str(empty_path / "absent")
-    expected = {(name, mode, target) for name in CASES for mode in ("default", "reuse")
-                for target in ("darwin", "linux", "x64") if not (name == "raw-across-call" and target == "x64")}
+    expected = {(name, mode, target) for name in cases for mode in ("default", "reuse")
+                for target in ("darwin", "linux", "x64") if not (name == raw_case and target == "x64")}
     stdout = b""
     if built:
         ready, stdout = run("generate", [str(executable), str(images)], env=native_env)
-        record("fixture-marker", ready and b"native storage fixtures ready" in stdout)
-    parsed = re.findall(rb"^native-storage-image ([a-z0-9-]+) (default|reuse) (darwin|linux|x64)$", stdout, re.M)
+        marker = b"native storage fixtures ready" if args.suite == "storage" else b"native arguments ready"
+        record("fixture-marker", ready and marker in stdout)
+    parsed = re.findall(rb"^" + suite.encode() + rb"-image ([a-z0-9-]+) (default|reuse) (darwin|linux|x64)$", stdout, re.M)
     found = [tuple(part.decode() for part in entry) for entry in parsed]
     record("manifest", len(found) == len(expected) and set(found) == expected)
     record("image-set", {p.name for p in images.iterdir()} == {"-".join(parts) for parts in expected})
-    frames = re.findall(rb"^native-storage-frame chain (default|reuse) ([0-9]+)$", stdout, re.M)
-    record("actual-arm64-frame-reduction", sorted(frames) == [(b"default", b"336"), (b"reuse", b"16")],
-           observed=[(mode.decode(), int(size)) for mode, size in frames], unit="bytes; not execution timing")
-    plans = re.findall(rb"^native-storage-plan chain 0 ([0-9]+) ([0-9]+)$", stdout, re.M)
-    record("chain-slot-plan", plans == [(b"41", b"2")])
+    if args.suite == "storage":
+        frames = re.findall(rb"^native-storage-frame chain (default|reuse) ([0-9]+)$", stdout, re.M)
+        record("actual-arm64-frame-reduction", sorted(frames) == [(b"default", b"336"), (b"reuse", b"16")],
+               observed=[(mode.decode(), int(size)) for mode, size in frames], unit="bytes; not execution timing")
+        plans = re.findall(rb"^native-storage-plan chain 0 ([0-9]+) ([0-9]+)$", stdout, re.M)
+        record("chain-slot-plan", plans == [(b"41", b"2")])
+    else:
+        frames = re.findall(rb"^native-arguments-frame large-frame (default|reuse) ([0-9]+)$", stdout, re.M)
+        record("actual-large-arm64-frames", sorted(frames) == [(b"default", b"9600"), (b"reuse", b"16")],
+               observed=[(mode.decode(), int(size)) for mode, size in frames], unit="bytes; not execution timing")
     linux = {}
     artifacts = {}
     for name, mode, target in sorted(expected):
@@ -94,8 +105,12 @@ def main():
             record(key + "-present", False)
             continue
         data = path.read_bytes()
-        prefix = bytes.fromhex("cffaedfe") if target == "darwin" else b"\x7fELF\x02\x01\x01"
-        record(key + "-header", data.startswith(prefix))
+        if target == "darwin":
+            header_ok = len(data) >= 32 and data[:4] == bytes.fromhex("cffaedfe") and struct.unpack_from("<I", data, 4)[0] == 16777228
+        else:
+            machine = 62 if target == "x64" else 183
+            header_ok = len(data) >= 64 and data[:7] == b"\x7fELF\x02\x01\x01" and struct.unpack_from("<HH", data, 16) == (2, machine)
+        record(key + "-header", header_ok)
         artifacts[key] = digest(path)
         if target == "darwin":
             path.chmod(0o755)
@@ -107,7 +122,7 @@ def main():
         docker = shutil.which("docker") or "docker"
         inspected, stdout = run("docker-image", [docker, "image", "inspect", "ubuntu:22.04", "--format", "{{.Id}}"])
         image = stdout.decode(errors="replace").strip()
-        if inspected and image.startswith("sha256:") and len(linux) == 22:
+        if inspected and image.startswith("sha256:") and len(linux) == len(expected) - len(cases) * 2:
             payload = io.BytesIO()
             with tarfile.open(fileobj=payload, mode="w") as archive:
                 for key, path in linux.items():
@@ -129,7 +144,7 @@ def main():
                   execution="Darwin arm64 and Linux aarch64 VM; x64 artifacts use user-mode emulation",
                   limitation="fixed slot-frame reduction is not runtime or compiler performance evidence")
     (output / "result.json").write_text(json.dumps(report, indent=2) + "\n")
-    print("native storage", "PASS" if report["passed"] else "FAIL", len(records), "checks")
+    print(suite, "PASS" if report["passed"] else "FAIL", len(records), "checks")
     return 0 if report["passed"] else 1
 
 

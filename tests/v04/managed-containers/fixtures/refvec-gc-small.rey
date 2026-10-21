@@ -1,0 +1,65 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCollect, managedCreate, managedDestroy, managedLiveObjects, managedRootPop, managedRootPush, managedRootSet};
+import containers::{managedStringFromInt, managedVecCapacity, managedVecCreate, managedVecGetI64, managedVecGetReference, managedVecLength, managedVecPopI64, managedVecPopReference, managedVecPushI64, managedVecPushReference, managedVecSetI64, managedVecSetReference, managedVecTruncate};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(3);
+    var oneOffset = __reyRawMap(8);
+    __reyRawStoreI64(oneOffset, 0);
+    var vectorLayout = layoutRegisterFixed(registry, 8, oneOffset, 1);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var referenceTail = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    __reyRawUnmap(oneOffset, 8);
+    var context = managedCreate(registry, false);
+    var vector = managedVecCreate(context, vectorLayout, referenceTail, 0);
+    var vectorSlot = managedRootPush(context);
+    managedRootSet(context, vectorSlot, vector);
+    var index = 0;
+    while index < 10 {
+        var text = managedStringFromInt(context, stringLayout, index);
+        var textSlot = managedRootPush(context);
+        managedRootSet(context, textSlot, text);
+        managedVecPushReference(context, vector, referenceTail, text);
+        managedRootPop(context, textSlot);
+        index = index + 1;
+    }
+    check(managedVecLength(context, vector) == 10 && managedVecCapacity(context, vector) >= 16);
+    check(!__reyRawEqual(managedVecGetReference(context, vector, 0), __reyRawNull()));
+    var replacement = managedStringFromInt(context, stringLayout, 900);
+    var replacementSlot = managedRootPush(context);
+    managedRootSet(context, replacementSlot, replacement);
+    managedVecSetReference(context, vector, 3, replacement);
+    check(__reyRawEqual(managedVecGetReference(context, vector, 3), replacement));
+    var last = managedVecPopReference(context, vector);
+    check(!__reyRawEqual(last, __reyRawNull()) && managedVecLength(context, vector) == 9);
+    managedVecTruncate(context, vector, 0);
+    check(managedVecLength(context, vector) == 0);
+    managedRootPop(context, replacementSlot);
+    managedCollect(context);
+    check(managedLiveObjects(context) == 2);
+
+    var scalarVector = managedVecCreate(context, vectorLayout, stringLayout, 0);
+    var scalarSlot = managedRootPush(context);
+    managedRootSet(context, scalarSlot, scalarVector);
+    index = 0;
+    while index < 9 {
+        managedVecPushI64(context, scalarVector, stringLayout, index * 3);
+        index = index + 1;
+    }
+    check(managedVecGetI64(context, scalarVector, 5) == 15);
+    managedVecSetI64(context, scalarVector, 5, 77);
+    check(managedVecGetI64(context, scalarVector, 5) == 77);
+    check(managedVecPopI64(context, scalarVector) == 24);
+    managedVecTruncate(context, scalarVector, 0);
+    check(managedVecLength(context, scalarVector) == 0);
+    managedRootPop(context, scalarSlot);
+    managedRootPop(context, vectorSlot);
+    managedCollect(context);
+    check(managedLiveObjects(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

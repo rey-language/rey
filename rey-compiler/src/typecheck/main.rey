@@ -3575,6 +3575,30 @@ func enumTypeName(ty: Type): string {
     return "";
 }
 
+func patternNodeKey(pattern: Pattern): string {
+    var span = patternSpan(pattern);
+    return "Pattern:" + span.start.toString() + ":" + span.end.toString();
+}
+
+func builtinSumPatternName(expected: Type, requestedName: string): bool {
+    if expected.kind == "Option" { return requestedName == "" || requestedName == "Option"; }
+    if expected.kind == "Result" { return requestedName == "" || requestedName == "Result"; }
+    return false;
+}
+
+func builtinSumPayloadType(expected: Type, variant: string): Type {
+    if expected.kind == "Option" && variant == "Some" {
+        var optionInner = expected.inner;
+        if optionInner != null { var resolvedOptionInner: Type = optionInner; return resolvedOptionInner; }
+    }
+    if expected.kind == "Result" {
+        var resultPayload = expected.inner;
+        if variant == "Err" { resultPayload = expected.key; }
+        if resultPayload != null { var resolvedResultPayload: Type = resultPayload; return resolvedResultPayload; }
+    }
+    return makeType("Unknown");
+}
+
 func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expected: Type): PatternResult {
     match pattern {
         Pattern::Error(_) => {
@@ -3594,6 +3618,9 @@ func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expecte
             return PatternResult { coversAll: false, variant: "", coversVariant: false };
         },
         Pattern::Variable(variable) => {
+            if expected.kind == "Option" && variable.name == "None" {
+                return PatternResult { coversAll: false, variant: "Option::None", coversVariant: true };
+            }
             var knownEnum = enumTypeName(expected);
             if knownEnum != "" {
                 var bareVariant = findVariantDecl(ctx, knownEnum, variable.name);
@@ -3601,10 +3628,50 @@ func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expecte
                     return PatternResult { coversAll: expected.kind == "Enum" && enumHasSingleVariant(ctx, expected, knownEnum), variant: variable.name, coversVariant: true };
                 }
             }
+            var duplicate = env.symbols.has(variable.name);
             defineSymbol(ctx, env, variable.name, expected, true, variable.span.start);
+            if !duplicate { recordBinding(ctx, pattern, patternNodeKey(pattern), variable.name, expected, "Pattern", true, -1); }
             return PatternResult { coversAll: true, variant: "", coversVariant: false };
         },
         Pattern::EnumVariant(enumPattern) => {
+            if (enumPattern.enumName == "Option" || enumPattern.enumName == "Result") && !builtinSumPatternName(expected, enumPattern.enumName) {
+                addError(ctx, "built-in sum pattern does not match scrutinee type " + typeName(expected), patternSpan(pattern).start);
+                return PatternResult { coversAll: false, variant: "", coversVariant: false };
+            }
+            if expected.kind == "Option" || expected.kind == "Result" {
+                if !builtinSumPatternName(expected, enumPattern.enumName) {
+                    addError(ctx, "built-in sum pattern does not match scrutinee type " + typeName(expected), patternSpan(pattern).start);
+                    return PatternResult { coversAll: false, variant: "", coversVariant: false };
+                }
+                var builtinVariantValid = false;
+                if expected.kind == "Option" { builtinVariantValid = enumPattern.variant == "Some" || enumPattern.variant == "None"; }
+                else { builtinVariantValid = enumPattern.variant == "Ok" || enumPattern.variant == "Err"; }
+                if !builtinVariantValid {
+                    addError(ctx, "unknown " + expected.kind + " variant '" + enumPattern.variant + "'", patternSpan(pattern).start);
+                    return PatternResult { coversAll: false, variant: "", coversVariant: false };
+                }
+                var builtinPayloadCount = 0;
+                if expected.kind == "Option" && enumPattern.variant == "Some" { builtinPayloadCount = 1; }
+                if expected.kind == "Result" { builtinPayloadCount = 1; }
+                if builtinPayloadCount == 0 && enumPattern.payloads.len() != 0 {
+                    addError(ctx, expected.kind + "::" + enumPattern.variant + " expects 0 payload patterns", patternSpan(pattern).start);
+                    return PatternResult { coversAll: false, variant: "", coversVariant: false };
+                }
+                if builtinPayloadCount > 0 && enumPattern.payloads.len() > 1 {
+                    addError(ctx, expected.kind + "::" + enumPattern.variant + " expects at most 1 payload pattern", patternSpan(pattern).start);
+                    return PatternResult { coversAll: false, variant: "", coversVariant: false };
+                }
+                var builtinCoversVariant = true;
+                if builtinPayloadCount > 0 && enumPattern.payloads.len() == 1 {
+                    var payloadResult = checkPattern(ctx, env, enumPattern.payloads[0], builtinSumPayloadType(expected, enumPattern.variant));
+                    builtinCoversVariant = payloadResult.coversAll;
+                }
+                return PatternResult {
+                    coversAll: false,
+                    variant: expected.kind + "::" + enumPattern.variant,
+                    coversVariant: builtinCoversVariant,
+                };
+            }
             var enumName = enumPattern.enumName;
             var expectedEnum = enumTypeName(expected);
             if enumName == "" && expectedEnum != "" { enumName = expectedEnum; }
@@ -3747,7 +3814,29 @@ func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
         i = i + 1;
     }
     if wildcard { return; }
-    if scrutinee.kind == "Enum" && ctx.enums.has(scrutinee.name) {
+    if scrutinee.kind == "Option" {
+        var optionVariants = ["Option::Some", "Option::None"];
+        var optionVariantIndex = 0;
+        loop {
+            if optionVariantIndex >= optionVariants.len() { break; }
+            var optionSeen = false;
+            var optionCoveredIndex = 0;
+            loop { if optionCoveredIndex >= covered.len() { break; } if covered[optionCoveredIndex] == optionVariants[optionVariantIndex] { optionSeen = true; } optionCoveredIndex = optionCoveredIndex + 1; }
+            if !optionSeen { addError(ctx, "non-exhaustive Option match; missing " + optionVariants[optionVariantIndex], stmt.span.start); }
+            optionVariantIndex = optionVariantIndex + 1;
+        }
+    } else if scrutinee.kind == "Result" {
+        var resultVariants = ["Result::Ok", "Result::Err"];
+        var resultVariantIndex = 0;
+        loop {
+            if resultVariantIndex >= resultVariants.len() { break; }
+            var resultSeen = false;
+            var resultCoveredIndex = 0;
+            loop { if resultCoveredIndex >= covered.len() { break; } if covered[resultCoveredIndex] == resultVariants[resultVariantIndex] { resultSeen = true; } resultCoveredIndex = resultCoveredIndex + 1; }
+            if !resultSeen { addError(ctx, "non-exhaustive Result match; missing " + resultVariants[resultVariantIndex], stmt.span.start); }
+            resultVariantIndex = resultVariantIndex + 1;
+        }
+    } else if scrutinee.kind == "Enum" && ctx.enums.has(scrutinee.name) {
         var decl: EnumDeclStmt = ctx.enums.get(scrutinee.name);
         var v = 0;
         loop {

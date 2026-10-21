@@ -153,7 +153,13 @@ func heapObjectCheck(heap: __rey_raw_address, object: __rey_raw_address): int {
     var id = heapObjectId(heap, object);
     var payloadBytes = __reyRawLoadI64(heapAddressAt(object, 8));
     var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
-    if payloadBytes < 0 || payloadBytes != layout.layoutPayloadBytes(registry, id) { heapFail(2002); return 0; }
+    if payloadBytes < 0 || !layout.layoutPayloadSizeValid(registry, id, payloadBytes) { heapFail(2002); return 0; }
+    if layout.layoutTailKind(registry, id) == 2 {
+        var minimumPayloadBytes = layout.layoutPayloadBytes(registry, id);
+        var capacity = (payloadBytes - minimumPayloadBytes) / 8;
+        var initialized = __reyRawLoadI64(heapAddressAt(object, 16));
+        if initialized < 0 || initialized > capacity { heapFail(2002); return 0; }
+    }
     return payloadBytes;
 }
 
@@ -319,13 +325,22 @@ pub func heapAllocate(heap: __rey_raw_address, layoutId: int): __rey_raw_address
     heapContextValidate(heap);
     var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
     var payloadBytes = layout.layoutPayloadBytes(registry, layoutId);
+    return heapAllocateSized(heap, layoutId, payloadBytes);
+}
+
+pub func heapAllocateSized(heap: __rey_raw_address, layoutId: int, payloadBytes: int): __rey_raw_address {
+    heapContextValidate(heap);
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    if payloadBytes < 0 || payloadBytes > 9223372036854775791 || !layout.layoutPayloadSizeValid(registry, layoutId, payloadBytes) {
+        heapFail(2001);
+        return __reyRawNull();
+    }
     var referenceCount = layout.layoutReferenceCount(registry, layoutId);
     var index = 0;
     while index < referenceCount {
         layout.layoutReferenceOffset(registry, layoutId, index);
         index = index + 1;
     }
-    if payloadBytes > 9223372036854775791 { heapFail(2001); return __reyRawNull(); }
     var actualSize = 16 + payloadBytes;
     if actualSize > 9223372036854775791 { heapFail(2001); return __reyRawNull(); }
     var slotSize = (actualSize + 15) / 16 * 16;

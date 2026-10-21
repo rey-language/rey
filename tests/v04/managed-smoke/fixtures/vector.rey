@@ -1,0 +1,7 @@
+func main(): void {
+    var values: Vec<int> = [7];
+    if values.len() != 1 || values[0] != 7 {
+        var zero: int = 0; var fail: int = 1 / zero;
+    }
+    return;
+}

@@ -1,0 +1,7 @@
+func main(): void {
+    var value: Option<int> = Option::Some(3);
+    match value {
+        Some(payload) => { var observed: int = payload; },
+    }
+    return;
+}

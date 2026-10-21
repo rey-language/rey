@@ -464,8 +464,8 @@ func resolveLocalFixups(emitter: Emitter, start: int, finish: int, blocks: Vec<B
 }
 
 func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, layout: FunctionSlots, reuse: bool): void {
-    if function.parameters.len() > 8 {
-        emitter.error = "native x64: functions with more than eight scalar arguments are unsupported";
+    if function.parameters.len() > 16 {
+        emitter.error = "native x64: functions with more than sixteen scalar arguments are unsupported";
         return;
     }
     var slots = collectSlots(function);
@@ -481,6 +481,8 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     }
     var scratchCount = maxEdgeParams(function);
     var outgoingBytes = 16;
+    var requiredOutgoingBytes = (maxCallArguments(function) - 6) * 8;
+    if requiredOutgoingBytes > outgoingBytes { outgoingBytes = requiredOutgoingBytes; }
     var rawFrame = slotCount * 8 + scratchCount * 8 + outgoingBytes;
     if rawFrame > 65520 {
         emitter.error = "native x64: stack frame exceeds the supported 65520-byte limit";
@@ -565,7 +567,7 @@ func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Resul
     var i = 0;
     loop {
         if i >= program.functions.len() { break; }
-        if program.functions[i].parameters.len() > 8 { return Result.Err("native x64: functions with more than eight scalar arguments are unsupported"); }
+        if program.functions[i].parameters.len() > 16 { return Result.Err("native x64: functions with more than sixteen scalar arguments are unsupported"); }
         var b = 0;
         loop {
             if b >= program.functions[i].blocks.len() { break; }
@@ -573,8 +575,8 @@ func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Resul
             loop {
                 if n >= program.functions[i].blocks[b].instructions.len() { break; }
                 var instruction = program.functions[i].blocks[b].instructions[n];
-                if instruction.kind == InstructionKind::Call && instruction.operands.len() > 8 {
-                    return Result.Err("native x64: calls with more than eight scalar arguments are unsupported");
+                if instruction.kind == InstructionKind::Call && instruction.operands.len() > 16 {
+                    return Result.Err("native x64: calls with more than sixteen scalar arguments are unsupported");
                 }
                 n = n + 1;
             }

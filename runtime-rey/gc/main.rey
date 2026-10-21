@@ -1,5 +1,5 @@
 import heap::{heapAllocate, heapLiveObjects, heapMark, heapRegistry, heapSweep};
-import layout::{layoutReferenceCount, layoutReferenceOffset};
+import layout::{layoutPayloadBytes, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
 
 func gcAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
     return __reyRawOffset(base, offset);
@@ -19,6 +19,37 @@ func gcInitializeRootSlots(addresses: __rey_raw_address, capacity: int): void {
     while index < capacity {
         __reyRawStoreAddress(gcAddressAt(addresses, index * 8), __reyRawNull());
         index = index + 1;
+    }
+}
+
+func gcRangeNext(range: __rey_raw_address): __rey_raw_address {
+    if __reyRawEqual(range, __reyRawNull()) { return __reyRawNull(); }
+    if __reyRawLoadI64(gcAddressAt(range, 0)) != 1380272210 {
+        gcFail(2102);
+        return __reyRawNull();
+    }
+    var count = __reyRawLoadI64(gcAddressAt(range, 24));
+    var addresses = __reyRawLoadAddress(gcAddressAt(range, 16));
+    if count < 0 || count > gcMaxRootCapacity() || (count == 0 && !__reyRawEqual(addresses, __reyRawNull())) || (count > 0 && __reyRawEqual(addresses, __reyRawNull())) {
+        gcFail(2102);
+        return __reyRawNull();
+    }
+    return __reyRawLoadAddress(gcAddressAt(range, 8));
+}
+
+func gcValidateRangeList(collector: __rey_raw_address): void {
+    var head = __reyRawLoadAddress(gcAddressAt(collector, 40));
+    var slow = head;
+    var fast = head;
+    while !__reyRawEqual(fast, __reyRawNull()) {
+        fast = gcRangeNext(fast);
+        if __reyRawEqual(fast, __reyRawNull()) { return; }
+        fast = gcRangeNext(fast);
+        slow = gcRangeNext(slow);
+        if !__reyRawEqual(fast, __reyRawNull()) && __reyRawEqual(fast, slow) {
+            gcFail(2102);
+            return;
+        }
     }
 }
 
@@ -47,7 +78,8 @@ func gcValidate(collector: __rey_raw_address): void {
         gcFail(2102);
         return;
     }
-    var reservedOffset = 40;
+    gcValidateRangeList(collector);
+    var reservedOffset = 48;
     while reservedOffset < 64 {
         if __reyRawLoadByte(gcAddressAt(collector, reservedOffset)) != 0 {
             gcFail(2102);
@@ -122,6 +154,19 @@ func gcTraceObject(heap: __rey_raw_address, registry: __rey_raw_address, worklis
         pending = gcVisit(heap, worklist, child, pending, capacity);
         index = index + 1;
     }
+    if layoutTailKind(registry, layoutId) == 2 {
+        var payloadBytes = __reyRawLoadI64(gcAddressAt(object, 8));
+        var minimumPayloadBytes = layoutPayloadBytes(registry, layoutId);
+        var tailCapacity = (payloadBytes - minimumPayloadBytes) / 8;
+        var initialized = __reyRawLoadI64(gcAddressAt(object, 16));
+        if initialized < 0 || initialized > tailCapacity { gcFail(2102); return pending; }
+        index = 0;
+        while index < initialized {
+            var tailAddress = gcAddressAt(object, 16 + minimumPayloadBytes + index * 8);
+            pending = gcVisit(heap, worklist, __reyRawLoadAddress(tailAddress), pending, capacity);
+            index = index + 1;
+        }
+    }
     return pending;
 }
 
@@ -143,11 +188,16 @@ pub func gcCreate(heap: __rey_raw_address, initialRootCapacity: int): __rey_raw_
     __reyRawStoreAddress(gcAddressAt(collector, 16), roots);
     __reyRawStoreI64(gcAddressAt(collector, 24), 0);
     __reyRawStoreI64(gcAddressAt(collector, 32), initialRootCapacity);
+    __reyRawStoreAddress(gcAddressAt(collector, 40), __reyRawNull());
     return collector;
 }
 
 pub func gcDestroy(collector: __rey_raw_address): void {
     gcValidate(collector);
+    if !__reyRawEqual(__reyRawLoadAddress(gcAddressAt(collector, 40)), __reyRawNull()) {
+        gcFail(2105);
+        return;
+    }
     var capacity = __reyRawLoadI64(gcAddressAt(collector, 32));
     var roots = __reyRawLoadAddress(gcAddressAt(collector, 16));
     if capacity > 0 { __reyRawUnmap(roots, gcRootBytes(capacity)); }
@@ -196,10 +246,62 @@ pub func gcRootCount(collector: __rey_raw_address): int {
     return __reyRawLoadI64(gcAddressAt(collector, 24));
 }
 
+pub func gcRegisterRootRange(collector: __rey_raw_address, addresses: __rey_raw_address, count: int): __rey_raw_address {
+    gcValidate(collector);
+    if count < 0 || count > gcMaxRootCapacity() || (count > 0 && __reyRawEqual(addresses, __reyRawNull())) {
+        gcFail(2105);
+        return __reyRawNull();
+    }
+    var range = __reyRawMap(32);
+    __reyRawStoreI64(gcAddressAt(range, 0), 1380272210);
+    __reyRawStoreAddress(gcAddressAt(range, 8), __reyRawLoadAddress(gcAddressAt(collector, 40)));
+    if count == 0 { __reyRawStoreAddress(gcAddressAt(range, 16), __reyRawNull()); }
+    else { __reyRawStoreAddress(gcAddressAt(range, 16), addresses); }
+    __reyRawStoreI64(gcAddressAt(range, 24), count);
+    __reyRawStoreAddress(gcAddressAt(collector, 40), range);
+    return range;
+}
+
+pub func gcUnregisterRootRange(collector: __rey_raw_address, range: __rey_raw_address): void {
+    gcValidate(collector);
+    if __reyRawEqual(range, __reyRawNull()) { gcFail(2105); return; }
+    var head = __reyRawLoadAddress(gcAddressAt(collector, 40));
+    var current = head;
+    var previous = __reyRawNull();
+    while !__reyRawEqual(current, __reyRawNull()) {
+        var next = gcRangeNext(current);
+        if __reyRawEqual(current, range) {
+            if __reyRawEqual(previous, __reyRawNull()) {
+                __reyRawStoreAddress(gcAddressAt(collector, 40), next);
+            } else {
+                __reyRawStoreAddress(gcAddressAt(previous, 8), next);
+            }
+            __reyRawStoreI64(gcAddressAt(current, 0), 0);
+            __reyRawUnmap(current, 32);
+            return;
+        }
+        previous = current;
+        current = next;
+    }
+    gcFail(2105);
+}
+
 pub func gcRequestedMetadataBytes(collector: __rey_raw_address): int {
     gcValidate(collector);
     var capacity = __reyRawLoadI64(gcAddressAt(collector, 32));
     return 64 + gcRootBytes(capacity);
+}
+
+pub func gcRequestedRangeMetadataBytes(collector: __rey_raw_address): int {
+    gcValidate(collector);
+    var range = __reyRawLoadAddress(gcAddressAt(collector, 40));
+    var count = 0;
+    while !__reyRawEqual(range, __reyRawNull()) {
+        range = gcRangeNext(range);
+        if count >= 288230376151711743 { gcFail(2101); return 0; }
+        count = count + 1;
+    }
+    return count * 32;
 }
 
 pub func gcCollect(collector: __rey_raw_address): int {
@@ -222,6 +324,18 @@ pub func gcCollect(collector: __rey_raw_address): int {
         var root = __reyRawLoadAddress(gcAddressAt(roots, index * 8));
         pending = gcVisit(heap, worklist, root, pending, capacity);
         index = index + 1;
+    }
+    var range = __reyRawLoadAddress(gcAddressAt(collector, 40));
+    while !__reyRawEqual(range, __reyRawNull()) {
+        var addresses = __reyRawLoadAddress(gcAddressAt(range, 16));
+        var count = __reyRawLoadI64(gcAddressAt(range, 24));
+        index = 0;
+        while index < count {
+            var root = __reyRawLoadAddress(gcAddressAt(addresses, index * 8));
+            pending = gcVisit(heap, worklist, root, pending, capacity);
+            index = index + 1;
+        }
+        range = gcRangeNext(range);
     }
     while pending > 0 {
         pending = pending - 1;

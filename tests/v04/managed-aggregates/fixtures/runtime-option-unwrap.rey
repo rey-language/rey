@@ -1,0 +1,5 @@
+func main(): void {
+    var absent: Option<int> = Option::None();
+    var missing: int = absent.unwrap();
+    return;
+}

@@ -3,6 +3,8 @@
 // uses that runtime until the full native self-hosting gate is implemented.
 import frontend::graph::{checkSourceFileGraph};
 import ir::lower::{lowerProgram};
+import ir::{IRProgram};
+import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
@@ -15,11 +17,11 @@ import ir::optimize::scalar::{foldConstants};
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots]");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--gc-stress] [--no-regions]");
         return;
     }
     if argv.len() < 7 || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots]");
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--gc-stress] [--no-regions]");
         exit(2);
         return;
     }
@@ -28,6 +30,11 @@ func main(): void {
     var hasStdRoot = false;
     var folding = false;
     var reuse = false;
+    var forceManaged = false;
+    var runtimeRoot = "";
+    var hasRuntimeRoot = false;
+    var stress = false;
+    var regions = true;
     var optionIndex = 7;
     while optionIndex < argv.len() {
         if argv[optionIndex] == "--std-root" && !hasStdRoot {
@@ -42,6 +49,22 @@ func main(): void {
         } else if argv[optionIndex] == "--reuse-slots" && !reuse {
             reuse = true;
             optionIndex = optionIndex + 1;
+        } else if argv[optionIndex] == "--managed" && !forceManaged {
+            forceManaged = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--runtime-root" && !hasRuntimeRoot {
+            if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
+                eprintln("expected --runtime-root <directory>"); exit(2); return;
+            }
+            runtimeRoot = argv[optionIndex + 1];
+            hasRuntimeRoot = true;
+            optionIndex += 2;
+        } else if argv[optionIndex] == "--gc-stress" && !stress {
+            stress = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--no-regions" && regions {
+            regions = false;
+            optionIndex += 1;
         } else {
             eprintln("unknown or duplicate option: " + argv[optionIndex]); exit(2); return;
         }
@@ -57,7 +80,14 @@ func main(): void {
     if !fileExists(path) { eprintln(path + ": error: source file not found"); exit(1); return; }
     var checked = checkSourceFileGraph(path, stdRoot);
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); return; }
-    var lowered = lowerProgram(checked.unwrap());
+    var lowered: Result<IRProgram, string> = Result.Err("not lowered");
+    if forceManaged || stress || requiresManagedLowering(checked.unwrap()) {
+        runtimeRoot = findManagedRuntimeRoot(runtimeRoot, argv[0]);
+        if runtimeRoot == "" { eprintln("managed runtime source not found; use --runtime-root <directory>"); exit(1); return; }
+        lowered = buildManagedProgram(checked.unwrap(), runtimeRoot, stdRoot, stress, regions);
+    } else {
+        lowered = lowerProgram(checked.unwrap());
+    }
     if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); return; }
     var program = lowered.unwrap();
     var verified = verifyProgram(program);

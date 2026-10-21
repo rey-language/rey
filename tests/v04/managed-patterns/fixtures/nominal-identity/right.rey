@@ -1,0 +1,7 @@
+pub struct Cell {
+    pub value: bool,
+}
+
+pub func acceptOtherCell(value: Cell): bool {
+    return value.value;
+}

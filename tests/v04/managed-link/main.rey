@@ -1,0 +1,159 @@
+import ir;
+import ir::{EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram};
+import ir::managed::link::{linkManagedRuntime};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-link-fixture.rey", 0, 1); }
+
+func effectSummary(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } escapes.push(Escape::Unknown); index = index + 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func runtimeFunction(id: int, module: string, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var parameterTypes: Vec<IRType> = [];
+    var parameters: Vec<IRValue> = [];
+    var index = 0;
+    loop { if index >= parameterKinds.len() { break; } parameterTypes.push(IRType { kind: parameterKinds[index] }); parameters.push(ir.irValue(100 + index, IRType { kind: parameterKinds[index] })); index = index + 1; }
+    var terminator = ir.returnVoid(source());
+    if returnKind != IRTypeKind::Void { terminator = ir.returnValue(returnId, source()); }
+    return ir.irFunction(id, ir.functionKey(module, "", name), ir.functionSignature(parameterTypes, IRType { kind: returnKind }), parameters, [ir.basicBlock(0, [], instructions, terminator)], effectSummary(parameterKinds.len()));
+}
+
+func plainRuntimeFunction(id: int, module: string, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    var returnId = -1;
+    if returnKind == IRTypeKind::I64 { instructions.push(ir.constI64(0, 0, source())); returnId = 0; }
+    else if returnKind == IRTypeKind::RawAddress { instructions.push(ir.rawNull(0, source())); returnId = 0; }
+    return runtimeFunction(id, module, name, parameterKinds, returnKind, instructions, returnId);
+}
+
+func runtimeHelper(root: string): IRFunction {
+    var instructions: Vec<Instruction> = [ir.call(0, ir.irI64(), 100, [100], source())];
+    return runtimeFunction(101, root + "/managed/main.rey", "managedTestHelper", [IRTypeKind::RawAddress], IRTypeKind::Void, instructions, -1);
+}
+
+func collectingRootPush(root: string): IRFunction {
+    var instructions: Vec<Instruction> = [ir.call(-1, ir.irVoid(), 101, [100], source()), ir.constI64(0, 0, source())];
+    return runtimeFunction(5, root + "/managed/main.rey", "managedRootPush", [IRTypeKind::RawAddress], IRTypeKind::I64, instructions, 0);
+}
+
+func collectingHook(root: string): IRFunction {
+    var instructions: Vec<Instruction> = [ir.call(-1, ir.irVoid(), 101, [100], source()), ir.rawNull(0, source())];
+    return runtimeFunction(102, root + "/managed/main.rey", "managedTestHook", [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::RawAddress, instructions, 0);
+}
+
+func runtimeProgram(root: string, mode: string): IRProgram {
+    var managedPath = root + "/managed/main.rey";
+    var layoutPath = root + "/layout/main.rey";
+    var gcPath = root + "/gc/main.rey";
+    var functions: Vec<IRFunction> = [];
+    functions.push(plainRuntimeFunction(100, gcPath, "gcCollect", [IRTypeKind::RawAddress], IRTypeKind::I64));
+    functions.push(runtimeHelper(root));
+    if mode == "hookCollecting" || mode == "rootCollecting" { functions.push(collectingHook(root)); }
+    else { functions.push(plainRuntimeFunction(102, managedPath, "managedTestHook", [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::RawAddress)); }
+    if mode == "wrongPathCreate" { functions.push(plainRuntimeFunction(1, root + "/other/main.rey", "managedCreate", [IRTypeKind::RawAddress, IRTypeKind::Bool], IRTypeKind::RawAddress)); }
+    else if mode != "missingCreate" { functions.push(plainRuntimeFunction(1, managedPath, "managedCreate", [IRTypeKind::RawAddress, IRTypeKind::Bool], IRTypeKind::RawAddress)); }
+    functions.push(plainRuntimeFunction(2, managedPath, "managedDestroy", [IRTypeKind::RawAddress], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(3, managedPath, "managedAllocate", [IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress));
+    var collectInstructions: Vec<Instruction> = [ir.call(0, ir.irI64(), 100, [100], source())];
+    functions.push(runtimeFunction(4, managedPath, "managedCollect", [IRTypeKind::RawAddress], IRTypeKind::I64, collectInstructions, 0));
+    if mode == "rootCollecting" { functions.push(collectingRootPush(root)); }
+    else { functions.push(plainRuntimeFunction(5, managedPath, "managedRootPush", [IRTypeKind::RawAddress], IRTypeKind::I64)); }
+    functions.push(plainRuntimeFunction(6, managedPath, "managedRootSet", [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(7, managedPath, "managedRootPop", [IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(8, managedPath, "managedStoreReference", [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(9, managedPath, "managedRegionCreate", [IRTypeKind::RawAddress], IRTypeKind::RawAddress));
+    functions.push(plainRuntimeFunction(10, managedPath, "managedRegionEnd", [IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(11, managedPath, "managedRegionAllocate", [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress));
+    functions.push(plainRuntimeFunction(12, managedPath, "managedAllocateDestination", [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::RawAddress));
+    functions.push(plainRuntimeFunction(13, layoutPath, "layoutRegistryCreate", [IRTypeKind::I64], IRTypeKind::RawAddress));
+    functions.push(plainRuntimeFunction(14, layoutPath, "layoutRegisterFixed", [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::I64));
+    functions.push(plainRuntimeFunction(15, layoutPath, "layoutRegistryRelease", [IRTypeKind::RawAddress], IRTypeKind::Void));
+    functions.push(plainRuntimeFunction(16, layoutPath, "layoutRegisterVariable", [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::I64], IRTypeKind::I64));
+    if mode == "duplicateCreate" {
+        var duplicateCreate = plainRuntimeFunction(103, managedPath, "managedCreate", [IRTypeKind::RawAddress, IRTypeKind::Bool], IRTypeKind::RawAddress);
+        var duplicateKey = duplicateCreate.key;
+        duplicateKey.owner = "alternate";
+        duplicateCreate.key = duplicateKey;
+        functions.push(duplicateCreate);
+    }
+    functions.push(plainRuntimeFunction(104, root + "/main.rey", "runtimeEntry", [], IRTypeKind::Void));
+    return ir.irProgram(104, functions);
+}
+
+func userProgram(): IRProgram {
+    var main = ir.irFunction(10, ir.functionKey("managed-link-user", "", "main"), ir.functionSignature([], ir.irVoid()), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))], effectSummary(0));
+    var hook = plainRuntimeFunction(11, "managed-link-user", "hookStub", [IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::RawAddress);
+    return ir.irProgram(10, [main, hook]);
+}
+
+func inputModule(): ManagedProgram {
+    var program = userProgram();
+    var fields: Vec<ManagedField> = [ManagedField { name: "value", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var layouts: Vec<ManagedLayout> = [ManagedLayout { id: 1, key: "fixture::Cell", payloadBytes: 8, fields: fields }];
+    var userFunctions: Vec<ManagedFunction> = [ManagedFunction { functionId: 10, referenceValues: [], parameterLayouts: [], returnLayout: 0 }];
+    var hooks: Vec<ManagedHook> = [ManagedHook { functionId: 11, runtimeName: "managedTestHook", mayCollect: false }];
+    return ManagedProgram { program: program, layouts: layouts, functions: userFunctions, allocations: [], derived: [], allocateFunctionId: 12, storeReferenceFunctionId: 13, collectFunctionId: 14, variableLayouts: [], hooks: hooks };
+}
+
+func functionIndex(program: IRProgram, id: int): int {
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id == id { return index; } index = index + 1; }
+    return -1;
+}
+
+func main(): void {
+    var root = "/synthetic-managed-runtime";
+    var input = inputModule();
+    var runtime = runtimeProgram(root, "valid");
+    var linkedResult = linkManagedRuntime(input, runtime, root);
+    require(linkedResult.isOk(), "exact runtime identities and signatures link");
+    var linked = linkedResult.unwrap();
+    var shift = 12;
+    require(linked.module.program.functions.len() == input.program.functions.len() + runtime.functions.len(), "linked program contains copied user and runtime functions");
+    require(linked.bindings.create == 1 + shift && linked.bindings.destroy == 2 + shift && linked.bindings.layoutRegisterVariable == 16 + shift, "runtime binding IDs use the exact runtime functions plus the user ID shift");
+    require(linked.bindings.hooks.len() == 1 && linked.bindings.hooks[0].runtimeFunctionId == 102 + shift, "generic runtime hook resolves to its linked function ID");
+    var collectIndex = functionIndex(linked.module.program, linked.bindings.collect);
+    require(collectIndex >= 0 && linked.module.program.functions[collectIndex].blocks[0].instructions[0].functionId == 100 + shift, "runtime call targets are remapped by the link shift");
+    var linkedModule = linked.module;
+    var linkedLayouts = linkedModule.layouts;
+    var copiedLayout = linkedLayouts[0];
+    var copiedFields = copiedLayout.fields;
+    copiedFields.set(0, ManagedField { name: "value", offset: 8, kind: IRTypeKind::I64, layoutId: 0 });
+    copiedLayout.fields = copiedFields;
+    linkedLayouts.set(0, copiedLayout);
+    linkedModule.layouts = linkedLayouts;
+    require(input.layouts[0].fields[0].offset == 0, "linked layout metadata is a deep copy");
+    var linkedProgram = linkedModule.program;
+    var linkedFunctions = linkedProgram.functions;
+    var linkedMain = linkedFunctions[0];
+    var linkedMainKey = linkedMain.key;
+    linkedMainKey.name = "changed";
+    linkedMain.key = linkedMainKey;
+    linkedFunctions.set(0, linkedMain);
+    linkedProgram.functions = linkedFunctions;
+    linkedModule.program = linkedProgram;
+    linked.module = linkedModule;
+    require(input.program.functions[0].key.name == "main", "linked IR function metadata is a deep copy");
+    var originalCollectIndex = functionIndex(runtime, 4);
+    require(originalCollectIndex >= 0 && runtime.functions[originalCollectIndex].blocks[0].instructions[0].functionId == 100, "linking leaves the caller runtime IR unchanged");
+    require(input.program.functions.len() == 2 && input.layouts[0].fields[0].offset == 0 && input.hooks[0].runtimeName == "managedTestHook", "linking leaves all caller metadata unchanged");
+
+    require(linkManagedRuntime(input, runtimeProgram(root, "missingCreate"), root).isErr(), "missing runtime binding is rejected");
+    require(linkManagedRuntime(input, runtimeProgram(root, "duplicateCreate"), root).isErr(), "duplicate exact-path runtime binding is rejected");
+    require(linkManagedRuntime(input, runtimeProgram(root, "wrongPathCreate"), root).isErr(), "matching bare name under a different module path is rejected");
+    require(linkManagedRuntime(input, runtimeProgram(root, "rootCollecting"), root).isErr(), "root helper that transitively calls gcCollect is rejected");
+    require(linkManagedRuntime(input, runtimeProgram(root, "hookCollecting"), root).isErr(), "collecting runtime hook declared non-collecting is rejected");
+    var collectingInput = inputModule();
+    collectingInput.hooks = [ManagedHook { functionId: 11, runtimeName: "managedTestHook", mayCollect: true }];
+    var acceptedHook = linkManagedRuntime(collectingInput, runtimeProgram(root, "hookCollecting"), root);
+    require(acceptedHook.isOk() && acceptedHook.unwrap().bindings.hooks[0].mayCollect, "collecting runtime hook is accepted when declared collecting");
+    println("managed-link: static assertions passed");
+}

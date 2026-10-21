@@ -1,0 +1,23 @@
+struct Node {
+    pub value: int,
+    pub next: Node?,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var fail: int = 1 / zero;
+    }
+    return;
+}
+
+func main(): void {
+    var values: HashMap<string, Node> = HashMap.new();
+    var original: Node = Node { value: 41, next: null };
+    values.set("original", original);
+    var later: Node = Node { value: 42, next: original };
+    var loaded: Node = values.get("original");
+    sourcecheck(loaded == original);
+    sourcecheck(loaded.value == 41 && later.next == loaded);
+    return;
+}

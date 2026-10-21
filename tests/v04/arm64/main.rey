@@ -140,28 +140,28 @@ func tooManyArgumentsProgram(): IRProgram {
     var instructions: Vec<Instruction> = Vec.new();
     var i = 0;
     loop {
-        if i >= 9 { break; }
+        if i >= 17 { break; }
         types.push(ir.irI64());
         parameters.push(ir.irValue(i + 100, ir.irI64()));
         arguments.push(i);
         instructions.push(ir.constI64(i, i, ir.sourceRef("arity.rey", i, i + 1)));
         i = i + 1;
     }
-    var helper = function(1, "nine", parameters, types, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(108, ir.sourceRef("arity.rey", 20, 21)))]);
-    instructions.push(ir.call(9, ir.irI64(), 1, arguments, ir.sourceRef("arity.rey", 22, 28)));
-    var main = function(0, "entry", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(9, ir.sourceRef("arity.rey", 29, 30)))]);
+    var helper = function(1, "seventeen", parameters, types, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(116, ir.sourceRef("arity.rey", 20, 21)))]);
+    instructions.push(ir.call(17, ir.irI64(), 1, arguments, ir.sourceRef("arity.rey", 22, 28)));
+    var main = function(0, "entry", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(17, ir.sourceRef("arity.rey", 29, 30)))]);
     return ir.irProgram(0, [main, helper]);
 }
 
-func largeFrameProgram(): IRProgram {
+func largeFrameProgram(count: int): IRProgram {
     var instructions: Vec<Instruction> = Vec.new();
     var i = 0;
     loop {
-        if i >= 511 { break; }
+        if i >= count { break; }
         instructions.push(ir.constI64(i, i, ir.sourceRef("frame.rey", i, i + 1)));
         i = i + 1;
     }
-    var entry = function(0, "large-frame", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(510, ir.sourceRef("frame.rey", 512, 513)))]);
+    var entry = function(0, "large-frame", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(count - 1, ir.sourceRef("frame.rey", count, count + 1)))]);
     return ir.irProgram(0, [entry]);
 }
 
@@ -239,8 +239,9 @@ func main(): void {
     var invalid: Result<Arm64Code, string> = emitArm64(ir.irProgram(99, []), "linux");
     require(invalid.isErr() && invalid.unwrapErr().contains("invalid IR"), "invalid IR is rejected before emission");
     var arity: Result<Arm64Code, string> = emitArm64(tooManyArgumentsProgram(), "linux");
-    require(arity.isErr() && arity.unwrapErr().contains("more than eight"), "more than eight scalar arguments are rejected");
-    var frame: Result<Arm64Code, string> = emitArm64(largeFrameProgram(), "linux");
-    require(frame.isErr() && frame.unwrapErr().contains("4080-byte"), "unrepresentable frame sizes are rejected");
+    require(arity.isErr() && arity.unwrapErr().contains("more than sixteen"), "more than sixteen scalar arguments are rejected");
+    require(emitArm64(largeFrameProgram(511), "linux").isOk(), "frames above one stack-adjustment immediate are supported");
+    var frame: Result<Arm64Code, string> = emitArm64(largeFrameProgram(4097), "linux");
+    require(frame.isErr() && frame.unwrapErr().contains("32768-byte"), "unrepresentable frame sizes are rejected");
     println("arm64 emitter fixtures passed");
 }

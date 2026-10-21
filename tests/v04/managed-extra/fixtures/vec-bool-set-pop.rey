@@ -1,0 +1,19 @@
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var fail: int = 1 / zero;
+    }
+    return;
+}
+
+func main(): void {
+    var values: Vec<bool> = Vec.new();
+    values.push(true);
+    values.push(false);
+    values.set(0, false);
+    values.set(1, true);
+    var last: bool = values.pop();
+    sourcecheck(last && values.len() == 1 && !values.get(0));
+    sourcecheck(values.pop() == false && values.len() == 0);
+    return;
+}

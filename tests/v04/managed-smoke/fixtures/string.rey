@@ -1,0 +1,7 @@
+func main(): void {
+    var value: string = "a\x00b";
+    if value.len() != 3 || value[1] != '\x00' {
+        var zero: int = 0; var fail: int = 1 / zero;
+    }
+    return;
+}

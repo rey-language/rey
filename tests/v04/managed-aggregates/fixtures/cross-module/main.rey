@@ -1,0 +1,25 @@
+import left.{makeCell, bumpCell};
+import right.makeOtherCell;
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func main(): void {
+    var leftCell = makeCell();
+    var rightCell = makeOtherCell();
+    var bumped = bumpCell(leftCell);
+    var leftIdentity: bool = bumped == leftCell;
+    var rightIdentity: bool = rightCell == makeOtherCell();
+    var leftValue: int = bumped.value;
+    var rightValue: bool = rightCell.value;
+    sourcecheck(leftIdentity);
+    sourcecheck(!rightIdentity);
+    sourcecheck(leftValue == 4);
+    sourcecheck(rightValue);
+    return;
+}

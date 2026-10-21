@@ -1,0 +1,367 @@
+import ir;
+import ir::{EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram, ManagedVariableLayout, ManagedHook};
+import ir::managed::placement::{planManagedPlacement};
+import ir::managed::roots::{RuntimeBindings, ManagedHookBinding, lowerManagedRoots};
+import ir::verify::{verifyProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-roots-fixture.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop { if i >= parameterCount { break; } escapes.push(Escape::Unknown); i = i + 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var terminator = ir.returnVoid(source());
+    if returnId >= 0 { terminator = ir.returnValue(returnId, source()); }
+    return ir.irFunction(id, ir.functionKey("managed-roots-fixture", "", name), ir.functionSignature(parameterTypes, returnType), parameters, [ir.basicBlock(0, [], instructions, terminator)], effects(parameterTypes.len()));
+}
+
+func binding(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType): IRFunction {
+    var parameters: Vec<IRValue> = [];
+    var i = 0;
+    loop { if i >= parameterTypes.len() { break; } parameters.push(ir.irValue(100 + i, parameterTypes[i])); i = i + 1; }
+    var instructions: Vec<Instruction> = [];
+    var returnId = -1;
+    if returnType.kind == IRTypeKind::RawAddress { instructions.push(ir.rawNull(0, source())); returnId = 0; }
+    else if returnType.kind == IRTypeKind::I64 { instructions.push(ir.constI64(0, 0, source())); returnId = 0; }
+    return makeFunction(id, name, parameterTypes, returnType, parameters, instructions, returnId);
+}
+
+func allocationHook(): IRFunction {
+    return makeFunction(20, "allocateHook", [ir.irI64()], ir.irRawAddress(), [ir.irValue(10, ir.irI64())], [ir.rawNull(0, source())], 0);
+}
+
+func storeHook(): IRFunction {
+    return makeFunction(21, "storeHook", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), [ir.irValue(10, ir.irRawAddress()), ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irRawAddress())], [], -1);
+}
+
+func collectHook(): IRFunction { return makeFunction(22, "collectHook", [], ir.irVoid(), [], [], -1); }
+
+func genericHook(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(13, 2299, source()), ir.rawFail(13, source()), ir.rawNull(0, source())];
+    return makeFunction(23, "genericCollectingHook", [ir.irI64(), ir.irRawAddress(), ir.irRawAddress()], ir.irRawAddress(), [ir.irValue(10, ir.irI64()), ir.irValue(11, ir.irRawAddress()), ir.irValue(12, ir.irRawAddress())], instructions, 0);
+}
+
+func mainFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()),
+        ir.call(1, ir.irRawAddress(), 20, [0], source()),
+        ir.call(2, ir.irRawAddress(), 11, [1], source()),
+        ir.constI64(3, 2, source()),
+        ir.rawNull(4, source()),
+        ir.call(5, ir.irRawAddress(), 23, [3, 4, 4], source()),
+        ir.rawEqual(6, 5, 2, source()),
+        ir.constI64(7, 1, source()),
+        ir.call(8, ir.irRawAddress(), 20, [7], source()),
+    ];
+    return makeFunction(10, "main", [], ir.irVoid(), [], instructions, -1);
+}
+
+func helperFunction(): IRFunction {
+    return makeFunction(11, "helper", [ir.irRawAddress()], ir.irRawAddress(), [ir.irValue(0, ir.irRawAddress())], [ir.call(-1, ir.irVoid(), 22, [], source())], 0);
+}
+
+func returnHelperFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 11, [0], source())];
+    return makeFunction(12, "returnHelper", [ir.irRawAddress()], ir.irRawAddress(), [ir.irValue(0, ir.irRawAddress())], instructions, 1);
+}
+
+func runtimeBindings(): RuntimeBindings {
+    return RuntimeBindings {
+        create: 100, destroy: 101, allocate: 102, collect: 103, rootPush: 104, rootSet: 105, rootPop: 106,
+        storeReference: 107, regionCreate: 108, regionEnd: 109, regionAllocate: 110, allocateDestination: 111,
+        layoutCreate: 112, layoutRegister: 113, layoutRegisterVariable: 114, layoutRelease: 115,
+        hooks: [ManagedHookBinding { functionId: 23, runtimeFunctionId: 116, mayCollect: true }],
+    };
+}
+
+func moduleUnderTest(): ManagedProgram {
+    var functions: Vec<IRFunction> = [mainFunction(), helperFunction(), returnHelperFunction(), allocationHook(), storeHook(), collectHook(), genericHook()];
+    functions.push(binding(100, "managedCreate", [ir.irRawAddress(), ir.irBool()], ir.irRawAddress()));
+    functions.push(binding(101, "managedDestroy", [ir.irRawAddress()], ir.irVoid()));
+    functions.push(binding(102, "managedAllocate", [ir.irRawAddress(), ir.irI64()], ir.irRawAddress()));
+    functions.push(binding(103, "managedCollect", [ir.irRawAddress()], ir.irI64()));
+    functions.push(binding(104, "managedRootPush", [ir.irRawAddress()], ir.irI64()));
+    functions.push(binding(105, "managedRootSet", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid()));
+    functions.push(binding(106, "managedRootPop", [ir.irRawAddress(), ir.irI64()], ir.irVoid()));
+    functions.push(binding(107, "managedStoreReference", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid()));
+    functions.push(binding(108, "managedRegionCreate", [ir.irRawAddress()], ir.irRawAddress()));
+    functions.push(binding(109, "managedRegionEnd", [ir.irRawAddress(), ir.irRawAddress()], ir.irVoid()));
+    functions.push(binding(110, "managedRegionAllocate", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64()], ir.irRawAddress()));
+    functions.push(binding(111, "managedAllocateDestination", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64()], ir.irRawAddress()));
+    functions.push(binding(112, "layoutRegistryCreate", [ir.irI64()], ir.irRawAddress()));
+    functions.push(binding(113, "layoutRegisterFixed", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64()], ir.irI64()));
+    functions.push(binding(114, "layoutRegisterVariable", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irI64()));
+    functions.push(binding(115, "layoutRegistryRelease", [ir.irRawAddress()], ir.irVoid()));
+    functions.push(binding(116, "managedStringConcat", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irRawAddress()], ir.irRawAddress()));
+    functions.push(binding(117, "unknownRawHelper", [ir.irRawAddress()], ir.irVoid()));
+    var program = ir.irProgram(10, functions);
+    var fields: Vec<ManagedField> = [ManagedField { name: "value", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var stringFields: Vec<ManagedField> = [ManagedField { name: "length", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var referenceTailFields: Vec<ManagedField> = [ManagedField { name: "count", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var layouts: Vec<ManagedLayout> = [
+        ManagedLayout { id: 1, key: "fixture::Box", payloadBytes: 8, fields: fields },
+        ManagedLayout { id: 2, key: "fixture::String", payloadBytes: 8, fields: stringFields },
+        ManagedLayout { id: 3, key: "fixture::ReferenceTail", payloadBytes: 8, fields: referenceTailFields },
+    ];
+    var managedFunctions: Vec<ManagedFunction> = [
+        ManagedFunction { functionId: 10, referenceValues: [1, 2, 4, 5, 8], parameterLayouts: [], returnLayout: 0 },
+        ManagedFunction { functionId: 11, referenceValues: [0], parameterLayouts: [1], returnLayout: 1 },
+        ManagedFunction { functionId: 12, referenceValues: [0, 1], parameterLayouts: [1], returnLayout: 1 },
+    ];
+    var allocations: Vec<ManagedAllocation> = [
+        ManagedAllocation { functionId: 10, blockId: 0, resultId: 1, layoutId: 1 },
+        ManagedAllocation { functionId: 10, blockId: 0, resultId: 8, layoutId: 1 },
+    ];
+    var derived: Vec<ManagedDerived> = [];
+    var variableLayouts: Vec<ManagedVariableLayout> = [ManagedVariableLayout { layoutId: 2, tailKind: 1 }, ManagedVariableLayout { layoutId: 3, tailKind: 2 }];
+    var hooks: Vec<ManagedHook> = [ManagedHook { functionId: 23, runtimeName: "managedStringConcat", mayCollect: true }];
+    return ManagedProgram { program: program, layouts: layouts, functions: managedFunctions, allocations: allocations, derived: derived, allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: variableLayouts, hooks: hooks };
+}
+
+func functionIndex(program: IRProgram, id: int): int {
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func countCalls(function: IRFunction, target: int): int {
+    var count = 0;
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].kind == InstructionKind::Call && block.instructions[ii].functionId == target { count = count + 1; } ii = ii + 1; } bi = bi + 1; }
+    return count;
+}
+
+func countCallsBefore(function: IRFunction, target: int, limit: int): int {
+    var count = 0;
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() || ii >= limit { break; } if block.instructions[ii].kind == InstructionKind::Call && block.instructions[ii].functionId == target { count = count + 1; } ii = ii + 1; } bi = bi + 1; }
+    return count;
+}
+
+func firstCallIndex(function: IRFunction, target: int): int {
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].kind == InstructionKind::Call && block.instructions[ii].functionId == target { return ii; } ii = ii + 1; } bi = bi + 1; }
+    return -1;
+}
+
+func firstCallOperands(function: IRFunction, target: int): Vec<int> {
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.kind == InstructionKind::Call && instruction.functionId == target { return instruction.operands; } ii = ii + 1; } bi = bi + 1; }
+    return [];
+}
+
+func publishedRootIndexBefore(function: IRFunction, target: int, valueId: int): int {
+    var bi = 0;
+    loop {
+        if bi >= function.blocks.len() { break; }
+        var block = function.blocks[bi];
+        var ii = 0;
+        loop {
+            if ii >= block.instructions.len() { break; }
+            var instruction = block.instructions[ii];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == target { return -1; }
+            if instruction.kind == InstructionKind::Call && instruction.functionId == 105
+                && instruction.operands.len() == 3 && instruction.operands[2] == valueId {
+                return instruction.operands[1];
+            }
+            ii = ii + 1;
+        }
+        bi = bi + 1;
+    }
+    return -1;
+}
+
+func replaceFunction(program: IRProgram, replacement: IRFunction): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id == replacement.id { functions.push(replacement); } else { functions.push(program.functions[i]); } i = i + 1; }
+    return ir.irProgram(program.entryFunctionId, functions);
+}
+
+func appendFunction(program: IRProgram, appended: IRFunction): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } functions.push(program.functions[i]); i = i + 1; }
+    functions.push(appended);
+    return ir.irProgram(program.entryFunctionId, functions);
+}
+
+func appendDerivedFunction(module: ManagedProgram, function: IRFunction, references: Vec<int>, parameterLayouts: Vec<int>, returnLayout: int, derivedValueId: int, ownerId: int): ManagedProgram {
+    module.program = appendFunction(module.program, function);
+    module.functions.push(ManagedFunction { functionId: function.id, referenceValues: references, parameterLayouts: parameterLayouts, returnLayout: returnLayout });
+    module.derived.push(ManagedDerived { functionId: function.id, valueId: derivedValueId, ownerId: ownerId });
+    return module;
+}
+
+func appendCallToMain(program: IRProgram, target: int, rawValueId: int): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        var function = program.functions[i];
+        if function.id == program.entryFunctionId {
+            var block = function.blocks[0];
+            var instructions: Vec<Instruction> = [];
+            var ii = 0;
+            loop { if ii >= block.instructions.len() { break; } instructions.push(block.instructions[ii]); ii = ii + 1; }
+            instructions.push(ir.call(-1, ir.irVoid(), target, [rawValueId], source()));
+            function = ir.irFunction(function.id, function.key, function.signature, function.parameters, [ir.basicBlock(block.id, block.params, instructions, block.terminator)], function.effects);
+        }
+        functions.push(function);
+        i = i + 1;
+    }
+    return ir.irProgram(program.entryFunctionId, functions);
+}
+
+func appendLayout(module: ManagedProgram, layout: ManagedLayout): ManagedProgram {
+    var layouts: Vec<ManagedLayout> = [];
+    var i = 0;
+    loop { if i >= module.layouts.len() { break; } layouts.push(module.layouts[i]); i = i + 1; }
+    layouts.push(layout);
+    module.layouts = layouts;
+    return module;
+}
+
+func main(): void {
+    var module = moduleUnderTest();
+    var planned = planManagedPlacement(module);
+    if planned.isErr() { eprintln("FAIL placement: " + planned.unwrapErr()); exit(1); }
+    var defaultLowered = lowerManagedRoots(module, runtimeBindings(), planned.unwrap(), false);
+    if defaultLowered.isErr() { eprintln("FAIL default root lowering: " + defaultLowered.unwrapErr()); exit(1); }
+    var lowered = lowerManagedRoots(module, runtimeBindings(), planned.unwrap(), true);
+    if lowered.isErr() { eprintln("FAIL root lowering: " + lowered.unwrapErr()); exit(1); }
+    var output = lowered.unwrap();
+    var verification = verifyProgram(output);
+    require(verification.ok, "lowered program verifies");
+    require(output.entryFunctionId != module.program.entryFunctionId, "generated wrapper becomes program entry");
+    var mainIndex = functionIndex(output, 10);
+    var helperIndex = functionIndex(output, 11);
+    var returnHelperIndex = functionIndex(output, 12);
+    var wrapperIndex = functionIndex(output, output.entryFunctionId);
+    require(mainIndex >= 0 && helperIndex >= 0 && returnHelperIndex >= 0 && wrapperIndex >= 0, "transformed functions and wrapper exist");
+    var main = output.functions[mainIndex];
+    var helper = output.functions[helperIndex];
+    var returnHelper = output.functions[returnHelperIndex];
+    var wrapper = output.functions[wrapperIndex];
+    require(main.parameters.len() == 2 && helper.parameters.len() == 3 && returnHelper.parameters.len() == 3, "context and destination parameters append after source parameters");
+    require(countCalls(main, 110) == 2 && countCalls(main, 111) == 0 && countCalls(main, 102) == 0, "caller-local return construction and local allocation use the region allocator");
+    require(countCalls(main, 11) == 1 && countCalls(helper, 103) == 1, "user calls are retargeted and poll hooks call the collector");
+    require(countCalls(returnHelper, 11) == 1, "caller-returned helper result preserves destination construction");
+    var returnedCallArgs = firstCallOperands(returnHelper, 11);
+    require(returnedCallArgs.len() == 3 && returnedCallArgs[2] == returnHelper.parameters[2].id, "caller-returned helper receives the caller destination parameter");
+    require(countCalls(main, 116) == 1, "generic hook call is rewritten to the resolved runtime ID");
+    require(main.blocks[0].instructions.len() > 8 && helper.blocks[0].instructions.len() > 5, "root slots and safepoint publication are emitted");
+    require(countCalls(main, 109) == 1 && countCalls(main, 106) == countCalls(main, 104), "region ends before each unique frame root is popped");
+    require(countCalls(main, 104) >= 2 && countCalls(main, 104) < 5, "nonoverlapping canonical reference ranges share root slots");
+    require(publishedRootIndexBefore(main, 11, 1) >= 0 && publishedRootIndexBefore(main, 11, 1) == publishedRootIndexBefore(main, 116, 2), "sequential references use the same root index");
+    require(publishedRootIndexBefore(main, 116, 2) >= 0 && publishedRootIndexBefore(main, 116, 2) != publishedRootIndexBefore(main, 116, 4), "references live together at a collecting hook keep distinct root indices");
+    require(countCalls(helper, 106) == 1, "callee roots are popped on return");
+    require(countCalls(wrapper, 112) == 1 && countCalls(wrapper, 113) == 1 && countCalls(wrapper, 114) == 2 && countCalls(wrapper, 100) == 1 && countCalls(wrapper, 101) == 1 && countCalls(wrapper, 115) == 1, "wrapper registers fixed and variable layouts and owns context lifetime");
+    var defaultMainIndex = functionIndex(defaultLowered.unwrap(), 10);
+    require(defaultMainIndex >= 0 && countCalls(defaultLowered.unwrap().functions[defaultMainIndex], 103) == 0, "default mode does not inject stress collections before hooks");
+    var defaultMain = defaultLowered.unwrap().functions[defaultMainIndex];
+    var defaultHookIndex = firstCallIndex(defaultMain, 116);
+    require(defaultHookIndex >= 0 && countCallsBefore(defaultMain, 105, defaultHookIndex) > 0, "default mode publishes live roots before a collecting generic hook");
+    require(countCalls(main, 103) == 2, "stress mode collects before user calls and collecting hooks");
+    var stressHookIndex = firstCallIndex(main, 116);
+    require(stressHookIndex >= 0 && countCallsBefore(main, 103, stressHookIndex) == 2 && countCallsBefore(main, 105, stressHookIndex) > 0, "stress collections follow root publication and precede generic hooks");
+
+    var malformedVariable = moduleUnderTest();
+    malformedVariable.variableLayouts = [ManagedVariableLayout { layoutId: 99, tailKind: 1 }];
+    require(lowerManagedRoots(malformedVariable, runtimeBindings(), planned.unwrap(), false).isErr(), "unknown variable layout IDs are rejected");
+    var malformedRuntime = moduleUnderTest();
+    malformedRuntime.program = replaceFunction(malformedRuntime.program, binding(116, "managedStringConcat", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irRawAddress()));
+    require(lowerManagedRoots(malformedRuntime, runtimeBindings(), planned.unwrap(), false).isErr(), "generic hook runtime must prepend context and preserve argument arity");
+    var malformedHookType = moduleUnderTest();
+    malformedHookType.program = replaceFunction(malformedHookType.program, binding(116, "managedStringConcat", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64()], ir.irRawAddress()));
+    require(lowerManagedRoots(malformedHookType, runtimeBindings(), planned.unwrap(), false).isErr(), "generic hook runtime parameter types must match the stub after context");
+    var malformedUnknown = moduleUnderTest();
+    malformedUnknown.program = appendCallToMain(malformedUnknown.program, 117, 8);
+    require(lowerManagedRoots(malformedUnknown, runtimeBindings(), planned.unwrap(), false).isErr(), "unclassified runtime calls receiving raw references remain fail-closed");
+    var malformedBindings = runtimeBindings();
+    malformedBindings.hooks = [ManagedHookBinding { functionId: 23, runtimeFunctionId: 115, mayCollect: true }];
+    require(lowerManagedRoots(module, malformedBindings, planned.unwrap(), false).isErr(), "hook runtime IDs cannot overlap ordinary runtime binding IDs");
+    var malformedHookMetadata = moduleUnderTest();
+    malformedHookMetadata.hooks = [ManagedHook { functionId: 20, runtimeName: "managedStringConcat", mayCollect: true }];
+    require(lowerManagedRoots(malformedHookMetadata, runtimeBindings(), planned.unwrap(), false).isErr(), "managed hook IDs cannot overlap fixed allocation hook stubs");
+
+    var validOpaque = appendLayout(moduleUnderTest(), ManagedLayout { id: 4, key: "$enum:fixture::Choice", payloadBytes: 16, fields: [ManagedField { name: "tag", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }, ManagedField { name: "$payload", offset: 8, kind: IRTypeKind::RawAddress, layoutId: -1 }] });
+    var validOpaquePlan = planManagedPlacement(validOpaque);
+    require(validOpaquePlan.isOk(), "private tagged payload sentinel is accepted by placement metadata checks");
+    var validOpaqueLowered = lowerManagedRoots(validOpaque, runtimeBindings(), validOpaquePlan.unwrap(), false);
+    require(validOpaqueLowered.isOk(), "private tagged payload sentinel is accepted and bootstrap remains valid");
+    var validOpaqueWrapperIndex = functionIndex(validOpaqueLowered.unwrap(), validOpaqueLowered.unwrap().entryFunctionId);
+    require(countCalls(validOpaqueLowered.unwrap().functions[validOpaqueWrapperIndex], 113) == 2, "opaque tagged payload offset remains in the fixed reference map");
+    var invalidOpaqueField = appendLayout(moduleUnderTest(), ManagedLayout { id: 4, key: "$enum:fixture::Choice", payloadBytes: 16, fields: [ManagedField { name: "tag", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }, ManagedField { name: "$payload", offset: 8, kind: IRTypeKind::I64, layoutId: -1 }] });
+    var invalidOpaqueName = appendLayout(moduleUnderTest(), ManagedLayout { id: 4, key: "$enum:fixture::Choice", payloadBytes: 16, fields: [ManagedField { name: "tag", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }, ManagedField { name: "payload", offset: 8, kind: IRTypeKind::RawAddress, layoutId: -1 }] });
+    var invalidOpaqueKey = appendLayout(moduleUnderTest(), ManagedLayout { id: 4, key: "fixture::Choice", payloadBytes: 16, fields: [ManagedField { name: "tag", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }, ManagedField { name: "$payload", offset: 8, kind: IRTypeKind::RawAddress, layoutId: -1 }] });
+    require(lowerManagedRoots(invalidOpaqueField, runtimeBindings(), planned.unwrap(), false).isErr(), "nonreference opaque sentinel field is rejected");
+    require(lowerManagedRoots(invalidOpaqueName, runtimeBindings(), planned.unwrap(), false).isErr(), "opaque sentinel with the wrong field name is rejected");
+    require(lowerManagedRoots(invalidOpaqueKey, runtimeBindings(), planned.unwrap(), false).isErr(), "opaque sentinel outside a tagged layout key is rejected");
+
+    var malformedDerivedUse = moduleUnderTest();
+    var badDerivedInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawEqual(3, 2, 2, source())];
+    var badDerivedFunction = makeFunction(24, "badDerivedUse", [ir.irRawAddress()], ir.irVoid(), [ir.irValue(0, ir.irRawAddress())], badDerivedInstructions, -1);
+    malformedDerivedUse.program = appendFunction(malformedDerivedUse.program, badDerivedFunction);
+    malformedDerivedUse.functions.push(ManagedFunction { functionId: 24, referenceValues: [0], parameterLayouts: [1], returnLayout: 0 });
+    malformedDerivedUse.derived.push(ManagedDerived { functionId: 24, valueId: 2, ownerId: 0 });
+    var malformedDerivedResult = lowerManagedRoots(malformedDerivedUse, runtimeBindings(), planned.unwrap(), false);
+    require(malformedDerivedResult.isErr() && malformedDerivedResult.unwrapErr().contains("functionId=24") && malformedDerivedResult.unwrapErr().contains("derivedValueId=2") && malformedDerivedResult.unwrapErr().contains("blockId=0") && malformedDerivedResult.unwrapErr().contains("useInstructionIndex=2") && malformedDerivedResult.unwrapErr().contains("source=managed-roots-fixture.rey:0-1"), "derived adjacency diagnostic identifies its user function, value, block, instruction, and source span");
+
+    var validDerivedConsumers = moduleUnderTest();
+    var rawParameterTypes: Vec<IRType> = [ir.irRawAddress()];
+    var rawParameters: Vec<IRValue> = [ir.irValue(0, ir.irRawAddress())];
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(25, "derivedLoadI64", rawParameterTypes, ir.irVoid(), rawParameters, [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawLoadI64(3, 2, source())], -1), [0], [1], 0, 2, 0);
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(26, "derivedStoreI64", rawParameterTypes, ir.irVoid(), rawParameters, [ir.constI64(1, 16, source()), ir.constI64(3, 41, source()), ir.rawOffset(2, 0, 1, source()), ir.rawStoreI64(2, 3, source())], -1), [0], [1], 0, 2, 0);
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(27, "derivedLoadAddress", rawParameterTypes, ir.irVoid(), rawParameters, [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawLoadAddress(3, 2, source())], -1), [0, 3], [1], 0, 2, 0);
+    var rawPairTypes: Vec<IRType> = [ir.irRawAddress(), ir.irRawAddress()];
+    var rawPairParameters: Vec<IRValue> = [ir.irValue(0, ir.irRawAddress()), ir.irValue(4, ir.irRawAddress())];
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(28, "derivedStoreAddress", rawPairTypes, ir.irVoid(), rawPairParameters, [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawStoreAddress(2, 4, source())], -1), [0, 4], [1, 1], 0, 2, 0);
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(29, "derivedLoadByte", rawParameterTypes, ir.irVoid(), rawParameters, [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawLoadByte(3, 2, source())], -1), [0], [1], 0, 2, 0);
+    validDerivedConsumers = appendDerivedFunction(validDerivedConsumers, makeFunction(30, "derivedStoreByte", rawParameterTypes, ir.irVoid(), rawParameters, [ir.constI64(1, 16, source()), ir.constI64(3, 41, source()), ir.rawOffset(2, 0, 1, source()), ir.rawStoreByte(2, 3, source())], -1), [0], [1], 0, 2, 0);
+    require(lowerManagedRoots(validDerivedConsumers, runtimeBindings(), planned.unwrap(), false).isOk(), "immediate derived loads and stores accept i64, address, and byte consumers");
+
+    var gapModule = moduleUnderTest();
+    var gapInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.constI64(3, 8, source()), ir.rawLoadI64(4, 2, source())];
+    gapModule = appendDerivedFunction(gapModule, makeFunction(31, "derivedGap", rawParameterTypes, ir.irVoid(), rawParameters, gapInstructions, -1), [0], [1], 0, 2, 0);
+    var gapResult = lowerManagedRoots(gapModule, runtimeBindings(), planned.unwrap(), false);
+    require(gapResult.isErr() && gapResult.unwrapErr().contains("functionId=31") && gapResult.unwrapErr().contains("useInstructionIndex=3"), "a non-access instruction between RawOffset and its consumer is rejected with context");
+
+    var callGapModule = moduleUnderTest();
+    var callGapInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.call(-1, ir.irVoid(), 22, [], source()), ir.rawLoadI64(4, 2, source())];
+    callGapModule = appendDerivedFunction(callGapModule, makeFunction(36, "derivedCallGap", rawParameterTypes, ir.irVoid(), rawParameters, callGapInstructions, -1), [0], [1], 0, 2, 0);
+    var callGapResult = lowerManagedRoots(callGapModule, runtimeBindings(), planned.unwrap(), false);
+    require(callGapResult.isErr() && callGapResult.unwrapErr().contains("functionId=36") && callGapResult.unwrapErr().contains("useInstructionIndex=3"), "a call between RawOffset and its consumer is rejected with context");
+
+    var wrongOperandModule = moduleUnderTest();
+    var wrongOperandInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawStoreAddress(4, 2, source())];
+    wrongOperandModule = appendDerivedFunction(wrongOperandModule, makeFunction(32, "derivedWrongOperand", rawPairTypes, ir.irVoid(), rawPairParameters, wrongOperandInstructions, -1), [0, 4], [1, 1], 0, 2, 0);
+    require(lowerManagedRoots(wrongOperandModule, runtimeBindings(), planned.unwrap(), false).isErr(), "derived pointer used outside the address operand is rejected");
+
+    var multipleUsesModule = moduleUnderTest();
+    var multipleUseInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawLoadI64(3, 2, source()), ir.rawLoadI64(4, 2, source())];
+    multipleUsesModule = appendDerivedFunction(multipleUsesModule, makeFunction(33, "derivedMultipleUses", rawParameterTypes, ir.irVoid(), rawParameters, multipleUseInstructions, -1), [0], [1], 0, 2, 0);
+    require(lowerManagedRoots(multipleUsesModule, runtimeBindings(), planned.unwrap(), false).isErr(), "reusing one derived address for multiple field accesses is rejected");
+
+    var returnDerivedModule = moduleUnderTest();
+    var returnDerivedInstructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source())];
+    var returnDerivedFunction = makeFunction(34, "returnDerived", rawParameterTypes, ir.irRawAddress(), rawParameters, returnDerivedInstructions, 2);
+    returnDerivedModule = appendDerivedFunction(returnDerivedModule, returnDerivedFunction, [0], [1], 1, 2, 0);
+    require(lowerManagedRoots(returnDerivedModule, runtimeBindings(), planned.unwrap(), false).isErr(), "derived address cannot be returned");
+
+    var branchDerivedModule = moduleUnderTest();
+    var branchDerivedFunction = ir.irFunction(35, ir.functionKey("managed-roots-fixture", "", "branchDerived"), ir.functionSignature(rawParameterTypes, ir.irVoid()), rawParameters, [ir.basicBlock(0, [], [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source())], ir.jump(1, [2], source())), ir.basicBlock(1, [ir.irValue(3, ir.irRawAddress())], [], ir.returnVoid(source()))], effects(1));
+    branchDerivedModule = appendDerivedFunction(branchDerivedModule, branchDerivedFunction, [0, 3], [1], 0, 2, 0);
+    require(lowerManagedRoots(branchDerivedModule, runtimeBindings(), planned.unwrap(), false).isErr(), "derived address cannot cross a CFG edge");
+    require(module.program.functions[0].parameters.len() == 0 && module.program.functions[0].blocks[0].instructions[1].functionId == 20, "input IR remains unchanged");
+    println("managed-roots: static assertions passed");
+}

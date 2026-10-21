@@ -194,9 +194,9 @@ func addDefinitionLiveAfterConflict(resultId: int, liveAfter: Vec<int>, indexByI
 }
 
 func addBlockConflicts(block: BasicBlock, liveBlock: BlockLiveness, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
-    if !addSetConflicts(liveBlock.liveIn, indexById, graph, budget) { return false; }
-    if !addSetConflicts(liveBlock.liveOut, indexById, graph, budget) { return false; }
-    if !addSetConflicts(liveBlock.liveAtTerminator, indexById, graph, budget) { return false; }
+    // For verified SSA, every live pair meets at its later definition, or at
+    // formal/block parameter entry. Those edges suffice even across backedges;
+    // rebuilding cliques for propagated live sets adds only duplicate edges.
     if !addParameterPairConflicts(block.params, indexById, graph, budget) { return false; }
     if !addParameterEntryConflicts(block.params, liveBlock.liveIn, indexById, graph, budget) { return false; }
 
@@ -208,8 +208,10 @@ func addBlockConflicts(block: BasicBlock, liveBlock: BlockLiveness, indexById: H
         if snapshot.instructionIndex < 0 || snapshot.instructionIndex >= block.instructions.len() {
             return false;
         }
-        if !addSetConflicts(snapshot.liveBefore, indexById, graph, budget) { return false; }
-        if !addSetConflicts(snapshot.liveAfter, indexById, graph, budget) { return false; }
+        // Entry parameters conflict above. Every other simultaneous pair first
+        // meets at a definition, so its result/live-after edge below
+        // records the conflict. Rebuilding both live-set cliques at every
+        // instruction repeats those same edges quadratically in live-set size.
         var resultId = block.instructions[snapshot.instructionIndex].resultId;
         if resultId >= 0 && !addDefinitionLiveAfterConflict(resultId, snapshot.liveAfter, indexById, graph, budget) {
             return false;
@@ -312,11 +314,13 @@ pub func planSlots(program: IRProgram): Result<ProgramSlots, string> {
         return Result.Err("storage: liveness result does not match the verified program");
     }
 
-    var budget: Vec<int> = [1000000];
     var functions: Vec<FunctionSlots> = [];
     var functionIndex = 0;
     loop {
         if functionIndex >= program.functions.len() { break; }
+        // Coloring and interference are independent across functions. Retain
+        // the same hard bound for each function as linked programs grow.
+        var budget: Vec<int> = [1000000];
         if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
         var function = program.functions[functionIndex];
         var liveFunction = liveness.functions[functionIndex];

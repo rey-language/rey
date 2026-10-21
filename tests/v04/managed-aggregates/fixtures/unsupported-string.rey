@@ -1,0 +1,81 @@
+struct StringRecord {
+    pub text: string,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func checkStringBasics(): void {
+    var original: string = " Rey managed ";
+    var sameText: string = " Rey managed ";
+    sourcecheck(original == sameText);
+    sourcecheck(original.len() == 13);
+    sourcecheck(original.hash() == 32);
+    sourcecheck("a" < "b");
+    sourcecheck("b" > "a");
+    sourcecheck(original.contains("managed"));
+    sourcecheck(original.startsWith(" Rey"));
+    sourcecheck(original.endsWith(" "));
+    sourcecheck(original.indexOf("managed") == 5);
+    return;
+}
+
+func checkStringTransforms(): void {
+    var original: string = " Rey managed ";
+    sourcecheck(("Rey" + " ") + "managed" == "Rey managed");
+    sourcecheck(original.trim() == "Rey managed");
+    sourcecheck(original.slice(1, 4) == "Rey");
+    sourcecheck(original.replace("managed", "runtime") == " Rey runtime ");
+    return;
+}
+
+func checkStringConversions(): void {
+    sourcecheck("42".toInt() == 42);
+    sourcecheck("Rey".toUpper() == "REY");
+    sourcecheck("REY".toLower() == "rey");
+    sourcecheck("ha".repeat(3) == "hahaha");
+    sourcecheck("7".padLeft(3, "0") == "007");
+    sourcecheck("7".padRight(3, "0") == "700");
+    sourcecheck("abc"[1] == 'b');
+    sourcecheck(string(42) == "42");
+    sourcecheck(string(true) == "true");
+    sourcecheck(string('A') == "A");
+    sourcecheck((string('A') + "B") == "AB");
+    return;
+}
+
+func checkStringRecord(): void {
+    var original: string = " Rey managed ";
+    var record: StringRecord = StringRecord { text: original };
+    sourcecheck(record.text == original);
+    record.text = "Rey";
+    sourcecheck(record.text == "Rey");
+    return;
+}
+
+func checkNullableString(): void {
+    var original: string = " Rey managed ";
+    var sameText: string = " Rey managed ";
+    var maybeText: string? = null;
+    sourcecheck(maybeText == null);
+    maybeText = sameText;
+    sourcecheck(maybeText == original);
+    sourcecheck(original == maybeText);
+    maybeText = null;
+    sourcecheck(maybeText != sameText);
+    return;
+}
+
+func main(): void {
+    checkStringBasics();
+    checkStringTransforms();
+    checkStringConversions();
+    checkStringRecord();
+    checkNullableString();
+    return;
+}

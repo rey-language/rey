@@ -1,0 +1,78 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateSized, managedCollect, managedCreate, managedDestroy, managedLiveObjects, managedRootPop, managedRootPush, managedRootSet};
+import containers::{managedMapCreate, managedMapDelete, managedMapGetI64, managedMapGetReference, managedMapHas, managedMapLength, managedMapSetI64, managedMapSetReference};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func makeKey(context: __rey_raw_address, layoutId: int, byte: int): __rey_raw_address {
+    var key = managedAllocateSized(context, layoutId, 10);
+    __reyRawStoreI64(__reyRawOffset(key, 16), 1);
+    __reyRawStoreByte(__reyRawOffset(key, 24), byte);
+    __reyRawStoreByte(__reyRawOffset(key, 25), 0);
+    return key;
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(5);
+    var keyLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var mapOffset = __reyRawMap(8);
+    __reyRawStoreI64(mapOffset, 0);
+    var mapLayout = layoutRegisterFixed(registry, 16, mapOffset, 1);
+    __reyRawUnmap(mapOffset, 8);
+    var bucketsLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var scalarOffsets = __reyRawMap(16);
+    __reyRawStoreI64(scalarOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(scalarOffsets, 8), 16);
+    var scalarNodeLayout = layoutRegisterFixed(registry, 24, scalarOffsets, 2);
+    var referenceOffsets = __reyRawMap(24);
+    __reyRawStoreI64(referenceOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(referenceOffsets, 8), 8);
+    __reyRawStoreI64(__reyRawOffset(referenceOffsets, 16), 16);
+    var referenceNodeLayout = layoutRegisterFixed(registry, 24, referenceOffsets, 3);
+    __reyRawUnmap(scalarOffsets, 16);
+    __reyRawUnmap(referenceOffsets, 24);
+
+    var context = managedCreate(registry, false);
+    var map = managedMapCreate(context, mapLayout, bucketsLayout);
+    var mapSlot = managedRootPush(context);
+    managedRootSet(context, mapSlot, map);
+    var initialBuckets = __reyRawLoadAddress(__reyRawOffset(map, 16));
+    check(__reyRawLoadI64(__reyRawOffset(initialBuckets, 8)) == 72);
+    var index = 0;
+    while index < 5 {
+        var key = makeKey(context, keyLayout, 48 + index);
+        var keySlot = managedRootPush(context);
+        managedRootSet(context, keySlot, key);
+        managedMapSetI64(context, map, scalarNodeLayout, key, index * 10);
+        managedRootPop(context, keySlot);
+        index = index + 1;
+    }
+    check(managedMapLength(context, map) == 5);
+    var grownBuckets = __reyRawLoadAddress(__reyRawOffset(map, 16));
+    check(!__reyRawEqual(initialBuckets, grownBuckets) && __reyRawLoadI64(__reyRawOffset(grownBuckets, 8)) == 136);
+    var key3 = makeKey(context, keyLayout, 51);
+    managedMapSetI64(context, map, scalarNodeLayout, key3, 31);
+    check(managedMapLength(context, map) == 5 && managedMapGetI64(context, map, key3) == 31);
+    check(managedMapDelete(context, map, key3) && managedMapLength(context, map) == 4);
+
+    var cyclicMap = managedMapCreate(context, mapLayout, bucketsLayout);
+    var cycleSlot = managedRootPush(context);
+    managedRootSet(context, cycleSlot, cyclicMap);
+    var selfKey = makeKey(context, keyLayout, 77);
+    var selfKeySlot = managedRootPush(context);
+    managedRootSet(context, selfKeySlot, selfKey);
+    managedMapSetReference(context, cyclicMap, referenceNodeLayout, selfKey, cyclicMap);
+    check(__reyRawEqual(managedMapGetReference(context, cyclicMap, selfKey), cyclicMap));
+    managedCollect(context);
+    check(managedLiveObjects(context) > 0);
+    check(managedMapDelete(context, cyclicMap, selfKey));
+    managedRootPop(context, selfKeySlot);
+    managedRootPop(context, cycleSlot);
+    managedRootPop(context, mapSlot);
+    managedCollect(context);
+    check(managedLiveObjects(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

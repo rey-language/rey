@@ -1,0 +1,8 @@
+func main(): void {
+    var value: Option<int> = Option::Some(3);
+    match value {
+        Option::Some(first, second) => {},
+        None => { var absent: bool = true; },
+    }
+    return;
+}

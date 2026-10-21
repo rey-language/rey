@@ -1,7 +1,8 @@
 import ir;
 import ir::{BasicBlock, Escape, Instruction, IRFunction, IRProgram, IRType, IRValue, SourceRef};
 import ir::eval::{evaluateProgram};
-import ir::storage::{planSlots};
+import ir::storage::{ProgramSlots, planSlots};
+import ir::liveness::{analyzeProgram};
 import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
 import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
 import native::image::{buildMachOArm64, buildElfArm64};
@@ -13,6 +14,57 @@ func require(ok: bool, message: string): void {
 }
 
 func source(): SourceRef { return ir.sourceRef("native-storage", 0, 1); }
+
+func requireDistinctSlots(values: Vec<int>, ids: Vec<int>, slots: Vec<int>): void {
+    var i = 0;
+    while i < values.len() {
+        var left = -1;
+        var k = 0;
+        while k < ids.len() { if ids[k] == values[i] { left = slots[k]; } k += 1; }
+        require(left >= 0, "live value has no slot");
+        var j = i + 1;
+        while j < values.len() {
+            var right = -1;
+            k = 0;
+            while k < ids.len() { if ids[k] == values[j] { right = slots[k]; } k += 1; }
+            require(right >= 0 && left != right, "simultaneously live values share a slot");
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+func validateSnapshots(program: IRProgram, plan: ProgramSlots): void {
+    var analyzed = analyzeProgram(program);
+    require(analyzed.isOk(), "snapshot analysis failed");
+    var live = analyzed.unwrap();
+    var f = 0;
+    while f < plan.functions.len() {
+        var ids: Vec<int> = [];
+        var slots: Vec<int> = [];
+        var v = 0;
+        while v < plan.functions[f].values.len() {
+            ids.push(plan.functions[f].values[v].valueId);
+            slots.push(plan.functions[f].values[v].index);
+            v += 1;
+        }
+        var b = 0;
+        while b < live.functions[f].blocks.len() {
+            var block = live.functions[f].blocks[b];
+            requireDistinctSlots(block.liveIn, ids, slots);
+            requireDistinctSlots(block.liveOut, ids, slots);
+            requireDistinctSlots(block.liveAtTerminator, ids, slots);
+            var s = 0;
+            while s < block.instructions.len() {
+                requireDistinctSlots(block.instructions[s].liveBefore, ids, slots);
+                requireDistinctSlots(block.instructions[s].liveAfter, ids, slots);
+                s += 1;
+            }
+            b += 1;
+        }
+        f += 1;
+    }
+}
 
 func function(id: int, name: string, parameters: Vec<IRValue>, result: IRType, blocks: Vec<BasicBlock>): IRFunction {
     var types: Vec<IRType> = [];
@@ -52,6 +104,7 @@ func emitCase(directory: string, name: string, input: IRProgram, expected: int, 
     require(evaluation.ok && evaluation.isVoid, name + " evaluator: " + evaluation.error);
     var plan = planSlots(program);
     if plan.isErr() { eprintln(name + ": " + plan.unwrapErr()); exit(1); }
+    validateSnapshots(program, plan.unwrap());
     var layouts = plan.unwrap().functions;
     var f = 0;
     while f < layouts.len() {
@@ -159,10 +212,35 @@ func rawAcrossCall(): IRProgram {
     return ir.irProgram(1, [helper, caller]);
 }
 
+func compositionBudgetRegression(): void {
+    var functions: Vec<IRFunction> = [];
+    var f = 0;
+    while f < 500 {
+        var instructions: Vec<Instruction> = [];
+        var i = 0;
+        while i < 40 { instructions.push(ir.constI64(i, i + 1, source())); i += 1; }
+        var current = 0;
+        i = 1;
+        while i < 40 {
+            instructions.push(ir.addCheckedI64(40 + i, current, i, source()));
+            current = 40 + i;
+            i += 1;
+        }
+        functions.push(function(f, "composition" + f.toString(), [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(current, source()))]));
+        f += 1;
+    }
+    var program = ir.irProgram(0, functions);
+    var planned = planSlots(program);
+    if planned.isErr() { eprintln("composition budget: " + planned.unwrapErr()); exit(1); }
+    require(planned.unwrap().functions.len() == 500, "composition lost functions");
+    validateSnapshots(program, planned.unwrap());
+}
+
 func main(): void {
     var argv = args();
     require(argv.len() == 2, "expected image directory");
     var out = argv[1];
+    compositionBudgetRegression();
     emitCase(out, "dead-result", deadResult(), 9223372036854775807, false);
     emitCase(out, "dead-parameters", deadParameters(), 9223372036854775807, false);
     emitCase(out, "dead-block-parameters", deadBlockParameters(), 1002, false);

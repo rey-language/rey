@@ -1,0 +1,314 @@
+import frontend::graph::{canonicalSourcePath, checkSourceFileGraph};
+import ir::{BasicBlock, EffectSummary, Escape, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef, Terminator, TerminatorKind, addCheckedI64, call, constI64, divCheckedI64, functionKey, functionSignature, irI64, printIR, rawLoadAddress, rawOffset, returnVoid, sourceRef};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import ir::managed::link::{buildManagedProgram};
+import ir::optimize::scalar::{foldConstants};
+import ir::verify::{verifyProgram};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
+import native::bytes::{byteString};
+import native::image::{buildElfArm64, buildMachOArm64};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func runtimeFunctionId(program: IRProgram, expectedModule: string, expectedName: string): int {
+    var result = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if function.key.module == expectedModule && function.key.owner == "" && function.key.name == expectedName {
+            if result >= 0 { return -1; }
+            result = function.id;
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
+func managedEntryIndex(program: IRProgram): int {
+    var result = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var key = program.functions[index].key;
+        if key.module == "managed" && key.owner == "" && key.name == "entry" {
+            if result >= 0 { return -1; }
+            result = index;
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
+func copyValues(values: Vec<IRValue>): Vec<IRValue> {
+    var result: Vec<IRValue> = [];
+    var index = 0;
+    while index < values.len() {
+        result.push(IRValue { id: values[index].id, ty: IRType { kind: values[index].ty.kind } });
+        index = index + 1;
+    }
+    return result;
+}
+
+func copyInstruction(value: Instruction): Instruction {
+    var operands: Vec<int> = [];
+    var index = 0;
+    while index < value.operands.len() { operands.push(value.operands[index]); index = index + 1; }
+    return Instruction { kind: value.kind, resultId: value.resultId, ty: IRType { kind: value.ty.kind }, operands: operands,
+        immediate: value.immediate, comparison: value.comparison, functionId: value.functionId,
+        source: SourceRef { unitId: value.source.unitId, start: value.source.start, end: value.source.end } };
+}
+
+func copyTerminator(value: Terminator): Terminator {
+    var targetArgs: Vec<int> = [];
+    var trueArgs: Vec<int> = [];
+    var falseArgs: Vec<int> = [];
+    var index = 0;
+    while index < value.targetArgs.len() { targetArgs.push(value.targetArgs[index]); index = index + 1; }
+    index = 0;
+    while index < value.trueArgs.len() { trueArgs.push(value.trueArgs[index]); index = index + 1; }
+    index = 0;
+    while index < value.falseArgs.len() { falseArgs.push(value.falseArgs[index]); index = index + 1; }
+    return Terminator { kind: value.kind, targetBlockId: value.targetBlockId, targetArgs: targetArgs,
+        conditionValueId: value.conditionValueId, trueTargetBlockId: value.trueTargetBlockId, trueArgs: trueArgs,
+        falseTargetBlockId: value.falseTargetBlockId, falseArgs: falseArgs, valueId: value.valueId,
+        source: SourceRef { unitId: value.source.unitId, start: value.source.start, end: value.source.end } };
+}
+
+func copyBlock(value: BasicBlock): BasicBlock {
+    var instructions: Vec<Instruction> = [];
+    var index = 0;
+    while index < value.instructions.len() { instructions.push(copyInstruction(value.instructions[index])); index = index + 1; }
+    return BasicBlock { id: value.id, params: copyValues(value.params), instructions: instructions, terminator: copyTerminator(value.terminator) };
+}
+
+func copyFunction(value: IRFunction, replacement: BasicBlock, replaceIndex: int): IRFunction {
+    var parameterTypes: Vec<IRType> = [];
+    var parameters = copyValues(value.parameters);
+    var index = 0;
+    while index < value.signature.parameterTypes.len() {
+        parameterTypes.push(IRType { kind: value.signature.parameterTypes[index].kind });
+        index = index + 1;
+    }
+    var blocks: Vec<BasicBlock> = [];
+    index = 0;
+    while index < value.blocks.len() {
+        if replaceIndex >= 0 && index == replaceIndex { blocks.push(replacement); }
+        else { blocks.push(copyBlock(value.blocks[index])); }
+        index = index + 1;
+    }
+    var escapes: Vec<Escape> = [];
+    index = 0;
+    while index < value.effects.argumentEscapes.len() { escapes.push(value.effects.argumentEscapes[index]); index = index + 1; }
+    var effects = EffectSummary { readsMemory: value.effects.readsMemory, writesMemory: value.effects.writesMemory,
+        allocates: value.effects.allocates, mayBlock: value.effects.mayBlock, synchronizes: value.effects.synchronizes,
+        unresolvedCallees: value.effects.unresolvedCallees, argumentEscapes: escapes, resultEscape: value.effects.resultEscape };
+    return IRFunction { id: value.id,
+        key: functionKey(value.key.module, value.key.owner, value.key.name),
+        signature: functionSignature(parameterTypes, IRType { kind: value.signature.returnType.kind }),
+        parameters: parameters, blocks: blocks, effects: effects };
+}
+
+func appendZeroAssertion(instructions: Vec<Instruction>, counterId: int, nextId: int, source: SourceRef): int {
+    var oneId = nextId;
+    instructions.push(constI64(oneId, 1, source));
+    nextId = nextId + 1;
+    var plusOneId = nextId;
+    instructions.push(addCheckedI64(plusOneId, counterId, oneId, source));
+    nextId = nextId + 1;
+    var innerId = nextId;
+    instructions.push(divCheckedI64(innerId, oneId, plusOneId, source));
+    nextId = nextId + 1;
+    var assertionId = nextId;
+    instructions.push(divCheckedI64(assertionId, oneId, innerId, source));
+    return nextId + 1;
+}
+
+func appendContextCounter(instructions: Vec<Instruction>, functionId: int, contextId: int, nextId: int, source: SourceRef): int {
+    var resultId = nextId;
+    instructions.push(call(resultId, irI64(), functionId, [contextId], source));
+    return appendZeroAssertion(instructions, resultId, nextId + 1, source);
+}
+
+func copyProgramWithTeardownChecks(program: IRProgram, runtimeRoot: string): Result<IRProgram, string> {
+    var managedModule = runtimeRoot + "/managed/main.rey";
+    var gcModule = runtimeRoot + "/gc/main.rey";
+    var createId = runtimeFunctionId(program, managedModule, "managedCreate");
+    var destroyId = runtimeFunctionId(program, managedModule, "managedDestroy");
+    var collectId = runtimeFunctionId(program, managedModule, "managedCollect");
+    var liveObjectsId = runtimeFunctionId(program, managedModule, "managedLiveObjects");
+    var livePayloadId = runtimeFunctionId(program, managedModule, "managedLivePayloadBytes");
+    var requestedObjectId = runtimeFunctionId(program, managedModule, "managedRequestedObjectBytes");
+    var regionRequestedId = runtimeFunctionId(program, managedModule, "managedRegionRequestedBytes");
+    var regionObjectsId = runtimeFunctionId(program, managedModule, "managedRegionObjectCount");
+    var regionUsedId = runtimeFunctionId(program, managedModule, "managedRegionUsedBytes");
+    var rootCountId = runtimeFunctionId(program, gcModule, "gcRootCount");
+    var rangeMetadataId = runtimeFunctionId(program, gcModule, "gcRequestedRangeMetadataBytes");
+    if createId < 0 || destroyId < 0 || collectId < 0 || liveObjectsId < 0 || livePayloadId < 0 || requestedObjectId < 0 || regionRequestedId < 0 || regionObjectsId < 0 || regionUsedId < 0 || rootCountId < 0 || rangeMetadataId < 0 {
+        return Result.Err("managed teardown: exact runtime module function resolution failed");
+    }
+    var entryIndex = managedEntryIndex(program);
+    if entryIndex < 0 { return Result.Err("managed teardown: unique generated managed::entry wrapper is missing"); }
+    var entry = program.functions[entryIndex];
+    if entry.id != program.entryFunctionId || entry.signature.returnType.kind != IRTypeKind::Void || entry.parameters.len() != 0 {
+        return Result.Err("managed teardown: managed::entry is not the zero-argument program entry");
+    }
+    if entry.blocks.len() != 1 { return Result.Err("managed teardown: generated entry wrapper must have one block"); }
+    var block = entry.blocks[0];
+    if block.terminator.kind != TerminatorKind::Return || block.terminator.valueId != -1 { return Result.Err("managed teardown: generated entry wrapper must return void"); }
+    var contextId = -1;
+    var createCount = 0;
+    var destroyCount = 0;
+    var destroyIndex = -1;
+    var index = 0;
+    while index < block.instructions.len() {
+        var item = block.instructions[index];
+        if item.kind == InstructionKind::Call && item.functionId == createId {
+            createCount = createCount + 1;
+            if item.resultId >= 0 && item.operands.len() == 2 { contextId = item.resultId; }
+        }
+        if item.kind == InstructionKind::Call && item.functionId == destroyId {
+            destroyCount = destroyCount + 1;
+            destroyIndex = index;
+            if item.operands.len() != 1 || item.operands[0] != contextId { return Result.Err("managed teardown: destroy does not use the generated context"); }
+        }
+        index = index + 1;
+    }
+    if createCount != 1 || destroyCount != 1 || contextId < 0 || destroyIndex < 0 {
+        return Result.Err("managed teardown: wrapper must contain exactly one context create and destroy");
+    }
+
+    var nextId = 0;
+    index = 0;
+    while index < block.instructions.len() {
+        if block.instructions[index].resultId >= nextId { nextId = block.instructions[index].resultId + 1; }
+        index = index + 1;
+    }
+    index = 0;
+    while index < entry.parameters.len() { if entry.parameters[index].id >= nextId { nextId = entry.parameters[index].id + 1; } index = index + 1; }
+    index = 0;
+    while index < block.params.len() { if block.params[index].id >= nextId { nextId = block.params[index].id + 1; } index = index + 1; }
+
+    var source = sourceRef("managed-roots", 0, 0);
+    var instructions: Vec<Instruction> = [];
+    index = 0;
+    while index < block.instructions.len() {
+        if index == destroyIndex {
+            var collectResultId = nextId;
+            instructions.push(call(collectResultId, irI64(), collectId, [contextId], source));
+            nextId = nextId + 1;
+            nextId = appendContextCounter(instructions, liveObjectsId, contextId, nextId, source);
+            nextId = appendContextCounter(instructions, livePayloadId, contextId, nextId, source);
+            nextId = appendContextCounter(instructions, requestedObjectId, contextId, nextId, source);
+            nextId = appendContextCounter(instructions, regionRequestedId, contextId, nextId, source);
+            nextId = appendContextCounter(instructions, regionObjectsId, contextId, nextId, source);
+            nextId = appendContextCounter(instructions, regionUsedId, contextId, nextId, source);
+            var collectorOffsetId = nextId;
+            instructions.push(constI64(collectorOffsetId, 24, source));
+            nextId = nextId + 1;
+            var collectorAddressId = nextId;
+            instructions.push(rawOffset(collectorAddressId, contextId, collectorOffsetId, source));
+            nextId = nextId + 1;
+            var collectorId = nextId;
+            instructions.push(rawLoadAddress(collectorId, collectorAddressId, source));
+            nextId = nextId + 1;
+            var rootCountResultId = nextId;
+            instructions.push(call(rootCountResultId, irI64(), rootCountId, [collectorId], source));
+            nextId = appendZeroAssertion(instructions, rootCountResultId, nextId + 1, source);
+            var rangeMetadataResultId = nextId;
+            instructions.push(call(rangeMetadataResultId, irI64(), rangeMetadataId, [collectorId], source));
+            nextId = appendZeroAssertion(instructions, rangeMetadataResultId, nextId + 1, source);
+        }
+        instructions.push(copyInstruction(block.instructions[index]));
+        index = index + 1;
+    }
+    var instrumentedBlock = BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) };
+    var functions: Vec<IRFunction> = [];
+    index = 0;
+    while index < program.functions.len() {
+        if program.functions[index].blocks.len() == 0 { return Result.Err("managed teardown: IR function has no blocks"); }
+        if index == entryIndex { functions.push(copyFunction(program.functions[index], instrumentedBlock, 0)); }
+        else { functions.push(copyFunction(program.functions[index], BasicBlock { id: 0, params: [], instructions: [], terminator: returnVoid(source) }, -1)); }
+        index = index + 1;
+    }
+    return Result.Ok(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions });
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func emitImages(program: IRProgram, outputPrefix: string, reuseSlots: bool): void {
+    var darwin: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if reuseSlots { darwin = emitArm64WithReuse(program, "darwin"); }
+    if darwin.isErr() { eprintln("managed teardown: Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln("managed teardown: Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputPrefix + ".darwin", macho.unwrap(), "Darwin");
+    var linux: Result<Arm64Code, string> = emitArm64(program, "linux");
+    if reuseSlots { linux = emitArm64WithReuse(program, "linux"); }
+    if linux.isErr() { eprintln("managed teardown: Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln("managed teardown: ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputPrefix + ".linux", elf.unwrap(), "Linux");
+}
+
+func modeOptions(mode: string): Vec<bool> {
+    if mode == "heap" { return [false, false, false, false]; }
+    if mode == "placed" { return [false, true, false, false]; }
+    if mode == "stress-heap" { return [true, false, false, false]; }
+    if mode == "stress-placed" { return [true, true, false, false]; }
+    if mode == "stress-optimized" { return [true, true, true, true]; }
+    return [];
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 5 || argv.len() == 6, "expected source path, runtime root, image output prefix, mode, and optional bounded-workload policy");
+    var nativeOnly = false;
+    if argv.len() == 6 {
+        require(argv[5] == "native-only-bounded-workload", "unknown teardown evaluator policy");
+        nativeOnly = true;
+    }
+    var options = modeOptions(argv[4]);
+    require(options.len() == 4, "mode must be heap, placed, stress-heap, stress-placed, or stress-optimized");
+    var sourcePath = argv[1];
+    var runtimeRoot = canonicalSourcePath(argv[2]);
+    var imagePrefix = argv[3];
+    require(fileExists(sourcePath), "managed source path does not exist: " + sourcePath);
+    require(fileExists(runtimeRoot + "/managed/main.rey") && fileExists(runtimeRoot + "/gc/main.rey"), "runtime root is incomplete");
+
+    var checked = checkSourceFileGraph(sourcePath, "");
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
+    var built = buildManagedProgram(checked.unwrap(), runtimeRoot, "", options[0], options[1]);
+    if built.isErr() { eprintln("managed teardown: managed build failed: " + built.unwrapErr()); exit(1); }
+    var instrumented = copyProgramWithTeardownChecks(built.unwrap(), runtimeRoot);
+    if instrumented.isErr() { eprintln(instrumented.unwrapErr()); exit(1); }
+    var program = instrumented.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln("managed teardown: instrumented IR verification failed: " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    if options[2] {
+        var folded = foldConstants(program);
+        if folded.isErr() { eprintln("managed teardown: constant folding failed: " + folded.unwrapErr()); exit(1); }
+        program = folded.unwrap();
+        verified = verifyProgram(program);
+        if !verified.ok { eprintln("managed teardown: folded IR verification failed: " + verified.errors.join("\n")); exit(1); }
+    }
+    if nativeOnly {
+        writeFile(imagePrefix + ".evaluation", "native-only\n");
+        writeFile(imagePrefix + ".steps", "0");
+    } else {
+        var evaluated = evaluateProgram(program, 4000000, 128);
+        if !evaluated.ok || !evaluated.isVoid { eprintln("managed teardown: bounded interpreter failed: " + evaluated.error); exit(1); }
+        writeFile(imagePrefix + ".evaluation", "interpreted\n");
+        writeFile(imagePrefix + ".steps", evaluated.steps.toString());
+    }
+    writeFile(imagePrefix + ".ir", printIR(program));
+    emitImages(program, imagePrefix, options[3]);
+    println("managed-teardown: verified");
+}

@@ -18,8 +18,14 @@ SEED = ROOT / "build/release/v0.3.1/macos-arm64-winruntime/package/rey-v0.3.1-ma
 RUNTIME = SEED.parent / "runtime"
 SEED_HASH = "89f41b7cac5f38018c32b74d7a134d4d32e1314d58ddf292efcea174d182a921"
 RUNTIME_HASH = "f3d625762a0ea9dfc403e81b5c3cc8cce49aaec64bd276e5b2dec95fad666667"
-MODULES = {"fixed-heap": ("layout", "heap"), "fixed-gc": ("layout", "heap", "gc")}
-NATIVE_ONLY = {("fixed-gc", "native-collection-stress-128")}
+MODULES = {"fixed-heap": ("layout", "heap"), "fixed-gc": ("layout", "heap", "gc"),
+           "managed-runtime": ("layout", "heap", "gc", "managed"),
+           "managed-containers": ("layout", "heap", "gc", "managed", "containers")}
+NATIVE_ONLY = {
+    ("fixed-gc", "native-collection-stress-128"): "128 forced-collection allocations exceed the historical-seed evaluator work/memory bound; native assertions remain required",
+    ("managed-containers", "refvec-gc"): "24 reference and 12 scalar vector pushes with collection before every allocation reached the 4000000-step evaluator bound; the smaller explicit-collection twin remains interpreted",
+    ("managed-containers", "map-cycles"): "12 map insertions with collection before every allocation reached the 4000000-step evaluator bound; the smaller explicit-collection twin remains interpreted",
+}
 
 
 def digest(path):
@@ -128,7 +134,7 @@ def main():
                 record(label + "-native-only-evaluation-policy",
                        evaluation_file.is_file() and evaluation_file.read_text() == "native-only\n",
                        evaluator_executed=False,
-                       reason="128 forced-collection allocations exceed the historical-seed evaluator work/memory bound; native assertions remain required")
+                       reason=NATIVE_ONLY[(suite, case)])
             elif evaluation_file.is_file():
                 record(label + "-unexpected-evaluator-skip", False)
             if steps_file.is_file():
@@ -199,7 +205,7 @@ def main():
                   linux_requested=args.linux_docker, linux_image=linux_image, reuse_slots=args.reuse_slots,
                   passed=all(r["passed"] for r in records),
                   native_only_cases=[suite + "/" + case for suite in args.suites for name, case in NATIVE_ONLY if name == suite],
-                  limitation="fixed layouts and explicit construction roots; one labeled 128-allocation forced-collection case is native-only; no automatic compiler roots or RSS claim")
+                  limitation="runtime APIs with explicit construction roots; named bounded-evaluator omissions retain native assertions and interpreted smaller twins; compiler-generated roots are gated separately; no RSS/timing claim")
     (output / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print("memory integration", "PASS" if report["passed"] else "FAIL", len(records), "checks", flush=True)
     return 0 if report["passed"] else 1

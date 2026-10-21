@@ -1,0 +1,607 @@
+import gc::{gcCollect, gcCreate, gcDestroy, gcRegisterRootRange, gcRootPop, gcRootPush, gcRootSet, gcUnregisterRootRange};
+import heap::{heapAllocateSized, heapCreate, heapDestroy, heapLiveObjects, heapLivePayloadBytes, heapRequestedObjectBytes};
+import layout::{layoutCount, layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
+
+func managedAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func managedFail(code: int): void {
+    __reyRawFail(code);
+    return;
+}
+
+func managedContextValidate(context: __rey_raw_address): void {
+    if __reyRawEqual(context, __reyRawNull()) { managedFail(2202); return; }
+    if __reyRawLoadI64(managedAddressAt(context, 0)) != 1380272212 { managedFail(2202); return; }
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    var heap = __reyRawLoadAddress(managedAddressAt(context, 16));
+    var collector = __reyRawLoadAddress(managedAddressAt(context, 24));
+    var stress = __reyRawLoadI64(managedAddressAt(context, 32));
+    var budget = __reyRawLoadI64(managedAddressAt(context, 40));
+    var sinceCollection = __reyRawLoadI64(managedAddressAt(context, 48));
+    var nextSerial = __reyRawLoadI64(managedAddressAt(context, 64));
+    if __reyRawEqual(registry, __reyRawNull()) || __reyRawEqual(heap, __reyRawNull()) || __reyRawEqual(collector, __reyRawNull()) || (stress != 0 && stress != 1) || budget < 65536 || sinceCollection < 0 || nextSerial < 0 {
+        managedFail(2202);
+        return;
+    }
+    layoutCount(registry);
+    heapLiveObjects(heap);
+    if __reyRawLoadI64(managedAddressAt(collector, 0)) != 1380272201 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(collector, 8)), heap) {
+        managedFail(2202);
+        return;
+    }
+    var offset = 88;
+    while offset < 128 {
+        if __reyRawLoadI64(managedAddressAt(context, offset)) != 0 { managedFail(2202); return; }
+        offset = offset + 8;
+    }
+}
+
+func managedRegionFind(context: __rey_raw_address, target: __rey_raw_address): __rey_raw_address {
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var steps = 0;
+    var limit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        if steps >= limit { managedFail(2202); return __reyRawNull(); }
+        if __reyRawLoadI64(managedAddressAt(region, 0)) != 1380272213 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(region, 16)), context) {
+            managedFail(2202);
+            return __reyRawNull();
+        }
+        if __reyRawEqual(region, target) { return region; }
+        region = __reyRawLoadAddress(managedAddressAt(region, 8));
+        steps = steps + 1;
+    }
+    return __reyRawNull();
+}
+
+func managedFindRegionObject(context: __rey_raw_address, object: __rey_raw_address): __rey_raw_address {
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var regionSteps = 0;
+    var regionLimit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        if regionSteps >= regionLimit { managedFail(2202); return __reyRawNull(); }
+        if __reyRawLoadI64(managedAddressAt(region, 0)) != 1380272213 { managedFail(2202); return __reyRawNull(); }
+        var record = __reyRawLoadAddress(managedAddressAt(region, 64));
+        var objectSteps = 0;
+        var objectLimit = __reyRawLoadI64(managedAddressAt(region, 80));
+        while !__reyRawEqual(record, __reyRawNull()) {
+            if objectSteps >= objectLimit { managedFail(2202); return __reyRawNull(); }
+            if __reyRawLoadI64(managedAddressAt(record, 0)) != 1380272214 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(record, 24)), region) {
+                managedFail(2202);
+                return __reyRawNull();
+            }
+            if __reyRawEqual(__reyRawLoadAddress(managedAddressAt(record, 16)), object) { return record; }
+            record = __reyRawLoadAddress(managedAddressAt(record, 8));
+            objectSteps = objectSteps + 1;
+        }
+        region = __reyRawLoadAddress(managedAddressAt(region, 8));
+        regionSteps = regionSteps + 1;
+    }
+    return __reyRawNull();
+}
+
+func managedObjectLayout(context: __rey_raw_address, object: __rey_raw_address, regionRecord: __rey_raw_address): int {
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    var header = __reyRawLoadI64(object);
+    var layoutId = 0;
+    if !__reyRawEqual(regionRecord, __reyRawNull()) {
+        layoutId = __reyRawLoadI64(managedAddressAt(regionRecord, 32));
+        if header != 8589934592 + layoutId { managedFail(2202); return 0; }
+    } else {
+        if header < 1 || header > 8589934591 { managedFail(2202); return 0; }
+        var mark = header / 4294967296;
+        if mark < 0 || mark > 1 { managedFail(2202); return 0; }
+        layoutId = header - mark * 4294967296;
+    }
+    var layoutCountValue = layoutCount(registry);
+    if layoutId < 1 || layoutId > layoutCountValue { managedFail(2202); return 0; }
+    var payloadBytes = __reyRawLoadI64(managedAddressAt(object, 8));
+    var tailKind = layoutTailKind(registry, layoutId);
+    if !layoutPayloadSizeValid(registry, layoutId, payloadBytes) || (!__reyRawEqual(regionRecord, __reyRawNull()) && tailKind != 0) { managedFail(2202); return 0; }
+    if tailKind == 2 {
+        var capacity = (payloadBytes - layoutPayloadBytes(registry, layoutId)) / 8;
+        var initialized = __reyRawLoadI64(managedAddressAt(object, 16));
+        if initialized < 0 || initialized > capacity { managedFail(2202); return 0; }
+    }
+    return layoutId;
+}
+
+func managedReferenceRegion(context: __rey_raw_address, object: __rey_raw_address): __rey_raw_address {
+    if __reyRawEqual(object, __reyRawNull()) { return __reyRawNull(); }
+    var header = __reyRawLoadI64(object);
+    if header < 8589934592 {
+        managedObjectLayout(context, object, __reyRawNull());
+        return __reyRawNull();
+    }
+    var record = managedFindRegionObject(context, object);
+    if !__reyRawEqual(record, __reyRawNull()) {
+        managedObjectLayout(context, object, record);
+        return __reyRawLoadAddress(managedAddressAt(record, 24));
+    }
+    managedFail(2204);
+    return __reyRawNull();
+}
+
+func managedReferenceForRoot(context: __rey_raw_address, object: __rey_raw_address): __rey_raw_address {
+    var region = managedReferenceRegion(context, object);
+    if !__reyRawEqual(region, __reyRawNull()) { return __reyRawNull(); }
+    return object;
+}
+
+func managedRegionAddChunk(region: __rey_raw_address, required: int): __rey_raw_address {
+    var capacity = 65536;
+    if required > capacity { capacity = required; }
+    if capacity > 9223372036854774783 { managedFail(2201); return __reyRawNull(); }
+    var data = __reyRawMap(capacity);
+    var chunk = __reyRawMap(64);
+    __reyRawStoreI64(managedAddressAt(chunk, 0), 1380272215);
+    __reyRawStoreAddress(managedAddressAt(chunk, 8), __reyRawLoadAddress(managedAddressAt(region, 48)));
+    __reyRawStoreAddress(managedAddressAt(chunk, 16), data);
+    __reyRawStoreI64(managedAddressAt(chunk, 24), capacity);
+    __reyRawStoreI64(managedAddressAt(chunk, 32), 0);
+    __reyRawStoreI64(managedAddressAt(chunk, 40), capacity);
+    __reyRawStoreAddress(managedAddressAt(region, 48), chunk);
+    __reyRawStoreAddress(managedAddressAt(region, 56), chunk);
+    return chunk;
+}
+
+func managedRegionAddRootChunk(context: __rey_raw_address, region: __rey_raw_address, requiredCells: int): __rey_raw_address {
+    var capacity = 1024;
+    if requiredCells > capacity { capacity = requiredCells; }
+    if capacity > 1152921504606846967 { managedFail(2201); return __reyRawNull(); }
+    var cellBytes = capacity * 8;
+    var cells = __reyRawMap(cellBytes);
+    var index = 0;
+    while index < capacity {
+        __reyRawStoreAddress(managedAddressAt(cells, index * 8), __reyRawNull());
+        index = index + 1;
+    }
+    var rootChunk = __reyRawMap(64);
+    __reyRawStoreI64(managedAddressAt(rootChunk, 0), 1380272216);
+    __reyRawStoreAddress(managedAddressAt(rootChunk, 8), __reyRawLoadAddress(managedAddressAt(region, 88)));
+    __reyRawStoreAddress(managedAddressAt(rootChunk, 16), cells);
+    __reyRawStoreI64(managedAddressAt(rootChunk, 24), 0);
+    __reyRawStoreI64(managedAddressAt(rootChunk, 32), capacity);
+    __reyRawStoreI64(managedAddressAt(rootChunk, 40), cellBytes);
+    __reyRawStoreAddress(managedAddressAt(region, 88), rootChunk);
+    __reyRawStoreAddress(managedAddressAt(region, 96), rootChunk);
+    var range = gcRegisterRootRange(__reyRawLoadAddress(managedAddressAt(context, 24)), cells, capacity);
+    __reyRawStoreAddress(managedAddressAt(rootChunk, 48), range);
+    return rootChunk;
+}
+
+func managedRegionAllocateCore(context: __rey_raw_address, region: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    if layoutTailKind(registry, layoutId) != 0 { managedFail(2203); return __reyRawNull(); }
+    var payloadBytes = layoutPayloadBytes(registry, layoutId);
+    var referenceCount = layoutReferenceCount(registry, layoutId);
+    if payloadBytes > 9223372036854775791 { managedFail(2201); return __reyRawNull(); }
+    var objectBytes = 16 + payloadBytes;
+    if objectBytes > 9223372036854774687 { managedFail(2201); return __reyRawNull(); }
+    var allocationBytes = (objectBytes + 15) / 16 * 16;
+    var recordBytes = 80;
+    var totalBytes = allocationBytes + recordBytes;
+    if allocationBytes < objectBytes || totalBytes < allocationBytes || __reyRawLoadI64(managedAddressAt(region, 72)) > 9223372036854775807 - totalBytes || __reyRawLoadI64(managedAddressAt(region, 80)) >= 9223372036854775807 {
+        managedFail(2201);
+        return __reyRawNull();
+    }
+    var chunk = __reyRawLoadAddress(managedAddressAt(region, 56));
+    if __reyRawEqual(chunk, __reyRawNull()) || __reyRawLoadI64(managedAddressAt(chunk, 24)) - __reyRawLoadI64(managedAddressAt(chunk, 32)) < totalBytes {
+        chunk = managedRegionAddChunk(region, totalBytes);
+    }
+    var data = __reyRawLoadAddress(managedAddressAt(chunk, 16));
+    var used = __reyRawLoadI64(managedAddressAt(chunk, 32));
+    var object = managedAddressAt(data, used);
+    __reyRawStoreI64(object, 8589934592 + layoutId);
+    __reyRawStoreI64(managedAddressAt(object, 8), payloadBytes);
+    var byteIndex = 0;
+    while byteIndex < payloadBytes {
+        __reyRawStoreByte(managedAddressAt(object, 16 + byteIndex), 0);
+        byteIndex = byteIndex + 1;
+    }
+    var record = managedAddressAt(object, allocationBytes);
+    __reyRawStoreI64(managedAddressAt(record, 0), 1380272214);
+    __reyRawStoreAddress(managedAddressAt(record, 8), __reyRawLoadAddress(managedAddressAt(region, 64)));
+    __reyRawStoreAddress(managedAddressAt(record, 16), object);
+    __reyRawStoreAddress(managedAddressAt(record, 24), region);
+    __reyRawStoreI64(managedAddressAt(record, 32), layoutId);
+    __reyRawStoreI64(managedAddressAt(record, 40), payloadBytes);
+    __reyRawStoreI64(managedAddressAt(record, 64), referenceCount);
+    __reyRawStoreI64(managedAddressAt(record, 72), recordBytes);
+
+    var cells = __reyRawNull();
+    if referenceCount > 0 {
+        var rootChunk = __reyRawLoadAddress(managedAddressAt(region, 96));
+        if __reyRawEqual(rootChunk, __reyRawNull()) || __reyRawLoadI64(managedAddressAt(rootChunk, 32)) - __reyRawLoadI64(managedAddressAt(rootChunk, 24)) < referenceCount {
+            rootChunk = managedRegionAddRootChunk(context, region, referenceCount);
+        }
+        var cellOffset = __reyRawLoadI64(managedAddressAt(rootChunk, 24));
+        cells = managedAddressAt(__reyRawLoadAddress(managedAddressAt(rootChunk, 16)), cellOffset * 8);
+        __reyRawStoreI64(managedAddressAt(rootChunk, 24), cellOffset + referenceCount);
+        var index = 0;
+        while index < referenceCount {
+            var fieldOffset = layoutReferenceOffset(registry, layoutId, index);
+            __reyRawStoreAddress(managedAddressAt(object, 16 + fieldOffset), __reyRawNull());
+            index = index + 1;
+        }
+    }
+    __reyRawStoreAddress(managedAddressAt(record, 48), cells);
+    __reyRawStoreI64(managedAddressAt(chunk, 32), used + totalBytes);
+    __reyRawStoreI64(managedAddressAt(region, 72), __reyRawLoadI64(managedAddressAt(region, 72)) + totalBytes);
+    __reyRawStoreI64(managedAddressAt(region, 80), __reyRawLoadI64(managedAddressAt(region, 80)) + 1);
+    __reyRawStoreAddress(managedAddressAt(region, 64), record);
+    return object;
+}
+
+func managedRegionRelease(context: __rey_raw_address, region: __rey_raw_address): void {
+    var rootChunk = __reyRawLoadAddress(managedAddressAt(region, 88));
+    while !__reyRawEqual(rootChunk, __reyRawNull()) {
+        var range = __reyRawLoadAddress(managedAddressAt(rootChunk, 48));
+        gcUnregisterRootRange(__reyRawLoadAddress(managedAddressAt(context, 24)), range);
+        rootChunk = __reyRawLoadAddress(managedAddressAt(rootChunk, 8));
+    }
+    rootChunk = __reyRawLoadAddress(managedAddressAt(region, 88));
+    while !__reyRawEqual(rootChunk, __reyRawNull()) {
+        var nextRootChunk = __reyRawLoadAddress(managedAddressAt(rootChunk, 8));
+        var cells = __reyRawLoadAddress(managedAddressAt(rootChunk, 16));
+        var cellBytes = __reyRawLoadI64(managedAddressAt(rootChunk, 40));
+        __reyRawUnmap(cells, cellBytes);
+        __reyRawStoreI64(managedAddressAt(rootChunk, 0), 0);
+        __reyRawUnmap(rootChunk, 64);
+        rootChunk = nextRootChunk;
+    }
+    var chunk = __reyRawLoadAddress(managedAddressAt(region, 48));
+    while !__reyRawEqual(chunk, __reyRawNull()) {
+        var next = __reyRawLoadAddress(managedAddressAt(chunk, 8));
+        var data = __reyRawLoadAddress(managedAddressAt(chunk, 16));
+        var capacity = __reyRawLoadI64(managedAddressAt(chunk, 40));
+        __reyRawUnmap(data, capacity);
+        __reyRawStoreI64(managedAddressAt(chunk, 0), 0);
+        __reyRawUnmap(chunk, 64);
+        chunk = next;
+    }
+    __reyRawStoreI64(managedAddressAt(region, 0), 0);
+    __reyRawUnmap(region, 128);
+}
+
+func managedHeapAllocateSized(context: __rey_raw_address, layoutId: int, payloadBytes: int): __rey_raw_address {
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    if payloadBytes < 0 || payloadBytes > 9223372036854775791 || !layoutPayloadSizeValid(registry, layoutId, payloadBytes) { managedFail(2201); return __reyRawNull(); }
+    var requestBytes = 16 + payloadBytes;
+    if requestBytes > 9223372036854774783 { managedFail(2201); return __reyRawNull(); }
+    requestBytes = (requestBytes + 15) / 16 * 16;
+    var stress = __reyRawLoadI64(managedAddressAt(context, 32));
+    var budget = __reyRawLoadI64(managedAddressAt(context, 40));
+    var sinceCollection = __reyRawLoadI64(managedAddressAt(context, 48));
+    if stress == 1 || requestBytes > budget || sinceCollection > budget - requestBytes {
+        managedCollect(context);
+    }
+    var heap = __reyRawLoadAddress(managedAddressAt(context, 16));
+    var object = heapAllocateSized(heap, layoutId, payloadBytes);
+    sinceCollection = __reyRawLoadI64(managedAddressAt(context, 48));
+    if sinceCollection > 9223372036854775807 - requestBytes { managedFail(2201); return __reyRawNull(); }
+    __reyRawStoreI64(managedAddressAt(context, 48), sinceCollection + requestBytes);
+    return object;
+}
+
+func managedHeapAllocate(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    return managedHeapAllocateSized(context, layoutId, layoutPayloadBytes(registry, layoutId));
+}
+
+pub func managedCreate(registry: __rey_raw_address, stress: bool): __rey_raw_address {
+    var layoutCountValue = layoutCount(registry);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+    var context = __reyRawMap(128);
+    __reyRawStoreI64(managedAddressAt(context, 0), 1380272212);
+    __reyRawStoreAddress(managedAddressAt(context, 8), registry);
+    __reyRawStoreAddress(managedAddressAt(context, 16), heap);
+    __reyRawStoreAddress(managedAddressAt(context, 24), collector);
+    if stress { __reyRawStoreI64(managedAddressAt(context, 32), 1); }
+    else { __reyRawStoreI64(managedAddressAt(context, 32), 0); }
+    __reyRawStoreI64(managedAddressAt(context, 40), 65536);
+    __reyRawStoreAddress(managedAddressAt(context, 56), __reyRawNull());
+    __reyRawStoreI64(managedAddressAt(context, 64), 0);
+    __reyRawStoreI64(managedAddressAt(context, 72), 0);
+    __reyRawStoreI64(managedAddressAt(context, 80), 0);
+    if layoutCountValue < 0 { managedFail(2202); return __reyRawNull(); }
+    return context;
+}
+
+pub func managedDestroy(context: __rey_raw_address): void {
+    managedContextValidate(context);
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        var next = __reyRawLoadAddress(managedAddressAt(region, 8));
+        managedRegionRelease(context, region);
+        region = next;
+    }
+    var collector = __reyRawLoadAddress(managedAddressAt(context, 24));
+    var heap = __reyRawLoadAddress(managedAddressAt(context, 16));
+    gcDestroy(collector);
+    heapDestroy(heap);
+    __reyRawStoreI64(managedAddressAt(context, 0), 0);
+    __reyRawUnmap(context, 128);
+}
+
+pub func managedAllocate(context: __rey_raw_address, layoutId: int): __rey_raw_address {
+    managedContextValidate(context);
+    return managedHeapAllocate(context, layoutId);
+}
+
+pub func managedAllocateSized(context: __rey_raw_address, layoutId: int, payloadBytes: int): __rey_raw_address {
+    managedContextValidate(context);
+    return managedHeapAllocateSized(context, layoutId, payloadBytes);
+}
+
+pub func managedCollect(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    var collector = __reyRawLoadAddress(managedAddressAt(context, 24));
+    var reclaimed = gcCollect(collector);
+    var liveBytes = heapLivePayloadBytes(__reyRawLoadAddress(managedAddressAt(context, 16)));
+    var nextBudget = 65536;
+    if liveBytes > 0 {
+        if liveBytes > 576460752303423487 { nextBudget = 1152921504606846975; }
+        else { nextBudget = liveBytes * 2; }
+        if nextBudget < 65536 { nextBudget = 65536; }
+        if nextBudget > 1152921504606846975 { nextBudget = 1152921504606846975; }
+    }
+    __reyRawStoreI64(managedAddressAt(context, 40), nextBudget);
+    __reyRawStoreI64(managedAddressAt(context, 48), 0);
+    return reclaimed;
+}
+
+pub func managedRootPush(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    return gcRootPush(__reyRawLoadAddress(managedAddressAt(context, 24)), __reyRawNull());
+}
+
+pub func managedRootSet(context: __rey_raw_address, index: int, object: __rey_raw_address): void {
+    managedContextValidate(context);
+    var rooted = managedReferenceForRoot(context, object);
+    gcRootSet(__reyRawLoadAddress(managedAddressAt(context, 24)), index, rooted);
+}
+
+pub func managedRootPop(context: __rey_raw_address, index: int): void {
+    managedContextValidate(context);
+    gcRootPop(__reyRawLoadAddress(managedAddressAt(context, 24)), index);
+}
+
+pub func managedStoreReference(context: __rey_raw_address, object: __rey_raw_address, payloadOffset: int, value: __rey_raw_address): void {
+    managedContextValidate(context);
+    if __reyRawEqual(object, __reyRawNull()) { managedFail(2203); return; }
+    var ownerHeader = __reyRawLoadI64(object);
+    var ownerIsHeap = ownerHeader < 8589934592;
+    var ownerRecord = __reyRawNull();
+    if !ownerIsHeap {
+        ownerRecord = managedFindRegionObject(context, object);
+        if __reyRawEqual(ownerRecord, __reyRawNull()) { managedFail(2204); return; }
+    }
+    var ownerRegion = __reyRawNull();
+    if ownerIsHeap {
+        managedObjectLayout(context, object, __reyRawNull());
+    } else {
+        ownerRegion = __reyRawLoadAddress(managedAddressAt(ownerRecord, 24));
+    }
+    var layoutId = managedObjectLayout(context, object, ownerRecord);
+    var registry = __reyRawLoadAddress(managedAddressAt(context, 8));
+    var referenceCount = layoutReferenceCount(registry, layoutId);
+    var fieldIndex = 0;
+    var found = false;
+    var tailField = false;
+    if layoutTailKind(registry, layoutId) == 2 {
+        var minimumPayloadBytes = layoutPayloadBytes(registry, layoutId);
+        if payloadOffset >= minimumPayloadBytes && (payloadOffset - minimumPayloadBytes) % 8 == 0 {
+            var tailIndex = (payloadOffset - minimumPayloadBytes) / 8;
+            var payloadBytes = __reyRawLoadI64(managedAddressAt(object, 8));
+            var tailCapacity = (payloadBytes - minimumPayloadBytes) / 8;
+            var initialized = __reyRawLoadI64(managedAddressAt(object, 16));
+            if tailIndex >= 0 && tailIndex < tailCapacity && tailIndex <= initialized {
+                fieldIndex = tailIndex;
+                tailField = true;
+                found = true;
+            }
+        }
+    }
+    if !found {
+        fieldIndex = 0;
+        while fieldIndex < referenceCount {
+            if layoutReferenceOffset(registry, layoutId, fieldIndex) == payloadOffset { found = true; break; }
+            fieldIndex = fieldIndex + 1;
+        }
+    }
+    if !found { managedFail(2203); return; }
+    var valueRegion = managedReferenceRegion(context, value);
+    if ownerIsHeap && !__reyRawEqual(valueRegion, __reyRawNull()) { managedFail(2203); return; }
+    if !ownerIsHeap && !__reyRawEqual(valueRegion, __reyRawNull()) {
+        var ownerSerial = __reyRawLoadI64(managedAddressAt(ownerRegion, 24));
+        var valueSerial = __reyRawLoadI64(managedAddressAt(valueRegion, 24));
+        if valueSerial > ownerSerial { managedFail(2203); return; }
+    }
+    var stored = value;
+    if !__reyRawEqual(valueRegion, __reyRawNull()) { stored = __reyRawNull(); }
+    __reyRawStoreAddress(managedAddressAt(object, 16 + payloadOffset), value);
+    if !ownerIsHeap {
+        var cells = __reyRawLoadAddress(managedAddressAt(ownerRecord, 48));
+        __reyRawStoreAddress(managedAddressAt(cells, fieldIndex * 8), stored);
+    } else if tailField {
+        var initialized = __reyRawLoadI64(managedAddressAt(object, 16));
+        if fieldIndex == initialized { __reyRawStoreI64(managedAddressAt(object, 16), initialized + 1); }
+    }
+}
+
+pub func managedRegionCreate(context: __rey_raw_address): __rey_raw_address {
+    managedContextValidate(context);
+    var serial = __reyRawLoadI64(managedAddressAt(context, 64));
+    if serial >= 9223372036854775807 { managedFail(2201); return __reyRawNull(); }
+    var region = __reyRawMap(128);
+    __reyRawStoreI64(managedAddressAt(region, 0), 1380272213);
+    __reyRawStoreAddress(managedAddressAt(region, 8), __reyRawLoadAddress(managedAddressAt(context, 56)));
+    __reyRawStoreAddress(managedAddressAt(region, 16), context);
+    __reyRawStoreI64(managedAddressAt(region, 24), serial + 1);
+    __reyRawStoreI64(managedAddressAt(region, 32), 0);
+    __reyRawStoreI64(managedAddressAt(region, 40), 0);
+    __reyRawStoreAddress(managedAddressAt(region, 48), __reyRawNull());
+    __reyRawStoreAddress(managedAddressAt(region, 56), __reyRawNull());
+    __reyRawStoreAddress(managedAddressAt(region, 64), __reyRawNull());
+    __reyRawStoreI64(managedAddressAt(region, 72), 0);
+    __reyRawStoreI64(managedAddressAt(region, 80), 0);
+    __reyRawStoreAddress(managedAddressAt(region, 88), __reyRawNull());
+    __reyRawStoreAddress(managedAddressAt(region, 96), __reyRawNull());
+    __reyRawStoreI64(managedAddressAt(region, 104), 128);
+    __reyRawStoreI64(managedAddressAt(region, 112), 0);
+    __reyRawStoreI64(managedAddressAt(region, 120), 0);
+    __reyRawStoreAddress(managedAddressAt(context, 56), region);
+    __reyRawStoreI64(managedAddressAt(context, 64), serial + 1);
+    return region;
+}
+
+pub func managedRegionEnd(context: __rey_raw_address, region: __rey_raw_address): void {
+    managedContextValidate(context);
+    var found = managedRegionFind(context, region);
+    if __reyRawEqual(found, __reyRawNull()) { managedFail(2204); return; }
+    var endingSerial = __reyRawLoadI64(managedAddressAt(found, 24));
+    var active = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var lifetimeSteps = 0;
+    var lifetimeLimit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(active, __reyRawNull()) {
+        if lifetimeSteps >= lifetimeLimit { managedFail(2202); return; }
+        if !__reyRawEqual(active, found) && __reyRawLoadI64(managedAddressAt(active, 24)) > endingSerial {
+            managedFail(2203);
+            return;
+        }
+        active = __reyRawLoadAddress(managedAddressAt(active, 8));
+        lifetimeSteps = lifetimeSteps + 1;
+    }
+    var current = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var previous = __reyRawNull();
+    var unlinkSteps = 0;
+    while !__reyRawEqual(current, __reyRawNull()) {
+        if unlinkSteps >= lifetimeLimit { managedFail(2202); return; }
+        var next = __reyRawLoadAddress(managedAddressAt(current, 8));
+        if __reyRawEqual(current, region) {
+            if __reyRawEqual(previous, __reyRawNull()) { __reyRawStoreAddress(managedAddressAt(context, 56), next); }
+            else { __reyRawStoreAddress(managedAddressAt(previous, 8), next); }
+            managedRegionRelease(context, current);
+            return;
+        }
+        previous = current;
+        current = next;
+        unlinkSteps = unlinkSteps + 1;
+    }
+    managedFail(2204);
+}
+
+pub func managedRegionAllocate(context: __rey_raw_address, region: __rey_raw_address, layoutId: int): __rey_raw_address {
+    managedContextValidate(context);
+    var active = managedRegionFind(context, region);
+    if __reyRawEqual(active, __reyRawNull()) { managedFail(2204); return __reyRawNull(); }
+    return managedRegionAllocateCore(context, active, layoutId);
+}
+
+pub func managedAllocateDestination(context: __rey_raw_address, destination: __rey_raw_address, layoutId: int): __rey_raw_address {
+    managedContextValidate(context);
+    if __reyRawEqual(destination, __reyRawNull()) { return managedHeapAllocate(context, layoutId); }
+    var region = managedRegionFind(context, destination);
+    if __reyRawEqual(region, __reyRawNull()) { managedFail(2204); return __reyRawNull(); }
+    return managedRegionAllocateCore(context, region, layoutId);
+}
+
+pub func managedLiveObjects(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    return heapLiveObjects(__reyRawLoadAddress(managedAddressAt(context, 16)));
+}
+
+pub func managedLivePayloadBytes(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    return heapLivePayloadBytes(__reyRawLoadAddress(managedAddressAt(context, 16)));
+}
+
+pub func managedRequestedObjectBytes(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    return heapRequestedObjectBytes(__reyRawLoadAddress(managedAddressAt(context, 16)));
+}
+
+pub func managedRegionRequestedBytes(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var total = 0;
+    var steps = 0;
+    var limit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        if steps >= limit || __reyRawLoadI64(managedAddressAt(region, 0)) != 1380272213 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(region, 16)), context) {
+            managedFail(2202);
+            return 0;
+        }
+        if total > 9223372036854775807 - 128 { managedFail(2201); return 0; }
+        total = total + 128;
+        var chunk = __reyRawLoadAddress(managedAddressAt(region, 48));
+        var chunks = 0;
+        var objectLimit = __reyRawLoadI64(managedAddressAt(region, 80));
+        while !__reyRawEqual(chunk, __reyRawNull()) {
+            if chunks > objectLimit || __reyRawLoadI64(managedAddressAt(chunk, 0)) != 1380272215 { managedFail(2202); return 0; }
+            var chunkBytes = __reyRawLoadI64(managedAddressAt(chunk, 24)) + 64;
+            if chunkBytes < 64 || total > 9223372036854775807 - chunkBytes { managedFail(2201); return 0; }
+            total = total + chunkBytes;
+            chunk = __reyRawLoadAddress(managedAddressAt(chunk, 8));
+            chunks = chunks + 1;
+        }
+        var rootChunk = __reyRawLoadAddress(managedAddressAt(region, 88));
+        var rootChunks = 0;
+        while !__reyRawEqual(rootChunk, __reyRawNull()) {
+            if rootChunks > objectLimit || __reyRawLoadI64(managedAddressAt(rootChunk, 0)) != 1380272216 { managedFail(2202); return 0; }
+            var rootBytes = __reyRawLoadI64(managedAddressAt(rootChunk, 40)) + 64;
+            if rootBytes < 64 || total > 9223372036854775807 - rootBytes { managedFail(2201); return 0; }
+            total = total + rootBytes;
+            rootChunk = __reyRawLoadAddress(managedAddressAt(rootChunk, 8));
+            rootChunks = rootChunks + 1;
+        }
+        region = __reyRawLoadAddress(managedAddressAt(region, 8));
+        steps = steps + 1;
+    }
+    return total;
+}
+
+pub func managedRegionUsedBytes(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var total = 0;
+    var steps = 0;
+    var limit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        if steps >= limit || __reyRawLoadI64(managedAddressAt(region, 0)) != 1380272213 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(region, 16)), context) {
+            managedFail(2202);
+            return 0;
+        }
+        var bytes = __reyRawLoadI64(managedAddressAt(region, 72));
+        if total > 9223372036854775807 - bytes { managedFail(2201); return 0; }
+        total = total + bytes;
+        region = __reyRawLoadAddress(managedAddressAt(region, 8));
+        steps = steps + 1;
+    }
+    return total;
+}
+
+pub func managedRegionObjectCount(context: __rey_raw_address): int {
+    managedContextValidate(context);
+    var region = __reyRawLoadAddress(managedAddressAt(context, 56));
+    var total = 0;
+    var steps = 0;
+    var limit = __reyRawLoadI64(managedAddressAt(context, 64));
+    while !__reyRawEqual(region, __reyRawNull()) {
+        if steps >= limit || __reyRawLoadI64(managedAddressAt(region, 0)) != 1380272213 || !__reyRawEqual(__reyRawLoadAddress(managedAddressAt(region, 16)), context) {
+            managedFail(2202);
+            return 0;
+        }
+        var count = __reyRawLoadI64(managedAddressAt(region, 80));
+        if total > 9223372036854775807 - count { managedFail(2201); return 0; }
+        total = total + count;
+        region = __reyRawLoadAddress(managedAddressAt(region, 8));
+        steps = steps + 1;
+    }
+    return total;
+}
+
+func main(): void {}

@@ -1,0 +1,12 @@
+struct Node { pub value: int, }
+
+func main(): void {
+    var values: Vec<Node?> = [null];
+    var node: Node = Node { value: 7 };
+    values[0] = node;
+    if values.get(0) != node {
+        var zero: int = 0;
+        var fail: int = 1 / zero;
+    }
+    return;
+}

@@ -436,6 +436,10 @@ pub func checkSourceFileGraph(entryPath: string, stdRoot: string): Result<Checke
     return checkSourceFileGraphWithRuntime(entryPath, stdRoot, []);
 }
 
+pub func canonicalSourcePath(path: string): string {
+    return normalizePath(path);
+}
+
 pub func checkSourceFileGraphWithRuntime(entryPath: string, stdRoot: string, runtimeUnits: Vec<string>): Result<CheckedProgram, string> {
     var normalizedEntry = normalizePath(entryPath);
     var graph = SourceGraph { entryPath: normalizedEntry, units: [], edges: [], errors: [] };

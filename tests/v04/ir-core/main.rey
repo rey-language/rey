@@ -1,4 +1,5 @@
 import ir;
+import ir::{Instruction};
 
 func main(): void {
     var emptyProgram = ir.irProgram(1, []);
@@ -72,5 +73,23 @@ func main(): void {
     var arithmeticFunction = ir.irFunction(3, ir.functionKey("arithmetic", "", "test"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], arithmeticInstructions, ir.returnValue(4, arithmeticSource))], ir.noEffects());
     var arithmeticPrint = ir.printIR(ir.irProgram(3, [arithmeticFunction]));
     assert(arithmeticPrint.contains("sub.checked.i64") && arithmeticPrint.contains("mul.checked.i64") && arithmeticPrint.contains("div.checked.i64") && arithmeticPrint.contains("rem.checked.i64") && arithmeticPrint.contains("compare.bool eq"), "new scalar tags preserve deterministic operation names");
+    var manyInstructions: Vec<Instruction> = [];
+    var lineIndex = 0;
+    while lineIndex < 1000 {
+        manyInstructions.push(ir.constI64(lineIndex, lineIndex, ir.sourceRef("many.rey", lineIndex, lineIndex + 1)));
+        lineIndex += 1;
+    }
+    var manyFunction = ir.irFunction(0, ir.functionKey("many", "", "lines"), ir.functionSignature([], ir.irVoid()), [],
+        [ir.basicBlock(0, [], manyInstructions, ir.returnVoid(ir.sourceRef("many.rey", 1000, 1001)))], ir.noEffects());
+    var manyLines = ir.printIR(ir.irProgram(0, [manyFunction])).split("\n");
+    assert(manyLines.len() == 1005, "balanced printing retains every line and trailing newline");
+    lineIndex = 0;
+    while lineIndex < 1000 {
+        var expectedLine = "    %v" + lineIndex.toString() + ":i64 = const.i64 " + lineIndex.toString()
+            + " @many.rey:" + lineIndex.toString() + ".." + (lineIndex + 1).toString();
+        assert(manyLines[lineIndex + 3] == expectedLine, "balanced printing preserves instruction ordering");
+        lineIndex += 1;
+    }
+    assert(manyLines[1003] == "    return void @many.rey:1000..1001" && manyLines[1004] == "", "balanced printing preserves the final terminator");
     print(printed);
 }

@@ -1,0 +1,28 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedRootPush, managedRootSet};
+import containers::{managedMapCreate, managedMapGetI64, managedStringFromInt};
+
+func main(): void {
+    var registry = layoutRegistryCreate(4);
+    var keyLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var offset = __reyRawMap(8);
+    __reyRawStoreI64(offset, 0);
+    var mapLayout = layoutRegisterFixed(registry, 16, offset, 1);
+    __reyRawUnmap(offset, 8);
+    var bucketsLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var nodeOffsets = __reyRawMap(16);
+    __reyRawStoreI64(nodeOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(nodeOffsets, 8), 16);
+    var nodeLayout = layoutRegisterFixed(registry, 24, nodeOffsets, 2);
+    __reyRawUnmap(nodeOffsets, 16);
+    var context = managedCreate(registry, false);
+    var map = managedMapCreate(context, mapLayout, bucketsLayout);
+    var mapSlot = managedRootPush(context);
+    managedRootSet(context, mapSlot, map);
+    var key = managedStringFromInt(context, keyLayout, 4);
+    var keySlot = managedRootPush(context);
+    managedRootSet(context, keySlot, key);
+    managedMapGetI64(context, map, key);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,24 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedRegionAllocate, managedRegionCreate, managedRootPush, managedRootSet};
+import containers::{managedVecCreate, managedVecPushReference};
+
+func main(): void {
+    var registry = layoutRegistryCreate(4);
+    var zeroOffsets = __reyRawNull();
+    var regionLayout = layoutRegisterFixed(registry, 8, zeroOffsets, 0);
+    var headerOffsets = __reyRawMap(8);
+    __reyRawStoreI64(headerOffsets, 0);
+    var vectorLayout = layoutRegisterFixed(registry, 8, headerOffsets, 1);
+    __reyRawUnmap(headerOffsets, 8);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var referenceTail = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var context = managedCreate(registry, false);
+    var region = managedRegionCreate(context);
+    var value = managedRegionAllocate(context, region, regionLayout);
+    var vector = managedVecCreate(context, vectorLayout, referenceTail, 0);
+    var vectorSlot = managedRootPush(context);
+    managedRootSet(context, vectorSlot, vector);
+    managedVecPushReference(context, vector, referenceTail, value);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

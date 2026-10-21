@@ -1,0 +1,11 @@
+import left.makeCellOption;
+import right.acceptOtherCell;
+
+func main(): void {
+    var maybeCell = makeCellOption();
+    match maybeCell {
+        Some(cell) => { var result: bool = acceptOtherCell(cell); },
+        None => { var absent: bool = true; },
+    }
+    return;
+}

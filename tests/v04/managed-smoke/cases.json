@@ -1,0 +1,49 @@
+{
+  "destination.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "enum.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "map.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false,
+    "eval_via_teardown": true,
+    "reason": "Forced-collection map smoke exceeds the source driver 1000000-step cap; the instrumented teardown interpreter completes in 1425007 steps in c-2 stress-placed mode under its 4000000-step bound. Every mode must pass that interpreted teardown and both native executions."
+  },
+  "result.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "roots-cycle.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "string.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "tagged.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "tuple.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  },
+  "vector.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": false
+  }
+}

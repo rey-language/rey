@@ -1,0 +1,68 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCollect, managedCreate, managedDestroy, managedLiveObjects, managedRootPop, managedRootPush, managedRootSet};
+import containers::{managedMapCreate, managedMapDelete, managedMapGetI64, managedMapGetReference, managedMapHas, managedMapLength, managedMapSetI64, managedMapSetReference, managedStringFromInt};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(5);
+    var keyLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var mapOffset = __reyRawMap(8);
+    __reyRawStoreI64(mapOffset, 0);
+    var mapLayout = layoutRegisterFixed(registry, 16, mapOffset, 1);
+    __reyRawUnmap(mapOffset, 8);
+    var bucketsLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var scalarOffsets = __reyRawMap(16);
+    __reyRawStoreI64(scalarOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(scalarOffsets, 8), 16);
+    var scalarNodeLayout = layoutRegisterFixed(registry, 24, scalarOffsets, 2);
+    var referenceOffsets = __reyRawMap(24);
+    __reyRawStoreI64(referenceOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(referenceOffsets, 8), 8);
+    __reyRawStoreI64(__reyRawOffset(referenceOffsets, 16), 16);
+    var referenceNodeLayout = layoutRegisterFixed(registry, 24, referenceOffsets, 3);
+    __reyRawUnmap(scalarOffsets, 16);
+    __reyRawUnmap(referenceOffsets, 24);
+
+    var context = managedCreate(registry, true);
+    var map = managedMapCreate(context, mapLayout, bucketsLayout);
+    var mapSlot = managedRootPush(context);
+    managedRootSet(context, mapSlot, map);
+    var index = 0;
+    while index < 12 {
+        var key = managedStringFromInt(context, keyLayout, index);
+        var keySlot = managedRootPush(context);
+        managedRootSet(context, keySlot, key);
+        managedMapSetI64(context, map, scalarNodeLayout, key, index * 10);
+        managedRootPop(context, keySlot);
+        index = index + 1;
+    }
+    check(managedMapLength(context, map) == 12);
+    var key3 = managedStringFromInt(context, keyLayout, 3);
+    check(managedMapHas(context, map, key3) && managedMapGetI64(context, map, key3) == 30);
+    managedMapSetI64(context, map, scalarNodeLayout, key3, 31);
+    check(managedMapLength(context, map) == 12 && managedMapGetI64(context, map, key3) == 31);
+    check(managedMapDelete(context, map, key3));
+    check(!managedMapHas(context, map, key3) && managedMapLength(context, map) == 11);
+
+    var cyclicMap = managedMapCreate(context, mapLayout, bucketsLayout);
+    var cycleSlot = managedRootPush(context);
+    managedRootSet(context, cycleSlot, cyclicMap);
+    var selfKey = managedStringFromInt(context, keyLayout, 77);
+    var selfKeySlot = managedRootPush(context);
+    managedRootSet(context, selfKeySlot, selfKey);
+    managedMapSetReference(context, cyclicMap, referenceNodeLayout, selfKey, cyclicMap);
+    check(__reyRawEqual(managedMapGetReference(context, cyclicMap, selfKey), cyclicMap));
+    managedCollect(context);
+    check(managedLiveObjects(context) > 0);
+    check(managedMapDelete(context, cyclicMap, selfKey));
+    managedRootPop(context, selfKeySlot);
+    managedRootPop(context, cycleSlot);
+    managedRootPop(context, mapSlot);
+    managedCollect(context);
+    check(managedLiveObjects(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,61 @@
+struct Payload {
+    pub value: int,
+    pub next: Payload?,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func echoOption(value: Option<Payload>): Option<Payload> {
+    return value;
+}
+
+func optionValue(value: Option<Payload>): int {
+    match value {
+        Some(payload) => { return payload.value; },
+        None => { return 0; },
+    }
+}
+
+func resultValue(value: Result<Payload, bool>): int {
+    match value {
+        Result::Ok(payload) => { return payload.value; },
+        Result::Err(flag) => { if flag { return -1; } else { return -2; } },
+    }
+}
+
+func main(): void {
+    var root: Payload = Payload { value: 7, next: null };
+    var some: Option<Payload> = Option::Some(root);
+    var none: Option<Payload> = Option::None();
+    var returned: Option<Payload> = echoOption(some);
+    sourcecheck(some.isSome());
+    sourcecheck(none.isNone());
+    sourcecheck(optionValue(returned) == 7);
+    sourcecheck(optionValue(none) == 0);
+    sourcecheck(some.unwrap().next == null);
+    sourcecheck(none.unwrapOr(root) == root);
+    sourcecheck(some == echoOption(some));
+    sourcecheck(some != none);
+
+    var ok: Result<Payload, bool> = Result::Ok(root);
+    var err: Result<Payload, bool> = Result::Err(false);
+    sourcecheck(ok.isOk());
+    sourcecheck(err.isErr());
+    sourcecheck(resultValue(ok) == 7);
+    sourcecheck(resultValue(err) == -2);
+    sourcecheck(ok.unwrap() == root);
+    sourcecheck(err.unwrapErr() == false);
+    sourcecheck(err.unwrapOr(root) == root);
+
+    var nullable: Payload? = root;
+    sourcecheck(nullable == root);
+    nullable = null;
+    sourcecheck(nullable == null);
+    return;
+}

@@ -1,0 +1,14 @@
+import managed::{managedCreate, managedRegionAllocate, managedRegionCreate, managedStoreReference};
+import layout::{layoutRegisterFixed, layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry, false);
+    var region = managedRegionCreate(context);
+    var owner = managedRegionAllocate(context, region, nodeLayout);
+    managedStoreReference(context, owner, 8, __reyRawNull());
+}

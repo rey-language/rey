@@ -1,0 +1,12 @@
+struct Node { pub value: int, }
+
+func main(): void {
+    var values: HashMap<string, Node?> = {"a": null};
+    var node: Node = Node { value: 7 };
+    values.set("a", node);
+    if values.get("a") != node {
+        var zero: int = 0;
+        var fail: int = 1 / zero;
+    }
+    return;
+}
