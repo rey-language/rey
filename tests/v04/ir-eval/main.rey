@@ -1,0 +1,138 @@
+import ir;
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, Fact, IRFunction, IRType, IRValue};
+import ir::analysis::{inferEffects};
+import ir::eval::{EvalResult, evaluateProgram};
+
+func cleanEffects(argumentCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= argumentCount { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("eval-test", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, cleanEffects(parameterTypes.len()));
+}
+
+func evaluateComparison(predicate: CompareI64Predicate, left: int, right: int): EvalResult {
+    var function = makeFunction(0, "comparison", [], ir.irBool(), [], [ir.basicBlock(0, [], [ir.constI64(0, left, ir.sourceRef("compare.rey", 1, 2)), ir.constI64(1, right, ir.sourceRef("compare.rey", 3, 4)), ir.compareI64(2, predicate, 0, 1, ir.sourceRef("compare.rey", 5, 8))], ir.returnValue(2, ir.sourceRef("compare.rey", 9, 12)))]);
+    return evaluateProgram(ir.irProgram(0, [function]), 30, 4);
+}
+
+func main(): void {
+    var arithmetic = makeFunction(
+        0,
+        "arithmetic",
+        [],
+        ir.irI64(),
+        [],
+        [ir.basicBlock(0, [], [ir.constI64(0, 20, ir.sourceRef("arithmetic.rey", 1, 2)), ir.constI64(1, 22, ir.sourceRef("arithmetic.rey", 3, 4)), ir.addCheckedI64(2, 0, 1, ir.sourceRef("arithmetic.rey", 5, 8))], ir.returnValue(2, ir.sourceRef("arithmetic.rey", 9, 15)))]
+    );
+    var arithmeticResult = evaluateProgram(ir.irProgram(0, [arithmetic]), 100, 8);
+    assert(arithmeticResult.ok && !arithmeticResult.isBool && !arithmeticResult.isVoid && arithmeticResult.value == 42, "scalar arithmetic evaluation must return 42");
+    assert(arithmeticResult.steps == 4, "each arithmetic instruction and the return terminator must consume one step");
+
+    var eqResult = evaluateComparison(ir.compareEq(), -3, -3);
+    var neResult = evaluateComparison(ir.compareNe(), -3, 2);
+    var sltResult = evaluateComparison(ir.compareSlt(), -3, 2);
+    var sleResult = evaluateComparison(ir.compareSle(), -3, -3);
+    var sgtResult = evaluateComparison(ir.compareSgt(), 2, -3);
+    var sgeResult = evaluateComparison(ir.compareSge(), 2, 2);
+    assert(eqResult.ok && eqResult.isBool && eqResult.value == 1 && neResult.ok && neResult.value == 1, "equality predicates must return bool scalars");
+    assert(sltResult.ok && sltResult.value == 1 && sleResult.ok && sleResult.value == 1 && sgtResult.ok && sgtResult.value == 1 && sgeResult.ok && sgeResult.value == 1, "all signed comparison predicates must evaluate correctly");
+
+    var voidFunction = makeFunction(0, "void-helper", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(ir.sourceRef("void.rey", 1, 5)))]);
+    var voidResult = evaluateProgram(ir.irProgram(0, [voidFunction]), 10, 2);
+    assert(voidResult.ok && voidResult.isVoid && !voidResult.isBool, "void returns must be represented explicitly");
+    var voidCaller = makeFunction(1, "void-caller", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.call(-1, ir.irVoid(), 0, [], ir.sourceRef("void-caller.rey", 1, 4)), ir.constI64(0, 7, ir.sourceRef("void-caller.rey", 5, 6))], ir.returnValue(0, ir.sourceRef("void-caller.rey", 7, 9)))]);
+    var voidCallResult = evaluateProgram(ir.irProgram(1, [voidFunction, voidCaller]), 20, 3);
+    assert(voidCallResult.ok && voidCallResult.value == 7 && voidCallResult.steps == 4, "void calls must count one call instruction and create no SSA result");
+
+    var branchFunction = makeFunction(
+        0,
+        "parallel-edges",
+        [ir.irBool(), ir.irI64(), ir.irI64()],
+        ir.irI64(),
+        [ir.irValue(0, ir.irBool()), ir.irValue(1, ir.irI64()), ir.irValue(2, ir.irI64())],
+        [
+            ir.basicBlock(0, [], [ir.constBool(6, true, ir.sourceRef("branch.rey", 1, 2)), ir.constBool(9, false, ir.sourceRef("branch.rey", 3, 4))], ir.jump(1, [6, 1, 2], ir.sourceRef("branch.rey", 5, 7))),
+            ir.basicBlock(1, [ir.irValue(3, ir.irBool()), ir.irValue(4, ir.irI64()), ir.irValue(5, ir.irI64())], [], ir.branch(3, 1, [9, 5, 4], 2, [4, 5], ir.sourceRef("branch.rey", 8, 14))),
+            ir.basicBlock(2, [ir.irValue(10, ir.irI64()), ir.irValue(11, ir.irI64())], [], ir.returnValue(10, ir.sourceRef("branch.rey", 15, 18)))
+        ]
+    );
+    var branchEntry = makeFunction(
+        1,
+        "parallel-edge-entry",
+        [],
+        ir.irI64(),
+        [],
+        [ir.basicBlock(0, [], [ir.constBool(0, false, ir.sourceRef("branch-entry.rey", 1, 2)), ir.constI64(1, 11, ir.sourceRef("branch-entry.rey", 3, 4)), ir.constI64(2, 22, ir.sourceRef("branch-entry.rey", 5, 6)), ir.call(3, ir.irI64(), 0, [0, 1, 2], ir.sourceRef("branch-entry.rey", 7, 12))], ir.returnValue(3, ir.sourceRef("branch-entry.rey", 13, 16)))]
+    );
+    var branchResult = evaluateProgram(ir.irProgram(1, [branchFunction, branchEntry]), 100, 8);
+    assert(branchResult.ok && branchResult.value == 22, "parallel block-parameter transfers must preserve the pre-edge values");
+
+    var recursiveFunction = makeFunction(
+        0,
+        "countdown",
+        [ir.irI64()],
+        ir.irI64(),
+        [ir.irValue(0, ir.irI64())],
+        [
+            ir.basicBlock(0, [], [ir.constI64(1, 0, ir.sourceRef("recursive.rey", 1, 2)), ir.compareI64(2, ir.compareSgt(), 0, 1, ir.sourceRef("recursive.rey", 3, 6))], ir.branch(2, 1, [0], 2, [0], ir.sourceRef("recursive.rey", 7, 12))),
+            ir.basicBlock(1, [ir.irValue(3, ir.irI64())], [ir.constI64(4, -1, ir.sourceRef("recursive.rey", 13, 15)), ir.addCheckedI64(5, 3, 4, ir.sourceRef("recursive.rey", 16, 19)), ir.call(6, ir.irI64(), 0, [5], ir.sourceRef("recursive.rey", 20, 25))], ir.returnValue(6, ir.sourceRef("recursive.rey", 26, 30))),
+            ir.basicBlock(2, [ir.irValue(7, ir.irI64())], [], ir.returnValue(7, ir.sourceRef("recursive.rey", 31, 35)))
+        ]
+    );
+    var recursiveEntry = makeFunction(
+        1,
+        "recursive-entry",
+        [],
+        ir.irI64(),
+        [],
+        [ir.basicBlock(0, [], [ir.constI64(0, 3, ir.sourceRef("recursive-entry.rey", 1, 2)), ir.call(1, ir.irI64(), 0, [0], ir.sourceRef("recursive-entry.rey", 3, 8))], ir.returnValue(1, ir.sourceRef("recursive-entry.rey", 9, 12)))]
+    );
+    var recursiveProgram = ir.irProgram(1, [recursiveFunction, recursiveEntry]);
+    var recursiveResult = evaluateProgram(recursiveProgram, 200, 5);
+    assert(recursiveResult.ok && recursiveResult.value == 0, "known scalar recursion must evaluate to completion");
+    var shallowResult = evaluateProgram(recursiveProgram, 200, 2);
+    assert(!shallowResult.ok && shallowResult.error.contains("depth limit") && shallowResult.error.contains("recursive.rey"), "recursion depth exhaustion must report the call source");
+
+    var maxValue = 9223372036854775807;
+    var minValue = -9223372036854775807 - 1;
+    var overflowMax = makeFunction(0, "overflow-max", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.constI64(0, maxValue, ir.sourceRef("overflow-max.rey", 1, 2)), ir.constI64(1, 1, ir.sourceRef("overflow-max.rey", 3, 4)), ir.addCheckedI64(2, 0, 1, ir.sourceRef("overflow-max.rey", 5, 9))], ir.returnValue(2, ir.sourceRef("overflow-max.rey", 10, 12)))]);
+    var overflowMaxResult = evaluateProgram(ir.irProgram(0, [overflowMax]), 50, 4);
+    assert(!overflowMaxResult.ok && overflowMaxResult.error.contains("overflow") && overflowMaxResult.error.contains("overflow-max.rey"), "positive i64 overflow must fail before addition with source context");
+    var overflowMin = makeFunction(0, "overflow-min", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.constI64(0, minValue, ir.sourceRef("overflow-min.rey", 1, 2)), ir.constI64(1, -1, ir.sourceRef("overflow-min.rey", 3, 4)), ir.addCheckedI64(2, 0, 1, ir.sourceRef("overflow-min.rey", 5, 9))], ir.returnValue(2, ir.sourceRef("overflow-min.rey", 10, 12)))]);
+    var overflowMinResult = evaluateProgram(ir.irProgram(0, [overflowMin]), 50, 4);
+    assert(!overflowMinResult.ok && overflowMinResult.error.contains("overflow"), "negative i64 overflow must fail before addition");
+
+    var loopFunction = makeFunction(0, "loop", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.jump(1, [], ir.sourceRef("loop.rey", 1, 4))), ir.basicBlock(1, [], [], ir.jump(1, [], ir.sourceRef("loop.rey", 5, 8)))]);
+    var loopResult = evaluateProgram(ir.irProgram(0, [loopFunction]), 3, 4);
+    assert(!loopResult.ok && loopResult.steps == 3 && loopResult.error.contains("step budget") && loopResult.error.contains("loop.rey"), "step budget must stop loops at the next terminator with source context");
+    assert(!evaluateProgram(ir.irProgram(0, [arithmetic]), 0, 4).ok, "zero step budgets must be rejected");
+    assert(!evaluateProgram(ir.irProgram(0, [arithmetic]), 5, -1).ok, "negative depth budgets must be rejected");
+
+    var invalidReference = makeFunction(0, "invalid-reference", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.addCheckedI64(1, 99, 100, ir.sourceRef("invalid.rey", 1, 5))], ir.returnValue(1, ir.sourceRef("invalid.rey", 6, 9)))]);
+    var invalidResult = evaluateProgram(ir.irProgram(0, [invalidReference]), 20, 3);
+    assert(!invalidResult.ok && invalidResult.steps == 0 && invalidResult.error.contains("invalid IR program"), "the evaluator must reject invalid references before executing IR");
+    var missingEntryResult = evaluateProgram(ir.irProgram(77, []), 20, 3);
+    assert(!missingEntryResult.ok && missingEntryResult.steps == 0, "the evaluator must reject an invalid entry reference before execution");
+
+    var recursiveEffects = inferEffects(recursiveProgram);
+    assert(recursiveEffects.functions[0].effects.readsMemory == Fact::No && recursiveEffects.functions[0].effects.writesMemory == Fact::No && recursiveEffects.functions[0].effects.allocates == Fact::No, "known recursive scalar functions must reach the no-effect fixed point");
+    assert(recursiveEffects.functions[0].effects.argumentEscapes.len() == 1 && recursiveEffects.functions[0].effects.argumentEscapes[0] == Escape::NoEscape && recursiveEffects.functions[0].effects.resultEscape == Escape::NoEscape, "scalar argument and result escape facts must be noescape");
+
+    var unknownTargetFunction = makeFunction(0, "unknown-target", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.call(0, ir.irI64(), 99, [], ir.sourceRef("unknown-target.rey", 1, 4))], ir.returnValue(0, ir.sourceRef("unknown-target.rey", 5, 8)))]);
+    var unknownEffectsProgram = inferEffects(ir.irProgram(0, [unknownTargetFunction]));
+    assert(unknownEffectsProgram.functions[0].effects.readsMemory == Fact::Unknown && unknownEffectsProgram.functions[0].effects.unresolvedCallees == Fact::Unknown, "an unresolved target must never receive a no-effect summary");
+
+    var unknownMiddle = makeFunction(1, "unknown-middle", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.call(0, ir.irI64(), 0, [], ir.sourceRef("unknown-middle.rey", 1, 4))], ir.returnValue(0, ir.sourceRef("unknown-middle.rey", 5, 8)))]);
+    var unknownOuter = makeFunction(2, "unknown-outer", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.call(0, ir.irI64(), 1, [], ir.sourceRef("unknown-outer.rey", 1, 4))], ir.returnValue(0, ir.sourceRef("unknown-outer.rey", 5, 8)))]);
+    var unknownChain = inferEffects(ir.irProgram(2, [unknownTargetFunction, unknownMiddle, unknownOuter]));
+    assert(unknownChain.functions[1].effects.allocates == Fact::Unknown && unknownChain.functions[2].effects.mayBlock == Fact::Unknown, "unknown effects must propagate through the transitive call graph");
+    print("v0.4 IR evaluator and effect analysis fixtures passed");
+}

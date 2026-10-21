@@ -1,0 +1,505 @@
+// Direct AArch64 emission for the verified scalar IR slice.
+import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRType, IRValue, CompareI64Predicate};
+import ir::verify::{verifyProgram};
+
+pub struct NativeFunctionOffset {
+    pub functionId: int,
+    pub offset: int,
+}
+
+pub struct Arm64Code {
+    pub bytes: Vec<int>,
+    pub entryOffset: int,
+    pub functions: Vec<NativeFunctionOffset>,
+}
+
+struct ValueSlot {
+    pub valueId: int,
+    pub index: int,
+}
+
+struct BlockOffset {
+    pub blockId: int,
+    pub offset: int,
+}
+
+struct Fixup {
+    pub offset: int,
+    pub kind: int,
+    pub targetFunctionId: int,
+    pub targetBlockId: int,
+    pub targetOffset: int,
+    pub condition: int,
+}
+
+struct Emitter {
+    pub bytes: Vec<int>,
+    pub functions: Vec<NativeFunctionOffset>,
+    pub fixups: Vec<Fixup>,
+    pub error: string,
+}
+
+func emitWord(emitter: Emitter, word: int): void {
+    if emitter.error != "" { return; }
+    if word < 0 || word > 4294967295 {
+        emitter.error = "native arm64: instruction does not fit uint32";
+        return;
+    }
+    emitter.bytes.push(word % 256);
+    emitter.bytes.push((word / 256) % 256);
+    emitter.bytes.push((word / 65536) % 256);
+    emitter.bytes.push((word / 16777216) % 256);
+}
+
+func addFixup(emitter: Emitter, offset: int, kind: int, functionId: int, blockId: int, targetOffset: int, condition: int): void {
+    emitter.fixups.push(Fixup { offset: offset, kind: kind, targetFunctionId: functionId, targetBlockId: blockId, targetOffset: targetOffset, condition: condition });
+}
+
+func valueSlot(slots: Vec<ValueSlot>, valueId: int): int {
+    var i = 0;
+    loop {
+        if i >= slots.len() { break; }
+        if slots[i].valueId == valueId { return slots[i].index; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func slotOffset(slots: Vec<ValueSlot>, valueId: int): int {
+    var index = valueSlot(slots, valueId);
+    if index < 0 { return -1; }
+    return index * 8;
+}
+
+func blockOffset(blocks: Vec<BlockOffset>, blockId: int): int {
+    var i = 0;
+    loop {
+        if i >= blocks.len() { break; }
+        if blocks[i].blockId == blockId { return blocks[i].offset; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func functionOffset(functions: Vec<NativeFunctionOffset>, functionId: int): int {
+    var i = 0;
+    loop {
+        if i >= functions.len() { break; }
+        if functions[i].functionId == functionId { return functions[i].offset; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func putLoad(emitter: Emitter, target: int, offset: int): void {
+    if offset < 0 || offset > 32760 || offset % 8 != 0 {
+        emitter.error = "native arm64: stack load offset is not encodable";
+        return;
+    }
+    emitWord(emitter, 4181722080 + (offset / 8) * 1024 + target);
+}
+
+func putStore(emitter: Emitter, source: int, offset: int): void {
+    if offset < 0 || offset > 32760 || offset % 8 != 0 {
+        emitter.error = "native arm64: stack store offset is not encodable";
+        return;
+    }
+    emitWord(emitter, 4177527776 + (offset / 8) * 1024 + source);
+}
+
+func putMovImm16(emitter: Emitter, target: int, value: int, halfword: int, keep: bool): void {
+    var base = 3531603968;
+    if keep { base = 4068474880; }
+    emitWord(emitter, base + halfword * 2097152 + value * 32 + target);
+}
+
+func putConstant(emitter: Emitter, target: int, value: int): void {
+    var remaining = value;
+    var halfword = 0;
+    loop {
+        if halfword >= 4 { break; }
+        var limb = remaining % 65536;
+        if limb < 0 { limb = limb + 65536; }
+        putMovImm16(emitter, target, limb, halfword, halfword > 0);
+        remaining = (remaining - limb) / 65536;
+        halfword = halfword + 1;
+    }
+}
+
+func putAddSp(emitter: Emitter, amount: int, subtract: bool): void {
+    if amount <= 0 || amount > 4080 || amount % 16 != 0 {
+        emitter.error = "native arm64: stack frame is not encodable";
+        return;
+    }
+    var base = 2432697343;
+    if subtract { base = 3506439167; }
+    emitWord(emitter, base + amount * 1024);
+}
+
+func appendDefinition(slots: Vec<ValueSlot>, valueId: int): void {
+    if valueId >= 0 { slots.push(ValueSlot { valueId: valueId, index: slots.len() }); }
+}
+
+func collectSlots(function: IRFunction): Vec<ValueSlot> {
+    var slots: Vec<ValueSlot> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= function.parameters.len() { break; }
+        appendDefinition(slots, function.parameters[i].id);
+        i = i + 1;
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        var paramIndex = 0;
+        loop {
+            if paramIndex >= block.params.len() { break; }
+            appendDefinition(slots, block.params[paramIndex].id);
+            paramIndex = paramIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            appendDefinition(slots, block.instructions[instructionIndex].resultId);
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return slots;
+}
+
+func maxEdgeParams(function: IRFunction): int {
+    var maximum = 0;
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].params.len() > maximum { maximum = function.blocks[i].params.len(); }
+        i = i + 1;
+    }
+    return maximum;
+}
+
+func emitEdgeCopy(emitter: Emitter, slots: Vec<ValueSlot>, scratchOffset: int, target: BasicBlock, arguments: Vec<int>): void {
+    var i = 0;
+    loop {
+        if i >= arguments.len() { break; }
+        putLoad(emitter, 9, slotOffset(slots, arguments[i]));
+        putStore(emitter, 9, scratchOffset + i * 8);
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= target.params.len() { break; }
+        putLoad(emitter, 9, scratchOffset + i * 8);
+        putStore(emitter, 9, slotOffset(slots, target.params[i].id));
+        i = i + 1;
+    }
+}
+
+func findBlock(function: IRFunction, id: int): BasicBlock {
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].id == id { return function.blocks[i]; }
+        i = i + 1;
+    }
+    return BasicBlock { id: -1, params: [], instructions: [], terminator: function.blocks[0].terminator };
+}
+
+func predicateCondition(predicate: CompareI64Predicate): int {
+    if predicate == CompareI64Predicate::Eq { return 0; }
+    if predicate == CompareI64Predicate::Ne { return 1; }
+    if predicate == CompareI64Predicate::Slt { return 11; }
+    if predicate == CompareI64Predicate::Sle { return 13; }
+    if predicate == CompareI64Predicate::Sgt { return 12; }
+    return 10;
+}
+
+func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, instruction: Instruction, overflowOffset: int): void {
+    if instruction.kind == InstructionKind::ConstI64 {
+        putConstant(emitter, 9, instruction.immediate);
+        putStore(emitter, 9, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::ConstBool {
+        putMovImm16(emitter, 9, instruction.immediate, 0, false);
+        putStore(emitter, 9, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::AddCheckedI64 {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitWord(emitter, 2868903936 + 10 * 65536 + 9 * 32 + 11);
+        var branchOffset = emitter.bytes.len();
+        emitWord(emitter, 1409286150);
+        addFixup(emitter, branchOffset, 4, -1, -1, overflowOffset, 6);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::CompareI64 {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putLoad(emitter, 10, slotOffset(slots, instruction.operands[1]));
+        emitWord(emitter, 3942645791 + 10 * 65536 + 9 * 32);
+        var condition = predicateCondition(instruction.comparison);
+        emitWord(emitter, 2594113504 + (condition - condition % 2 + (1 - condition % 2)) * 4096 + 11);
+        putStore(emitter, 11, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::Call {
+        var argumentIndex = 0;
+        loop {
+            if argumentIndex >= instruction.operands.len() { break; }
+            putLoad(emitter, argumentIndex, slotOffset(slots, instruction.operands[argumentIndex]));
+            argumentIndex = argumentIndex + 1;
+        }
+        var callOffset = emitter.bytes.len();
+        emitWord(emitter, 2483027968);
+        addFixup(emitter, callOffset, 3, instruction.functionId, -1, -1, 0);
+        if instruction.resultId >= 0 { putStore(emitter, 0, slotOffset(slots, instruction.resultId)); }
+        return;
+    }
+    emitter.error = "native arm64: unsupported scalar instruction";
+}
+
+func emitTerminator(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, block: BasicBlock, blockOffsets: Vec<BlockOffset>, scratchOffset: int): void {
+    var terminator = block.terminator;
+    if terminator.kind == TerminatorKind::Jump {
+        var target = findBlock(function, terminator.targetBlockId);
+        emitEdgeCopy(emitter, slots, scratchOffset, target, terminator.targetArgs);
+        var jumpOffset = emitter.bytes.len();
+        emitWord(emitter, 335544320);
+        addFixup(emitter, jumpOffset, 0, -1, terminator.targetBlockId, -1, 0);
+        return;
+    }
+    if terminator.kind == TerminatorKind::Branch {
+        putLoad(emitter, 9, slotOffset(slots, terminator.conditionValueId));
+        var falseBranch = emitter.bytes.len();
+        emitWord(emitter, 3019898889);
+        var trueBlock = findBlock(function, terminator.trueTargetBlockId);
+        emitEdgeCopy(emitter, slots, scratchOffset, trueBlock, terminator.trueArgs);
+        var trueJump = emitter.bytes.len();
+        emitWord(emitter, 335544320);
+        addFixup(emitter, trueJump, 0, -1, terminator.trueTargetBlockId, -1, 0);
+        var falseOffset = emitter.bytes.len();
+        addFixup(emitter, falseBranch, 2, -1, -1, falseOffset, 0);
+        var falseBlock = findBlock(function, terminator.falseTargetBlockId);
+        emitEdgeCopy(emitter, slots, scratchOffset, falseBlock, terminator.falseArgs);
+        var falseJump = emitter.bytes.len();
+        emitWord(emitter, 335544320);
+        addFixup(emitter, falseJump, 0, -1, terminator.falseTargetBlockId, -1, 0);
+        return;
+    }
+    if terminator.kind == TerminatorKind::Return {
+        if terminator.valueId >= 0 { putLoad(emitter, 0, slotOffset(slots, terminator.valueId)); }
+        var returnOffset = emitter.bytes.len();
+        emitWord(emitter, 335544320);
+        addFixup(emitter, returnOffset, 1, -1, -1, -1, 0);
+        return;
+    }
+    emitter.error = "native arm64: unsupported scalar terminator";
+}
+
+func patchRelative(emitter: Emitter, fixup: Fixup, target: int): void {
+    if emitter.error != "" { return; }
+    var delta = target - fixup.offset;
+    if delta % 4 != 0 {
+        emitter.error = "native arm64: branch target is not instruction aligned";
+        return;
+    }
+    var immediate = delta / 4;
+    var word = 0;
+    if fixup.kind == 0 || fixup.kind == 1 || fixup.kind == 3 || fixup.kind == 5 || fixup.kind == 6 {
+        if delta < -134217728 || delta > 134217724 {
+            emitter.error = "native arm64: branch or call target is outside the signed imm26 range";
+            return;
+        }
+        if immediate < 0 { immediate = immediate + 67108864; }
+        var base = 335544320;
+        if fixup.kind == 3 || fixup.kind == 6 { base = 2483027968; }
+        word = base + immediate;
+    } else {
+        if delta < -1048576 || delta > 1048572 {
+            emitter.error = "native arm64: conditional branch target is outside the signed imm19 range";
+            return;
+        }
+        if immediate < 0 { immediate = immediate + 524288; }
+        if fixup.kind == 2 {
+            word = 3019898889 + immediate * 32;
+        } else {
+            word = 1409286144 + immediate * 32 + fixup.condition;
+        }
+    }
+    if fixup.offset < 0 || fixup.offset > emitter.bytes.len() || emitter.bytes.len() - fixup.offset < 4 {
+        emitter.error = "native arm64: fixup offset is outside emitted code";
+        return;
+    }
+    emitter.bytes.set(fixup.offset, word % 256);
+    emitter.bytes.set(fixup.offset + 1, (word / 256) % 256);
+    emitter.bytes.set(fixup.offset + 2, (word / 65536) % 256);
+    emitter.bytes.set(fixup.offset + 3, (word / 16777216) % 256);
+}
+
+func resolveFunctionFixups(emitter: Emitter, function: IRFunction, localFixups: Vec<Fixup>, blocks: Vec<BlockOffset>, epilogueOffset: int): void {
+    var i = 0;
+    loop {
+        if i >= localFixups.len() { break; }
+        var fixup = localFixups[i];
+        var target = fixup.targetOffset;
+        if fixup.kind == 0 { target = blockOffset(blocks, fixup.targetBlockId); }
+        if fixup.kind == 1 { target = epilogueOffset; }
+        if target < 0 {
+            emitter.error = "native arm64: unresolved local block target";
+            return;
+        }
+        patchRelative(emitter, fixup, target);
+        i = i + 1;
+    }
+}
+
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int): void {
+    if function.parameters.len() > 8 {
+        emitter.error = "native arm64: functions with more than eight scalar arguments are unsupported";
+        return;
+    }
+    var slots = collectSlots(function);
+    var scratchBytes = maxEdgeParams(function) * 8;
+    var rawFrame = slots.len() * 8 + scratchBytes;
+    if rawFrame > 4080 {
+        emitter.error = "native arm64: stack frame exceeds the encodable 4080-byte limit";
+        return;
+    }
+    var frameSize = rawFrame;
+    if frameSize % 16 != 0 { frameSize = frameSize + (16 - frameSize % 16); }
+    var localFixups: Vec<Fixup> = Vec.new();
+    var blockOffsets: Vec<BlockOffset> = Vec.new();
+    var functionStart = emitter.bytes.len();
+    emitter.functions.push(NativeFunctionOffset { functionId: function.id, offset: functionStart });
+    emitWord(emitter, 2847898621);
+    emitWord(emitter, 2432697341);
+    if frameSize > 0 { putAddSp(emitter, frameSize, true); }
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= function.parameters.len() { break; }
+        putStore(emitter, parameterIndex, slotOffset(slots, function.parameters[parameterIndex].id));
+        parameterIndex = parameterIndex + 1;
+    }
+    var scratchOffset = slots.len() * 8;
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        blockOffsets.push(BlockOffset { blockId: block.id, offset: emitter.bytes.len() });
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            emitInstruction(emitter, function, slots, block.instructions[instructionIndex], overflowOffset);
+            instructionIndex = instructionIndex + 1;
+        }
+        var before = emitter.fixups.len();
+        emitTerminator(emitter, function, slots, block, blockOffsets, scratchOffset);
+        var fixupIndex = before;
+        loop {
+            if fixupIndex >= emitter.fixups.len() { break; }
+            if emitter.fixups[fixupIndex].kind == 0 || emitter.fixups[fixupIndex].kind == 1 || emitter.fixups[fixupIndex].kind == 2 {
+                localFixups.push(emitter.fixups[fixupIndex]);
+            }
+            fixupIndex = fixupIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    var epilogueOffset = emitter.bytes.len();
+    if frameSize > 0 { putAddSp(emitter, frameSize, false); }
+    emitWord(emitter, 2831252477);
+    emitWord(emitter, 3596551104);
+    resolveFunctionFixups(emitter, function, localFixups, blockOffsets, epilogueOffset);
+}
+
+func appendStub(emitter: Emitter, targetOS: string, entryFunction: IRFunction): int {
+    var callOffset = emitter.bytes.len();
+    emitWord(emitter, 2483027968);
+    addFixup(emitter, callOffset, 6, entryFunction.id, -1, -1, 0);
+    if entryFunction.signature.returnType.kind == IRTypeKind::Void { emitWord(emitter, 3531603968); }
+    var skipOffset = emitter.bytes.len();
+    emitWord(emitter, 335544320);
+    var overflowOffset = emitter.bytes.len();
+    emitWord(emitter, 3531604000);
+    var syscallOffset = emitter.bytes.len();
+    if targetOS == "darwin" {
+        emitWord(emitter, 3531604016);
+        emitWord(emitter, 3556773889);
+    } else {
+        emitWord(emitter, 3531606952);
+        emitWord(emitter, 3556769793);
+    }
+    addFixup(emitter, skipOffset, 5, -1, -1, syscallOffset, 0);
+    return overflowOffset;
+}
+
+pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, string> {
+    if targetOS != "darwin" && targetOS != "linux" {
+        return Result.Err("native arm64: target OS must be darwin or linux");
+    }
+    var verification = verifyProgram(program);
+    if !verification.ok {
+        if verification.errors.len() > 0 { return Result.Err("native arm64: invalid IR: " + verification.errors[0]); }
+        return Result.Err("native arm64: invalid IR program");
+    }
+    var entryIndex = 0;
+    loop {
+        if entryIndex >= program.functions.len() { break; }
+        if program.functions[entryIndex].id == program.entryFunctionId { break; }
+        entryIndex = entryIndex + 1;
+    }
+    if entryIndex >= program.functions.len() { return Result.Err("native arm64: entry function is missing"); }
+    var entryFunction = program.functions[entryIndex];
+    if entryFunction.parameters.len() != 0 {
+        return Result.Err("native arm64: program entry function must have zero scalar arguments");
+    }
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        if program.functions[i].parameters.len() > 8 {
+            return Result.Err("native arm64: functions with more than eight scalar arguments are unsupported");
+        }
+        var b = 0;
+        loop {
+            if b >= program.functions[i].blocks.len() { break; }
+            var instructions = program.functions[i].blocks[b].instructions;
+            var n = 0;
+            loop {
+                if n >= instructions.len() { break; }
+                if instructions[n].kind == InstructionKind::Call && instructions[n].operands.len() > 8 {
+                    return Result.Err("native arm64: calls with more than eight scalar arguments are unsupported");
+                }
+                n = n + 1;
+            }
+            b = b + 1;
+        }
+        i = i + 1;
+    }
+    var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "" };
+    var overflowOffset = appendStub(emitter, targetOS, entryFunction);
+    i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        emitFunction(emitter, program.functions[i], overflowOffset);
+        if emitter.error != "" { return Result.Err(emitter.error); }
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= emitter.fixups.len() { break; }
+        var fixup = emitter.fixups[i];
+        if fixup.kind == 3 || fixup.kind == 6 {
+            var target = functionOffset(emitter.functions, fixup.targetFunctionId);
+            if target < 0 { return Result.Err("native arm64: unresolved function call target"); }
+            patchRelative(emitter, fixup, target);
+        } else if fixup.kind == 4 || fixup.kind == 5 {
+            patchRelative(emitter, fixup, fixup.targetOffset);
+        }
+        if emitter.error != "" { return Result.Err(emitter.error); }
+        i = i + 1;
+    }
+    return Result.Ok(Arm64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions });
+}

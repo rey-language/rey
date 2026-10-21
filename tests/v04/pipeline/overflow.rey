@@ -1,0 +1,2 @@
+func increment(value: int): int { return value + 1; }
+func main(): void { var value = increment(9223372036854775807); }

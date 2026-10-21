@@ -1,0 +1,164 @@
+import ir::{EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, Instruction, InstructionKind, TerminatorKind, effectSummary, irFunction, irProgram, withFunction};
+
+func functionIndex(program: IRProgram, functionId: int): int {
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        if program.functions[i].id == functionId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func factJoin(left: Fact, right: Fact): Fact {
+    if left == Fact::Unknown || right == Fact::Unknown { return Fact::Unknown; }
+    if left == Fact::Yes || right == Fact::Yes { return Fact::Yes; }
+    return Fact::No;
+}
+
+func typeIsScalar(ty: IRType): bool {
+    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool;
+}
+
+func emptyEscapeFacts(function: IRFunction): EffectSummary {
+    var argumentEscapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= function.signature.parameterTypes.len() { break; }
+        var parameterType = function.signature.parameterTypes[i];
+        if typeIsScalar(parameterType) { argumentEscapes.push(Escape::NoEscape); }
+        else { argumentEscapes.push(Escape::Unknown); }
+        i = i + 1;
+    }
+    var resultEscape = Escape::Unknown;
+    if typeIsScalar(function.signature.returnType) || function.signature.returnType.kind == IRTypeKind::Void { resultEscape = Escape::NoEscape; }
+    return effectSummary(Fact::No, Fact::No, Fact::No, Fact::No, Fact::No, Fact::No, argumentEscapes, resultEscape);
+}
+
+func markUnknown(effects: EffectSummary): EffectSummary {
+    return effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, effects.argumentEscapes, effects.resultEscape);
+}
+
+func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
+    if instruction.kind == InstructionKind::ConstI64 || instruction.kind == InstructionKind::ConstBool {
+        return instruction.resultId >= 0 && instruction.operands.len() == 0;
+    }
+    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::CompareI64 {
+        return instruction.resultId >= 0 && instruction.operands.len() == 2;
+    }
+    if instruction.kind == InstructionKind::Call {
+        var targetIndex = functionIndex(program, instruction.functionId);
+        if targetIndex < 0 { return false; }
+        return instruction.operands.len() == program.functions[targetIndex].parameters.len();
+    }
+    return false;
+}
+
+func baseEffects(function: IRFunction, program: IRProgram): EffectSummary {
+    var effects = emptyEscapeFacts(function);
+    var unknown = false;
+    if function.blocks.len() == 0 { unknown = true; }
+    if function.signature.parameterTypes.len() != function.parameters.len() { unknown = true; }
+    var signatureIndex = 0;
+    loop {
+        if signatureIndex >= function.signature.parameterTypes.len() || signatureIndex >= function.parameters.len() { break; }
+        var parameterType = function.signature.parameterTypes[signatureIndex];
+        if !typeIsScalar(parameterType) || parameterType.kind != function.parameters[signatureIndex].ty.kind { unknown = true; }
+        signatureIndex = signatureIndex + 1;
+    }
+    if function.signature.returnType.kind != IRTypeKind::I64 && function.signature.returnType.kind != IRTypeKind::Bool && function.signature.returnType.kind != IRTypeKind::Void { unknown = true; }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        if block.terminator.kind != TerminatorKind::Jump && block.terminator.kind != TerminatorKind::Branch && block.terminator.kind != TerminatorKind::Return { unknown = true; }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            if !supportedInstruction(program, block.instructions[instructionIndex]) { unknown = true; }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    if unknown { effects = markUnknown(effects); }
+    return effects;
+}
+
+func derivedEffects(function: IRFunction, program: IRProgram): EffectSummary {
+    var effects = baseEffects(function, program);
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            if instruction.kind == InstructionKind::Call {
+                var targetIndex = functionIndex(program, instruction.functionId);
+                if targetIndex < 0 {
+                    effects = markUnknown(effects);
+                } else {
+                    var callee = program.functions[targetIndex].effects;
+                    effects = effectSummary(
+                        factJoin(effects.readsMemory, callee.readsMemory),
+                        factJoin(effects.writesMemory, callee.writesMemory),
+                        factJoin(effects.allocates, callee.allocates),
+                        factJoin(effects.mayBlock, callee.mayBlock),
+                        factJoin(effects.synchronizes, callee.synchronizes),
+                        factJoin(effects.unresolvedCallees, callee.unresolvedCallees),
+                        effects.argumentEscapes,
+                        effects.resultEscape
+                    );
+                }
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return effects;
+}
+
+func equalEffects(left: EffectSummary, right: EffectSummary): bool {
+    if left.readsMemory != right.readsMemory || left.writesMemory != right.writesMemory || left.allocates != right.allocates || left.mayBlock != right.mayBlock || left.synchronizes != right.synchronizes || left.unresolvedCallees != right.unresolvedCallees || left.resultEscape != right.resultEscape { return false; }
+    if left.argumentEscapes.len() != right.argumentEscapes.len() { return false; }
+    var i = 0;
+    loop {
+        if i >= left.argumentEscapes.len() { break; }
+        if left.argumentEscapes[i] != right.argumentEscapes[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func rebuildWithEffects(program: IRProgram, useDerived: bool): IRProgram {
+    var rebuilt = irProgram(program.entryFunctionId, []);
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        var function = program.functions[i];
+        var effects = baseEffects(function, program);
+        if useDerived { effects = derivedEffects(function, program); }
+        var copied = irFunction(function.id, function.key, function.signature, function.parameters, function.blocks, effects);
+        rebuilt = withFunction(rebuilt, copied);
+        i = i + 1;
+    }
+    return rebuilt;
+}
+
+pub func inferEffects(program: IRProgram): IRProgram {
+    var current = rebuildWithEffects(program, false);
+    loop {
+        var next = rebuildWithEffects(current, true);
+        var changed = false;
+        var i = 0;
+        loop {
+            if i >= current.functions.len() { break; }
+            if !equalEffects(current.functions[i].effects, next.functions[i].effects) { changed = true; }
+            i = i + 1;
+        }
+        current = next;
+        if !changed { break; }
+    }
+    return current;
+}

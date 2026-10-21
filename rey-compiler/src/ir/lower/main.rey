@@ -1,0 +1,986 @@
+// Lower the checked scalar source slice into the v0.4 SSA IR.
+import ir;
+import ir::{IRProgram, IRFunction, IRType, IRTypeKind, IRValue, SourceRef, EffectSummary, Escape, BasicBlock, Instruction, Terminator, irProgram, irFunction, irValue, irI64, irBool, irVoid, functionKey, functionSignature, effectSummary, factUnknown, escapeUnknown, sourceRef, constI64, constBool, addCheckedI64, compareI64, call, jump, branch, returnValue, returnVoid, basicBlock, withFunction};
+import typecheck::{CheckedProgram, CheckedExprInfo, CheckedBindingInfo, ResolvedSymbol, Type};
+import parser::ast::{Program, Stmt, Expr, FuncDeclStmt, FuncParam, VarDeclStmt, ConstDeclStmt, AssignStmt, IfStmt, WhileStmt, ReturnStmt, BlockStmt, ExprStmt, BinaryExpr, LiteralExpr, IdentExpr, CallExpr, LiteralKind, StmtKind, ExprKind, stmtSpan, exprSpan};
+import lexer::{Span};
+
+struct FunctionPlan {
+    pub id: int,
+    pub sourcePath: string,
+    pub moduleId: string,
+    pub sourceName: string,
+    pub declarationIndex: int,
+    pub declaration: FuncDeclStmt,
+    pub symbol: ResolvedSymbol,
+    pub parameterTypes: Vec<IRType>,
+    pub returnType: IRType,
+}
+
+struct LocalBinding {
+    pub name: string,
+    pub identity: string,
+    pub isConst: bool,
+    pub value: IRValue,
+}
+
+struct LocalScope {
+    pub bindings: Vec<LocalBinding>,
+}
+
+struct LowerValue {
+    pub id: int,
+    pub ty: IRType,
+}
+
+struct LocalLocation {
+    pub found: bool,
+    pub scopeIndex: int,
+    pub bindingIndex: int,
+    pub binding: LocalBinding,
+}
+
+struct BlockEnvironment {
+    pub scopes: Vec<LocalScope>,
+    pub params: Vec<IRValue>,
+    pub args: Vec<int>,
+    pub bindingKeys: Vec<string>,
+}
+
+struct LoopTarget {
+    pub headerBlockId: int,
+    pub exitBlockId: int,
+    pub bindingKeys: Vec<string>,
+}
+
+struct FunctionLowerer {
+    pub checked: CheckedProgram,
+    pub plan: FunctionPlan,
+    pub plans: Vec<FunctionPlan>,
+    pub sourcePath: string,
+    pub moduleId: string,
+    pub nextValueId: int,
+    pub currentBlockId: int,
+    pub currentParams: Vec<IRValue>,
+    pub terminated: bool,
+    pub currentInstructions: Vec<Instruction>,
+    pub blocks: Vec<BasicBlock>,
+    pub scopes: Vec<LocalScope>,
+    pub loopTargets: Vec<LoopTarget>,
+    pub error: string,
+}
+
+func lowerError(path: string, offset: int, message: string): string {
+    return path + ":" + offset.toString() + ": " + message;
+}
+
+func spanRef(path: string, span: Span): SourceRef {
+    return sourceRef(path, span.start, span.end);
+}
+
+func checkedTypeIsScalar(ty: Type): bool {
+    return ty.kind == "Int" || ty.kind == "Bool";
+}
+
+func checkedTypeIsSupported(ty: Type): bool {
+    return checkedTypeIsScalar(ty) || ty.kind == "Void";
+}
+
+func toIRType(ty: Type): IRType {
+    if ty.kind == "Int" { return irI64(); }
+    if ty.kind == "Bool" { return irBool(); }
+    return irVoid();
+}
+
+func functionTypeResult(ty: Type): Type {
+    var result = ty.ret;
+    if result != null { return result; }
+    return Type { kind: "Unknown", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+}
+
+func findFunctionSymbol(checked: CheckedProgram, sourcePath: string, moduleId: string, declarationIndex: int): ResolvedSymbol? {
+    var i = 0;
+    loop {
+        if i >= checked.symbols.len() { break; }
+        var symbol = checked.symbols[i];
+        if symbol.sourcePath == sourcePath && symbol.moduleId == moduleId && symbol.declarationIndex == declarationIndex && symbol.kind == "Function" && symbol.receiverPassing == "None" {
+            return symbol;
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+func findPlanForSymbol(plans: Vec<FunctionPlan>, symbol: ResolvedSymbol): int {
+    var i = 0;
+    loop {
+        if i >= plans.len() { break; }
+        var plan = plans[i];
+        if plan.sourcePath == symbol.sourcePath && plan.moduleId == symbol.moduleId && plan.sourceName == symbol.sourceName {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func preflightFunction(checked: CheckedProgram, sourcePath: string, moduleId: string, declaration: FuncDeclStmt, declarationIndex: int, id: int): Result<FunctionPlan, string> {
+    var maybeSymbol = findFunctionSymbol(checked, sourcePath, moduleId, declarationIndex);
+    if maybeSymbol != null {
+    var symbol: ResolvedSymbol = maybeSymbol;
+    if symbol.signature.kind != "Function" {
+        return Result.Err(lowerError(sourcePath, declaration.span.start, "checked function signature is not callable"));
+    }
+    if symbol.signature.params.len() != declaration.params.len() {
+        return Result.Err(lowerError(sourcePath, declaration.span.start, "checked function parameter metadata does not match its declaration"));
+    }
+    var parameterTypes: Vec<IRType> = [];
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= declaration.params.len() { break; }
+        var parameter = declaration.params[parameterIndex];
+        if parameter.hasDefault || parameter.variadic {
+            return Result.Err(lowerError(sourcePath, declaration.span.start, "default and variadic parameters are unsupported by scalar IR lowering"));
+        }
+        var checkedParameterType = symbol.signature.params[parameterIndex];
+        if !checkedTypeIsScalar(checkedParameterType) {
+            return Result.Err(lowerError(sourcePath, declaration.span.start, "parameter '" + parameter.name + "' has unsupported type " + checkedParameterType.kind));
+        }
+        parameterTypes.push(toIRType(checkedParameterType));
+        parameterIndex = parameterIndex + 1;
+    }
+    var resultType = functionTypeResult(symbol.signature);
+    if !checkedTypeIsSupported(resultType) {
+        return Result.Err(lowerError(sourcePath, declaration.span.start, "function result has unsupported type " + resultType.kind));
+    }
+    var irResult = toIRType(resultType);
+    if declaration.name == "main" && (declaration.params.len() != 0 || irResult.kind != IRTypeKind::Void) {
+        return Result.Err(lowerError(sourcePath, declaration.span.start, "IR entry main must take no parameters and return void"));
+    }
+    return Result.Ok(FunctionPlan {
+        id: id,
+        sourcePath: sourcePath,
+        moduleId: moduleId,
+        sourceName: symbol.sourceName,
+        declarationIndex: declarationIndex,
+        declaration: declaration,
+        symbol: symbol,
+        parameterTypes: parameterTypes,
+        returnType: irResult,
+    });
+    }
+    return Result.Err(lowerError(sourcePath, declaration.span.start, "checked function has no matching resolved symbol"));
+}
+
+func findExprInfo(checked: CheckedProgram, sourcePath: string, moduleId: string, expression: Expr): CheckedExprInfo? {
+    var i = 0;
+    loop {
+        if i >= checked.expressions.len() { break; }
+        var info = checked.expressions[i];
+        if info.sourcePath == sourcePath && info.moduleId == moduleId && info.expression == expression {
+            return info;
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+func stmtVariant(stmt: Stmt): string {
+    match stmt {
+        Stmt::VarDecl(_) => { return "VarDecl"; },
+        Stmt::ConstDecl(_) => { return "ConstDecl"; },
+        Stmt::FuncDecl(_) => { return "FuncDecl"; },
+        Stmt::StructDecl(_) => { return "StructDecl"; },
+        Stmt::EnumDecl(_) => { return "EnumDecl"; },
+        Stmt::Import(_) => { return "Import"; },
+        Stmt::If(_) => { return "If"; },
+        Stmt::Assign(_) => { return "Assign"; },
+        Stmt::Return(_) => { return "Return"; },
+        Stmt::Break(_) => { return "Break"; },
+        Stmt::Continue(_) => { return "Continue"; },
+        Stmt::While(_) => { return "While"; },
+        Stmt::For(_) => { return "For"; },
+        Stmt::Loop(_) => { return "Loop"; },
+        Stmt::Block(_) => { return "Block"; },
+        Stmt::ExprStmt(_) => { return "ExprStmt"; },
+        Stmt::Match(_) => { return "Match"; },
+    }
+    return "Unknown";
+}
+
+func bindingForDeclaration(checked: CheckedProgram, sourcePath: string, moduleId: string, statement: Stmt, name: string): CheckedBindingInfo? {
+    var span = stmtSpan(statement);
+    var declarationKey = stmtVariant(statement) + ":" + span.start.toString() + ":" + span.end.toString();
+    var i = 0;
+    loop {
+        if i >= checked.bindings.len() { break; }
+        var binding = checked.bindings[i];
+        if binding.sourcePath == sourcePath && binding.moduleId == moduleId && binding.declarationKey == declarationKey && binding.name == name {
+            return binding;
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+func pushScope(lowerer: FunctionLowerer) {
+    lowerer.scopes.push(LocalScope { bindings: [] });
+}
+
+func popScope(lowerer: FunctionLowerer) {
+    lowerer.scopes.pop();
+}
+
+func findLocalLocation(scopes: Vec<LocalScope>, name: string): LocalLocation {
+    var scopeIndex = scopes.len() - 1;
+    loop {
+        if scopeIndex < 0 { break; }
+        var scope = scopes[scopeIndex];
+        var bindingIndex = scope.bindings.len() - 1;
+        loop {
+            if bindingIndex < 0 { break; }
+            var binding = scope.bindings[bindingIndex];
+            if binding.name == name { return LocalLocation { found: true, scopeIndex: scopeIndex, bindingIndex: bindingIndex, binding: binding }; }
+            bindingIndex = bindingIndex - 1;
+        }
+        scopeIndex = scopeIndex - 1;
+    }
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: "", identity: "", isConst: false, value: irValue(-1, irVoid()) } };
+}
+
+func findLocal(lowerer: FunctionLowerer, name: string): IRValue? {
+    var location = findLocalLocation(lowerer.scopes, name);
+    if location.found { return location.binding.value; }
+    return null;
+}
+
+func updateLocal(lowerer: FunctionLowerer, location: LocalLocation, value: IRValue) {
+    var scope = lowerer.scopes[location.scopeIndex];
+    var binding = scope.bindings[location.bindingIndex];
+    scope.bindings.set(location.bindingIndex, LocalBinding {
+        name: binding.name,
+        identity: binding.identity,
+        isConst: binding.isConst,
+        value: value,
+    });
+    lowerer.scopes.set(location.scopeIndex, scope);
+}
+
+func bindLocal(lowerer: FunctionLowerer, name: string, identity: string, isConst: bool, value: IRValue) {
+    if lowerer.scopes.len() == 0 {
+        lowerer.error = lowerError(lowerer.sourcePath, 0, "internal lowering error: no lexical scope");
+        return;
+    }
+    var scopeIndex = lowerer.scopes.len() - 1;
+    var scope = lowerer.scopes[scopeIndex];
+    scope.bindings.push(LocalBinding { name: name, identity: identity, isConst: isConst, value: value });
+    lowerer.scopes.set(scopeIndex, scope);
+}
+
+func allocateValue(lowerer: FunctionLowerer, ty: IRType): IRValue {
+    var result = irValue(lowerer.nextValueId, ty);
+    lowerer.nextValueId = lowerer.nextValueId + 1;
+    return result;
+}
+
+func cloneScopes(scopes: Vec<LocalScope>): Vec<LocalScope> {
+    var copied: Vec<LocalScope> = [];
+    var scopeIndex = 0;
+    loop {
+        if scopeIndex >= scopes.len() { break; }
+        var sourceScope = scopes[scopeIndex];
+        var copiedBindings: Vec<LocalBinding> = [];
+        var bindingIndex = 0;
+        loop {
+            if bindingIndex >= sourceScope.bindings.len() { break; }
+            var sourceBinding = sourceScope.bindings[bindingIndex];
+            copiedBindings.push(LocalBinding {
+                name: sourceBinding.name,
+                identity: sourceBinding.identity,
+                isConst: sourceBinding.isConst,
+                value: sourceBinding.value,
+            });
+            bindingIndex = bindingIndex + 1;
+        }
+        copied.push(LocalScope { bindings: copiedBindings });
+        scopeIndex = scopeIndex + 1;
+    }
+    return copied;
+}
+
+func findBindingIdentity(scopes: Vec<LocalScope>, identity: string): LocalLocation {
+    var scopeIndex = scopes.len() - 1;
+    loop {
+        if scopeIndex < 0 { break; }
+        var scope = scopes[scopeIndex];
+        var bindingIndex = scope.bindings.len() - 1;
+        loop {
+            if bindingIndex < 0 { break; }
+            var binding = scope.bindings[bindingIndex];
+            if binding.identity == identity {
+                return LocalLocation { found: true, scopeIndex: scopeIndex, bindingIndex: bindingIndex, binding: binding };
+            }
+            bindingIndex = bindingIndex - 1;
+        }
+        scopeIndex = scopeIndex - 1;
+    }
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: "", identity: "", isConst: false, value: irValue(-1, irVoid()) } };
+}
+
+func makeBlockEnvironment(lowerer: FunctionLowerer, sourceScopes: Vec<LocalScope>): BlockEnvironment {
+    var targetScopes = cloneScopes(sourceScopes);
+    var params: Vec<IRValue> = [];
+    var args: Vec<int> = [];
+    var keys: Vec<string> = [];
+    var scopeIndex = 0;
+    loop {
+        if scopeIndex >= sourceScopes.len() { break; }
+        var sourceScope = sourceScopes[scopeIndex];
+        var targetScope = targetScopes[scopeIndex];
+        var bindingIndex = 0;
+        loop {
+            if bindingIndex >= sourceScope.bindings.len() { break; }
+            var sourceBinding = sourceScope.bindings[bindingIndex];
+            args.push(sourceBinding.value.id);
+            keys.push(sourceBinding.identity);
+            var parameter = allocateValue(lowerer, sourceBinding.value.ty);
+            params.push(parameter);
+            var targetBinding = targetScope.bindings[bindingIndex];
+            targetScope.bindings.set(bindingIndex, LocalBinding {
+                name: targetBinding.name,
+                identity: targetBinding.identity,
+                isConst: targetBinding.isConst,
+                value: parameter,
+            });
+            bindingIndex = bindingIndex + 1;
+        }
+        targetScopes.set(scopeIndex, targetScope);
+        scopeIndex = scopeIndex + 1;
+    }
+    return BlockEnvironment { scopes: targetScopes, params: params, args: args, bindingKeys: keys };
+}
+
+func blockArgsForKeys(lowerer: FunctionLowerer, scopes: Vec<LocalScope>, keys: Vec<string>, offset: int): Vec<int> {
+    var args: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= keys.len() { break; }
+        var location = findBindingIdentity(scopes, keys[i]);
+        if !location.found {
+            lowerer.error = lowerError(lowerer.sourcePath, offset, "internal lowering error: block edge lost a live lexical binding");
+            return args;
+        }
+        args.push(location.binding.value.id);
+        i = i + 1;
+    }
+    return args;
+}
+
+func lowerTypeOfExpr(lowerer: FunctionLowerer, expression: Expr): IRType? {
+    var maybeInfo = findExprInfo(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, expression);
+    if maybeInfo != null {
+        var info: CheckedExprInfo = maybeInfo;
+        if !checkedTypeIsSupported(info.ty) {
+            lowerer.error = lowerError(lowerer.sourcePath, exprSpan(expression).start, "expression type " + info.ty.kind + " is outside the scalar IR slice");
+            return null;
+        }
+        return toIRType(info.ty);
+    }
+    lowerer.error = lowerError(lowerer.sourcePath, exprSpan(expression).start, "checked expression metadata is missing");
+    return null;
+}
+
+func digitValue(digit: string): int {
+    if digit >= "0" && digit <= "9" { return digit.toInt(); }
+    if digit == "a" || digit == "A" { return 10; }
+    if digit == "b" || digit == "B" { return 11; }
+    if digit == "c" || digit == "C" { return 12; }
+    if digit == "d" || digit == "D" { return 13; }
+    if digit == "e" || digit == "E" { return 14; }
+    if digit == "f" || digit == "F" { return 15; }
+    return -1;
+}
+
+func parseIntegerLiteral(text: string): Result<int, string> {
+    var body = text;
+    var base = 10;
+    if body.len() > 2 && body.slice(0, 1) == "0" && (body.slice(1, 2) == "x" || body.slice(1, 2) == "X") {
+        base = 16;
+        body = body.slice(2, body.len());
+    } else if body.len() > 2 && body.slice(0, 1) == "0" && (body.slice(1, 2) == "b" || body.slice(1, 2) == "B") {
+        base = 2;
+        body = body.slice(2, body.len());
+    }
+    var value = 0;
+    var sawDigit = false;
+    var previousWasDigit = false;
+    var i = 0;
+    loop {
+        if i >= body.len() { break; }
+        var digit = body.slice(i, i + 1);
+        if digit == "_" {
+            if !previousWasDigit || i + 1 >= body.len() { return Result.Err("misplaced underscore in integer literal"); }
+            previousWasDigit = false;
+        } else {
+            var parsedDigit = digitValue(digit);
+            if parsedDigit < 0 || parsedDigit >= base { return Result.Err("invalid digit in integer literal"); }
+            sawDigit = true;
+            previousWasDigit = true;
+            var maxI64 = 9223372036854775807;
+            if value > (maxI64 - parsedDigit) / base { return Result.Err("integer literal exceeds signed i64 range"); }
+            value = value * base + parsedDigit;
+        }
+        i = i + 1;
+    }
+    if !sawDigit { return Result.Err("integer literal has no digits"); }
+    if !previousWasDigit { return Result.Err("misplaced underscore in integer literal"); }
+    return Result.Ok(value);
+}
+
+func appendInstruction(lowerer: FunctionLowerer, instruction: Instruction) {
+    if lowerer.error != "" { return; }
+    lowerer.currentInstructions.push(instruction);
+}
+
+func failExpression(lowerer: FunctionLowerer, expression: Expr, message: string): LowerValue {
+    lowerer.error = lowerError(lowerer.sourcePath, exprSpan(expression).start, message);
+    return LowerValue { id: -1, ty: irVoid() };
+}
+
+func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): LowerValue {
+    var maybeInfo = findExprInfo(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, expression);
+    if maybeInfo != null {
+    var info: CheckedExprInfo = maybeInfo;
+    var maybeSymbol = info.symbol;
+    if maybeSymbol != null {
+    var symbol: ResolvedSymbol = maybeSymbol;
+    if symbol.kind != "Function" || symbol.receiverPassing != "None" || symbol.intrinsicId != "" {
+        return failExpression(lowerer, expression, "only calls to top-level source functions are supported");
+    }
+    if symbol.sourcePath != lowerer.sourcePath || symbol.moduleId != lowerer.moduleId {
+        return failExpression(lowerer, expression, "cross-module calls are unsupported by single-unit scalar lowering");
+    }
+    var targetIndex = findPlanForSymbol(lowerer.plans, symbol);
+    if targetIndex < 0 {
+        return failExpression(lowerer, expression, "resolved call target is not a top-level scalar function in this source unit");
+    }
+    var target = lowerer.plans[targetIndex];
+    if callExpr.args.len() != target.parameterTypes.len() {
+        return failExpression(lowerer, expression, "call argument count does not match the scalar function signature");
+    }
+    var arguments: Vec<int> = [];
+    var argumentIndex = 0;
+    loop {
+        if argumentIndex >= callExpr.args.len() { break; }
+        var argument = lowerExpr(lowerer, callExpr.args[argumentIndex]);
+        if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+        if argument.id < 0 || argument.ty.kind == IRTypeKind::Void {
+            return failExpression(lowerer, callExpr.args[argumentIndex], "void call cannot be used as an argument");
+        }
+        if argument.ty.kind != target.parameterTypes[argumentIndex].kind {
+            return failExpression(lowerer, callExpr.args[argumentIndex], "checked call argument does not match the target scalar type");
+        }
+        arguments.push(argument.id);
+        argumentIndex = argumentIndex + 1;
+    }
+    var resultType = toIRType(info.ty);
+    if resultType.kind != target.returnType.kind {
+        return failExpression(lowerer, expression, "checked call result does not match its resolved function signature");
+    }
+    var resultId = -1;
+    if resultType.kind != IRTypeKind::Void {
+        var result = allocateValue(lowerer, resultType);
+        resultId = result.id;
+    }
+    var span = exprSpan(expression);
+    appendInstruction(lowerer, call(resultId, resultType, target.id, arguments, spanRef(lowerer.sourcePath, span)));
+    return LowerValue { id: resultId, ty: resultType };
+    }
+    return failExpression(lowerer, expression, "call has no checked resolved symbol");
+    }
+    return failExpression(lowerer, expression, "checked call metadata is missing");
+}
+
+func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
+    if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+    var maybeIRType = lowerTypeOfExpr(lowerer, expression);
+    var resultType = irVoid();
+    if maybeIRType != null { resultType = maybeIRType; }
+    if maybeIRType == null { return LowerValue { id: -1, ty: irVoid() }; }
+    match expression {
+        Expr::Literal(literal) => {
+            var value = allocateValue(lowerer, resultType);
+            var span = exprSpan(expression);
+            if literal.kind == LiteralKind::Int {
+                var parsedInteger = parseIntegerLiteral(literal.text);
+                if parsedInteger.isErr() { return failExpression(lowerer, expression, parsedInteger.unwrapErr()); }
+                appendInstruction(lowerer, constI64(value.id, parsedInteger.unwrap(), spanRef(lowerer.sourcePath, span)));
+                return LowerValue { id: value.id, ty: resultType };
+            }
+            if literal.kind == LiteralKind::Bool {
+                appendInstruction(lowerer, constBool(value.id, literal.text == "true", spanRef(lowerer.sourcePath, span)));
+                return LowerValue { id: value.id, ty: resultType };
+            }
+            return failExpression(lowerer, expression, "only integer and boolean literals are supported");
+        },
+        Expr::Identifier(identifier) => {
+            var maybeLocal = findLocal(lowerer, identifier.name);
+            if maybeLocal != null {
+                var local: IRValue = maybeLocal;
+                if local.ty.kind != resultType.kind { return failExpression(lowerer, expression, "checked identifier type differs from its local SSA binding"); }
+                return LowerValue { id: local.id, ty: local.ty };
+            }
+            return failExpression(lowerer, expression, "identifier '" + identifier.name + "' is not a local scalar binding");
+        },
+        Expr::Binary(binary) => {
+            var left = lowerExpr(lowerer, binary.left);
+            if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+            var right = lowerExpr(lowerer, binary.right);
+            if lowerer.error != "" { return LowerValue { id: -1, ty: irVoid() }; }
+            if binary.op == "+" {
+                if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::I64 {
+                    return failExpression(lowerer, expression, "checked addition lowering requires i64 operands and result");
+                }
+                var added = allocateValue(lowerer, irI64());
+                appendInstruction(lowerer, addCheckedI64(added.id, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));
+                return LowerValue { id: added.id, ty: added.ty };
+            }
+            if binary.op == "==" || binary.op == "!=" || binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" {
+                if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::Bool {
+                    return failExpression(lowerer, expression, "scalar comparison lowering currently requires i64 operands");
+                }
+                var predicate = ir.compareEq();
+                if binary.op == "!=" { predicate = ir.compareNe(); }
+                if binary.op == "<" { predicate = ir.compareSlt(); }
+                if binary.op == "<=" { predicate = ir.compareSle(); }
+                if binary.op == ">" { predicate = ir.compareSgt(); }
+                if binary.op == ">=" { predicate = ir.compareSge(); }
+                var compared = allocateValue(lowerer, irBool());
+                appendInstruction(lowerer, compareI64(compared.id, predicate, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));
+                return LowerValue { id: compared.id, ty: compared.ty };
+            }
+            return failExpression(lowerer, expression, "binary operator '" + binary.op + "' is unsupported by scalar IR lowering");
+        },
+        Expr::Call(callExpr) => { return lowerCall(lowerer, expression, callExpr); },
+        _ => { return failExpression(lowerer, expression, "expression syntax is unsupported by scalar IR lowering"); },
+    }
+    return LowerValue { id: -1, ty: irVoid() };
+}
+
+func alwaysTerminates(statements: Vec<Stmt>): bool {
+    var i = 0;
+    loop {
+        if i >= statements.len() { break; }
+        var statement = statements[i];
+        match statement {
+            Stmt::Return(_) => { return true; },
+            Stmt::Break(_) => { return true; },
+            Stmt::Continue(_) => { return true; },
+            Stmt::Block(block) => { if alwaysTerminates(block.statements) { return true; } },
+            Stmt::If(ifStmt) => {
+                var maybeElse = ifStmt.elseBranch;
+                if maybeElse != null {
+                    var elseBlock: BlockStmt = maybeElse;
+                    if alwaysTerminates(ifStmt.thenBranch.statements) && alwaysTerminates(elseBlock.statements) { return true; }
+                }
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+func reserveBlock(lowerer: FunctionLowerer, params: Vec<IRValue>): int {
+    var id = lowerer.blocks.len();
+    var placeholder = basicBlock(id, params, [], returnVoid(sourceRef(lowerer.sourcePath, 0, 0)));
+    lowerer.blocks.push(placeholder);
+    return id;
+}
+
+func finishBlock(lowerer: FunctionLowerer, terminator: Terminator) {
+    var block = basicBlock(lowerer.currentBlockId, lowerer.currentParams, lowerer.currentInstructions, terminator);
+    lowerer.blocks.set(lowerer.currentBlockId, block);
+    lowerer.currentInstructions = [];
+    lowerer.terminated = true;
+}
+
+func enterBlock(lowerer: FunctionLowerer, blockId: int, params: Vec<IRValue>) {
+    lowerer.currentBlockId = blockId;
+    lowerer.currentParams = params;
+    lowerer.currentInstructions = [];
+    lowerer.terminated = false;
+}
+
+func lowerStatements(lowerer: FunctionLowerer, statements: Vec<Stmt>) {
+    var i = 0;
+    loop {
+        if i >= statements.len() { break; }
+        if lowerer.error != "" { return; }
+        if lowerer.terminated {
+            var unreachableSpan = stmtSpan(statements[i]);
+            lowerer.error = lowerError(lowerer.sourcePath, unreachableSpan.start, "unreachable statement after a terminating path is unsupported");
+            return;
+        }
+        lowerStmt(lowerer, statements[i]);
+        i = i + 1;
+    }
+}
+
+func lowerDeclaration(lowerer: FunctionLowerer, statement: Stmt, name: string, initializer: Expr, span: Span) {
+    var maybeBinding = bindingForDeclaration(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, statement, name);
+    if maybeBinding != null {
+        var binding: CheckedBindingInfo = maybeBinding;
+        if !checkedTypeIsScalar(binding.ty) {
+            lowerer.error = lowerError(lowerer.sourcePath, span.start, "local '" + name + "' has unsupported type " + binding.ty.kind);
+            return;
+        }
+        var initializerValue = lowerExpr(lowerer, initializer);
+        if lowerer.error != "" { return; }
+        if initializerValue.id < 0 || initializerValue.ty.kind == IRTypeKind::Void || initializerValue.ty.kind != toIRType(binding.ty).kind {
+            lowerer.error = lowerError(lowerer.sourcePath, span.start, "local initializer does not produce its checked scalar type");
+            return;
+        }
+        var identity = "local:" + binding.declarationKey + ":" + binding.name;
+        bindLocal(lowerer, name, identity, binding.isConst, irValue(initializerValue.id, initializerValue.ty));
+        return;
+    }
+    lowerer.error = lowerError(lowerer.sourcePath, span.start, "checked local binding metadata is missing");
+}
+
+func lowerReturn(lowerer: FunctionLowerer, statement: ReturnStmt) {
+    var returnSpan = statement.span;
+    var valueSpan = exprSpan(statement.value);
+    if valueSpan.start == returnSpan.start {
+        if lowerer.plan.returnType.kind != IRTypeKind::Void {
+            lowerer.error = lowerError(lowerer.sourcePath, returnSpan.start, "value-returning function requires a scalar return value");
+            return;
+        }
+        finishBlock(lowerer, returnVoid(spanRef(lowerer.sourcePath, returnSpan)));
+        return;
+    }
+    if lowerer.plan.returnType.kind == IRTypeKind::Void {
+        lowerer.error = lowerError(lowerer.sourcePath, returnSpan.start, "void function cannot return a value in scalar IR lowering");
+        return;
+    }
+    var value = lowerExpr(lowerer, statement.value);
+    if lowerer.error != "" { return; }
+    if value.id < 0 || value.ty.kind != lowerer.plan.returnType.kind {
+        lowerer.error = lowerError(lowerer.sourcePath, returnSpan.start, "return value does not match the checked function result type");
+        return;
+    }
+    finishBlock(lowerer, returnValue(value.id, spanRef(lowerer.sourcePath, returnSpan)));
+}
+
+func lowerIf(lowerer: FunctionLowerer, statement: IfStmt) {
+    var condition = lowerExpr(lowerer, statement.condition);
+    if lowerer.error != "" { return; }
+    if condition.ty.kind != IRTypeKind::Bool || condition.id < 0 {
+        lowerer.error = lowerError(lowerer.sourcePath, exprSpan(statement.condition).start, "if condition must lower to a bool SSA value");
+        return;
+    }
+    var maybeElse = statement.elseBranch;
+    var hasElse = maybeElse != null;
+    var thenTerminates = alwaysTerminates(statement.thenBranch.statements);
+    var elseTerminates = false;
+    if maybeElse != null {
+        var elseBlock: BlockStmt = maybeElse;
+        elseTerminates = alwaysTerminates(elseBlock.statements);
+    }
+    var bothTerminate = hasElse && thenTerminates && elseTerminates;
+    var beforeScopes = cloneScopes(lowerer.scopes);
+    var thenEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var elseEnvironment = BlockEnvironment { scopes: [], params: [], args: [], bindingKeys: [] };
+    if maybeElse != null { elseEnvironment = makeBlockEnvironment(lowerer, beforeScopes); }
+    var mergeEnvironment = BlockEnvironment { scopes: [], params: [], args: [], bindingKeys: [] };
+    if !bothTerminate { mergeEnvironment = makeBlockEnvironment(lowerer, beforeScopes); }
+    var thenId = reserveBlock(lowerer, thenEnvironment.params);
+    var elseId = -1;
+    if hasElse { elseId = reserveBlock(lowerer, elseEnvironment.params); }
+    var mergeId = -1;
+    if !bothTerminate { mergeId = reserveBlock(lowerer, mergeEnvironment.params); }
+    var span = statement.span;
+    var falseTarget = mergeId;
+    var falseArgs: Vec<int> = mergeEnvironment.args;
+    if hasElse { falseTarget = elseId; falseArgs = elseEnvironment.args; }
+    finishBlock(lowerer, branch(condition.id, thenId, thenEnvironment.args, falseTarget, falseArgs, spanRef(lowerer.sourcePath, span)));
+
+    lowerer.scopes = cloneScopes(thenEnvironment.scopes);
+    enterBlock(lowerer, thenId, thenEnvironment.params);
+    pushScope(lowerer);
+    lowerStatements(lowerer, statement.thenBranch.statements);
+    popScope(lowerer);
+    if lowerer.error != "" { return; }
+    if !lowerer.terminated {
+        if mergeId < 0 { lowerer.error = lowerError(lowerer.sourcePath, span.start, "internal lowering error: missing if merge block"); return; }
+        var thenArgs = blockArgsForKeys(lowerer, lowerer.scopes, mergeEnvironment.bindingKeys, span.start);
+        if lowerer.error != "" { return; }
+        finishBlock(lowerer, jump(mergeId, thenArgs, spanRef(lowerer.sourcePath, span)));
+    }
+
+    if maybeElse != null {
+        lowerer.scopes = cloneScopes(elseEnvironment.scopes);
+        enterBlock(lowerer, elseId, elseEnvironment.params);
+        pushScope(lowerer);
+        var explicitElse: BlockStmt = maybeElse;
+        lowerStatements(lowerer, explicitElse.statements);
+        popScope(lowerer);
+        if lowerer.error != "" { return; }
+        if !lowerer.terminated {
+            if mergeId < 0 { lowerer.error = lowerError(lowerer.sourcePath, span.start, "internal lowering error: missing if merge block"); return; }
+            var elseArgs = blockArgsForKeys(lowerer, lowerer.scopes, mergeEnvironment.bindingKeys, span.start);
+            if lowerer.error != "" { return; }
+            finishBlock(lowerer, jump(mergeId, elseArgs, spanRef(lowerer.sourcePath, span)));
+        }
+    }
+    if mergeId >= 0 {
+        lowerer.scopes = cloneScopes(mergeEnvironment.scopes);
+        enterBlock(lowerer, mergeId, mergeEnvironment.params);
+    }
+    else { lowerer.terminated = true; lowerer.currentBlockId = -1; }
+}
+
+func lowerWhile(lowerer: FunctionLowerer, statement: WhileStmt) {
+    var beforeScopes = cloneScopes(lowerer.scopes);
+    var headerEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var bodyEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var exitEnvironment = makeBlockEnvironment(lowerer, beforeScopes);
+    var headerId = reserveBlock(lowerer, headerEnvironment.params);
+    var bodyId = reserveBlock(lowerer, bodyEnvironment.params);
+    var exitId = reserveBlock(lowerer, exitEnvironment.params);
+    var span = statement.span;
+    finishBlock(lowerer, jump(headerId, headerEnvironment.args, spanRef(lowerer.sourcePath, span)));
+
+    lowerer.scopes = cloneScopes(headerEnvironment.scopes);
+    enterBlock(lowerer, headerId, headerEnvironment.params);
+    var condition = lowerExpr(lowerer, statement.condition);
+    if lowerer.error != "" { return; }
+    if condition.id < 0 || condition.ty.kind != IRTypeKind::Bool {
+        lowerer.error = lowerError(lowerer.sourcePath, exprSpan(statement.condition).start, "while condition must lower to a bool SSA value");
+        return;
+    }
+    var bodyArgs = blockArgsForKeys(lowerer, lowerer.scopes, bodyEnvironment.bindingKeys, span.start);
+    if lowerer.error != "" { return; }
+    var exitArgs = blockArgsForKeys(lowerer, lowerer.scopes, exitEnvironment.bindingKeys, span.start);
+    if lowerer.error != "" { return; }
+    finishBlock(lowerer, branch(condition.id, bodyId, bodyArgs, exitId, exitArgs, spanRef(lowerer.sourcePath, span)));
+
+    lowerer.loopTargets.push(LoopTarget { headerBlockId: headerId, exitBlockId: exitId, bindingKeys: headerEnvironment.bindingKeys });
+    lowerer.scopes = cloneScopes(bodyEnvironment.scopes);
+    enterBlock(lowerer, bodyId, bodyEnvironment.params);
+    pushScope(lowerer);
+    lowerStatements(lowerer, statement.body);
+    popScope(lowerer);
+    if lowerer.error != "" { return; }
+    if !lowerer.terminated {
+        var backedgeArgs = blockArgsForKeys(lowerer, lowerer.scopes, headerEnvironment.bindingKeys, span.start);
+        if lowerer.error != "" { return; }
+        finishBlock(lowerer, jump(headerId, backedgeArgs, spanRef(lowerer.sourcePath, span)));
+    }
+    lowerer.loopTargets.pop();
+
+    lowerer.scopes = cloneScopes(exitEnvironment.scopes);
+    enterBlock(lowerer, exitId, exitEnvironment.params);
+}
+
+func lowerLoopTransfer(lowerer: FunctionLowerer, span: Span, isBreak: bool) {
+    if lowerer.loopTargets.len() == 0 {
+        var label = "continue";
+        if isBreak { label = "break"; }
+        lowerer.error = lowerError(lowerer.sourcePath, span.start, label + " used outside a lowered while loop");
+        return;
+    }
+    var target = lowerer.loopTargets[lowerer.loopTargets.len() - 1];
+    var args = blockArgsForKeys(lowerer, lowerer.scopes, target.bindingKeys, span.start);
+    if lowerer.error != "" { return; }
+    var targetBlockId = target.headerBlockId;
+    if isBreak { targetBlockId = target.exitBlockId; }
+    finishBlock(lowerer, jump(targetBlockId, args, spanRef(lowerer.sourcePath, span)));
+}
+
+func lowerAssignment(lowerer: FunctionLowerer, statement: AssignStmt) {
+    var maybeIdentifier = statement.target;
+    match maybeIdentifier {
+        Expr::Identifier(identifier) => {
+            var location = findLocalLocation(lowerer.scopes, identifier.name);
+            if !location.found {
+                lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "assignment target is not a local scalar binding");
+                return;
+            }
+            if location.binding.isConst {
+                lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "cannot assign to const '" + identifier.name + "'");
+                return;
+            }
+            var right = lowerExpr(lowerer, statement.value);
+            if lowerer.error != "" { return; }
+            var newValue = right;
+            if statement.op == "+=" {
+                if location.binding.value.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || right.id < 0 {
+                    lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "checked += lowering requires i64 operands");
+                    return;
+                }
+                var sum = allocateValue(lowerer, irI64());
+                finishAssignmentInstruction(lowerer, sum, location.binding.value.id, right.id, statement.span);
+                newValue = LowerValue { id: sum.id, ty: sum.ty };
+            } else if statement.op != "=" {
+                lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "assignment operator '" + statement.op + "' is unsupported by scalar IR lowering");
+                return;
+            }
+            if newValue.id < 0 || newValue.ty.kind != location.binding.value.ty.kind {
+                lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "assignment value does not match the checked local scalar type");
+                return;
+            }
+            updateLocal(lowerer, location, irValue(newValue.id, newValue.ty));
+        },
+        _ => { lowerer.error = lowerError(lowerer.sourcePath, statement.span.start, "only direct local identifier assignments are supported by scalar IR lowering"); },
+    }
+}
+
+func finishAssignmentInstruction(lowerer: FunctionLowerer, result: IRValue, leftId: int, rightId: int, span: Span) {
+    appendInstruction(lowerer, addCheckedI64(result.id, leftId, rightId, spanRef(lowerer.sourcePath, span)));
+}
+
+func lowerStmt(lowerer: FunctionLowerer, statement: Stmt) {
+    if lowerer.error != "" { return; }
+    match statement {
+        Stmt::VarDecl(declaration) => { lowerDeclaration(lowerer, statement, declaration.name, declaration.value, declaration.span); },
+        Stmt::ConstDecl(declaration) => { lowerDeclaration(lowerer, statement, declaration.name, declaration.value, declaration.span); },
+        Stmt::Return(returnStmt) => { lowerReturn(lowerer, returnStmt); },
+        Stmt::If(ifStmt) => { lowerIf(lowerer, ifStmt); },
+        Stmt::Block(block) => {
+            pushScope(lowerer);
+            lowerStatements(lowerer, block.statements);
+            popScope(lowerer);
+        },
+        Stmt::ExprStmt(expressionStmt) => {
+            var ignored = lowerExpr(lowerer, expressionStmt.expr);
+        },
+        Stmt::Assign(assignStmt) => { lowerAssignment(lowerer, assignStmt); },
+        Stmt::FuncDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "nested function declarations are unsupported by scalar IR lowering"); },
+        Stmt::Import(importStmt) => { lowerer.error = lowerError(lowerer.sourcePath, importStmt.span.start, "imports are unsupported by single-unit scalar IR lowering"); },
+        Stmt::StructDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "struct declarations are unsupported by scalar IR lowering"); },
+        Stmt::EnumDecl(declaration) => { lowerer.error = lowerError(lowerer.sourcePath, declaration.span.start, "enum declarations are unsupported by scalar IR lowering"); },
+        Stmt::While(whileStmt) => { lowerWhile(lowerer, whileStmt); },
+        Stmt::For(forStmt) => { lowerer.error = lowerError(lowerer.sourcePath, forStmt.span.start, "for loops are unsupported by scalar IR lowering"); },
+        Stmt::Loop(loopStmt) => { lowerer.error = lowerError(lowerer.sourcePath, loopStmt.span.start, "loop statements are unsupported by scalar IR lowering"); },
+        Stmt::Break(breakStmt) => { lowerLoopTransfer(lowerer, breakStmt.span, true); },
+        Stmt::Continue(continueStmt) => { lowerLoopTransfer(lowerer, continueStmt.span, false); },
+        Stmt::Match(matchStmt) => { lowerer.error = lowerError(lowerer.sourcePath, matchStmt.span.start, "match statements are unsupported by scalar IR lowering"); },
+    }
+}
+
+func unknownEffectsFor(parameters: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= parameters { break; }
+        escapes.push(escapeUnknown());
+        i = i + 1;
+    }
+    return effectSummary(factUnknown(), factUnknown(), factUnknown(), factUnknown(), factUnknown(), factUnknown(), escapes, escapeUnknown());
+}
+
+func lowerFunction(checked: CheckedProgram, plan: FunctionPlan, plans: Vec<FunctionPlan>): Result<IRFunction, string> {
+    var parameterValues: Vec<IRValue> = [];
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= plan.parameterTypes.len() { break; }
+        parameterValues.push(irValue(parameterIndex, plan.parameterTypes[parameterIndex]));
+        parameterIndex = parameterIndex + 1;
+    }
+    var lowerer = FunctionLowerer {
+        checked: checked,
+        plan: plan,
+        plans: plans,
+        sourcePath: plan.sourcePath,
+        moduleId: plan.moduleId,
+        nextValueId: parameterValues.len(),
+        currentBlockId: 0,
+        currentParams: [],
+        terminated: false,
+        currentInstructions: [],
+        blocks: [],
+        scopes: [],
+        loopTargets: [],
+        error: "",
+    };
+    reserveBlock(lowerer, []);
+    pushScope(lowerer);
+    var parameterIndex2 = 0;
+    loop {
+        if parameterIndex2 >= plan.declaration.params.len() { break; }
+        var parameter: FuncParam = plan.declaration.params[parameterIndex2];
+        bindLocal(lowerer, parameter.name, "parameter:" + parameterIndex2.toString(), false, parameterValues[parameterIndex2]);
+        parameterIndex2 = parameterIndex2 + 1;
+    }
+    lowerStatements(lowerer, plan.declaration.body);
+    if lowerer.error != "" { return Result.Err(lowerer.error); }
+    if !lowerer.terminated {
+        if plan.returnType.kind != IRTypeKind::Void {
+            return Result.Err(lowerError(plan.sourcePath, plan.declaration.span.start, "non-void function has a path without a scalar return"));
+        }
+        finishBlock(lowerer, returnVoid(sourceRef(plan.sourcePath, plan.declaration.span.end, plan.declaration.span.end)));
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= lowerer.blocks.len() { break; }
+        var block = lowerer.blocks[blockIndex];
+        if block.id != blockIndex {
+            return Result.Err(lowerError(plan.sourcePath, plan.declaration.span.start, "internal lowering error: block IDs are not insertion ordered"));
+        }
+        blockIndex = blockIndex + 1;
+    }
+    var signature = functionSignature(plan.parameterTypes, plan.returnType);
+    var function = irFunction(plan.id, functionKey(plan.moduleId, "", plan.sourceName), signature, parameterValues, lowerer.blocks, unknownEffectsFor(parameterValues.len()));
+    return Result.Ok(function);
+}
+
+pub func lowerProgram(checked: CheckedProgram): Result<IRProgram, string> {
+    if checked.units.len() != 1 {
+        return Result.Err(lowerError(checked.entryPath, 0, "scalar IR lowering requires exactly one checked source unit"));
+    }
+    var unit = checked.units[0];
+    var plans: Vec<FunctionPlan> = [];
+    var statementIndex = 0;
+    loop {
+        if statementIndex >= unit.program.statements.len() { break; }
+        var statement = unit.program.statements[statementIndex];
+        match statement {
+            Stmt::FuncDecl(declaration) => {
+                var maybePlan = preflightFunction(checked, unit.sourcePath, unit.moduleId, declaration, statementIndex, plans.len());
+                if maybePlan.isErr() { return Result.Err(maybePlan.unwrapErr()); }
+                plans.push(maybePlan.unwrap());
+            },
+            Stmt::VarDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level variable declarations are unsupported by scalar IR lowering")); },
+            Stmt::ConstDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "top-level constant declarations are unsupported by scalar IR lowering")); },
+            Stmt::Import(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "imports are unsupported by single-unit scalar IR lowering")); },
+            Stmt::StructDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "struct declarations are unsupported by scalar IR lowering")); },
+            Stmt::EnumDecl(declaration) => { return Result.Err(lowerError(unit.sourcePath, declaration.span.start, "enum declarations are unsupported by scalar IR lowering")); },
+            _ => { return Result.Err(lowerError(unit.sourcePath, stmtSpan(statement).start, "only top-level function declarations are supported by scalar IR lowering")); },
+        }
+        statementIndex = statementIndex + 1;
+    }
+    if plans.len() == 0 { return Result.Err(lowerError(unit.sourcePath, 0, "checked source unit contains no scalar functions")); }
+    var entryFunctionId = -1;
+    var planIndex = 0;
+    loop {
+        if planIndex >= plans.len() { break; }
+        if plans[planIndex].sourceName == "main" {
+            if entryFunctionId >= 0 { return Result.Err(lowerError(unit.sourcePath, plans[planIndex].declaration.span.start, "multiple scalar entry functions named main")); }
+            entryFunctionId = plans[planIndex].id;
+        }
+        planIndex = planIndex + 1;
+    }
+    if entryFunctionId < 0 { return Result.Err(lowerError(unit.sourcePath, 0, "checked source unit has no scalar entry function main")); }
+
+    var result = irProgram(entryFunctionId, []);
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= plans.len() { break; }
+        var lowered = lowerFunction(checked, plans[functionIndex], plans);
+        if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
+        result = withFunction(result, lowered.unwrap());
+        functionIndex = functionIndex + 1;
+    }
+    return Result.Ok(result);
+}

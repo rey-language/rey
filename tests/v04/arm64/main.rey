@@ -1,0 +1,246 @@
+import ir;
+import ir::{IRType, IRValue, IRFunction, BasicBlock, Instruction, EffectSummary, IRProgram, Escape};
+import native::arm64::{emitArm64, Arm64Code};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func function(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("arm64-test", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func code(program: IRProgram, os: string): Arm64Code {
+    var result: Result<Arm64Code, string> = emitArm64(program, os);
+    require(result.isOk(), "emission succeeds: " + os);
+    return result.unwrap();
+}
+
+func wordAt(bytes: Vec<int>, offset: int): int {
+    return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536 + bytes[offset + 3] * 16777216;
+}
+
+func hasWord(bytes: Vec<int>, wanted: int): bool {
+    var offset = 0;
+    loop {
+        if offset + 4 > bytes.len() { break; }
+        if wordAt(bytes, offset) == wanted { return true; }
+        offset = offset + 4;
+    }
+    return false;
+}
+
+func findWord(bytes: Vec<int>, wanted: int): int {
+    var offset = 0;
+    loop {
+        if offset + 4 > bytes.len() { break; }
+        if wordAt(bytes, offset) == wanted { return offset; }
+        offset = offset + 4;
+    }
+    return -1;
+}
+
+func offsetFor(code: Arm64Code, functionId: int): int {
+    var i = 0;
+    loop {
+        if i >= code.functions.len() { break; }
+        if code.functions[i].functionId == functionId { return code.functions[i].offset; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func branchTarget(bytes: Vec<int>, offset: int, bits: int): int {
+    var value = wordAt(bytes, offset);
+    var immediate = value % 67108864;
+    if bits == 19 { immediate = (value / 32) % 524288; }
+    var signBit = 33554432;
+    var modulus = 67108864;
+    if bits == 19 { signBit = 262144; modulus = 524288; }
+    if immediate >= signBit { immediate = immediate - modulus; }
+    return offset + immediate * 4;
+}
+
+func constProgram(value: int, valueId: int): IRProgram {
+    var entry = function(700, "literal", [], [], ir.irI64(), [ir.basicBlock(41, [], [ir.constI64(valueId, value, ir.sourceRef("literal.rey", 1, 4))], ir.returnValue(valueId, ir.sourceRef("literal.rey", 5, 8)))]);
+    return ir.irProgram(700, [entry]);
+}
+
+func callProgram(): IRProgram {
+    var helper = function(41, "identity", [ir.irValue(900001, ir.irI64())], [ir.irI64()], ir.irI64(), [ir.basicBlock(8, [], [], ir.returnValue(900001, ir.sourceRef("call.rey", 1, 4)))]);
+    var mainBlock = ir.basicBlock(91, [], [ir.constI64(700000, 23, ir.sourceRef("call.rey", 5, 7)), ir.call(999999, ir.irI64(), 41, [700000], ir.sourceRef("call.rey", 8, 14))], ir.returnValue(999999, ir.sourceRef("call.rey", 15, 18)));
+    var main = function(7, "main", [], [], ir.irI64(), [mainBlock]);
+    return ir.irProgram(7, [main, helper]);
+}
+
+func edgeProgram(): IRProgram {
+    var parameters: Vec<IRValue> = [ir.irValue(300, ir.irBool()), ir.irValue(900, ir.irI64()), ir.irValue(12, ir.irI64())];
+    var types: Vec<IRType> = [ir.irBool(), ir.irI64(), ir.irI64()];
+    var entry = ir.basicBlock(0, [], [], ir.branch(300, 1, [300, 900, 12], 2, [300, 12, 900], ir.sourceRef("edge.rey", 1, 8)));
+    var yes = ir.basicBlock(1, [ir.irValue(1001, ir.irBool()), ir.irValue(1002, ir.irI64()), ir.irValue(1003, ir.irI64())], [], ir.returnValue(1002, ir.sourceRef("edge.rey", 9, 12)));
+    var no = ir.basicBlock(2, [ir.irValue(2001, ir.irBool()), ir.irValue(2002, ir.irI64()), ir.irValue(2003, ir.irI64())], [], ir.returnValue(2002, ir.sourceRef("edge.rey", 13, 16)));
+    var helper = function(17, "edge", parameters, types, ir.irI64(), [entry, yes, no]);
+    var main = function(18, "edge-entry", [], [], ir.irI64(), [ir.basicBlock(0, [], [ir.constBool(0, true, ir.sourceRef("edge-main.rey", 1, 2)), ir.constI64(1, 55, ir.sourceRef("edge-main.rey", 3, 4)), ir.constI64(2, 66, ir.sourceRef("edge-main.rey", 5, 6)), ir.call(3, ir.irI64(), 17, [0, 1, 2], ir.sourceRef("edge-main.rey", 7, 10))], ir.returnValue(3, ir.sourceRef("edge-main.rey", 11, 13)))]);
+    return ir.irProgram(18, [helper, main]);
+}
+
+func compareProgram(): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, -8, ir.sourceRef("compare.rey", 1, 2)),
+        ir.constI64(1, 4, ir.sourceRef("compare.rey", 3, 4)),
+        ir.compareI64(2, ir.compareEq(), 0, 1, ir.sourceRef("compare.rey", 5, 7)),
+        ir.compareI64(3, ir.compareNe(), 0, 1, ir.sourceRef("compare.rey", 8, 10)),
+        ir.compareI64(4, ir.compareSlt(), 0, 1, ir.sourceRef("compare.rey", 11, 13)),
+        ir.compareI64(5, ir.compareSle(), 0, 1, ir.sourceRef("compare.rey", 14, 16)),
+        ir.compareI64(6, ir.compareSgt(), 0, 1, ir.sourceRef("compare.rey", 17, 19)),
+        ir.compareI64(7, ir.compareSge(), 0, 1, ir.sourceRef("compare.rey", 20, 22))
+    ];
+    var entry = function(1, "comparisons", [], [], ir.irBool(), [ir.basicBlock(0, [], instructions, ir.returnValue(7, ir.sourceRef("compare.rey", 23, 25)))]);
+    return ir.irProgram(1, [entry]);
+}
+
+func overflowProgram(): IRProgram {
+    var maximum = 9223372036854775807;
+    var instructions: Vec<Instruction> = [ir.constI64(0, maximum, ir.sourceRef("overflow.rey", 1, 2)), ir.constI64(1, 1, ir.sourceRef("overflow.rey", 3, 4)), ir.addCheckedI64(2, 0, 1, ir.sourceRef("overflow.rey", 5, 8))];
+    var entry = function(0, "overflow", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(2, ir.sourceRef("overflow.rey", 9, 12)))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func recursiveProgram(): IRProgram {
+    var recursiveParameters: Vec<IRValue> = [ir.irValue(100, ir.irI64())];
+    var recursiveTypes: Vec<IRType> = [ir.irI64()];
+    var dispatch = ir.basicBlock(0, [], [ir.constI64(901, 0, ir.sourceRef("recursive.rey", 1, 2)), ir.compareI64(902, ir.compareSgt(), 100, 901, ir.sourceRef("recursive.rey", 3, 6))], ir.branch(902, 1, [100], 2, [100], ir.sourceRef("recursive.rey", 7, 12)));
+    var step = ir.basicBlock(1, [ir.irValue(1000, ir.irI64())], [ir.constI64(2000, -1, ir.sourceRef("recursive.rey", 13, 15)), ir.addCheckedI64(3000, 1000, 2000, ir.sourceRef("recursive.rey", 16, 19)), ir.call(4000, ir.irI64(), 31, [3000], ir.sourceRef("recursive.rey", 20, 25))], ir.returnValue(4000, ir.sourceRef("recursive.rey", 26, 30)));
+    var base = ir.basicBlock(2, [ir.irValue(5000, ir.irI64())], [], ir.returnValue(5000, ir.sourceRef("recursive.rey", 31, 35)));
+    var recursive = function(31, "countdown", recursiveParameters, recursiveTypes, ir.irI64(), [dispatch, step, base]);
+    var entry = function(32, "recursive-entry", [], [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(0, 5, ir.sourceRef("recursive-entry.rey", 1, 2)), ir.call(1, ir.irI64(), 31, [0], ir.sourceRef("recursive-entry.rey", 3, 8))], ir.returnValue(1, ir.sourceRef("recursive-entry.rey", 9, 12)))]);
+    return ir.irProgram(32, [recursive, entry]);
+}
+
+func voidProgram(): IRProgram {
+    var entry = function(0, "void-entry", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(ir.sourceRef("void.rey", 1, 5)))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func tooManyArgumentsProgram(): IRProgram {
+    var types: Vec<IRType> = Vec.new();
+    var parameters: Vec<IRValue> = Vec.new();
+    var arguments: Vec<int> = Vec.new();
+    var instructions: Vec<Instruction> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= 9 { break; }
+        types.push(ir.irI64());
+        parameters.push(ir.irValue(i + 100, ir.irI64()));
+        arguments.push(i);
+        instructions.push(ir.constI64(i, i, ir.sourceRef("arity.rey", i, i + 1)));
+        i = i + 1;
+    }
+    var helper = function(1, "nine", parameters, types, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(108, ir.sourceRef("arity.rey", 20, 21)))]);
+    instructions.push(ir.call(9, ir.irI64(), 1, arguments, ir.sourceRef("arity.rey", 22, 28)));
+    var main = function(0, "entry", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(9, ir.sourceRef("arity.rey", 29, 30)))]);
+    return ir.irProgram(0, [main, helper]);
+}
+
+func largeFrameProgram(): IRProgram {
+    var instructions: Vec<Instruction> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= 511 { break; }
+        instructions.push(ir.constI64(i, i, ir.sourceRef("frame.rey", i, i + 1)));
+        i = i + 1;
+    }
+    var entry = function(0, "large-frame", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(510, ir.sourceRef("frame.rey", 512, 513)))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func main(): void {
+    var literal = code(constProgram(42, 1000000000), "linux");
+    var literalFunction = offsetFor(literal, 700);
+    require(literal.entryOffset == 0 && literalFunction == 20, "entry and sparse function IDs use byte offsets");
+    require(wordAt(literal.bytes, 0) == 2483027968 + (literalFunction / 4), "entry stub BL is fixed to the entry function");
+    require(branchTarget(literal.bytes, 4, 26) == 12, "entry stub skips the overflow exit block");
+    require(wordAt(literal.bytes, literalFunction + 12) == 3531605321, "literal uses MOVZ for a small positive value");
+    require(wordAt(literal.bytes, literalFunction + 32) == 4181722080, "scalar return loads x0 from its compact stack slot");
+    require(hasWord(literal.bytes, 3531606952) && hasWord(literal.bytes, 3556769793), "Linux exit syscall sequence is emitted directly");
+
+    var darwin = code(constProgram(42, 1000000000), "darwin");
+    require(hasWord(darwin.bytes, 3531604016) && hasWord(darwin.bytes, 3556773889), "Darwin exit syscall sequence is emitted directly");
+
+    var extrema = code(constProgram(-9223372036854775807 - 1, 77), "linux");
+    var extremaFunction = offsetFor(extrema, 700);
+    require(wordAt(extrema.bytes, extremaFunction + 12) == 3531603977, "INT64_MIN low halfword does not negate the value");
+    require(wordAt(extrema.bytes, extremaFunction + 24) == 4075814921, "INT64_MIN high halfword is encoded as two's complement");
+    var negativeOne = code(constProgram(-1, 5), "linux");
+    var negativeFunction = offsetFor(negativeOne, 700);
+    require(wordAt(negativeOne.bytes, negativeFunction + 12) == 3533701097 && wordAt(negativeOne.bytes, negativeFunction + 24) == 4076863465, "negative literals preserve all four immediate halfwords");
+
+    var calls = code(callProgram(), "linux");
+    var mainOffset = offsetFor(calls, 7);
+    var helperOffset = offsetFor(calls, 41);
+    require(mainOffset >= 0 && helperOffset > mainOffset, "function table preserves sparse function IDs");
+    var callInstruction = mainOffset + 36;
+    require(wordAt(calls.bytes, callInstruction) / 67108864 == 37 && branchTarget(calls.bytes, callInstruction, 26) == helperOffset, "internal BL call fixup reaches the helper");
+    require(wordAt(calls.bytes, 0) / 67108864 == 37 && branchTarget(calls.bytes, 0, 26) == mainOffset, "entry BL fixup reaches the selected entry ID");
+
+    var comparisons = code(compareProgram(), "linux");
+    require(hasWord(comparisons.bytes, 2594117611), "eq uses CSET with inverted condition");
+    require(hasWord(comparisons.bytes, 2594113515), "ne uses CSET with inverted condition");
+    require(hasWord(comparisons.bytes, 2594154475), "signed less-than uses CSET");
+    require(hasWord(comparisons.bytes, 2594162667), "signed less-or-equal uses CSET");
+    require(hasWord(comparisons.bytes, 2594166763), "signed greater-than uses CSET");
+    require(hasWord(comparisons.bytes, 2594158571), "signed greater-or-equal uses CSET");
+
+    var edges = code(edgeProgram(), "linux");
+    var edgeOffset = offsetFor(edges, 17);
+    require(hasWord(edges.bytes, 4177537001) && hasWord(edges.bytes, 4177538025) && hasWord(edges.bytes, 4177539049), "branch arguments are captured in the dedicated edge scratch area");
+    var scratch0 = findWord(edges.bytes, 4177537001);
+    var scratch1 = findWord(edges.bytes, 4177538025);
+    var scratch2 = findWord(edges.bytes, 4177539049);
+    var firstParamWrite = findWord(edges.bytes, 4177530857);
+    require(scratch0 < scratch1 && scratch1 < scratch2 && scratch2 < firstParamWrite, "all edge values are captured before block parameters are overwritten");
+    require(wordAt(edges.bytes, edgeOffset + 28) / 67108864 == 45, "conditional edge dispatch uses a patched CBZ instruction");
+    require(branchTarget(edges.bytes, edgeOffset + 28, 19) > edgeOffset + 28, "CBZ fixup targets the false-edge transfer");
+
+    var overflow = code(overflowProgram(), "linux");
+    var overflowOffset = offsetFor(overflow, 0);
+    var branchOffset = overflowOffset + 64;
+    require(branchTarget(overflow.bytes, branchOffset, 19) == 8, "checked addition branches to the status-1 overflow path");
+    require(wordAt(overflow.bytes, 8) == 3531604000, "overflow exits with the SPEC runtime-error status 1");
+
+    var recursive = code(recursiveProgram(), "linux");
+    var recursiveOffset = offsetFor(recursive, 31);
+    var recursiveEntryOffset = offsetFor(recursive, 32);
+    var foundRecursiveCall = false;
+    var scanOffset = recursiveOffset;
+    loop {
+        if scanOffset >= recursiveEntryOffset { break; }
+        if wordAt(recursive.bytes, scanOffset) / 67108864 == 37 && branchTarget(recursive.bytes, scanOffset, 26) == recursiveOffset { foundRecursiveCall = true; }
+        scanOffset = scanOffset + 4;
+    }
+    require(foundRecursiveCall, "recursive BL fixup targets the current function");
+
+    var voidEntry = code(voidProgram(), "linux");
+    require(wordAt(voidEntry.bytes, 4) == 3531603968, "void entry sets the process exit status to zero");
+
+    var badOS: Result<Arm64Code, string> = emitArm64(constProgram(0, 0), "freebsd");
+    require(badOS.isErr() && badOS.unwrapErr().contains("target OS"), "unsupported target OS is rejected");
+    var invalid: Result<Arm64Code, string> = emitArm64(ir.irProgram(99, []), "linux");
+    require(invalid.isErr() && invalid.unwrapErr().contains("invalid IR"), "invalid IR is rejected before emission");
+    var arity: Result<Arm64Code, string> = emitArm64(tooManyArgumentsProgram(), "linux");
+    require(arity.isErr() && arity.unwrapErr().contains("more than eight"), "more than eight scalar arguments are rejected");
+    var frame: Result<Arm64Code, string> = emitArm64(largeFrameProgram(), "linux");
+    require(frame.isErr() && frame.unwrapErr().contains("4080-byte"), "unrepresentable frame sizes are rejected");
+    println("arm64 emitter fixtures passed");
+}

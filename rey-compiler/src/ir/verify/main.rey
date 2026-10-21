@@ -1,0 +1,558 @@
+import ir::{IRProgram, IRType, IRTypeKind, IRFunction, BasicBlock, Instruction, InstructionKind, Terminator, TerminatorKind, IRValue, SourceRef, CompareI64Predicate, irVoid, functionKeyName};
+
+struct ValueDef {
+    pub id: int,
+    pub ty: IRType,
+    pub blockIndex: int,
+    pub instructionIndex: int,
+}
+
+pub struct VerifyResult {
+    pub ok: bool,
+    pub errors: Vec<string>,
+}
+
+func sameType(left: IRType, right: IRType): bool {
+    return left.kind == right.kind;
+}
+
+func validSource(source: SourceRef): bool {
+    return source.unitId != "" && source.start >= 0 && source.end >= source.start;
+}
+
+func findFunctionIndex(program: IRProgram, functionId: int): int {
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        if program.functions[i].id == functionId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findBlockIndex(function: IRFunction, blockId: int): int {
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].id == blockId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findDefinition(definitions: Vec<ValueDef>, valueId: int): ValueDef {
+    var i = 0;
+    loop {
+        if i >= definitions.len() { break; }
+        if definitions[i].id == valueId { return definitions[i]; }
+        i = i + 1;
+    }
+    return ValueDef { id: -1, ty: irVoid(), blockIndex: -1, instructionIndex: -1 };
+}
+
+func checkSource(errors: Vec<string>, source: SourceRef, context: string): void {
+    if !validSource(source) {
+        errors.push(context + ": invalid source span");
+    }
+}
+
+func checkUse(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, useBlockIndex: int, useInstructionIndex: int, dominators: Vec<int>, blockCount: int, context: string): void {
+    if valueId < 0 {
+        errors.push(context + ": invalid negative SSA operand");
+        return;
+    }
+    var definition = findDefinition(definitions, valueId);
+    if definition.id < 0 {
+        errors.push(context + ": undefined SSA value %v" + valueId.toString());
+        return;
+    }
+    if definition.ty.kind == IRTypeKind::Void {
+        errors.push(context + ": void cannot be used as an SSA operand");
+    }
+    if definition.blockIndex < 0 { return; }
+    if definition.blockIndex == useBlockIndex {
+        if definition.instructionIndex >= 0 && definition.instructionIndex >= useInstructionIndex {
+            errors.push(context + ": SSA value %v" + valueId.toString() + " is used before its definition");
+        }
+        return;
+    }
+    var matrixIndex = useBlockIndex * blockCount + definition.blockIndex;
+    if matrixIndex < 0 || matrixIndex >= dominators.len() || dominators[matrixIndex] == 0 {
+        errors.push(context + ": definition of %v" + valueId.toString() + " does not dominate this use");
+    }
+}
+
+func checkI64Operand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
+    var definition = findDefinition(definitions, valueId);
+    if definition.id >= 0 && definition.ty.kind != IRTypeKind::I64 {
+        errors.push(context + ": operand must have type i64");
+    }
+}
+
+func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
+    var errors: Vec<string> = [];
+    var functionLabel = "function %f" + function.id.toString() + " (" + functionKeyName(function.key) + ")";
+
+    if function.id < 0 { errors.push(functionLabel + ": function ID must be nonnegative"); }
+    if function.key.module == "" || function.key.name == "" { errors.push(functionLabel + ": stable key requires a module and name"); }
+    if function.blocks.len() == 0 { errors.push(functionLabel + ": function must contain an entry block"); }
+    if function.parameters.len() != function.signature.parameterTypes.len() {
+        errors.push(functionLabel + ": formal parameter count does not match signature");
+    }
+    if function.effects.argumentEscapes.len() != function.signature.parameterTypes.len() {
+        errors.push(functionLabel + ": effect argument vector does not match signature arity");
+    }
+
+    var paramIndex = 0;
+    loop {
+        if paramIndex >= function.signature.parameterTypes.len() { break; }
+        if function.signature.parameterTypes[paramIndex].kind == IRTypeKind::Void {
+            errors.push(functionLabel + ": signature parameter " + paramIndex.toString() + " cannot be void");
+        }
+        paramIndex = paramIndex + 1;
+    }
+
+    var definitions: Vec<ValueDef> = [];
+    paramIndex = 0;
+    loop {
+        if paramIndex >= function.parameters.len() { break; }
+        var parameter = function.parameters[paramIndex];
+        if parameter.id < 0 { errors.push(functionLabel + ": formal parameter ID must be nonnegative"); }
+        if parameter.ty.kind == IRTypeKind::Void { errors.push(functionLabel + ": formal parameter cannot be void"); }
+        if paramIndex < function.signature.parameterTypes.len() {
+            if !sameType(parameter.ty, function.signature.parameterTypes[paramIndex]) {
+                errors.push(functionLabel + ": formal parameter type does not match signature");
+            }
+        }
+        if parameter.id >= 0 {
+            if findDefinition(definitions, parameter.id).id >= 0 {
+                errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
+            }
+            definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: -1, instructionIndex: -1 });
+        }
+        paramIndex = paramIndex + 1;
+    }
+
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        if block.id < 0 { errors.push(functionLabel + ": block ID must be nonnegative"); }
+        var earlierBlock = 0;
+        loop {
+            if earlierBlock >= blockIndex { break; }
+            if function.blocks[earlierBlock].id == block.id {
+                errors.push(functionLabel + ": duplicate block ID bb" + block.id.toString());
+                break;
+            }
+            earlierBlock = earlierBlock + 1;
+        }
+        if blockIndex == 0 && block.params.len() != 0 {
+            errors.push(functionLabel + ": entry block cannot have parameters");
+        }
+        var parameterIndex = 0;
+        loop {
+            if parameterIndex >= block.params.len() { break; }
+            var parameter = block.params[parameterIndex];
+            if parameter.id < 0 { errors.push(functionLabel + ": block parameter ID must be nonnegative"); }
+            if parameter.ty.kind == IRTypeKind::Void { errors.push(functionLabel + ": block parameter cannot be void"); }
+            if parameter.id >= 0 {
+                if findDefinition(definitions, parameter.id).id >= 0 {
+                    errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
+                }
+                definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: blockIndex, instructionIndex: -1 });
+            }
+            parameterIndex = parameterIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            if instruction.resultId < -1 { errors.push(functionLabel + ": result ID must be nonnegative or the void sentinel -1"); }
+            if instruction.resultId >= 0 {
+                if findDefinition(definitions, instruction.resultId).id >= 0 {
+                    errors.push(functionLabel + ": duplicate SSA value ID %v" + instruction.resultId.toString());
+                }
+                definitions.push(ValueDef { id: instruction.resultId, ty: instruction.ty, blockIndex: blockIndex, instructionIndex: instructionIndex });
+            }
+            checkSource(errors, instruction.source, functionLabel + " block bb" + block.id.toString() + " instruction " + instructionIndex.toString());
+            instructionIndex = instructionIndex + 1;
+        }
+        checkSource(errors, block.terminator.source, functionLabel + " block bb" + block.id.toString() + " terminator");
+        blockIndex = blockIndex + 1;
+    }
+
+    var blockCount = function.blocks.len();
+    var edges: Vec<int> = [];
+    var edgeCell = 0;
+    loop {
+        if edgeCell >= blockCount * blockCount { break; }
+        edges.push(0);
+        edgeCell = edgeCell + 1;
+    }
+
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        var block = function.blocks[blockIndex];
+        var terminator = block.terminator;
+        var context = functionLabel + " block bb" + block.id.toString() + " terminator";
+        if terminator.kind == TerminatorKind::Invalid {
+            errors.push(context + ": invalid terminator");
+        } else if terminator.kind == TerminatorKind::Jump {
+            if terminator.conditionValueId != -1 || terminator.trueTargetBlockId != -1 || terminator.falseTargetBlockId != -1 || terminator.trueArgs.len() != 0 || terminator.falseArgs.len() != 0 || terminator.valueId != -1 {
+                errors.push(context + ": jump contains fields belonging to another terminator kind");
+            }
+            var targetIndex = findBlockIndex(function, terminator.targetBlockId);
+            if targetIndex < 0 {
+                errors.push(context + ": jump target bb" + terminator.targetBlockId.toString() + " does not exist");
+            } else {
+                edges.set(blockIndex * blockCount + targetIndex, 1);
+                var target = function.blocks[targetIndex];
+                if terminator.targetArgs.len() != target.params.len() {
+                    errors.push(context + ": jump argument count does not match target parameters");
+                }
+                var argumentIndex = 0;
+                loop {
+                    if argumentIndex >= terminator.targetArgs.len() || argumentIndex >= target.params.len() { break; }
+                    var argument = findDefinition(definitions, terminator.targetArgs[argumentIndex]);
+                    if argument.id >= 0 && !sameType(argument.ty, target.params[argumentIndex].ty) {
+                        errors.push(context + ": jump argument type does not match target parameter");
+                    }
+                    argumentIndex = argumentIndex + 1;
+                }
+            }
+        } else if terminator.kind == TerminatorKind::Branch {
+            if terminator.targetBlockId != -1 || terminator.targetArgs.len() != 0 || terminator.valueId != -1 {
+                errors.push(context + ": branch contains fields belonging to another terminator kind");
+            }
+            var condition = findDefinition(definitions, terminator.conditionValueId);
+            if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(context + ": branch condition must have type bool"); }
+            var trueIndex = findBlockIndex(function, terminator.trueTargetBlockId);
+            if trueIndex < 0 {
+                errors.push(context + ": true branch target bb" + terminator.trueTargetBlockId.toString() + " does not exist");
+            } else {
+                edges.set(blockIndex * blockCount + trueIndex, 1);
+                var trueBlock = function.blocks[trueIndex];
+                if terminator.trueArgs.len() != trueBlock.params.len() { errors.push(context + ": true branch argument count does not match target parameters"); }
+                var trueArgIndex = 0;
+                loop {
+                    if trueArgIndex >= terminator.trueArgs.len() || trueArgIndex >= trueBlock.params.len() { break; }
+                    var trueArg = findDefinition(definitions, terminator.trueArgs[trueArgIndex]);
+                    if trueArg.id >= 0 && !sameType(trueArg.ty, trueBlock.params[trueArgIndex].ty) { errors.push(context + ": true branch argument type does not match target parameter"); }
+                    trueArgIndex = trueArgIndex + 1;
+                }
+            }
+            var falseIndex = findBlockIndex(function, terminator.falseTargetBlockId);
+            if falseIndex < 0 {
+                errors.push(context + ": false branch target bb" + terminator.falseTargetBlockId.toString() + " does not exist");
+            } else {
+                edges.set(blockIndex * blockCount + falseIndex, 1);
+                var falseBlock = function.blocks[falseIndex];
+                if terminator.falseArgs.len() != falseBlock.params.len() { errors.push(context + ": false branch argument count does not match target parameters"); }
+                var falseArgIndex = 0;
+                loop {
+                    if falseArgIndex >= terminator.falseArgs.len() || falseArgIndex >= falseBlock.params.len() { break; }
+                    var falseArg = findDefinition(definitions, terminator.falseArgs[falseArgIndex]);
+                    if falseArg.id >= 0 && !sameType(falseArg.ty, falseBlock.params[falseArgIndex].ty) { errors.push(context + ": false branch argument type does not match target parameter"); }
+                    falseArgIndex = falseArgIndex + 1;
+                }
+            }
+        } else if terminator.kind == TerminatorKind::Return {
+            if terminator.targetBlockId != -1 || terminator.targetArgs.len() != 0 || terminator.conditionValueId != -1 || terminator.trueTargetBlockId != -1 || terminator.trueArgs.len() != 0 || terminator.falseTargetBlockId != -1 || terminator.falseArgs.len() != 0 {
+                errors.push(context + ": return contains fields belonging to another terminator kind");
+            }
+            if function.signature.returnType.kind == IRTypeKind::Void {
+                if terminator.valueId != -1 { errors.push(context + ": void function must return void"); }
+            } else if terminator.valueId < 0 {
+                errors.push(context + ": non-void function must return an SSA value");
+            } else {
+                var returned = findDefinition(definitions, terminator.valueId);
+                if returned.id >= 0 && !sameType(returned.ty, function.signature.returnType) { errors.push(context + ": return value type does not match function result"); }
+            }
+        }
+        blockIndex = blockIndex + 1;
+    }
+
+    if blockCount > 0 {
+        var incomingEntry = 0;
+        loop {
+            if incomingEntry >= blockCount { break; }
+            if edges.get(incomingEntry * blockCount) != 0 {
+                errors.push(functionLabel + ": entry block bb" + function.blocks[0].id.toString() + " cannot have incoming edges");
+                break;
+            }
+            incomingEntry = incomingEntry + 1;
+        }
+    }
+
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        var block = function.blocks[blockIndex];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            var context = functionLabel + " block bb" + block.id.toString() + " instruction " + instructionIndex.toString();
+            var operandCount = instruction.operands.len();
+            if instruction.kind == InstructionKind::ConstI64 {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": const.i64 requires an i64 result"); }
+                if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.i64 has invalid unused fields"); }
+            } else if instruction.kind == InstructionKind::ConstBool {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": const.bool requires a bool result"); }
+                if instruction.immediate != 0 && instruction.immediate != 1 { errors.push(context + ": bool immediate must be 0 or 1"); }
+                if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.bool has invalid unused fields"); }
+            } else if instruction.kind == InstructionKind::AddCheckedI64 {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": add.checked.i64 requires an i64 result"); }
+                if operandCount != 2 { errors.push(context + ": add.checked.i64 requires exactly two operands"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": add.checked.i64 has invalid unused fields"); }
+                var addIndex = 0;
+                loop {
+                    if addIndex >= operandCount { break; }
+                    checkI64Operand(errors, definitions, instruction.operands[addIndex], context);
+                    addIndex = addIndex + 1;
+                }
+            } else if instruction.kind == InstructionKind::CompareI64 {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": compare.i64 requires a bool result"); }
+                if operandCount != 2 { errors.push(context + ": compare.i64 requires exactly two operands"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 { errors.push(context + ": compare.i64 has invalid unused fields"); }
+                var compareIndex = 0;
+                loop {
+                    if compareIndex >= operandCount { break; }
+                    checkI64Operand(errors, definitions, instruction.operands[compareIndex], context);
+                    compareIndex = compareIndex + 1;
+                }
+            } else if instruction.kind == InstructionKind::Call {
+                if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": call has invalid unused fields"); }
+                var calleeIndex = findFunctionIndex(program, instruction.functionId);
+                if calleeIndex < 0 {
+                    errors.push(context + ": call target %f" + instruction.functionId.toString() + " does not exist");
+                } else {
+                    var callee = program.functions[calleeIndex];
+                    if !sameType(instruction.ty, callee.signature.returnType) { errors.push(context + ": call result type does not match callee return type"); }
+                    if instruction.operands.len() != callee.signature.parameterTypes.len() { errors.push(context + ": call argument count does not match callee signature"); }
+                    var callArgIndex = 0;
+                    loop {
+                        if callArgIndex >= instruction.operands.len() || callArgIndex >= callee.signature.parameterTypes.len() { break; }
+                        var callArg = findDefinition(definitions, instruction.operands[callArgIndex]);
+                        if callArg.id >= 0 && !sameType(callArg.ty, callee.signature.parameterTypes[callArgIndex]) { errors.push(context + ": call argument type does not match callee signature"); }
+                        callArgIndex = callArgIndex + 1;
+                    }
+                }
+                if instruction.ty.kind == IRTypeKind::Void {
+                    if instruction.resultId != -1 { errors.push(context + ": void call result ID must be -1"); }
+                } else if instruction.resultId < 0 {
+                    errors.push(context + ": non-void call must define an SSA result");
+                }
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        var terminator = block.terminator;
+        var termContext = functionLabel + " block bb" + block.id.toString() + " terminator";
+        if terminator.kind == TerminatorKind::Branch {
+            var condition = findDefinition(definitions, terminator.conditionValueId);
+            if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(termContext + ": branch condition must have type bool"); }
+        }
+        blockIndex = blockIndex + 1;
+    }
+
+    var reachable: Vec<int> = [];
+    var reachIndex = 0;
+    loop {
+        if reachIndex >= blockCount { break; }
+        reachable.push(0);
+        reachIndex = reachIndex + 1;
+    }
+    if blockCount > 0 { reachable.set(0, 1); }
+    var reachPass = 0;
+    var reachChanged = true;
+    loop {
+        if reachPass >= blockCount || !reachChanged { break; }
+        reachChanged = false;
+        var fromIndex = 0;
+        loop {
+            if fromIndex >= blockCount { break; }
+            if reachable[fromIndex] != 0 {
+                var toIndex = 0;
+                loop {
+                    if toIndex >= blockCount { break; }
+                    if edges.get(fromIndex * blockCount + toIndex) != 0 && reachable[toIndex] == 0 {
+                        reachable.set(toIndex, 1);
+                        reachChanged = true;
+                    }
+                    toIndex = toIndex + 1;
+                }
+            }
+            fromIndex = fromIndex + 1;
+        }
+        reachPass = reachPass + 1;
+    }
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        if reachable[blockIndex] == 0 { errors.push(functionLabel + ": unreachable block bb" + function.blocks[blockIndex].id.toString()); }
+        blockIndex = blockIndex + 1;
+    }
+
+    var dominators: Vec<int> = [];
+    var domCell = 0;
+    loop {
+        if domCell >= blockCount * blockCount { break; }
+        dominators.push(0);
+        domCell = domCell + 1;
+    }
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        var candidateIndex = 0;
+        loop {
+            if candidateIndex >= blockCount { break; }
+            if blockIndex == 0 {
+                if candidateIndex == 0 { dominators.set(blockIndex * blockCount + candidateIndex, 1); }
+            } else if reachable[blockIndex] != 0 && reachable[candidateIndex] != 0 {
+                dominators.set(blockIndex * blockCount + candidateIndex, 1);
+            }
+            candidateIndex = candidateIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    var domPass = 0;
+    var domChanged = true;
+    loop {
+        if domPass >= blockCount || !domChanged { break; }
+        var nextDominators: Vec<int> = [];
+        domCell = 0;
+        loop {
+            if domCell >= blockCount * blockCount { break; }
+            nextDominators.push(0);
+            domCell = domCell + 1;
+        }
+        blockIndex = 0;
+        loop {
+            if blockIndex >= blockCount { break; }
+            if blockIndex == 0 {
+                nextDominators.set(0, 1);
+            } else if reachable[blockIndex] != 0 {
+                var candidateIndex = 0;
+                loop {
+                    if candidateIndex >= blockCount { break; }
+                    var inAllPredecessors = 1;
+                    var hasPredecessor = 0;
+                    var predecessorIndex = 0;
+                    loop {
+                        if predecessorIndex >= blockCount { break; }
+                        if edges.get(predecessorIndex * blockCount + blockIndex) != 0 && reachable[predecessorIndex] != 0 {
+                            hasPredecessor = 1;
+                            if dominators.get(predecessorIndex * blockCount + candidateIndex) == 0 { inAllPredecessors = 0; }
+                        }
+                        predecessorIndex = predecessorIndex + 1;
+                    }
+                    if hasPredecessor == 0 { inAllPredecessors = 0; }
+                    if candidateIndex == blockIndex { inAllPredecessors = 1; }
+                    nextDominators.set(blockIndex * blockCount + candidateIndex, inAllPredecessors);
+                    candidateIndex = candidateIndex + 1;
+                }
+            }
+            blockIndex = blockIndex + 1;
+        }
+        domChanged = false;
+        domCell = 0;
+        loop {
+            if domCell >= dominators.len() { break; }
+            if dominators[domCell] != nextDominators[domCell] { domChanged = true; }
+            domCell = domCell + 1;
+        }
+        dominators = nextDominators;
+        domPass = domPass + 1;
+    }
+
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        var block = function.blocks[blockIndex];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            var context = functionLabel + " block bb" + block.id.toString() + " instruction " + instructionIndex.toString();
+            var operandIndex = 0;
+            loop {
+                if operandIndex >= instruction.operands.len() { break; }
+                checkUse(errors, definitions, instruction.operands[operandIndex], blockIndex, instructionIndex, dominators, blockCount, context);
+                operandIndex = operandIndex + 1;
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        var terminator = block.terminator;
+        var termContext = functionLabel + " block bb" + block.id.toString() + " terminator";
+        var useIndex = block.instructions.len();
+        if terminator.kind == TerminatorKind::Jump {
+            var argumentIndex = 0;
+            loop {
+                if argumentIndex >= terminator.targetArgs.len() { break; }
+                checkUse(errors, definitions, terminator.targetArgs[argumentIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                argumentIndex = argumentIndex + 1;
+            }
+        } else if terminator.kind == TerminatorKind::Branch {
+            checkUse(errors, definitions, terminator.conditionValueId, blockIndex, useIndex, dominators, blockCount, termContext);
+            var trueArgIndex = 0;
+            loop {
+                if trueArgIndex >= terminator.trueArgs.len() { break; }
+                checkUse(errors, definitions, terminator.trueArgs[trueArgIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                trueArgIndex = trueArgIndex + 1;
+            }
+            var falseArgIndex = 0;
+            loop {
+                if falseArgIndex >= terminator.falseArgs.len() { break; }
+                checkUse(errors, definitions, terminator.falseArgs[falseArgIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                falseArgIndex = falseArgIndex + 1;
+            }
+        } else if terminator.kind == TerminatorKind::Return && terminator.valueId != -1 {
+            checkUse(errors, definitions, terminator.valueId, blockIndex, useIndex, dominators, blockCount, termContext);
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return errors;
+}
+
+pub func verifyProgram(program: IRProgram): VerifyResult {
+    var errors: Vec<string> = [];
+    if program.functions.len() == 0 { errors.push("program: must contain at least one function"); }
+    if program.entryFunctionId < 0 { errors.push("program: entry function ID must be nonnegative"); }
+    var entryIndex = findFunctionIndex(program, program.entryFunctionId);
+    if entryIndex < 0 {
+        errors.push("program: entry function %f" + program.entryFunctionId.toString() + " does not exist");
+    } else {
+        var entry = program.functions[entryIndex];
+        if entry.parameters.len() != 0 || entry.signature.parameterTypes.len() != 0 {
+            errors.push("program: entry function must have no arguments");
+        }
+    }
+
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var function = program.functions[functionIndex];
+        if function.id < 0 { errors.push("program: function IDs must be nonnegative"); }
+        var earlierFunction = 0;
+        loop {
+            if earlierFunction >= functionIndex { break; }
+            var prior = program.functions[earlierFunction];
+            if prior.id == function.id { errors.push("program: duplicate function ID %f" + function.id.toString()); }
+            if prior.key.module == function.key.module && prior.key.owner == function.key.owner && prior.key.name == function.key.name {
+                errors.push("program: duplicate stable function key " + functionKeyName(function.key));
+            }
+            earlierFunction = earlierFunction + 1;
+        }
+        var functionErrors = checkFunction(program, function);
+        var errorIndex = 0;
+        loop {
+            if errorIndex >= functionErrors.len() { break; }
+            errors.push(functionErrors[errorIndex]);
+            errorIndex = errorIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+    return VerifyResult { ok: errors.len() == 0, errors: errors };
+}

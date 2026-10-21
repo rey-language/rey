@@ -1,0 +1,116 @@
+import native::bytes::{appendU32Be, appendU32Le, appendU64Le, byteString, patchU32Le, sha256};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func hexDigit(value: int): string {
+    return "0123456789abcdef"[value].toString();
+}
+
+func hex(bytes: Vec<int>): string {
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= bytes.len() { break; }
+        var value = bytes[i];
+        result = result + hexDigit(value / 16) + hexDigit(value % 16);
+        i = i + 1;
+    }
+    return result;
+}
+
+func hashHex(bytes: Vec<int>): string {
+    var result: Result<Vec<int>, string> = sha256(bytes);
+    require(result.isOk(), "sha256 succeeds");
+    return hex(result.unwrap());
+}
+
+func repeatedByte(value: int, count: int): Vec<int> {
+    var result: Vec<int> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        result.push(value);
+        i = i + 1;
+    }
+    return result;
+}
+
+func main(): void {
+    var empty: Vec<int> = Vec.new();
+    require(hashHex(empty) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "FIPS empty hash");
+    var abc: Vec<int> = [97, 98, 99];
+    require(hashHex(abc) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "FIPS abc hash");
+    require(abc.len() == 3 && abc[0] == 97 && abc[1] == 98 && abc[2] == 99, "sha256 leaves input unchanged");
+
+    var multi: Vec<int> = [];
+    var multiText = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    var textIndex = 0;
+    loop {
+        if textIndex >= multiText.len() { break; }
+        multi.push(int(multiText[textIndex]));
+        textIndex = textIndex + 1;
+    }
+    require(hashHex(multi) == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", "standard multiblock hash");
+
+    require(hashHex(repeatedByte(97, 55)) == "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318", "padding length 55");
+    require(hashHex(repeatedByte(97, 56)) == "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a", "padding length 56");
+    require(hashHex(repeatedByte(97, 63)) == "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34", "padding length 63");
+    require(hashHex(repeatedByte(97, 64)) == "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb", "padding length 64");
+    require(hashHex(repeatedByte(97, 65)) == "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0", "padding length 65");
+
+    var allBytes: Vec<int> = Vec.new();
+    var byteValue = 0;
+    loop {
+        if byteValue >= 256 { break; }
+        allBytes.push(byteValue);
+        byteValue = byteValue + 1;
+    }
+    var rawResult: Result<string, string> = byteString(allBytes);
+    require(rawResult.isOk(), "byteString accepts all byte values");
+    var raw = rawResult.unwrap();
+    require(raw.len() == 256, "byteString preserves full binary length");
+    require(int(raw[0]) == 0 && int(raw[1]) == 1 && int(raw[127]) == 127 && int(raw[128]) == 128 && int(raw[255]) == 255, "byteString preserves embedded NUL and high bytes");
+    var rawBytes: Vec<int> = Vec.new();
+    var rawIndex = 0;
+    loop {
+        if rawIndex >= raw.len() { break; }
+        rawBytes.push(int(raw[rawIndex]));
+        rawIndex = rawIndex + 1;
+    }
+    require(hashHex(rawBytes) == "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880", "byteString all-byte output hash");
+    require(allBytes.len() == 256 && allBytes[0] == 0 && allBytes[255] == 255, "byteString and sha256 do not mutate input");
+
+    var encoded: Vec<int> = [17];
+    var leResult: Result<bool, string> = appendU32Le(encoded, 305419896);
+    require(leResult.isOk() && encoded.len() == 5 && encoded[1] == 120 && encoded[2] == 86 && encoded[3] == 52 && encoded[4] == 18, "append uint32 little endian");
+    var beResult: Result<bool, string> = appendU32Be(encoded, 4294967295);
+    require(beResult.isOk() && encoded.len() == 9 && encoded[5] == 255 && encoded[8] == 255, "append uint32 big endian maximum");
+    var beBytes: Vec<int> = Vec.new();
+    var asymmetricBe: Result<bool, string> = appendU32Be(beBytes, 305419896);
+    require(asymmetricBe.isOk() && beBytes.len() == 4 && beBytes[0] == 18 && beBytes[1] == 52 && beBytes[2] == 86 && beBytes[3] == 120, "append uint32 big endian ordering");
+    var u64Result: Result<bool, string> = appendU64Le(encoded, 9223372036854775807);
+    require(u64Result.isOk() && encoded.len() == 17 && encoded[9] == 255 && encoded[15] == 255 && encoded[16] == 127, "append signed maximum as uint64 little endian");
+
+    var patchBytes: Vec<int> = [9, 9, 9, 9, 9, 9];
+    var patchResult: Result<bool, string> = patchU32Le(patchBytes, 1, 2309737967);
+    require(patchResult.isOk() && patchBytes[0] == 9 && patchBytes[1] == 239 && patchBytes[2] == 205 && patchBytes[3] == 171 && patchBytes[4] == 137 && patchBytes[5] == 9, "patch uint32 little endian");
+
+    var invalidByte: Vec<int> = [7, 256, 8];
+    var beforeInvalid = invalidByte[0] * 65536 + invalidByte[1] * 256 + invalidByte[2];
+    require(byteString(invalidByte).isErr(), "byteString rejects invalid byte");
+    require(sha256(invalidByte).isErr(), "sha256 rejects invalid byte");
+    require(appendU32Le(invalidByte, 1).isErr(), "append rejects invalid existing bytes");
+    require(invalidByte.len() == 3 && invalidByte[0] * 65536 + invalidByte[1] * 256 + invalidByte[2] == beforeInvalid, "invalid byte failures do not mutate destination");
+
+    var untouched: Vec<int> = [1, 2, 3];
+    require(appendU32Le(untouched, -1).isErr() && appendU32Le(untouched, 4294967296).isErr(), "uint32 range failures");
+    require(appendU32Be(untouched, -1).isErr() && appendU32Be(untouched, 4294967296).isErr(), "big endian uint32 range failures");
+    require(appendU64Le(untouched, -1).isErr(), "uint64 rejects negative value");
+    require(patchU32Le(untouched, -1, 0).isErr() && patchU32Le(untouched, 1, 0).isErr(), "patch rejects negative and short spans");
+    require(patchU32Le(untouched, 0, 4294967296).isErr(), "patch rejects uint32 overflow");
+    require(untouched.len() == 3 && untouched[0] == 1 && untouched[1] == 2 && untouched[2] == 3, "range failures leave destination unchanged");
+
+    println("native bytes ok");
+}

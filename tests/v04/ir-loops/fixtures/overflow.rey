@@ -1,0 +1,6 @@
+func main(): void { return; }
+func overflow(): int {
+    var value: int = 9223372036854775807;
+    value += 1;
+    return value;
+}

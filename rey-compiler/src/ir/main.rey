@@ -1,0 +1,518 @@
+// Seed-compatible scalar typed IR data model. Constructors are the canonical
+// way to create nodes; consumers treat the supplied Vec values as frozen.
+
+pub enum IRTypeKind {
+    I64,
+    Bool,
+    Void,
+}
+
+pub enum InstructionKind {
+    ConstI64,
+    ConstBool,
+    AddCheckedI64,
+    CompareI64,
+    Call,
+}
+
+pub enum TerminatorKind {
+    Invalid,
+    Jump,
+    Branch,
+    Return,
+}
+
+pub enum CompareI64Predicate {
+    Eq,
+    Ne,
+    Slt,
+    Sle,
+    Sgt,
+    Sge,
+}
+
+pub enum Fact {
+    No,
+    Yes,
+    Unknown,
+}
+
+pub enum Escape {
+    NoEscape,
+    MayEscape,
+    Unknown,
+}
+
+pub struct IRType {
+    pub kind: IRTypeKind,
+}
+
+pub struct SourceRef {
+    pub unitId: string,
+    pub start: int,
+    pub end: int,
+}
+
+pub struct FunctionKey {
+    pub module: string,
+    pub owner: string,
+    pub name: string,
+}
+
+pub struct FunctionSignature {
+    pub parameterTypes: Vec<IRType>,
+    pub returnType: IRType,
+}
+
+pub struct IRValue {
+    pub id: int,
+    pub ty: IRType,
+}
+
+pub struct EffectSummary {
+    pub readsMemory: Fact,
+    pub writesMemory: Fact,
+    pub allocates: Fact,
+    pub mayBlock: Fact,
+    pub synchronizes: Fact,
+    pub unresolvedCallees: Fact,
+    pub argumentEscapes: Vec<Escape>,
+    pub resultEscape: Escape,
+}
+
+// `operands` holds binary operands for arithmetic/comparison and ordered call
+// arguments. The remaining fields are interpreted only for the matching tag.
+pub struct Instruction {
+    pub kind: InstructionKind,
+    pub resultId: int,
+    pub ty: IRType,
+    pub operands: Vec<int>,
+    pub immediate: int,
+    pub comparison: CompareI64Predicate,
+    pub functionId: int,
+    pub source: SourceRef,
+}
+
+// Jump uses targetBlockId/targetArgs. Branch uses conditionValueId and both
+// successor/argument pairs. Return uses valueId (or -1 for void).
+pub struct Terminator {
+    pub kind: TerminatorKind,
+    pub targetBlockId: int,
+    pub targetArgs: Vec<int>,
+    pub conditionValueId: int,
+    pub trueTargetBlockId: int,
+    pub trueArgs: Vec<int>,
+    pub falseTargetBlockId: int,
+    pub falseArgs: Vec<int>,
+    pub valueId: int,
+    pub source: SourceRef,
+}
+
+pub struct BasicBlock {
+    pub id: int,
+    pub params: Vec<IRValue>,
+    pub instructions: Vec<Instruction>,
+    pub terminator: Terminator,
+}
+
+pub struct IRFunction {
+    pub id: int,
+    pub key: FunctionKey,
+    pub signature: FunctionSignature,
+    pub parameters: Vec<IRValue>,
+    pub blocks: Vec<BasicBlock>,
+    pub effects: EffectSummary,
+}
+
+pub struct IRProgram {
+    pub entryFunctionId: int,
+    pub functions: Vec<IRFunction>,
+}
+
+pub func irI64(): IRType {
+    return IRType { kind: IRTypeKind::I64 };
+}
+
+pub func irBool(): IRType {
+    return IRType { kind: IRTypeKind::Bool };
+}
+
+pub func irVoid(): IRType {
+    return IRType { kind: IRTypeKind::Void };
+}
+
+pub func irTypeName(ty: IRType): string {
+    if ty.kind == IRTypeKind::I64 { return "i64"; }
+    if ty.kind == IRTypeKind::Bool { return "bool"; }
+    return "void";
+}
+
+pub func irTypeIsScalar(ty: IRType): bool {
+    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool;
+}
+
+pub func factNo(): Fact {
+    return Fact::No;
+}
+
+pub func factYes(): Fact {
+    return Fact::Yes;
+}
+
+pub func factUnknown(): Fact {
+    return Fact::Unknown;
+}
+
+pub func escapeNoEscape(): Escape {
+    return Escape::NoEscape;
+}
+
+pub func escapeMayEscape(): Escape {
+    return Escape::MayEscape;
+}
+
+pub func escapeUnknown(): Escape {
+    return Escape::Unknown;
+}
+
+pub func compareEq(): CompareI64Predicate {
+    return CompareI64Predicate::Eq;
+}
+
+pub func compareNe(): CompareI64Predicate {
+    return CompareI64Predicate::Ne;
+}
+
+pub func compareSlt(): CompareI64Predicate {
+    return CompareI64Predicate::Slt;
+}
+
+pub func compareSle(): CompareI64Predicate {
+    return CompareI64Predicate::Sle;
+}
+
+pub func compareSgt(): CompareI64Predicate {
+    return CompareI64Predicate::Sgt;
+}
+
+pub func compareSge(): CompareI64Predicate {
+    return CompareI64Predicate::Sge;
+}
+
+pub func sourceRef(unitId: string, start: int, end: int): SourceRef {
+    return SourceRef { unitId: unitId, start: start, end: end };
+}
+
+pub func functionKey(module: string, owner: string, name: string): FunctionKey {
+    return FunctionKey { module: module, owner: owner, name: name };
+}
+
+pub func functionKeyName(key: FunctionKey): string {
+    if key.owner == "" { return key.module + "::" + key.name; }
+    return key.module + "::" + key.owner + "::" + key.name;
+}
+
+pub func functionSignature(parameterTypes: Vec<IRType>, returnType: IRType): FunctionSignature {
+    return FunctionSignature { parameterTypes: parameterTypes, returnType: returnType };
+}
+
+pub func irValue(id: int, ty: IRType): IRValue {
+    return IRValue { id: id, ty: ty };
+}
+
+pub func effectSummary(readsMemory: Fact, writesMemory: Fact, allocates: Fact, mayBlock: Fact, synchronizes: Fact, unresolvedCallees: Fact, argumentEscapes: Vec<Escape>, resultEscape: Escape): EffectSummary {
+    return EffectSummary { readsMemory: readsMemory, writesMemory: writesMemory, allocates: allocates, mayBlock: mayBlock, synchronizes: synchronizes, unresolvedCallees: unresolvedCallees, argumentEscapes: argumentEscapes, resultEscape: resultEscape };
+}
+
+pub func unknownEffects(): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    return effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, escapes, Escape::Unknown);
+}
+
+pub func noEffects(): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    return effectSummary(Fact::No, Fact::No, Fact::No, Fact::No, Fact::No, Fact::No, escapes, Escape::NoEscape);
+}
+
+func emptyInstruction(kind: InstructionKind, resultId: int, ty: IRType, source: SourceRef): Instruction {
+    var operands: Vec<int> = [];
+    return Instruction { kind: kind, resultId: resultId, ty: ty, operands: operands, immediate: 0, comparison: CompareI64Predicate::Eq, functionId: -1, source: source };
+}
+
+pub func constI64(resultId: int, value: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::ConstI64, resultId, irI64(), source);
+    instruction.immediate = value;
+    return instruction;
+}
+
+pub func constBool(resultId: int, value: bool, source: SourceRef): Instruction {
+    var encoded = 0;
+    if value { encoded = 1; }
+    var instruction = emptyInstruction(InstructionKind::ConstBool, resultId, irBool(), source);
+    instruction.immediate = encoded;
+    return instruction;
+}
+
+pub func addCheckedI64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::AddCheckedI64, resultId, irI64(), source);
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func comparePredicateName(comparison: CompareI64Predicate): string {
+    if comparison == CompareI64Predicate::Eq { return "eq"; }
+    if comparison == CompareI64Predicate::Ne { return "ne"; }
+    if comparison == CompareI64Predicate::Slt { return "slt"; }
+    if comparison == CompareI64Predicate::Sle { return "sle"; }
+    if comparison == CompareI64Predicate::Sgt { return "sgt"; }
+    return "sge";
+}
+
+pub func compareI64(resultId: int, comparison: CompareI64Predicate, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::CompareI64, resultId, irBool(), source);
+    instruction.comparison = comparison;
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func call(resultId: int, returnType: IRType, targetFunctionId: int, arguments: Vec<int>, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::Call, resultId, returnType, source);
+    instruction.operands = arguments;
+    instruction.functionId = targetFunctionId;
+    return instruction;
+}
+
+pub func jump(targetBlockId: int, targetArgs: Vec<int>, source: SourceRef): Terminator {
+    return Terminator { kind: TerminatorKind::Jump, targetBlockId: targetBlockId, targetArgs: targetArgs, conditionValueId: -1, trueTargetBlockId: -1, trueArgs: [], falseTargetBlockId: -1, falseArgs: [], valueId: -1, source: source };
+}
+
+pub func branch(conditionValueId: int, trueTargetBlockId: int, trueArgs: Vec<int>, falseTargetBlockId: int, falseArgs: Vec<int>, source: SourceRef): Terminator {
+    return Terminator { kind: TerminatorKind::Branch, targetBlockId: -1, targetArgs: [], conditionValueId: conditionValueId, trueTargetBlockId: trueTargetBlockId, trueArgs: trueArgs, falseTargetBlockId: falseTargetBlockId, falseArgs: falseArgs, valueId: -1, source: source };
+}
+
+pub func returnValue(valueId: int, source: SourceRef): Terminator {
+    return Terminator { kind: TerminatorKind::Return, targetBlockId: -1, targetArgs: [], conditionValueId: -1, trueTargetBlockId: -1, trueArgs: [], falseTargetBlockId: -1, falseArgs: [], valueId: valueId, source: source };
+}
+
+pub func returnVoid(source: SourceRef): Terminator {
+    return returnValue(-1, source);
+}
+
+pub func basicBlock(id: int, params: Vec<IRValue>, instructions: Vec<Instruction>, terminator: Terminator): BasicBlock {
+    return BasicBlock { id: id, params: params, instructions: instructions, terminator: terminator };
+}
+
+pub func irFunction(id: int, key: FunctionKey, signature: FunctionSignature, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>, effects: EffectSummary): IRFunction {
+    return IRFunction { id: id, key: key, signature: signature, parameters: parameters, blocks: blocks, effects: effects };
+}
+
+pub func irProgram(entryFunctionId: int, functions: Vec<IRFunction>): IRProgram {
+    return IRProgram { entryFunctionId: entryFunctionId, functions: functions };
+}
+
+pub func withInstruction(block: BasicBlock, instruction: Instruction): BasicBlock {
+    var instructions: Vec<Instruction> = [];
+    var i = 0;
+    loop {
+        if i >= block.instructions.len() { break; }
+        instructions.push(block.instructions[i]);
+        i = i + 1;
+    }
+    instructions.push(instruction);
+    return basicBlock(block.id, block.params, instructions, block.terminator);
+}
+
+pub func withBlock(function: IRFunction, block: BasicBlock): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        blocks.push(function.blocks[i]);
+        i = i + 1;
+    }
+    blocks.push(block);
+    return irFunction(function.id, function.key, function.signature, function.parameters, blocks, function.effects);
+}
+
+pub func withFunction(program: IRProgram, function: IRFunction): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        functions.push(program.functions[i]);
+        i = i + 1;
+    }
+    functions.push(function);
+    return irProgram(program.entryFunctionId, functions);
+}
+
+pub func nextFunctionId(program: IRProgram): int {
+    var next = 0;
+    var i = 0;
+    while i < program.functions.len() {
+        var id = program.functions[i].id;
+        if id >= next {
+            if id == 9223372036854775807 { return -1; }
+            next = id + 1;
+        }
+        i = i + 1;
+    }
+    return next;
+}
+
+pub func nextBlockId(function: IRFunction): int {
+    var next = 0;
+    var i = 0;
+    while i < function.blocks.len() {
+        var id = function.blocks[i].id;
+        if id >= next {
+            if id == 9223372036854775807 { return -1; }
+            next = id + 1;
+        }
+        i = i + 1;
+    }
+    return next;
+}
+
+func factName(fact: Fact): string {
+    if fact == Fact::No { return "no"; }
+    if fact == Fact::Yes { return "yes"; }
+    return "unknown";
+}
+
+func escapeName(escape: Escape): string {
+    if escape == Escape::NoEscape { return "noescape"; }
+    if escape == Escape::MayEscape { return "mayescape"; }
+    return "unknown";
+}
+
+func sourceText(source: SourceRef): string {
+    return "@" + source.unitId + ":" + source.start.toString() + ".." + source.end.toString();
+}
+
+func valueText(valueId: int): string {
+    if valueId < 0 { return "void"; }
+    return "%v" + valueId.toString();
+}
+
+func blockArgsText(blockId: int, args: Vec<int>): string {
+    var result = "bb" + blockId.toString() + "(";
+    var i = 0;
+    loop {
+        if i >= args.len() { break; }
+        if i > 0 { result = result + ", "; }
+        result = result + valueText(args[i]);
+        i = i + 1;
+    }
+    return result + ")";
+}
+
+func instructionText(instruction: Instruction): string {
+    var prefix = "";
+    if instruction.resultId >= 0 {
+        prefix = "%v" + instruction.resultId.toString() + ":" + irTypeName(instruction.ty) + " = ";
+    }
+    if instruction.kind == InstructionKind::ConstI64 {
+        return prefix + "const.i64 " + instruction.immediate.toString() + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::ConstBool {
+        var value = "false";
+        if instruction.immediate != 0 { value = "true"; }
+        return prefix + "const.bool " + value + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::AddCheckedI64 {
+        return prefix + "add.checked.i64 " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::CompareI64 {
+        return prefix + "compare.i64 " + comparePredicateName(instruction.comparison) + " " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
+    }
+    var args = "";
+    var i = 0;
+    loop {
+        if i >= instruction.operands.len() { break; }
+        if i > 0 { args = args + ", "; }
+        args = args + valueText(instruction.operands[i]);
+        i = i + 1;
+    }
+    return prefix + "call %f" + instruction.functionId.toString() + "(" + args + ") " + sourceText(instruction.source);
+}
+
+func terminatorText(terminator: Terminator): string {
+    if terminator.kind == TerminatorKind::Jump {
+        return "jump " + blockArgsText(terminator.targetBlockId, terminator.targetArgs) + " " + sourceText(terminator.source);
+    }
+    if terminator.kind == TerminatorKind::Branch {
+        return "branch " + valueText(terminator.conditionValueId) + ", " + blockArgsText(terminator.trueTargetBlockId, terminator.trueArgs) + ", " + blockArgsText(terminator.falseTargetBlockId, terminator.falseArgs) + " " + sourceText(terminator.source);
+    }
+    if terminator.kind == TerminatorKind::Return {
+        if terminator.valueId < 0 { return "return void " + sourceText(terminator.source); }
+        return "return " + valueText(terminator.valueId) + " " + sourceText(terminator.source);
+    }
+    return "invalid-terminator " + sourceText(terminator.source);
+}
+
+func functionParametersText(parameters: Vec<IRValue>): string {
+    var result = "(";
+    var i = 0;
+    loop {
+        if i >= parameters.len() { break; }
+        if i > 0 { result = result + ", "; }
+        result = result + "%v" + parameters[i].id.toString() + ":" + irTypeName(parameters[i].ty);
+        i = i + 1;
+    }
+    return result + ")";
+}
+
+func effectText(effects: EffectSummary): string {
+    var escapes = "[";
+    var i = 0;
+    loop {
+        if i >= effects.argumentEscapes.len() { break; }
+        if i > 0 { escapes = escapes + ", "; }
+        escapes = escapes + escapeName(effects.argumentEscapes[i]);
+        i = i + 1;
+    }
+    escapes = escapes + "]";
+    return "effects(read=" + factName(effects.readsMemory) + ", write=" + factName(effects.writesMemory) + ", alloc=" + factName(effects.allocates) + ", block=" + factName(effects.mayBlock) + ", sync=" + factName(effects.synchronizes) + ", unresolved=" + factName(effects.unresolvedCallees) + ", args=" + escapes + ", result=" + escapeName(effects.resultEscape) + ")";
+}
+
+func blockParamsText(params: Vec<IRValue>): string {
+    var result = "(";
+    var i = 0;
+    loop {
+        if i >= params.len() { break; }
+        if i > 0 { result = result + ", "; }
+        result = result + "%v" + params[i].id.toString() + ":" + irTypeName(params[i].ty);
+        i = i + 1;
+    }
+    return result + ")";
+}
+
+pub func printIR(program: IRProgram): string {
+    var lines: Vec<string> = [];
+    lines.push("program entry=%f" + program.entryFunctionId.toString() + "\n");
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var function = program.functions[functionIndex];
+        lines.push("func %f" + function.id.toString() + " " + functionKeyName(function.key) + " " + functionParametersText(function.parameters) + " -> " + irTypeName(function.signature.returnType) + " " + effectText(function.effects) + "\n");
+        var blockIndex = 0;
+        loop {
+            if blockIndex >= function.blocks.len() { break; }
+            var block = function.blocks[blockIndex];
+            lines.push("  bb" + block.id.toString() + blockParamsText(block.params) + ":\n");
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= block.instructions.len() { break; }
+                lines.push("    " + instructionText(block.instructions[instructionIndex]) + "\n");
+                instructionIndex = instructionIndex + 1;
+            }
+            lines.push("    " + terminatorText(block.terminator) + "\n");
+            blockIndex = blockIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+    return lines.join("");
+}

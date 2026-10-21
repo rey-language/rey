@@ -1,0 +1,283 @@
+// Validated byte construction and pure Rey SHA-256.
+
+func byteError(): string { return "byte values must be in 0..255"; }
+
+func validateBytes(bytes: Vec<int>): bool {
+    var i = 0;
+    loop {
+        if i >= bytes.len() { break; }
+        var value = bytes[i];
+        if value < 0 || value > 255 { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+pub func byteString(bytes: Vec<int>): Result<string, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    var pieces: Vec<string> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= bytes.len() { break; }
+        pieces.push(char(bytes[i]).toString());
+        i = i + 1;
+    }
+    return Result.Ok(pieces.join(""));
+}
+
+pub func appendU32Le(bytes: Vec<int>, value: int): Result<bool, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if value < 0 || value > 4294967295 { return Result.Err("value must fit uint32"); }
+    bytes.push(value % 256);
+    bytes.push((value / 256) % 256);
+    bytes.push((value / 65536) % 256);
+    bytes.push((value / 16777216) % 256);
+    return Result.Ok(true);
+}
+
+pub func appendU32Be(bytes: Vec<int>, value: int): Result<bool, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if value < 0 || value > 4294967295 { return Result.Err("value must fit uint32"); }
+    bytes.push((value / 16777216) % 256);
+    bytes.push((value / 65536) % 256);
+    bytes.push((value / 256) % 256);
+    bytes.push(value % 256);
+    return Result.Ok(true);
+}
+
+pub func appendU64Le(bytes: Vec<int>, value: int): Result<bool, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if value < 0 { return Result.Err("value must be a nonnegative signed 64-bit integer"); }
+    var remaining = value;
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        bytes.push(remaining % 256);
+        remaining = remaining / 256;
+        i = i + 1;
+    }
+    return Result.Ok(true);
+}
+
+pub func patchU32Le(bytes: Vec<int>, offset: int, value: int): Result<bool, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if value < 0 || value > 4294967295 { return Result.Err("value must fit uint32"); }
+    if offset < 0 { return Result.Err("patch range must contain four bytes"); }
+    if offset > bytes.len() { return Result.Err("patch range must contain four bytes"); }
+    if bytes.len() - offset < 4 { return Result.Err("patch range must contain four bytes"); }
+    bytes.set(offset, value % 256);
+    bytes.set(offset + 1, (value / 256) % 256);
+    bytes.set(offset + 2, (value / 65536) % 256);
+    bytes.set(offset + 3, (value / 16777216) % 256);
+    return Result.Ok(true);
+}
+
+func xor32(left: int, right: int): int {
+    var a = left;
+    var b = right;
+    var weight = 1;
+    var result = 0;
+    var i = 0;
+    loop {
+        if i >= 32 { break; }
+        var abit = a % 2;
+        var bbit = b % 2;
+        if abit != bbit { result = result + weight; }
+        a = a / 2;
+        b = b / 2;
+        weight = weight * 2;
+        i = i + 1;
+    }
+    return result;
+}
+
+func and32(left: int, right: int): int {
+    var a = left;
+    var b = right;
+    var weight = 1;
+    var result = 0;
+    var i = 0;
+    loop {
+        if i >= 32 { break; }
+        if a % 2 == 1 && b % 2 == 1 { result = result + weight; }
+        a = a / 2;
+        b = b / 2;
+        weight = weight * 2;
+        i = i + 1;
+    }
+    return result;
+}
+
+func rotr32(value: int, count: int): int {
+    var divisor = 1;
+    var factor = 1;
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        divisor = divisor * 2;
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= 32 - count { break; }
+        factor = factor * 2;
+        i = i + 1;
+    }
+    return value / divisor + (value % divisor) * factor;
+}
+
+func smallSigma0(value: int): int {
+    return xor32(xor32(rotr32(value, 7), rotr32(value, 18)), value / 8);
+}
+
+func smallSigma1(value: int): int {
+    return xor32(xor32(rotr32(value, 17), rotr32(value, 19)), value / 1024);
+}
+
+func bigSigma0(value: int): int {
+    return xor32(xor32(rotr32(value, 2), rotr32(value, 13)), rotr32(value, 22));
+}
+
+func bigSigma1(value: int): int {
+    return xor32(xor32(rotr32(value, 6), rotr32(value, 11)), rotr32(value, 25));
+}
+
+func choose32(x: int, y: int, z: int): int {
+    return xor32(and32(x, y), and32(4294967295 - x, z));
+}
+
+func majority32(x: int, y: int, z: int): int {
+    return xor32(xor32(and32(x, y), and32(x, z)), and32(y, z));
+}
+
+func powerOfTwo(exponent: int): int {
+    var value = 1;
+    var i = 0;
+    loop {
+        if i >= exponent { break; }
+        value = value * 2;
+        i = i + 1;
+    }
+    return value;
+}
+
+pub func sha256(bytes: Vec<int>): Result<Vec<int>, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if bytes.len() > 1152921504606846975 {
+        return Result.Err("message length exceeds the supported SHA-256 length field");
+    }
+
+    var padded: Vec<int> = Vec.new();
+    var inputIndex = 0;
+    loop {
+        if inputIndex >= bytes.len() { break; }
+        padded.push(bytes[inputIndex]);
+        inputIndex = inputIndex + 1;
+    }
+    var bitLength = bytes.len() * 8;
+    padded.push(128);
+    loop {
+        if padded.len() % 64 == 56 { break; }
+        padded.push(0);
+    }
+    var lengthIndex = 7;
+    loop {
+        if lengthIndex < 0 { break; }
+        var shift = lengthIndex * 8;
+        padded.push((bitLength / powerOfTwo(shift)) % 256);
+        lengthIndex = lengthIndex - 1;
+    }
+
+    var constants: Vec<int> = [
+        1116352408, 1899447441, 3049323471, 3921009573,
+        961987163, 1508970993, 2453635748, 2870763221,
+        3624381080, 310598401, 607225278, 1426881987,
+        1925078388, 2162078206, 2614888103, 3248222580,
+        3835390401, 4022224774, 264347078, 604807628,
+        770255983, 1249150122, 1555081692, 1996064986,
+        2554220882, 2821834349, 2952996808, 3210313671,
+        3336571891, 3584528711, 113926993, 338241895,
+        666307205, 773529912, 1294757372, 1396182291,
+        1695183700, 1986661051, 2177026350, 2456956037,
+        2730485921, 2820302411, 3259730800, 3345764771,
+        3516065817, 3600352804, 4094571909, 275423344,
+        430227734, 506948616, 659060556, 883997877,
+        958139571, 1322822218, 1537002063, 1747873779,
+        1955562222, 2024104815, 2227730452, 2361852424,
+        2428436474, 2756734187, 3204031479, 3329325298
+    ];
+    var state: Vec<int> = [
+        1779033703, 3144134277, 1013904242, 2773480762,
+        1359893119, 2600822924, 528734635, 1541459225
+    ];
+    var blockOffset = 0;
+    loop {
+        if blockOffset >= padded.len() { break; }
+        var words: Vec<int> = Vec.new();
+        var wordIndex = 0;
+        loop {
+            if wordIndex >= 16 { break; }
+            var byteOffset = blockOffset + wordIndex * 4;
+            var word = padded[byteOffset] * 16777216
+                + padded[byteOffset + 1] * 65536
+                + padded[byteOffset + 2] * 256
+                + padded[byteOffset + 3];
+            words.push(word);
+            wordIndex = wordIndex + 1;
+        }
+        wordIndex = 16;
+        loop {
+            if wordIndex >= 64 { break; }
+            var s0 = smallSigma0(words[wordIndex - 15]);
+            var s1 = smallSigma1(words[wordIndex - 2]);
+            words.push((s1 + words[wordIndex - 7] + s0 + words[wordIndex - 16]) % 4294967296);
+            wordIndex = wordIndex + 1;
+        }
+
+        var a = state[0];
+        var b = state[1];
+        var c = state[2];
+        var d = state[3];
+        var e = state[4];
+        var f = state[5];
+        var g = state[6];
+        var h = state[7];
+        var round = 0;
+        loop {
+            if round >= 64 { break; }
+            var t1 = (h + bigSigma1(e) + choose32(e, f, g) + constants[round] + words[round]) % 4294967296;
+            var t2 = (bigSigma0(a) + majority32(a, b, c)) % 4294967296;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + t1) % 4294967296;
+            d = c;
+            c = b;
+            b = a;
+            a = (t1 + t2) % 4294967296;
+            round = round + 1;
+        }
+        state.set(0, (state[0] + a) % 4294967296);
+        state.set(1, (state[1] + b) % 4294967296);
+        state.set(2, (state[2] + c) % 4294967296);
+        state.set(3, (state[3] + d) % 4294967296);
+        state.set(4, (state[4] + e) % 4294967296);
+        state.set(5, (state[5] + f) % 4294967296);
+        state.set(6, (state[6] + g) % 4294967296);
+        state.set(7, (state[7] + h) % 4294967296);
+        blockOffset = blockOffset + 64;
+    }
+
+    var digest: Vec<int> = Vec.new();
+    var stateIndex = 0;
+    loop {
+        if stateIndex >= 8 { break; }
+        var word = state[stateIndex];
+        digest.push((word / 16777216) % 256);
+        digest.push((word / 65536) % 256);
+        digest.push((word / 256) % 256);
+        digest.push(word % 256);
+        stateIndex = stateIndex + 1;
+    }
+    return Result.Ok(digest);
+}

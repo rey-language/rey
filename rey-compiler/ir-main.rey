@@ -1,0 +1,70 @@
+// Experimental v0.4 scalar pipeline. This bring-up executable is built by the
+// historical seed; it does not claim native machine-code generation yet.
+import frontend;
+import ir::{printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+
+func main(): void {
+    var argv = args();
+    if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
+        println("Usage: rey-ir <check|dump|eval> <source.rey>");
+        return;
+    }
+    if argv.len() != 3 {
+        eprintln("Usage: rey-ir <check|dump|eval> <source.rey>");
+        exit(2);
+        return;
+    }
+    var command = argv[1];
+    if command != "check" && command != "dump" && command != "eval" {
+        eprintln("unknown scalar IR command: " + command);
+        exit(2);
+        return;
+    }
+    var path = argv[2];
+    if !fileExists(path) {
+        eprintln(path + ": error: source file not found");
+        exit(1);
+        return;
+    }
+    var checked = frontend.checkSingleSource(readFile(path), path);
+    if checked.isErr() {
+        eprintln(checked.unwrapErr());
+        exit(1);
+        return;
+    }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() {
+        eprintln(lowered.unwrapErr());
+        exit(1);
+        return;
+    }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok {
+        eprintln(verified.errors.join("\n"));
+        exit(1);
+        return;
+    }
+    program = inferEffects(program);
+    var analyzed = verifyProgram(program);
+    if !analyzed.ok {
+        eprintln(analyzed.errors.join("\n"));
+        exit(1);
+        return;
+    }
+    if command == "check" { return; }
+    if command == "dump" { print(printIR(program)); return; }
+    var evaluated = evaluateProgram(program, 1000000, 128);
+    if !evaluated.ok {
+        eprintln(evaluated.error);
+        exit(1);
+        return;
+    }
+    if evaluated.isVoid { println("void"); }
+    else if evaluated.isBool { println((evaluated.value != 0).toString()); }
+    else { println(evaluated.value.toString()); }
+}

@@ -1,0 +1,91 @@
+import frontend;
+import ir;
+import ir::lower;
+import ir::verify;
+import ir::eval;
+import typecheck::{CheckedProgram};
+import ir::{IRProgram};
+import ir::eval::{EvalResult};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func checkedSource(source: string, path: string): CheckedProgram {
+    var checked = frontend.checkSingleSource(source, path);
+    if checked.isErr() {
+        println("FAIL frontend " + path + ": " + checked.unwrapErr());
+        exit(1);
+    }
+    return checked.unwrap();
+}
+
+func loweredSource(source: string, path: string): IRProgram {
+    var checked = checkedSource(source, path);
+    var lowered = lower.lowerProgram(checked);
+    if lowered.isErr() {
+        println("FAIL lower " + path + ": " + lowered.unwrapErr());
+        exit(1);
+    }
+    return lowered.unwrap();
+}
+
+func functionId(program: IRProgram, name: string): int {
+    var i = 0;
+    while i < program.functions.len() {
+        if program.functions[i].key.name == name { return program.functions[i].id; }
+        i += 1;
+    }
+    return -1;
+}
+
+func evaluateNamed(program: IRProgram, name: string, maxSteps: int): EvalResult {
+    var id = functionId(program, name);
+    if id < 0 {
+        println("FAIL missing lowered helper " + name);
+        exit(1);
+    }
+    return eval.evaluateProgram(ir.irProgram(id, program.functions), maxSteps, 32);
+}
+
+func main(): void {
+    var controlSource = "func main(): void \x7B return; \x7D func countingSum(): int \x7B var i: int = 0; var total: int = 0; while i < 5 \x7B if i < 3 \x7B total += i; \x7D else \x7B total += 2; \x7D i += 1; \x7D return total; \x7D func zeroIterations(): int \x7B var value: int = 17; while false \x7B value = 99; \x7D return value; \x7D func branchOneReturns(): int \x7B var value: int = 4; if false \x7B return 2; \x7D else \x7B value += 3; \x7D return value; \x7D func shadowing(): int \x7B var value: int = 5; \x7B var value: int = 10; value += 1; \x7D return value; \x7D func nestedLoops(): int \x7B var i: int = 0; var total: int = 0; while i < 3 \x7B var j: int = 0; while j < 2 \x7B total += 1; j += 1; \x7D i += 1; \x7D return total; \x7D func loopControl(): int \x7B var i: int = 0; var total: int = 0; while i < 10 \x7B i += 1; if i == 3 \x7B continue; \x7D if i == 7 \x7B break; \x7D total += i; \x7D return total; \x7D";
+    var program = loweredSource(controlSource, "loop-control.rey");
+    var verification = verify.verifyProgram(program);
+    if !verification.ok {
+        var errorIndex = 0;
+        while errorIndex < verification.errors.len() {
+            println("VERIFY " + verification.errors[errorIndex]);
+            errorIndex += 1;
+        }
+    }
+    require(verification.ok, "lowered assignments and control flow verify");
+    require(program.entryFunctionId == functionId(program, "main"), "main remains the scalar entry");
+    var count = evaluateNamed(program, "countingSum", 500);
+    var zero = evaluateNamed(program, "zeroIterations", 100);
+    var branch = evaluateNamed(program, "branchOneReturns", 100);
+    var shadow = evaluateNamed(program, "shadowing", 100);
+    var nested = evaluateNamed(program, "nestedLoops", 1000);
+    var control = evaluateNamed(program, "loopControl", 1000);
+    require(count.ok && count.value == 7, "loop-carried sum and nested branch mutation produce 7");
+    require(zero.ok && zero.value == 17, "zero-iteration loop preserves incoming locals");
+    require(branch.ok && branch.value == 7, "one returning branch joins the surviving branch");
+    require(shadow.ok && shadow.value == 5, "lexical shadowing does not overwrite the outer binding");
+    require(nested.ok && nested.value == 6, "nested loops carry outer and inner local values");
+    require(control.ok && control.value == 18, "continue and break transfer the current loop bindings");
+
+    var overflowSource = "func main(): void \x7B return; \x7D func overflow(): int \x7B var value: int = 9223372036854775807; value += 1; return value; \x7D";
+    var overflowProgram = loweredSource(overflowSource, "overflow.rey");
+    var overflow = evaluateNamed(overflowProgram, "overflow", 100);
+    require(!overflow.ok && overflow.error.contains("overflow") && overflow.error.contains("overflow.rey"), "checked compound addition reports signed overflow with source context");
+
+    var spinSource = "func main(): void \x7B return; \x7D func spin(): int \x7B var count: int = 0; while true \x7B count += 1; \x7D return count; \x7D";
+    var spinProgram = loweredSource(spinSource, "spin.rey");
+    var spin = evaluateNamed(spinProgram, "spin", 40);
+    require(!spin.ok && spin.steps == 40 && spin.error.contains("step budget"), "infinite loops stop at the evaluator step budget");
+
+    var constSource = "func main(): void \x7B const value: int = 1; value = 2; return; \x7D";
+    var constCheck = frontend.checkSingleSource(constSource, "const-assignment.rey");
+    require(constCheck.isErr() && constCheck.unwrapErr().contains("cannot assign to const"), "checked frontend rejects assignment to immutable const");
+    println("v04 ir-loops ok");
+}

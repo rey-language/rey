@@ -1,0 +1,116 @@
+import ir;
+import ir::verify::{verifyProgram};
+import ir::{IRProgram, IRFunction, IRType, IRValue, Instruction, BasicBlock, FunctionSignature, SourceRef};
+
+func source(start: int, end: int): SourceRef {
+    return ir.sourceRef("verify.rey", start, end);
+}
+
+func makeHelper(): IRFunction {
+    var block = ir.basicBlock(0, [], [], ir.returnValue(0, source(1, 3)));
+    var parameters = [ir.irValue(0, ir.irI64())];
+    var signature = ir.functionSignature([ir.irI64()], ir.irI64());
+    var effects = ir.unknownEffects();
+    effects.argumentEscapes.push(ir.escapeUnknown());
+    return ir.irFunction(0, ir.functionKey("test", "", "identity"), signature, parameters, [block], effects);
+}
+
+func makeMain(mode: int): IRFunction {
+    var functionId = 1;
+    if mode == 18 { functionId = -1; }
+    var key = ir.functionKey("test", "", "main");
+    if mode == 2 { functionId = 0; }
+    if mode == 14 { key = ir.functionKey("test", "", "identity"); }
+
+    var parameterTypes: Vec<IRType> = [];
+    var parameters: Vec<IRValue> = [];
+    if mode == 12 {
+        parameterTypes.push(ir.irI64());
+        parameters.push(ir.irValue(10, ir.irI64()));
+    }
+    var returnType = ir.irI64();
+    if mode == 13 { returnType = ir.irBool(); }
+    if mode == 15 { returnType = ir.irVoid(); }
+    var signature = ir.functionSignature(parameterTypes, returnType);
+    var effects = ir.unknownEffects();
+    if mode == 12 { effects.argumentEscapes.push(ir.escapeUnknown()); }
+
+    var literalSource = source(4, 5);
+    if mode == 11 { literalSource = source(-1, 5); }
+    var literal = ir.constI64(0, 3, literalSource);
+    if mode == 19 { literal.resultId = -2; }
+    var truth = ir.constBool(1, true, source(5, 6));
+    if mode == 20 { truth.resultId = 0; }
+    if mode == 10 { truth.immediate = 2; }
+
+    var entryInstructions: Vec<Instruction> = [];
+    entryInstructions.push(literal);
+    entryInstructions.push(truth);
+    var callResult = 2;
+    if mode == 4 {
+        entryInstructions.push(ir.addCheckedI64(6, 0, 2, source(6, 7)));
+        entryInstructions.push(ir.constI64(2, 8, source(7, 8)));
+        callResult = 5;
+    }
+    var callReturnType = ir.irI64();
+    if mode == 16 { callReturnType = ir.irBool(); }
+    entryInstructions.push(ir.call(callResult, callReturnType, 0, [0], source(8, 9)));
+
+    var trueTarget = 1;
+    if mode == 6 { trueTarget = 99; }
+    var branchCondition = 1;
+    if mode == 9 { branchCondition = 0; }
+    var trueArgs = [callResult];
+    if mode == 7 { trueArgs = []; }
+    if mode == 8 { trueArgs = [1]; }
+    var entryBlockId = 0;
+    if mode == 3 { entryBlockId = -1; }
+    var entry = ir.basicBlock(
+        entryBlockId,
+        [],
+        entryInstructions,
+        ir.branch(branchCondition, trueTarget, trueArgs, 2, [0], source(9, 12))
+    );
+
+    var trueInstructions: Vec<Instruction> = [];
+    var trueTerminator = ir.jump(3, [3], source(12, 13));
+    if mode == 5 { trueInstructions.push(ir.constI64(6, 11, source(12, 13))); }
+    var trueBlock = ir.basicBlock(1, [ir.irValue(3, ir.irI64())], trueInstructions, trueTerminator);
+
+    var falseTerminator = ir.jump(3, [4], source(13, 14));
+    if mode == 5 { falseTerminator = ir.returnValue(6, source(13, 14)); }
+    var falseBlock = ir.basicBlock(2, [ir.irValue(4, ir.irI64())], [], falseTerminator);
+    var mergeBlock = ir.basicBlock(3, [ir.irValue(8, ir.irI64())], [], ir.returnValue(8, source(14, 15)));
+    var blocks: Vec<BasicBlock> = [];
+    blocks.push(entry);
+    blocks.push(trueBlock);
+    blocks.push(falseBlock);
+    blocks.push(mergeBlock);
+    return ir.irFunction(functionId, key, signature, parameters, blocks, effects);
+}
+
+func makeProgram(mode: int): IRProgram {
+    if mode == 1 { return ir.irProgram(1, []); }
+    var functions: Vec<IRFunction> = [];
+    functions.push(makeHelper());
+    functions.push(makeMain(mode));
+    var entryId = 1;
+    if mode == 17 { entryId = 77; }
+    return ir.irProgram(entryId, functions);
+}
+
+func main(): void {
+    var valid = verifyProgram(makeProgram(0));
+    assert(valid.ok, "diamond with block parameters and a call must verify with unknown effects");
+    assert(valid.errors.len() == 0, "valid IR should have no diagnostics");
+
+    var mode = 1;
+    loop {
+        if mode > 20 { break; }
+        var result = verifyProgram(makeProgram(mode));
+        assert(!result.ok, "malformed fixture mode " + mode.toString() + " must be rejected");
+        assert(result.errors.len() > 0, "rejected fixture must include a deterministic diagnostic");
+        mode = mode + 1;
+    }
+    print("ir verifier: all fixtures passed");
+}

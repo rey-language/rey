@@ -1,0 +1,5 @@
+var value: int = 1;
+
+func main(): void {
+    return;
+}

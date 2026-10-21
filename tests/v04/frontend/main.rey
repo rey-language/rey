@@ -1,0 +1,20 @@
+import frontend;
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func main(): void {
+    var valid = frontend.checkSingleSource("func answer(): int \x7B return 42; \x7D func main(): void \x7B var result = answer(); \x7D", "valid.rey");
+    if valid.isErr() { println(valid.unwrapErr()); }
+    require(valid.isOk(), "valid checked program");
+    var badLex = frontend.checkSingleSource("@", "lex.rey");
+    require(badLex.isErr(), "lexer rejects invalid input");
+    var badParse = frontend.checkSingleSource("func main( \x7B", "parse.rey");
+    require(badParse.isErr(), "parser rejects invalid input");
+    var badType = frontend.checkSingleSource("func bad(): int \x7B return true; \x7D func main(): void \x7B return; \x7D", "type.rey");
+    require(badType.isErr(), "checker rejects wrong result type");
+    var imported = frontend.checkSingleSource("import missing; func main(): int \x7B return 0; \x7D", "import.rey");
+    require(imported.isErr(), "single unit adapter rejects imports");
+    println("v04 frontend ok");
+}

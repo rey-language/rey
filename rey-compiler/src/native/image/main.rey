@@ -1,0 +1,366 @@
+// Pure Mach-O and ELF images for the first scalar AArch64 target.
+import native::arm64::{Arm64Code};
+import native::bytes::{appendU32Be, appendU32Le, appendU64Le, sha256};
+
+func imageError(message: string): string { return "native image: " + message; }
+
+func pushZeros(bytes: Vec<int>, count: int) {
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        bytes.push(0);
+        i = i + 1;
+    }
+}
+
+func appendRange(target: Vec<int>, source: Vec<int>, start: int, count: int) {
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        target.push(source[start + i]);
+        i = i + 1;
+    }
+}
+
+func appendLe32(bytes: Vec<int>, value: int): bool {
+    var field: Vec<int> = Vec.new();
+    var result: Result<bool, string> = appendU32Le(field, value);
+    if result.isErr() { return false; }
+    appendRange(bytes, field, 0, field.len());
+    return true;
+}
+
+func appendBe32(bytes: Vec<int>, value: int): bool {
+    var field: Vec<int> = Vec.new();
+    var result: Result<bool, string> = appendU32Be(field, value);
+    if result.isErr() { return false; }
+    appendRange(bytes, field, 0, field.len());
+    return true;
+}
+
+func appendLe64(bytes: Vec<int>, value: int): bool {
+    var field: Vec<int> = Vec.new();
+    var result: Result<bool, string> = appendU64Le(field, value);
+    if result.isErr() { return false; }
+    appendRange(bytes, field, 0, field.len());
+    return true;
+}
+
+func appendBe64(bytes: Vec<int>, value: int): bool {
+    if value < 0 { return false; }
+    var remaining = value;
+    var field: Vec<int> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        field.push(remaining % 256);
+        remaining = remaining / 256;
+        i = i + 1;
+    }
+    i = 7;
+    loop {
+        if i < 0 { break; }
+        bytes.push(field[i]);
+        i = i - 1;
+    }
+    return true;
+}
+
+func appendLe16(bytes: Vec<int>, value: int): bool {
+    if value < 0 || value > 65535 { return false; }
+    bytes.push(value % 256);
+    bytes.push((value / 256) % 256);
+    return true;
+}
+
+func validateCode(code: Arm64Code): string {
+    if code.bytes.len() == 0 { return "instruction stream is empty"; }
+    if code.bytes.len() % 4 != 0 { return "instruction stream length must be four-byte aligned"; }
+    var i = 0;
+    loop {
+        if i >= code.bytes.len() { break; }
+        if code.bytes[i] < 0 || code.bytes[i] > 255 { return "code byte is outside 0..255"; }
+        i = i + 1;
+    }
+    if code.entryOffset < 0 || code.entryOffset % 4 != 0 || code.entryOffset > code.bytes.len() - 4 {
+        return "entry offset must identify an aligned instruction in the code";
+    }
+    i = 0;
+    loop {
+        if i >= code.functions.len() { break; }
+        if code.functions[i].functionId < 0 { return "function id must be nonnegative"; }
+        var offset = code.functions[i].offset;
+        if offset < 0 || offset % 4 != 0 || offset > code.bytes.len() - 4 {
+            return "function offset must identify an aligned instruction in the code";
+        }
+        var prior = 0;
+        loop {
+            if prior >= i { break; }
+            if code.functions[prior].functionId == code.functions[i].functionId {
+                return "function ids must be unique";
+            }
+            prior = prior + 1;
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+func checkedAlign(value: int, alignment: int): int {
+    if value < 0 || alignment <= 0 || value > 9223372036854775807 - (alignment - 1) { return -1; }
+    var remainder = value % alignment;
+    if remainder == 0 { return value; }
+    return value + alignment - remainder;
+}
+
+func appendFixedName(bytes: Vec<int>, name: string): bool {
+    if name.len() > 16 { return false; }
+    var i = 0;
+    loop {
+        if i >= name.len() { break; }
+        bytes.push(int(name[i]));
+        i = i + 1;
+    }
+    pushZeros(bytes, 16 - name.len());
+    return true;
+}
+
+func appendSegment(bytes: Vec<int>, name: string, vmaddr: int, vmsize: int,
+        fileoff: int, filesize: int, maxprot: int, initprot: int): bool {
+    if !appendLe32(bytes, 25) || !appendLe32(bytes, 72) { return false; }
+    if !appendFixedName(bytes, name) { return false; }
+    if !appendLe64(bytes, vmaddr) || !appendLe64(bytes, vmsize)
+        || !appendLe64(bytes, fileoff) || !appendLe64(bytes, filesize) { return false; }
+    if !appendLe32(bytes, maxprot) || !appendLe32(bytes, initprot)
+        || !appendLe32(bytes, 0) || !appendLe32(bytes, 0) { return false; }
+    return true;
+}
+
+func appendTextSegment(bytes: Vec<int>, vmaddr: int, vmsize: int,
+        codeFileOffset: int, codeSize: int): bool {
+    if !appendLe32(bytes, 25) || !appendLe32(bytes, 152)
+        || !appendFixedName(bytes, "__TEXT") { return false; }
+    if !appendLe64(bytes, vmaddr) || !appendLe64(bytes, vmsize)
+        || !appendLe64(bytes, 0) || !appendLe64(bytes, vmsize) { return false; }
+    if !appendLe32(bytes, 5) || !appendLe32(bytes, 5)
+        || !appendLe32(bytes, 1) || !appendLe32(bytes, 0) { return false; }
+    if !appendFixedName(bytes, "__text") || !appendFixedName(bytes, "__TEXT")
+        || !appendLe64(bytes, vmaddr + codeFileOffset) || !appendLe64(bytes, codeSize)
+        || !appendLe32(bytes, codeFileOffset) || !appendLe32(bytes, 2)
+        || !appendLe32(bytes, 0) || !appendLe32(bytes, 0)
+        || !appendLe32(bytes, 2147484672) || !appendLe32(bytes, 0)
+        || !appendLe32(bytes, 0) || !appendLe32(bytes, 0) { return false; }
+    return true;
+}
+
+func appendDylinkerCommand(bytes: Vec<int>): bool {
+    var path = "/usr/lib/dyld";
+    if !appendLe32(bytes, 14) || !appendLe32(bytes, 32)
+        || !appendLe32(bytes, 12) { return false; }
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        bytes.push(int(path[i]));
+        i = i + 1;
+    }
+    bytes.push(0);
+    pushZeros(bytes, 32 - 12 - path.len() - 1);
+    return true;
+}
+
+func appendSystemDylibCommand(bytes: Vec<int>): bool {
+    var path = "/usr/lib/libSystem.B.dylib";
+    if !appendLe32(bytes, 12) || !appendLe32(bytes, 56)
+        || !appendLe32(bytes, 24) || !appendLe32(bytes, 0)
+        || !appendLe32(bytes, 0) || !appendLe32(bytes, 0) { return false; }
+    var i = 0;
+    loop {
+        if i >= path.len() { break; }
+        bytes.push(int(path[i]));
+        i = i + 1;
+    }
+    bytes.push(0);
+    pushZeros(bytes, 56 - 24 - path.len() - 1);
+    return true;
+}
+
+func appendUuidCommand(bytes: Vec<int>, codeBytes: Vec<int>): bool {
+    var digestResult: Result<Vec<int>, string> = sha256(codeBytes);
+    if digestResult.isErr() { return false; }
+    var digest = digestResult.unwrap();
+    if digest.len() != 32 || !appendLe32(bytes, 27) || !appendLe32(bytes, 24) { return false; }
+    appendRange(bytes, digest, 0, 16);
+    return true;
+}
+
+func appendCodeDirectory(text: Vec<int>, textSize: int, executableLimit: int, pageCount: int): Result<Vec<int>, string> {
+    var id = "rey-native";
+    var identOffset = 88;
+    var hashOffset = identOffset + id.len() + 1;
+    if hashOffset < identOffset || hashOffset > 4294967295 - pageCount * 32 {
+        return Result.Err("CodeDirectory size exceeds uint32");
+    }
+    var directoryLength = hashOffset + pageCount * 32;
+    var directory: Vec<int> = Vec.new();
+    if !appendBe32(directory, 4208856066) || !appendBe32(directory, directoryLength)
+        || !appendBe32(directory, 132096) || !appendBe32(directory, 131074)
+        || !appendBe32(directory, hashOffset) || !appendBe32(directory, identOffset)
+        || !appendBe32(directory, 0) || !appendBe32(directory, pageCount)
+        || !appendBe32(directory, textSize) { return Result.Err("cannot encode CodeDirectory header"); }
+    directory.push(32);
+    directory.push(2);
+    directory.push(0);
+    directory.push(12);
+    if !appendBe32(directory, 0) || !appendBe32(directory, 0)
+        || !appendBe32(directory, 0) || !appendBe32(directory, 0)
+        || !appendBe64(directory, 0) || !appendBe64(directory, 0)
+        || !appendBe64(directory, executableLimit) || !appendBe64(directory, 1) {
+        return Result.Err("cannot encode CodeDirectory version fields");
+    }
+
+    var idIndex = 0;
+    loop {
+        if idIndex >= id.len() { break; }
+        directory.push(int(id[idIndex]));
+        idIndex = idIndex + 1;
+    }
+    directory.push(0);
+    var page = 0;
+    loop {
+        if page >= pageCount { break; }
+        var pageBytes: Vec<int> = Vec.new();
+        appendRange(pageBytes, text, page * 4096, 4096);
+        var digestResult: Result<Vec<int>, string> = sha256(pageBytes);
+        if digestResult.isErr() { return Result.Err("cannot hash Mach-O code page: " + digestResult.unwrapErr()); }
+        var digest = digestResult.unwrap();
+        if digest.len() != 32 { return Result.Err("SHA-256 returned an invalid digest length"); }
+        appendRange(directory, digest, 0, digest.len());
+        page = page + 1;
+    }
+    if directory.len() != directoryLength { return Result.Err("CodeDirectory length calculation mismatch"); }
+    return Result.Ok(directory);
+}
+
+func buildMachOSignature(text: Vec<int>, textSize: int, executableLimit: int): Result<Vec<int>, string> {
+    var pageCount = textSize / 4096;
+    var directoryResult = appendCodeDirectory(text, textSize, executableLimit, pageCount);
+    if directoryResult.isErr() { return Result.Err(directoryResult.unwrapErr()); }
+    var directory = directoryResult.unwrap();
+    var totalLength = 20 + directory.len();
+    var signature: Vec<int> = Vec.new();
+    if !appendBe32(signature, 4208856256) || !appendBe32(signature, totalLength)
+        || !appendBe32(signature, 1) || !appendBe32(signature, 0)
+        || !appendBe32(signature, 20) { return Result.Err("cannot encode embedded-signature SuperBlob"); }
+    appendRange(signature, directory, 0, directory.len());
+    return Result.Ok(signature);
+}
+
+func buildMachOValidated(code: Arm64Code): Result<Vec<int>, string> {
+    var codeFileOffset = 4096;
+    if code.bytes.len() > 9223372036854775807 - codeFileOffset {
+        return Result.Err("Mach-O text size overflows signed address arithmetic");
+    }
+    var textSize = checkedAlign(codeFileOffset + code.bytes.len(), 16384);
+    if textSize < 0 || textSize > 4294967295 { return Result.Err("Mach-O signed text must fit the CodeDirectory uint32 code limit"); }
+    var pageCount = textSize / 4096;
+    if pageCount <= 0 || pageCount > 4294967295 { return Result.Err("Mach-O code page count exceeds uint32"); }
+    var signatureSize = 20 + 88 + pageCount * 32 + 11;
+    if signatureSize < 0 || signatureSize > 4294967295 { return Result.Err("Mach-O signature exceeds uint32"); }
+    var linkeditVmaddr = 4294967296 + textSize;
+    if linkeditVmaddr < 0 { return Result.Err("Mach-O linkedit address overflows signed arithmetic"); }
+    var linkeditVmsize = checkedAlign(signatureSize, 16384);
+    if linkeditVmsize < 0 { return Result.Err("Mach-O linkedit size overflows signed arithmetic"); }
+    var commands: Vec<int> = Vec.new();
+    if !appendSegment(commands, "__PAGEZERO", 0, 4294967296, 0, 0, 0, 0)
+        || !appendTextSegment(commands, 4294967296, textSize, codeFileOffset, code.bytes.len())
+        || !appendSegment(commands, "__LINKEDIT", linkeditVmaddr, linkeditVmsize,
+            textSize, signatureSize, 1, 1) || !appendUuidCommand(commands, code.bytes) {
+        return Result.Err("cannot encode Mach-O segment/UUID commands");
+    }
+    if !appendDylinkerCommand(commands) || !appendSystemDylibCommand(commands)
+        || !appendLe32(commands, 2147483688) || !appendLe32(commands, 24)
+        || !appendLe64(commands, codeFileOffset + code.entryOffset)
+        || !appendLe64(commands, 0)
+        || !appendLe32(commands, 50) || !appendLe32(commands, 24)
+        || !appendLe32(commands, 1) || !appendLe32(commands, 1769472)
+        || !appendLe32(commands, 1769472) || !appendLe32(commands, 0)
+        || !appendLe32(commands, 29) || !appendLe32(commands, 16)
+        || !appendLe32(commands, textSize) || !appendLe32(commands, signatureSize) {
+        return Result.Err("cannot encode Mach-O dynamic-loader/signature commands");
+    }
+    if commands.len() != 472 { return Result.Err("Mach-O load-command size calculation mismatch"); }
+
+    var text: Vec<int> = Vec.new();
+    if !appendLe32(text, 4277009103) || !appendLe32(text, 16777228)
+        || !appendLe32(text, 0) || !appendLe32(text, 2)
+        || !appendLe32(text, 9) || !appendLe32(text, commands.len())
+        || !appendLe32(text, 2097157) || !appendLe32(text, 0) {
+        return Result.Err("cannot encode Mach-O header");
+    }
+    appendRange(text, commands, 0, commands.len());
+    if text.len() > codeFileOffset { return Result.Err("Mach-O header overlaps instruction stream"); }
+    pushZeros(text, codeFileOffset - text.len());
+    appendRange(text, code.bytes, 0, code.bytes.len());
+    if text.len() > textSize { return Result.Err("Mach-O instructions exceed the mapped text segment"); }
+    pushZeros(text, textSize - text.len());
+
+    var signatureResult = buildMachOSignature(text, textSize, codeFileOffset + code.bytes.len());
+    if signatureResult.isErr() { return Result.Err(signatureResult.unwrapErr()); }
+    var signature = signatureResult.unwrap();
+    if signature.len() != signatureSize { return Result.Err("Mach-O signature size calculation mismatch"); }
+    appendRange(text, signature, 0, signature.len());
+    return Result.Ok(text);
+}
+
+pub func buildMachOArm64(code: Arm64Code): Result<Vec<int>, string> {
+    var problem = validateCode(code);
+    if problem != "" { return Result.Err(imageError(problem)); }
+    return buildMachOValidated(code);
+}
+
+func buildElfValidated(code: Arm64Code): Result<Vec<int>, string> {
+    var codeFileOffset = 4096;
+    if code.bytes.len() > 9223372036854775807 - codeFileOffset {
+        return Result.Err("ELF image size overflows signed arithmetic");
+    }
+    var fileSize = codeFileOffset + code.bytes.len();
+    var codeAddress = 4194304 + codeFileOffset;
+    if codeAddress < 0 || fileSize > 9223372036854775807 - 4194304 {
+        return Result.Err("ELF load address overflows signed arithmetic");
+    }
+    var entryAddress = codeAddress + code.entryOffset;
+    if entryAddress < codeAddress { return Result.Err("ELF entry address overflows signed arithmetic"); }
+
+    var image: Vec<int> = Vec.new();
+    image.push(127);
+    image.push(69);
+    image.push(76);
+    image.push(70);
+    image.push(2);
+    image.push(1);
+    image.push(1);
+    pushZeros(image, 9);
+    if !appendLe16(image, 2) || !appendLe16(image, 183)
+        || !appendLe32(image, 1) || !appendLe64(image, entryAddress)
+        || !appendLe64(image, 64) || !appendLe64(image, 0)
+        || !appendLe32(image, 0) || !appendLe16(image, 64)
+        || !appendLe16(image, 56) || !appendLe16(image, 1)
+        || !appendLe16(image, 0) || !appendLe16(image, 0)
+        || !appendLe16(image, 0) { return Result.Err("cannot encode ELF header"); }
+    if !appendLe32(image, 1) || !appendLe32(image, 5)
+        || !appendLe64(image, 0) || !appendLe64(image, 4194304)
+        || !appendLe64(image, 4194304) || !appendLe64(image, fileSize)
+        || !appendLe64(image, fileSize) || !appendLe64(image, 4096) {
+        return Result.Err("cannot encode ELF load segment");
+    }
+    if image.len() != 120 { return Result.Err("ELF header size calculation mismatch"); }
+    pushZeros(image, codeFileOffset - image.len());
+    appendRange(image, code.bytes, 0, code.bytes.len());
+    return Result.Ok(image);
+}
+
+pub func buildElfArm64(code: Arm64Code): Result<Vec<int>, string> {
+    var problem = validateCode(code);
+    if problem != "" { return Result.Err(imageError(problem)); }
+    return buildElfValidated(code);
+}

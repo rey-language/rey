@@ -1,5 +1,13 @@
 # Primer — rey-lang
 
+## Active v0.4 implementation — 2026-10-21
+
+- User authorized phased parallel implementation using GPT-6 Luna at medium effort, with each worker testing after its assigned code and fixtures are written. The coordinator reviews diffs and runs integration gates before advancing automatically.
+- Integration branch: `codex-v0.4`, starting at plan commit `b236b22`. Worker scopes are exclusive; only the coordinator changes shared contracts/driver wiring and performs Git operations.
+- The first native gate passes 114 integration checks including 24 actual macOS arm64 executions; branch/while/overflow source builds run with compiler tools absent from PATH. The scalar/loop gate passes 26 checks. The pinned seed baseline passes 154 conformance and 11 E2E fixtures and retains six focused frontend failures. See `docs/V0.4-PARALLEL-PHASES.md` for scope and artifacts.
+- ARM64 instructions, Mach-O/ELF headers and signatures are emitted in Rey. macOS requires OS dyld/libSystem startup; no Rey C runtime or external build linker is used in generated programs. Linux output is structurally checked only, not executed. Current next-sector work is source-graph frontend integration. Full source coverage, runtime reclamation/self-hosting, regions/promotion, structured tasks, caching/Capy, and remaining platform/release gates are pending.
+- No v0.4 performance or native-independence claim is established by this handoff. Record observed gates as implementation proceeds.
+
 ## Current v0.4 planning handoff — 2026-10-21
 
 - This session delivers a written plan, not compiler/runtime implementation. The contributor branch is `codex-v0.4-plan`, based on the released source at `0003e19`; the existing divergent `codex` branch and performance branch history are preserved.

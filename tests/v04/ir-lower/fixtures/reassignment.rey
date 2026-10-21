@@ -1,0 +1,5 @@
+func main(): void {
+    var value: int = 1;
+    value = 2;
+    return;
+}

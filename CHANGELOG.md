@@ -1,5 +1,11 @@
 # Changelog
 
+## [unreleased] — v0.4 implementation
+- Added explicit-seed capability/baseline runners, matched seven-language numeric/vector benchmark fixtures, and a scalar typed IR model with deterministic printing.
+- Added the checked scalar frontend/IR pipeline with conservative effects, mutable local/while CFG lowering, precise memory/runtime ABI contract, and parallel implementation ledger. Scalar integration passes 26 checks. Pure Rey byte encoding and SHA-256 pass standard/binary/padding-boundary cases.
+- Added a direct scalar ARM64 emitter and pure Rey Mach-O/ELF image writer, including embedded Mach-O signing and OS loader metadata. The first native gate passes 114 checks and 24 real macOS arm64 executions, including source builds with compiler tools absent from PATH. ELF AArch64 is structurally checked only. Full language/native runtime support, self-hosting, collector, regions, tasks and release ports remain pending.
+- The pinned seed passes 154 conformance and 11 native E2E cases. The focused frontend baseline retains six failures; details and artifact paths are recorded in `docs/V0.4-PARALLEL-PHASES.md`.
+
 ## [unreleased] — v0.4 execution plan
 - Added `docs/V0.4-EXECUTION-PLAN.md` for a pure Rey compiler/backend/runtime, explicit seed-to-native bootstrap, correct reclamation, inferred regions and promotion, incremental Capy builds, and all five platform gates.
 - Marked the earlier LLVM/C-based v0.4 proposal historical and updated contributor handoff/context links. This is documentation only; performance targets and milestones are not implementation results.

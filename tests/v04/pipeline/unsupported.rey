@@ -1,0 +1,1 @@
+func main(): void { var value = "heap strings are outside the scalar slice"; }

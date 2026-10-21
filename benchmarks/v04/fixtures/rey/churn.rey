@@ -1,0 +1,26 @@
+func main(): void {
+    var values = args();
+    if values.len() != 2 { exit(2); }
+    var rounds = values[1].toInt();
+    if rounds < 0 || rounds > 4096 { exit(2); }
+    var checksum = 0;
+    var round = 0;
+    loop {
+        if round >= rounds { break; }
+        var values: Vec<int> = Vec.new();
+        var index = 0;
+        loop {
+            if index >= 32 { break; }
+            values.push((round * 17 + index * 13) % 1009);
+            index += 1;
+        }
+        var item = 0;
+        loop {
+            if item >= values.len() { break; }
+            checksum += values[item];
+            item += 1;
+        }
+        round += 1;
+    }
+    println("checksum=" + checksum.toString() + " processed=" + (rounds * 32).toString());
+}

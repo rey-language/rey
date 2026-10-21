@@ -1,0 +1,136 @@
+import ir;
+import ir::{BasicBlock, CompareI64Predicate, Escape, IRFunction, IRProgram, IRType, IRValue, SourceRef};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64};
+import native::image::{buildMachOArm64};
+import native::bytes::{byteString};
+
+func source(): SourceRef { return ir.sourceRef("native-crosscheck.rey", 0, 0); }
+
+func function(id: int, name: string, parameters: Vec<IRValue>, result: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    var types: Vec<IRType> = [];
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    while i < parameters.len() {
+        types.push(parameters[i].ty);
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    var effects = ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+    return ir.irFunction(id, ir.functionKey("native-crosscheck", "", name), ir.functionSignature(types, result), parameters, blocks, effects);
+}
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func emitCase(directory: string, name: string, program: IRProgram, expected: int): void {
+    var evaluated = evaluateProgram(program, 10000, 32);
+    if name == "overflow-positive" || name == "overflow-negative" {
+        require(!evaluated.ok, name + " must reject overflow before evaluating a result");
+        require(evaluated.error.contains("overflow"), name + " must report checked overflow");
+    } else {
+        require(evaluated.ok, name + ": " + evaluated.error);
+        var actual = evaluated.value % 256;
+        if actual < 0 { actual = actual + 256; }
+        require(actual == expected, name + " evaluator disagrees with independent expected result");
+    }
+    var code = emitArm64(program, "darwin");
+    require(code.isOk(), name + " machine-code emission failed");
+    var image = buildMachOArm64(code.unwrap());
+    require(image.isOk(), name + " image emission failed");
+    var encoded = byteString(image.unwrap());
+    require(encoded.isOk(), name + " binary encoding failed");
+    var path = directory + "/" + name + ".macho";
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), name + " binary write failed");
+    println("native-case " + name + " " + expected.toString());
+}
+
+func literal(value: int): IRProgram {
+    var main = function(0, "literal", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(1000000, value, source())], ir.returnValue(1000000, source()))]);
+    return ir.irProgram(0, [main]);
+}
+
+func addition(left: int, right: int): IRProgram {
+    var main = function(0, "addition", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(0, left, source()), ir.constI64(1, right, source()), ir.addCheckedI64(2, 0, 1, source())], ir.returnValue(2, source()))]);
+    return ir.irProgram(0, [main]);
+}
+
+func comparison(predicate: CompareI64Predicate, left: int, right: int): IRProgram {
+    var main = function(0, "comparison", [], ir.irBool(), [ir.basicBlock(0, [], [ir.constI64(0, left, source()), ir.constI64(1, right, source()), ir.compareI64(2, predicate, 0, 1, source())], ir.returnValue(2, source()))]);
+    return ir.irProgram(0, [main]);
+}
+
+func diamond(condition: bool): IRProgram {
+    var main = function(0, "diamond", [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constBool(0, condition, source()), ir.constI64(1, 7, source()), ir.constI64(2, 9, source())], ir.branch(0, 1, [1], 2, [2], source())),
+        ir.basicBlock(1, [ir.irValue(3, ir.irI64())], [], ir.jump(3, [3], source())),
+        ir.basicBlock(2, [ir.irValue(4, ir.irI64())], [], ir.jump(3, [4], source())),
+        ir.basicBlock(3, [ir.irValue(5, ir.irI64())], [], ir.returnValue(5, source()))
+    ]);
+    return ir.irProgram(0, [main]);
+}
+
+func recursive(): IRProgram {
+    var count = function(0, "count", [ir.irValue(0, ir.irI64())], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(1, 0, source()), ir.compareI64(2, ir.compareSgt(), 0, 1, source())], ir.branch(2, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [ir.constI64(3, -1, source()), ir.addCheckedI64(4, 0, 3, source()), ir.call(5, ir.irI64(), 0, [4], source()), ir.constI64(6, 1, source()), ir.addCheckedI64(7, 5, 6, source())], ir.returnValue(7, source())),
+        ir.basicBlock(2, [], [], ir.returnValue(1, source()))
+    ]);
+    var entry = function(1, "entry", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(0, 6, source()), ir.call(1, ir.irI64(), 0, [0], source())], ir.returnValue(1, source()))]);
+    return ir.irProgram(1, [count, entry]);
+}
+
+func swapLoop(): IRProgram {
+    var main = function(0, "swap", [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constBool(0, true, source()), ir.constBool(1, false, source()), ir.constI64(2, 11, source()), ir.constI64(3, 22, source())], ir.jump(1, [0, 2, 3], source())),
+        ir.basicBlock(1, [ir.irValue(4, ir.irBool()), ir.irValue(5, ir.irI64()), ir.irValue(6, ir.irI64())], [], ir.branch(4, 1, [1, 6, 5], 2, [5], source())),
+        ir.basicBlock(2, [ir.irValue(7, ir.irI64())], [], ir.returnValue(7, source()))
+    ]);
+    return ir.irProgram(0, [main]);
+}
+
+func eightArgs(): IRProgram {
+    var parameters: Vec<IRValue> = [];
+    var i = 0;
+    while i < 8 { parameters.push(ir.irValue(i, ir.irI64())); i = i + 1; }
+    var helper = function(0, "eighth", parameters, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(7, source()))]);
+    var entry = function(1, "eight-entry", [], ir.irI64(), [ir.basicBlock(0, [], [
+        ir.constI64(0, 1, source()), ir.constI64(1, 2, source()), ir.constI64(2, 3, source()), ir.constI64(3, 4, source()),
+        ir.constI64(4, 5, source()), ir.constI64(5, 6, source()), ir.constI64(6, 7, source()), ir.constI64(7, 42, source()),
+        ir.call(8, ir.irI64(), 0, [0, 1, 2, 3, 4, 5, 6, 7], source())
+    ], ir.returnValue(8, source()))]);
+    return ir.irProgram(1, [helper, entry]);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "native crosscheck needs an existing output directory");
+    var out = argv[1];
+    var minimum = -9223372036854775807 - 1;
+    var maximum = 9223372036854775807;
+    emitCase(out, "zero", literal(0), 0);
+    emitCase(out, "sparse-id", literal(42), 42);
+    emitCase(out, "negative", literal(-1), 255);
+    emitCase(out, "minimum", literal(minimum), 0);
+    emitCase(out, "maximum", literal(maximum), 255);
+    emitCase(out, "addition", addition(20, 22), 42);
+    emitCase(out, "opposite-extrema", addition(minimum, maximum), 255);
+    emitCase(out, "overflow-positive", addition(maximum, 1), 1);
+    emitCase(out, "overflow-negative", addition(minimum, -1), 1);
+    emitCase(out, "eq", comparison(ir.compareEq(), 7, 9), 0);
+    emitCase(out, "ne", comparison(ir.compareNe(), 7, 9), 1);
+    emitCase(out, "slt", comparison(ir.compareSlt(), minimum, 0), 1);
+    emitCase(out, "sle", comparison(ir.compareSle(), 9, 9), 1);
+    emitCase(out, "sgt", comparison(ir.compareSgt(), maximum, 0), 1);
+    emitCase(out, "sge", comparison(ir.compareSge(), 7, 9), 0);
+    emitCase(out, "diamond-true", diamond(true), 7);
+    emitCase(out, "diamond-false", diamond(false), 9);
+    emitCase(out, "recursion", recursive(), 6);
+    emitCase(out, "parallel-swap", swapLoop(), 22);
+    emitCase(out, "eight-arguments", eightArgs(), 42);
+    var empty = function(0, "void", [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+    emitCase(out, "void", ir.irProgram(0, [empty]), 0);
+    println("native crosscheck images ready");
+}

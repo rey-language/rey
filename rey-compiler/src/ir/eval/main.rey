@@ -1,0 +1,239 @@
+import ir::{BasicBlock, CompareI64Predicate, InstructionKind, IRFunction, IRProgram, IRTypeKind, SourceRef, TerminatorKind, basicBlock, functionKeyName, returnVoid, sourceRef};
+import ir::verify::{verifyProgram};
+
+pub struct EvalResult {
+    pub ok: bool,
+    pub value: int,
+    pub isBool: bool,
+    pub isVoid: bool,
+    pub error: string,
+    pub steps: int,
+}
+
+struct ValueLookup {
+    pub found: bool,
+    pub value: int,
+}
+
+struct EvalFrame {
+    pub ids: Vec<int>,
+    pub values: Vec<int>,
+}
+
+struct EdgeTransfer {
+    pub ok: bool,
+    pub block: BasicBlock,
+    pub values: Vec<int>,
+    pub error: string,
+}
+
+func evalSuccess(value: int, isBool: bool, isVoid: bool, steps: int): EvalResult {
+    return EvalResult { ok: true, value: value, isBool: isBool, isVoid: isVoid, error: "", steps: steps };
+}
+
+func evalFailure(error: string, steps: int): EvalResult {
+    return EvalResult { ok: false, value: 0, isBool: false, isVoid: false, error: error, steps: steps };
+}
+
+func sourceLocation(source: SourceRef): string {
+    return "@" + source.unitId + ":" + source.start.toString() + ".." + source.end.toString();
+}
+
+func failAt(message: string, source: SourceRef, steps: int): EvalResult {
+    return evalFailure(message + " " + sourceLocation(source), steps);
+}
+
+func readValue(frame: EvalFrame, valueId: int): ValueLookup {
+    var i = 0;
+    loop {
+        if i >= frame.ids.len() { break; }
+        if frame.ids[i] == valueId { return ValueLookup { found: true, value: frame.values[i] }; }
+        i = i + 1;
+    }
+    return ValueLookup { found: false, value: 0 };
+}
+
+func writeValue(frame: EvalFrame, valueId: int, value: int) {
+    var i = 0;
+    loop {
+        if i >= frame.ids.len() { break; }
+        if frame.ids[i] == valueId {
+            frame.values.set(i, value);
+            return;
+        }
+        i = i + 1;
+    }
+    frame.ids.push(valueId);
+    frame.values.push(value);
+}
+
+func findFunctionIndex(program: IRProgram, functionId: int): int {
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        if program.functions[i].id == functionId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func findBlockIndex(function: IRFunction, blockId: int): int {
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].id == blockId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func transferEdge(function: IRFunction, frame: EvalFrame, targetBlockId: int, argumentIds: Vec<int>): EdgeTransfer {
+    var targetIndex = findBlockIndex(function, targetBlockId);
+    if targetIndex < 0 { return EdgeTransfer { ok: false, block: basicBlock(-1, [], [], returnVoid(sourceRef("", 0, 0))), values: [], error: "edge references a missing block" }; }
+    var target = function.blocks[targetIndex];
+    if argumentIds.len() != target.params.len() { return EdgeTransfer { ok: false, block: target, values: [], error: "edge argument count does not match block parameters" }; }
+    var edgeValues: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= argumentIds.len() { break; }
+        var found = readValue(frame, argumentIds[i]);
+        if !found.found { return EdgeTransfer { ok: false, block: target, values: [], error: "edge references an unavailable SSA value" }; }
+        edgeValues.push(found.value);
+        i = i + 1;
+    }
+    return EdgeTransfer { ok: true, block: target, values: edgeValues, error: "" };
+}
+
+func assignEdge(frame: EvalFrame, edge: EdgeTransfer) {
+    var i = 0;
+    loop {
+        if i >= edge.block.params.len() { break; }
+        writeValue(frame, edge.block.params[i].id, edge.values[i]);
+        i = i + 1;
+    }
+}
+
+func comparisonResult(predicate: CompareI64Predicate, left: int, right: int): bool {
+    if predicate == CompareI64Predicate::Eq { return left == right; }
+    if predicate == CompareI64Predicate::Ne { return left != right; }
+    if predicate == CompareI64Predicate::Slt { return left < right; }
+    if predicate == CompareI64Predicate::Sle { return left <= right; }
+    if predicate == CompareI64Predicate::Sgt { return left > right; }
+    return left >= right;
+}
+
+func evalFunction(program: IRProgram, functionId: int, arguments: Vec<int>, depth: int, steps: int, maxSteps: int, maxDepth: int): EvalResult {
+    var functionIndex = findFunctionIndex(program, functionId);
+    if functionIndex < 0 { return evalFailure("call references a missing function", steps); }
+    var function = program.functions[functionIndex];
+    if depth > maxDepth { return evalFailure("call depth limit exceeded in " + functionKeyName(function.key), steps); }
+    if arguments.len() != function.parameters.len() { return evalFailure("call argument count does not match function parameters in " + functionKeyName(function.key), steps); }
+    if function.blocks.len() == 0 { return evalFailure("function has no entry block: " + functionKeyName(function.key), steps); }
+
+    var frame = EvalFrame { ids: [], values: [] };
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= function.parameters.len() { break; }
+        writeValue(frame, function.parameters[parameterIndex].id, arguments[parameterIndex]);
+        parameterIndex = parameterIndex + 1;
+    }
+
+    var currentBlockId = function.blocks[0].id;
+    var currentSteps = steps;
+    loop {
+        var blockIndex = findBlockIndex(function, currentBlockId);
+        if blockIndex < 0 { return evalFailure("control flow reached a missing block in " + functionKeyName(function.key), currentSteps); }
+        var block = function.blocks[blockIndex];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            if currentSteps >= maxSteps { return failAt("step budget exhausted while evaluating instruction", instruction.source, currentSteps); }
+            currentSteps = currentSteps + 1;
+
+            if instruction.kind == InstructionKind::ConstI64 {
+                writeValue(frame, instruction.resultId, instruction.immediate);
+            } else if instruction.kind == InstructionKind::ConstBool {
+                var boolValue = 0;
+                if instruction.immediate != 0 { boolValue = 1; }
+                writeValue(frame, instruction.resultId, boolValue);
+            } else if instruction.kind == InstructionKind::AddCheckedI64 {
+                if instruction.operands.len() != 2 { return failAt("checked addition has malformed operands", instruction.source, currentSteps); }
+                var left = readValue(frame, instruction.operands[0]);
+                var right = readValue(frame, instruction.operands[1]);
+                if !left.found || !right.found { return failAt("checked addition references an unavailable SSA value", instruction.source, currentSteps); }
+                var maximum = 9223372036854775807;
+                var minimum = -9223372036854775807 - 1;
+                if right.value > 0 && left.value > maximum - right.value { return failAt("signed i64 addition overflow", instruction.source, currentSteps); }
+                if right.value < 0 && left.value < minimum - right.value { return failAt("signed i64 addition overflow", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, left.value + right.value);
+            } else if instruction.kind == InstructionKind::CompareI64 {
+                if instruction.operands.len() != 2 { return failAt("comparison has malformed operands", instruction.source, currentSteps); }
+                var leftCompare = readValue(frame, instruction.operands[0]);
+                var rightCompare = readValue(frame, instruction.operands[1]);
+                if !leftCompare.found || !rightCompare.found { return failAt("comparison references an unavailable SSA value", instruction.source, currentSteps); }
+                var comparisonValue = comparisonResult(instruction.comparison, leftCompare.value, rightCompare.value);
+                var encodedComparison = 0;
+                if comparisonValue { encodedComparison = 1; }
+                writeValue(frame, instruction.resultId, encodedComparison);
+            } else if instruction.kind == InstructionKind::Call {
+                var callArguments: Vec<int> = [];
+                var argumentIndex = 0;
+                loop {
+                    if argumentIndex >= instruction.operands.len() { break; }
+                    var callArgument = readValue(frame, instruction.operands[argumentIndex]);
+                    if !callArgument.found { return failAt("call references an unavailable SSA value", instruction.source, currentSteps); }
+                    callArguments.push(callArgument.value);
+                    argumentIndex = argumentIndex + 1;
+                }
+                if depth + 1 > maxDepth { return failAt("call depth limit exceeded", instruction.source, currentSteps); }
+                var callResult = evalFunction(program, instruction.functionId, callArguments, depth + 1, currentSteps, maxSteps, maxDepth);
+                if !callResult.ok { return callResult; }
+                currentSteps = callResult.steps;
+                if !callResult.isVoid { writeValue(frame, instruction.resultId, callResult.value); }
+            } else {
+                return failAt("unsupported IR instruction", instruction.source, currentSteps);
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+
+        var terminator = block.terminator;
+        if currentSteps >= maxSteps { return failAt("step budget exhausted while evaluating terminator", terminator.source, currentSteps); }
+        currentSteps = currentSteps + 1;
+        if terminator.kind == TerminatorKind::Jump {
+            var jumpEdge = transferEdge(function, frame, terminator.targetBlockId, terminator.targetArgs);
+            if !jumpEdge.ok { return failAt(jumpEdge.error, terminator.source, currentSteps); }
+            assignEdge(frame, jumpEdge);
+            currentBlockId = jumpEdge.block.id;
+        } else if terminator.kind == TerminatorKind::Branch {
+            var condition = readValue(frame, terminator.conditionValueId);
+            if !condition.found { return failAt("branch references an unavailable condition value", terminator.source, currentSteps); }
+            var selectedEdge: EdgeTransfer = transferEdge(function, frame, terminator.falseTargetBlockId, terminator.falseArgs);
+            if condition.value != 0 { selectedEdge = transferEdge(function, frame, terminator.trueTargetBlockId, terminator.trueArgs); }
+            if !selectedEdge.ok { return failAt(selectedEdge.error, terminator.source, currentSteps); }
+            assignEdge(frame, selectedEdge);
+            currentBlockId = selectedEdge.block.id;
+        } else if terminator.kind == TerminatorKind::Return {
+            if terminator.valueId < 0 {
+                if function.signature.returnType.kind != IRTypeKind::Void { return failAt("void return in non-void function", terminator.source, currentSteps); }
+                return evalSuccess(0, false, true, currentSteps);
+            }
+            var returnValue = readValue(frame, terminator.valueId);
+            if !returnValue.found { return failAt("return references an unavailable SSA value", terminator.source, currentSteps); }
+            if function.signature.returnType.kind == IRTypeKind::Bool { return evalSuccess(returnValue.value, true, false, currentSteps); }
+            if function.signature.returnType.kind == IRTypeKind::I64 { return evalSuccess(returnValue.value, false, false, currentSteps); }
+            return failAt("scalar return in void function", terminator.source, currentSteps);
+        } else {
+            return failAt("invalid or unsupported IR terminator", terminator.source, currentSteps);
+        }
+    }
+    return evalFailure("evaluation stopped unexpectedly", currentSteps);
+}
+
+pub func evaluateProgram(program: IRProgram, maxSteps: int, maxDepth: int): EvalResult {
+    var verification = verifyProgram(program);
+    if !verification.ok { return evalFailure("invalid IR program: verifier rejected the program", 0); }
+    if maxSteps <= 0 { return evalFailure("maxSteps must be positive", 0); }
+    if maxDepth < 0 { return evalFailure("maxDepth must be nonnegative", 0); }
+    return evalFunction(program, program.entryFunctionId, [], 0, 0, maxSteps, maxDepth);
+}
