@@ -1,0 +1,6 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(8);
+    buffer.rawBufferSetLength(handle, 9);
+}

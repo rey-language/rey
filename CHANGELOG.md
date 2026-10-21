@@ -1,6 +1,7 @@
 # Changelog
 
 ## [unreleased] — v0.4 implementation
+- Added the pure Rey owned raw byte-buffer API with geometric growth and exact mapping release, plus explicit trusted runtime failures. The expanded gate passes 261 checks and 47 executions per ARM64 OS. A separate frontend-only comparison retains identical 62/70 expected results with eight baseline mismatches and no regressions.
 - Added authorized raw-address checking, precise raw IR operations/effects, bounded evaluator mappings with address-cell provenance, and direct ARM64 OS memory mapping/access. The source/native gate passes 145 checks and 32 executions each on Darwin and Linux arm64. These are manual trusted primitives, not an automatic collector or inferred regions.
 - Added the direct Linux x86-64 scalar emitter, SysV ABI and pure Rey ELF64 writer. Execution caught and fixed a division-guard relocation bug. The x64 gate passes 64 source and two direct-IR executables under emulation in the ARM64 Linux VM; the same 64 sources pass on matching Linux arm64 (196 checks per backend). Native x64 hardware and other x64 platforms remain unverified.
 - Extended checked scalar arithmetic, unary/boolean operators, short-circuit CFGs and module-graph function lowering. The expanded native gate passes 238 checks and 59 macOS arm64 executions; an independent 55-program arithmetic oracle passes 227 process checks. Nine emitted ELF programs pass 31 checks in a Linux arm64 VM. These are correctness results, not performance or release claims.

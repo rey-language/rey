@@ -430,6 +430,11 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                     checkRawAddressOperand(errors, definitions, instruction.operands[rawEqualIndex], context);
                     rawEqualIndex = rawEqualIndex + 1;
                 }
+            } else if instruction.kind == InstructionKind::RawFail {
+                if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.fail requires a void result and ID -1"); }
+                if operandCount != 1 { errors.push(context + ": raw.fail requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.fail");
+                if operandCount > 0 { checkI64Operand(errors, definitions, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::Call {
                 if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": call has invalid unused fields"); }
                 var calleeIndex = findFunctionIndex(program, instruction.functionId);

@@ -538,6 +538,11 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
                 var encodedEqual = 0;
                 if equal { encodedEqual = 1; }
                 writeValue(frame, instruction.resultId, encodedEqual);
+            } else if instruction.kind == InstructionKind::RawFail {
+                if instruction.operands.len() != 1 { return failAt("raw.fail has malformed operands", instruction.source, currentSteps); }
+                var failureCode = readValue(frame, instruction.operands[0]);
+                if !failureCode.found { return failAt("raw.fail references an unavailable SSA value", instruction.source, currentSteps); }
+                return failAt("trusted runtime failure code " + failureCode.value.toString(), instruction.source, currentSteps);
             } else if instruction.kind == InstructionKind::Call {
                 var callArguments: Vec<int> = [];
                 var argumentIndex = 0;

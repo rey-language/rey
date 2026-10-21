@@ -1,0 +1,115 @@
+import buffer;
+
+func require(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func checkZeroAndGrowth(): void {
+    var value = buffer.rawBufferCreate(0);
+    require(buffer.rawBufferLength(value) == 0, 101);
+    require(buffer.rawBufferCapacity(value) == 0, 102);
+    require(__reyRawEqual(buffer.rawBufferData(value), __reyRawNull()), 103);
+    buffer.rawBufferGrow(value, 0);
+    require(buffer.rawBufferCapacity(value) == 0, 104);
+    buffer.rawBufferGrow(value, 1);
+    require(buffer.rawBufferCapacity(value) == 8, 105);
+    buffer.rawBufferSetLength(value, 8);
+    var data = buffer.rawBufferData(value);
+    var index = 0;
+    while index < 8 {
+        __reyRawStoreByte(__reyRawOffset(data, index), index);
+        index = index + 1;
+    }
+    var stableData = buffer.rawBufferData(value);
+    buffer.rawBufferGrow(value, 8);
+    require(buffer.rawBufferCapacity(value) == 8, 106);
+    require(__reyRawEqual(stableData, buffer.rawBufferData(value)), 107);
+    buffer.rawBufferGrow(value, 9);
+    require(buffer.rawBufferCapacity(value) == 16, 108);
+    var grownData = buffer.rawBufferData(value);
+    require(!__reyRawEqual(stableData, grownData), 109);
+    index = 0;
+    while index < 8 {
+        require(__reyRawLoadByte(__reyRawOffset(grownData, index)) == index, 110);
+        index = index + 1;
+    }
+    index = 8;
+    while index < 16 {
+        require(__reyRawLoadByte(__reyRawOffset(grownData, index)) == 0, 111);
+        index = index + 1;
+    }
+    buffer.rawBufferSetLength(value, 3);
+    buffer.rawBufferSetLength(value, 8);
+    require(buffer.rawBufferLength(value) == 8, 112);
+    buffer.rawBufferRelease(value);
+}
+
+func checkAllBytes(): void {
+    var value = buffer.rawBufferCreate(1);
+    require(buffer.rawBufferCapacity(value) == 1, 201);
+    buffer.rawBufferGrow(value, 256);
+    require(buffer.rawBufferCapacity(value) == 256, 202);
+    buffer.rawBufferSetLength(value, 256);
+    var data = buffer.rawBufferData(value);
+    var index = 0;
+    while index < 256 {
+        __reyRawStoreByte(__reyRawOffset(data, index), index);
+        index = index + 1;
+    }
+    require(__reyRawLoadByte(data) == 0, 203);
+    var oldData = buffer.rawBufferData(value);
+    buffer.rawBufferGrow(value, 257);
+    var newData = buffer.rawBufferData(value);
+    require(buffer.rawBufferCapacity(value) == 512, 204);
+    require(buffer.rawBufferLength(value) == 256, 205);
+    require(!__reyRawEqual(oldData, newData), 206);
+    index = 0;
+    while index < 256 {
+        require(__reyRawLoadByte(__reyRawOffset(newData, index)) == index, 207);
+        index = index + 1;
+    }
+    index = 256;
+    while index < 512 {
+        require(__reyRawLoadByte(__reyRawOffset(newData, index)) == 0, 208);
+        index = index + 1;
+    }
+    buffer.rawBufferGrow(value, 512);
+    require(__reyRawEqual(newData, buffer.rawBufferData(value)), 209);
+    buffer.rawBufferSetLength(value, 17);
+    buffer.rawBufferSetLength(value, 256);
+    require(buffer.rawBufferLength(value) == 256, 210);
+    buffer.rawBufferRelease(value);
+}
+
+func checkSeparateHandles(): void {
+    var first = buffer.rawBufferCreate(8);
+    var second = buffer.rawBufferCreate(8);
+    require(!__reyRawEqual(buffer.rawBufferData(first), buffer.rawBufferData(second)), 301);
+    buffer.rawBufferSetLength(first, 1);
+    buffer.rawBufferSetLength(second, 1);
+    __reyRawStoreByte(buffer.rawBufferData(first), 17);
+    __reyRawStoreByte(buffer.rawBufferData(second), 29);
+    require(__reyRawLoadByte(buffer.rawBufferData(first)) == 17, 302);
+    require(__reyRawLoadByte(buffer.rawBufferData(second)) == 29, 303);
+    buffer.rawBufferRelease(first);
+    buffer.rawBufferRelease(second);
+}
+
+func checkRepeatedOwnership(): void {
+    var iteration = 0;
+    while iteration < 300 {
+        var value = buffer.rawBufferCreate(0);
+        buffer.rawBufferGrow(value, iteration + 1);
+        buffer.rawBufferSetLength(value, 0);
+        buffer.rawBufferGrow(value, iteration + 17);
+        buffer.rawBufferRelease(value);
+        iteration = iteration + 1;
+    }
+}
+
+func main(): void {
+    checkZeroAndGrowth();
+    checkAllBytes();
+    checkSeparateHandles();
+    checkRepeatedOwnership();
+}

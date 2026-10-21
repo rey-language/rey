@@ -1,0 +1,76 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::{printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, label: string): void {
+    if !ok { eprintln("FAIL " + label); exit(1); }
+}
+
+func exercise(fixturePath: string, name: string, expectedStatus: int, sourceDirectory: string, outputDirectory: string): void {
+    var entryPath = sourceDirectory + "/main.rey";
+    var runtimePath = sourceDirectory + "/buffer/main.rey";
+    writeFile(entryPath, readFile(fixturePath));
+    var ordinary = checkSourceFileGraph(entryPath, "");
+    require(ordinary.isErr(), name + ": ordinary checking must not authorize raw runtime units");
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [runtimePath, entryPath]);
+    if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var evaluated = evaluateProgram(program, 2000000, 32);
+    if expectedStatus == 0 {
+        if !evaluated.ok { eprintln(name + ": evaluator failed: " + evaluated.error); exit(1); }
+        require(evaluated.isVoid, name + ": successful fixture must return void");
+        println("raw-buffer-expected requested=257 old_capacity=256 new_capacity=512 copied_live_bytes=256");
+    } else {
+        require(!evaluated.ok, name + ": invalid fixture must fail through raw validation");
+        require(evaluated.error != "", name + ": raw validation failure must preserve a diagnostic");
+    }
+    writeFile(outputDirectory + "/" + name + ".ir", printIR(program));
+
+    var darwin = emitArm64(program, "darwin");
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    var machoBytes = byteString(macho.unwrap());
+    require(machoBytes.isOk(), name + ": Mach-O byte conversion failed");
+    writeFile(outputDirectory + "/darwin-" + name, machoBytes.unwrap());
+    require(readFile(outputDirectory + "/darwin-" + name) == machoBytes.unwrap(), name + ": Mach-O exact write failed");
+
+    var linux = emitArm64(program, "linux");
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    var elfBytes = byteString(elf.unwrap());
+    require(elfBytes.isOk(), name + ": ELF byte conversion failed");
+    writeFile(outputDirectory + "/linux-" + name, elfBytes.unwrap());
+    require(readFile(outputDirectory + "/linux-" + name) == elfBytes.unwrap(), name + ": ELF exact write failed");
+    println("native-raw-buffer-case " + name + " " + expectedStatus.toString());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 4, "expected fixture directory, staged source directory, and output directory");
+    var fixtures = argv[1];
+    var sourceDirectory = argv[2];
+    var outputDirectory = argv[3];
+    exercise(fixtures + "/valid.rey", "valid", 0, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/negative-create.rey", "negative-create", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/negative-grow.rey", "negative-grow", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/negative-length.rey", "negative-length", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/length-over-capacity.rey", "length-over-capacity", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/corrupt-magic.rey", "corrupt-magic", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/corrupt-length.rey", "corrupt-length", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/corrupt-reserved.rey", "corrupt-reserved", 1, sourceDirectory, outputDirectory);
+    exercise(fixtures + "/corrupt-null-data.rey", "corrupt-null-data", 1, sourceDirectory, outputDirectory);
+    println("raw byte buffer source fixtures ready");
+}

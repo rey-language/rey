@@ -1,0 +1,7 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(8);
+    __reyRawStoreI64(__reyRawOffset(handle, 8), 9);
+    var ignoredLength = buffer.rawBufferLength(handle);
+}

@@ -1,0 +1,7 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(8);
+    __reyRawStoreI64(handle, 0);
+    var ignoredCapacity = buffer.rawBufferCapacity(handle);
+}

@@ -1045,7 +1045,7 @@ func isRawIntrinsicName(name: string): bool {
     return name == "__reyRawNull" || name == "__reyRawMap" || name == "__reyRawUnmap" ||
         name == "__reyRawOffset" || name == "__reyRawLoadI64" || name == "__reyRawStoreI64" ||
         name == "__reyRawLoadByte" || name == "__reyRawStoreByte" || name == "__reyRawEqual" ||
-        name == "__reyRawLoadAddress" || name == "__reyRawStoreAddress";
+        name == "__reyRawLoadAddress" || name == "__reyRawStoreAddress" || name == "__reyRawFail";
 }
 
 func registerRawBuiltins(ctx: TypecheckContext) {
@@ -1064,6 +1064,7 @@ func registerRawBuiltins(ctx: TypecheckContext) {
     addBuiltin(ctx, "__reyRawEqual", makeSignature([raw, raw], 2, false, makeType("Unknown"), bool));
     addBuiltin(ctx, "__reyRawLoadAddress", makeSignature([raw], 1, false, makeType("Unknown"), raw));
     addBuiltin(ctx, "__reyRawStoreAddress", makeSignature([raw, raw], 2, false, makeType("Unknown"), void));
+    addBuiltin(ctx, "__reyRawFail", makeSignature([int], 1, false, makeType("Unknown"), void));
 }
 
 func llvmSymbolNameAt(moduleIndex: int, sourceName: string, owner: string): string {

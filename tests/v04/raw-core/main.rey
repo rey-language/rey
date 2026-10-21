@@ -13,10 +13,10 @@ func main(): void {
         ir.rawNull(0, source), ir.rawMap(1, 20, source), ir.rawUnmap(1, 20, source),
         ir.rawOffset(2, 1, 20, source), ir.rawLoadI64(3, 2, source), ir.rawStoreI64(2, 3, source),
         ir.rawLoadByte(4, 2, source), ir.rawStoreByte(2, 4, source), ir.rawEqual(5, 0, 1, source),
-        ir.rawLoadAddress(6, 2, source), ir.rawStoreAddress(2, 6, source)
+        ir.rawLoadAddress(6, 2, source), ir.rawStoreAddress(2, 6, source), ir.rawFail(20, source)
     ];
-    var arities: Vec<int> = [0, 1, 2, 2, 1, 2, 1, 2, 2, 1, 2];
-    var names: Vec<string> = ["raw.null", "raw.map", "raw.unmap", "raw.offset", "raw.load.i64", "raw.store.i64", "raw.load.byte", "raw.store.byte", "raw.equal", "raw.load.address", "raw.store.address"];
+    var arities: Vec<int> = [0, 1, 2, 2, 1, 2, 1, 2, 2, 1, 2, 1];
+    var names: Vec<string> = ["raw.null", "raw.map", "raw.unmap", "raw.offset", "raw.load.i64", "raw.store.i64", "raw.load.byte", "raw.store.byte", "raw.equal", "raw.load.address", "raw.store.address", "raw.fail"];
     var i = 0;
     while i < operations.len() {
         var operation = operations[i];
@@ -24,7 +24,7 @@ func main(): void {
         require(ir.rawInstructionName(operation.kind) == names[i], "instruction name");
         require(operation.immediate == 0 && operation.functionId == -1, "unused fields canonical");
         require(operation.source.unitId == "runtime.rey", "source retained");
-        if i == 2 || i == 5 || i == 7 || i == 10 {
+        if i == 2 || i == 5 || i == 7 || i == 10 || i == 11 {
             require(operation.resultId == -1 && operation.ty.kind == IRTypeKind::Void, "stores and unmap are void");
         }
         i += 1;

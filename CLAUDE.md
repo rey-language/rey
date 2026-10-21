@@ -10,6 +10,7 @@
 - User authorized narrowly scoped GPT-6 Luna medium workers, three at a time, writing their entire assigned code/fixtures before testing. Coordinator owns shared interfaces, integration and Git. Current branch differs from the divergent historical `codex` branch deliberately; preserve both.
 - The new `linux-x64` scalar target and ELF64 writer pass 64 source and two direct-IR executions under x64 emulation in the ARM64 Linux VM. Native x64 hardware, Windows and macOS Intel remain gates. Raw-memory work is a separate next wave, not a collector claim.
 - Trusted raw checking/IR/ARM64 primitives now pass 145 integration checks and 32 executions each on Darwin/Linux arm64. Ordinary compilation has no raw authority. Typed address cells support runtime metadata without integer casts; evaluator provenance checks remain distinct from native trusted-code preconditions. An owned raw byte-buffer module is the next runtime sector.
+- The owned raw byte buffer and explicit runtime failure extension pass 261 checks and 47 executions per ARM64 OS. The frontend-only baseline/candidate comparison retains identical 62/70 expected results with no regressions; eight mismatches remain. Tracing-layout metadata, liveness and scalar folding are the next scoped sectors. No automatic collector or inferred-region result is claimed.
 
 ## Core Rules
 

@@ -412,6 +412,12 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
         putStore(emitter, 11, slotOffset(slots, instruction.resultId));
         return;
     }
+    if instruction.kind == InstructionKind::RawFail {
+        var branchOffset = emitter.bytes.len();
+        emitWord(emitter, 335544320);
+        addFixup(emitter, branchOffset, 5, -1, -1, overflowOffset, 0);
+        return;
+    }
     if instruction.kind == InstructionKind::Call {
         var argumentIndex = 0;
         loop {

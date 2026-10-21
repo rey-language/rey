@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 NORMAL = "zero-initialized i64-min i64-max byte-zero byte-127 byte-128 byte-255 offset-access null-equal null-not-mapping-equal same-mapping-equal distinct-mappings-not-equal separate-mappings raw-call-block-param address-cell-null address-cell-roundtrip".split()
 ERRORS = "map-size-zero map-size-negative map-size-too-large offset-null offset-negative offset-overflow load-i64-unaligned store-i64-unaligned store-byte-negative store-byte-overflow unmap-size-zero unmap-syscall-failure load-address-unaligned store-address-unaligned".split()
 EXPECTED = {**dict.fromkeys(NORMAL, 2), **dict.fromkeys(ERRORS, 1)}
+FAILURE_CASES = {"fail-zero": 1, "fail-17": 1, "fail-negative": 1, "fail-max": 1, "fail-before-99": 1, "conditional-skip": 0}
+BUFFER_CASES = {"valid": 0, **dict.fromkeys("negative-create negative-grow negative-length length-over-capacity corrupt-magic corrupt-length corrupt-reserved corrupt-null-data".split(), 1)}
 
 
 def digest(path):
@@ -61,7 +63,9 @@ def main():
         env[name] = str(empty_path / "absent")
     markers = {"raw-core": "raw IR core fixtures passed", "raw-checker": "v0.4 raw checker fixtures passed",
                "raw-ir": "v04 raw IR verifier, evaluator, and effects passed", "arm64-raw": "",
-               "raw-pipeline": "raw source pipeline fixtures ready"}
+               "raw-pipeline": "raw source pipeline fixtures ready",
+               "raw-fail": "raw fail source, IR, evaluator, and ARM64 fixtures passed",
+               "raw-buffer": "raw byte buffer source fixtures ready"}
     linux_cases = {}
     for name, marker in markers.items():
         project = output / name
@@ -73,7 +77,7 @@ def main():
         if not built["passed"]:
             continue
         command = [str(executable)]
-        if name in ("arm64-raw", "raw-pipeline"):
+        if name in ("arm64-raw", "raw-pipeline", "raw-fail", "raw-buffer"):
             image_dir = project / "images"
             image_dir.mkdir()
             if name == "raw-pipeline":
@@ -81,9 +85,16 @@ def main():
                 shutil.copytree(ROOT / "tests/v04/raw-pipeline/fixtures", fixtures)
                 snapshots[name].update({str(p.relative_to(project)): digest(p) for p in sorted(fixtures.rglob("*.rey"))})
                 command.append(str(fixtures))
+            if name == "raw-buffer":
+                fixtures, sources = project / "fixtures", project / "sources"
+                shutil.copytree(ROOT / "tests/v04/raw-buffer/fixtures", fixtures)
+                (sources / "buffer").mkdir(parents=True)
+                shutil.copyfile(ROOT / "runtime-rey/buffer/main.rey", sources / "buffer/main.rey")
+                snapshots[name].update({str(p.relative_to(project)): digest(p) for folder in (fixtures, sources) for p in sorted(folder.rglob("*.rey"))})
+                command += [str(fixtures), str(sources)]
             command.append(str(image_dir))
         ran, stdout = run(name + "-run", command, marker=marker, env=env)
-        if not ran["passed"] or name not in ("arm64-raw", "raw-pipeline"):
+        if not ran["passed"] or name not in ("arm64-raw", "raw-pipeline", "raw-fail", "raw-buffer"):
             continue
         if name == "arm64-raw":
             parsed = [(key.decode(), int(status)) for key, status in re.findall(rb"^native-raw-case ([a-z0-9-]+) (\d+)$", stdout, re.M)]
@@ -91,6 +102,18 @@ def main():
             expected_files = {os_name + "-" + case for case in EXPECTED for os_name in ("darwin", "linux")}
             records.append(dict(label="raw-image-set", passed={p.name for p in image_dir.iterdir()} == expected_files and all(p.is_file() for p in image_dir.iterdir())))
             images = [(case, image_dir / ("darwin-" + case), image_dir / ("linux-" + case), status) for case, status in EXPECTED.items()]
+        elif name in ("raw-fail", "raw-buffer"):
+            cases = FAILURE_CASES if name == "raw-fail" else BUFFER_CASES
+            prefix = b"raw-fail-case" if name == "raw-fail" else b"native-raw-buffer-case"
+            parsed = [(key.decode(), int(status)) for key, status in re.findall(rb"^" + prefix + rb" ([a-z0-9-]+) (\d+)$", stdout, re.M)]
+            records.append(dict(label=name + "-manifest", passed=len(parsed) == len(cases) and len(dict(parsed)) == len(parsed) and dict(parsed) == cases))
+            expected_files = {os_name + "-" + case for case in cases for os_name in ("darwin", "linux")}
+            if name == "raw-buffer":
+                expected_files |= {case + ".ir" for case in cases}
+            actual_files = {p.name for p in image_dir.iterdir() if p.is_file()}
+            records.append(dict(label=name + "-image-set", passed=actual_files == expected_files))
+            snapshots[name].update({str(p.relative_to(project)): digest(p) for p in sorted(project.rglob("*.rey"))})
+            images = [(name + "-" + case, image_dir / ("darwin-" + case), image_dir / ("linux-" + case), status) for case, status in cases.items()]
         else:
             images = [("source-" + case, image_dir / (case + ".macho"), image_dir / (case + ".elf"), status) for case, status in {"memory": 0, "bad-byte": 1}.items()]
         for case, darwin, linux, status in images:
@@ -99,10 +122,13 @@ def main():
             if not exists:
                 continue
             artifacts[case] = dict(darwin_sha256=digest(darwin), linux_sha256=digest(linux), expected=status)
+            correct_format = darwin.read_bytes()[:8] == bytes.fromhex("cffaedfe0c000001") and linux.read_bytes()[:6] == b"\x7fELF\x02\x01" and linux.read_bytes()[18:20] == b"\xb7\x00"
+            records.append(dict(label=case + "-formats", passed=correct_format))
             linux_cases[case] = (linux, status)
             if platform.system() == "Darwin" and platform.machine() == "arm64":
                 darwin.chmod(0o755)
-                run(case + "-darwin-execute", [str(darwin)], expected=status, timeout=10)
+                execution, target_stdout = run(case + "-darwin-execute", [str(darwin)], expected=status, timeout=10)
+                execution["passed"] = execution["passed"] and target_stdout == b""
                 run(case + "-signature", ["/usr/bin/codesign", "--verify", "--strict", str(darwin)], timeout=10)
             else:
                 records.append(dict(label=case + "-darwin-execute", passed=False, reason="Darwin arm64 host required"))
@@ -110,7 +136,7 @@ def main():
         docker = shutil.which("docker")
         inspected, stdout = run("linux-image-inspect", [docker or "docker", "image", "inspect", "ubuntu:22.04", "--format", "{{.Id}}"], timeout=30)
         image_id = stdout.decode().strip()
-        if inspected["passed"] and image_id.startswith("sha256:") and len(linux_cases) == 32:
+        if inspected["passed"] and image_id.startswith("sha256:") and len(linux_cases) == 47:
             payload = io.BytesIO()
             with tarfile.open(fileobj=payload, mode="w") as archive:
                 for name, (image, status) in linux_cases.items():
@@ -126,6 +152,7 @@ def main():
                 "--tmpfs", "/work:exec", image_id, "/bin/sh", "-c", shell], input=payload.getvalue(), timeout=60)
             lines = stdout.decode(errors="replace").splitlines()
             records.append(dict(label="linux-host", passed=bool(lines) and lines[0] == "Linux aarch64"))
+            records.append(dict(label="linux-output-lines", passed=len(lines) == 1 + len(linux_cases)))
             observed = {}
             for line in lines[1:]:
                 fields = line.split()

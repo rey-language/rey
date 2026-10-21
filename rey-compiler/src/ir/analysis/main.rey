@@ -60,6 +60,9 @@ func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
     if instruction.kind == InstructionKind::RawOffset || instruction.kind == InstructionKind::RawEqual {
         return instruction.resultId >= 0 && instruction.operands.len() == 2;
     }
+    if instruction.kind == InstructionKind::RawFail {
+        return instruction.resultId == -1 && instruction.operands.len() == 1;
+    }
     if instruction.kind == InstructionKind::Call {
         var targetIndex = functionIndex(program, instruction.functionId);
         if targetIndex < 0 { return false; }

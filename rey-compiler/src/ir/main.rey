@@ -30,6 +30,7 @@ pub enum InstructionKind {
     RawEqual,
     RawLoadAddress,
     RawStoreAddress,
+    RawFail,
 }
 
 pub enum TerminatorKind {
@@ -352,6 +353,7 @@ pub func rawStoreByte(addressId: int, valueId: int, source: SourceRef): Instruct
 pub func rawEqual(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawEqual, resultId, irBool(), [leftId, rightId], source); }
 pub func rawLoadAddress(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawLoadAddress, resultId, irRawAddress(), [addressId], source); }
 pub func rawStoreAddress(addressId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawStoreAddress, -1, irVoid(), [addressId, valueId], source); }
+pub func rawFail(codeId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawFail, -1, irVoid(), [codeId], source); }
 
 pub func rawInstructionName(kind: InstructionKind): string {
     if kind == InstructionKind::RawNull { return "raw.null"; }
@@ -365,6 +367,7 @@ pub func rawInstructionName(kind: InstructionKind): string {
     if kind == InstructionKind::RawEqual { return "raw.equal"; }
     if kind == InstructionKind::RawLoadAddress { return "raw.load.address"; }
     if kind == InstructionKind::RawStoreAddress { return "raw.store.address"; }
+    if kind == InstructionKind::RawFail { return "raw.fail"; }
     return "";
 }
 
