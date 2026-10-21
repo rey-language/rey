@@ -1,0 +1,102 @@
+tests/v04/raw-buffer/fixtures/length-over-capacity.rey
+  s_3868795c391050::t_f70016ded96f5c 1-6
+docs/V0.4-PARALLEL-PHASES.md
+  s_3868795c391050::t_bed2e95a721699 68-72
+tests/v04/raw-buffer/fixtures/corrupt-magic.rey
+  s_3868795c391050::t_74218b5e0049e3 6
+  s_3868795c391050::t_f70016ded96f5c 1-5,7
+tests/v04/raw-buffer/fixtures/corrupt-reserved.rey
+  s_3868795c391050::t_f70016ded96f5c 1-5,7
+  s_3868795c391050::t_74218b5e0049e3 6
+tests/v04/raw-buffer/fixtures/negative-length.rey
+  s_3868795c391050::t_f70016ded96f5c 1-6
+tests/v04/raw-buffer/fixtures/valid.rey
+  s_3868795c391050::t_681ec684a7bc28 1-99,101-115
+  s_3868795c391050::t_b2dca869cd79c4 100
+scripts/v04-raw-test.py
+  s_3868795c391050::t_202eef83074049 19-20,66-68,80,88-94,97,105-116,125-126,130-131,139,155
+CLAUDE.md
+  s_3868795c391050::t_bed2e95a721699 13
+tests/v04/frontend-regression/run.py
+  s_3868795c391050::t_9eda9d509fd65a 1-195,239-261,263,265-266,269-314,316-406,408-417,421-427,429-439,441-446,449-455,457-462,464-471,474-491,501-513
+  s_3868795c391050::t_76ad805d6a5bab 407,418-420,428,440,447-448,456
+  s_3868795c391050::t_48d9626279b847 262,264,267-268,315
+  s_3868795c391050::t_3dd67476faf6bb 220-221
+  s_3868795c391050::t_5aa37900ba1056 196-219,222-238,463,472-473,492-500
+docs/V0.4-RAW-BUFFER-CONTRACT.md
+  s_3868795c391050::t_b0e3c94e78d8f9 66-70
+  s_3868795c391050::t_f8f1a61fc7c1c5 1-2,4-7,13-65,71-81
+  s_3868795c391050::t_bed2e95a721699 3,8-12
+tests/v04/raw-buffer/fixtures/negative-grow.rey
+  s_3868795c391050::t_f70016ded96f5c 1-6
+rey-compiler/src/ir/analysis/main.rey
+  s_3868795c391050::t_af9f36684084b3 63-65
+rey-compiler/src/ir/lower/main.rey
+  s_3868795c391050::t_b0e3c94e78d8f9 532,562
+rey-compiler/src/ir/eval/main.rey
+  s_3868795c391050::t_25bb5896bfc969 541-545
+tests/v04/raw-core/main.rey
+  s_3868795c391050::t_b0e3c94e78d8f9 16,18-19,27
+tests/v04/raw-buffer/main.rey
+  s_3868795c391050::t_a8c84ccb369d79 62
+  s_3868795c391050::t_7a100c749955ad 1-28,30-32,34-61,63-76
+  s_3868795c391050::t_b2dca869cd79c4 29,33
+runtime-rey/buffer/main.rey
+  s_3868795c391050::t_f105886637f07c 30,41,101
+  s_3868795c391050::t_5be3527d32f14c 104-105
+  s_3868795c391050::t_83621bbc65d2c1 1-29,31-40,42-100,102-103,106-122
+tests/v04/raw-buffer/verify.py
+  s_3868795c391050::t_c01dd0aaedd84e 54
+  s_3868795c391050::t_c58551bdcd3acc 1-53,55-78
+primer.md
+  s_3868795c391050::t_bed2e95a721699 11
+CHANGELOG.md
+  s_3868795c391050::t_bed2e95a721699 4
+rey-compiler/src/typecheck/main.rey
+  s_3868795c391050::t_4f32da16011c2a 1048,1067
+rey-compiler/src/native/arm64/main.rey
+  s_3868795c391050::t_a501a05540553b 415-420
+tests/v04/raw-buffer/run.sh
+  s_3868795c391050::t_c58551bdcd3acc 1-6,9-20
+  s_3868795c391050::t_b2dca869cd79c4 7-8
+tests/v04/raw-buffer/fixtures/negative-create.rey
+  s_3868795c391050::t_f70016ded96f5c 1-5
+tests/v04/raw-buffer/fixtures/corrupt-null-data.rey
+  s_3868795c391050::t_74218b5e0049e3 7
+  s_3868795c391050::t_f70016ded96f5c 1-6,8
+tests/v04/raw-buffer/fixtures/corrupt-length.rey
+  s_3868795c391050::t_74218b5e0049e3 6
+  s_3868795c391050::t_f70016ded96f5c 1-5,7
+rey-compiler/src/ir/main.rey
+  s_3868795c391050::t_b0e3c94e78d8f9 33,356,370
+tests/v04/raw-fail/main.rey
+  s_3868795c391050::t_c8d8399f21a241 2
+  s_3868795c391050::t_b87eb1d43b69ad 3,16,35,84,92
+  s_3868795c391050::t_efcd2692e6c0c7 1,4-15,17-34,36-83,85-91,93-125
+rey-compiler/frontend-main.rey
+  s_3868795c391050::t_7746d8cd5700d4 15-16,20,24,28-29,33
+  s_3868795c391050::t_bd44752d973e93 1-14,17-19,21-23,25-27,30-32,34-54
+docs/V0.4-RAW-MEMORY-CONTRACT.md
+  s_3868795c391050::t_b0e3c94e78d8f9 1,47,66-72
+  s_3868795c391050::t_bed2e95a721699 3-4
+rey-compiler/src/ir/verify/main.rey
+  s_3868795c391050::t_b5b769b9f258e8 433-437
+tests/v04/raw-fail/verify.py
+  s_3868795c391050::t_13896ec0549a28 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cf7380c43caccb4779d6c08521d1da9a47b24d2a",
+  "prompts": {},
+  "sessions": {
+    "s_3868795c391050": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15928-4757-7001-9551-d48d98915811",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "codex <codex@users.noreply.github.com>"
+    }
+  }
+}
