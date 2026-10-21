@@ -1,0 +1,95 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::{IRProgram, printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func expectedCode(name: string): int {
+    if name == "graph-cycle-growth" || name == "collect-before-8" || name == "construction-roots" || name == "raw-pointer-shape" || name == "context-cycles" || name == "native-collection-stress-128" { return 0; }
+    if name == "bad-create-capacity" { return 2101; }
+    if name == "corrupt-context" { return 2102; }
+    if name == "bad-root-index" || name == "bad-root-order" { return 2103; }
+    return -1;
+}
+
+func evaluationBudget(name: string): int {
+    if name == "graph-cycle-growth" { return 20000000; }
+    return 2000000;
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func emitImages(program: IRProgram, name: string, outputDirectory: string, reuseSlots: bool): void {
+    var darwin: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if reuseSlots { darwin = emitArm64WithReuse(program, "darwin"); }
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/darwin-" + name, macho.unwrap(), name + " Darwin");
+
+    var linux: Result<Arm64Code, string> = emitArm64(program, "linux");
+    if reuseSlots { linux = emitArm64WithReuse(program, "linux"); }
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-" + name, elf.unwrap(), name + " Linux");
+}
+
+func exercise(fixtures: string, sourceDirectory: string, outputDirectory: string, name: string, reuseSlots: bool): void {
+    var expected = expectedCode(name);
+    require(expected >= 0, "unknown fixture name: " + name);
+    var entryPath = sourceDirectory + "/main.rey";
+    var layoutPath = sourceDirectory + "/layout/main.rey";
+    var heapPath = sourceDirectory + "/heap/main.rey";
+    var gcPath = sourceDirectory + "/gc/main.rey";
+    writeFile(entryPath, readFile(fixtures + "/" + name + ".rey"));
+    require(checkSourceFileGraph(entryPath, "").isErr(), name + ": ordinary source checking must not authorize raw runtime units");
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [layoutPath, heapPath, gcPath, entryPath]);
+    if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    if name == "native-collection-stress-128" {
+        writeFile(outputDirectory + "/" + name + ".steps", "0");
+        writeFile(outputDirectory + "/" + name + ".evaluation", "native-only\n");
+    } else {
+        var evaluated = evaluateProgram(program, evaluationBudget(name), 64);
+        writeFile(outputDirectory + "/" + name + ".steps", evaluated.steps.toString());
+        if expected == 0 {
+            require(evaluated.ok && evaluated.isVoid, name + ": evaluator failed: " + evaluated.error);
+        } else {
+            require(!evaluated.ok, name + ": fixture should fail through RawFail");
+            require(evaluated.error.contains("trusted runtime failure code " + expected.toString()), name + ": expected RawFail " + expected.toString() + ", got " + evaluated.error);
+        }
+    }
+    writeFile(outputDirectory + "/" + name + ".ir", printIR(program));
+    emitImages(program, name, outputDirectory, reuseSlots);
+    println("fixed-gc-case " + name + " " + expected.toString());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 5 || argv.len() == 6, "expected fixture directory, staged source directory, output directory, case, and optional --reuse-slots");
+    var reuseSlots = false;
+    if argv.len() == 6 {
+        require(argv[5] == "--reuse-slots", "optional final argument must be --reuse-slots");
+        reuseSlots = true;
+    }
+    exercise(argv[1], argv[2], argv[3], argv[4], reuseSlots);
+}

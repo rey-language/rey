@@ -1,0 +1,573 @@
+import layout;
+
+func heapAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func heapFail(code: int): void {
+    __reyRawFail(code);
+    return;
+}
+
+func heapSmallClassSize(index: int): int {
+    if index == 0 { return 16; }
+    if index == 1 { return 32; }
+    if index == 2 { return 64; }
+    if index == 3 { return 128; }
+    if index == 4 { return 256; }
+    if index == 5 { return 512; }
+    if index == 6 { return 1024; }
+    if index == 7 { return 2048; }
+    if index == 8 { return 4096; }
+    if index == 9 { return 8192; }
+    if index == 10 { return 16384; }
+    return 0;
+}
+
+func heapClassForSize(size: int): int {
+    var index = 0;
+    while index < 11 {
+        if size <= heapSmallClassSize(index) { return index; }
+        index = index + 1;
+    }
+    return -1;
+}
+
+func heapExpectedSlots(classIndex: int, slotSize: int): int {
+    if classIndex == -1 { return 1; }
+    return 61440 / slotSize;
+}
+
+func heapContextReservedValidate(heap: __rey_raw_address): void {
+    var offset = 64;
+    while offset < 128 {
+        if __reyRawLoadI64(heapAddressAt(heap, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 8;
+    }
+    offset = 216;
+    while offset < 256 {
+        if __reyRawLoadI64(heapAddressAt(heap, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 8;
+    }
+}
+
+func heapContextValidate(heap: __rey_raw_address): void {
+    if __reyRawEqual(heap, __reyRawNull()) { heapFail(2002); return; }
+    if __reyRawLoadI64(heapAddressAt(heap, 0)) != 1380272200 { heapFail(2002); return; }
+    if __reyRawLoadI64(heapAddressAt(heap, 16)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 24)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 32)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 48)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 56)) < 0 { heapFail(2002); return; }
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    layout.layoutCount(registry);
+    __reyRawLoadAddress(heapAddressAt(heap, 40));
+    var index = 0;
+    while index < 11 {
+        __reyRawLoadAddress(heapAddressAt(heap, 128 + index * 8));
+        index = index + 1;
+    }
+    heapContextReservedValidate(heap);
+}
+
+func heapBlockReservedValidate(block: __rey_raw_address, slotCount: int): void {
+    var offset = 72;
+    while offset < 128 {
+        if __reyRawLoadI64(heapAddressAt(block, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 8;
+    }
+    offset = 128 + slotCount;
+    while offset < 4096 && offset % 8 != 0 {
+        if __reyRawLoadByte(heapAddressAt(block, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 1;
+    }
+    while offset + 8 <= 4096 {
+        if __reyRawLoadI64(heapAddressAt(block, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 8;
+    }
+    while offset < 4096 {
+        if __reyRawLoadByte(heapAddressAt(block, offset)) != 0 { heapFail(2002); return; }
+        offset = offset + 1;
+    }
+}
+
+func heapBlockAudit(block: __rey_raw_address): void {
+    var slotCount = __reyRawLoadI64(heapAddressAt(block, 40));
+    var nextUnused = __reyRawLoadI64(heapAddressAt(block, 64));
+    var liveCount = __reyRawLoadI64(heapAddressAt(block, 16));
+    var index = 0;
+    var countedLive = 0;
+    while index < nextUnused {
+        var flag = __reyRawLoadByte(heapAddressAt(block, 128 + index));
+        if flag > 1 { heapFail(2002); return; }
+        if flag == 1 { countedLive = countedLive + 1; }
+        index = index + 1;
+    }
+    if countedLive != liveCount { heapFail(2002); return; }
+    var freeHead = __reyRawLoadI64(heapAddressAt(block, 8));
+    if freeHead < -1 || freeHead >= nextUnused { heapFail(2002); return; }
+    var freeCount = 0;
+    var steps = 0;
+    while freeHead != -1 {
+        if freeHead < 0 || freeHead >= nextUnused || steps >= slotCount { heapFail(2002); return; }
+        if __reyRawLoadByte(heapAddressAt(block, 128 + freeHead)) != 0 { heapFail(2002); return; }
+        var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+        var slot = heapAddressAt(block, 4096 + freeHead * slotSize);
+        freeHead = __reyRawLoadI64(slot);
+        if freeHead < -1 || freeHead >= nextUnused { heapFail(2002); return; }
+        freeCount = freeCount + 1;
+        steps = steps + 1;
+    }
+    if freeCount != nextUnused - liveCount { heapFail(2002); return; }
+    heapBlockReservedValidate(block, slotCount);
+}
+
+func heapBlockValidate(block: __rey_raw_address, classIndex: int): void {
+    if __reyRawEqual(block, __reyRawNull()) { heapFail(2002); return; }
+    if __reyRawLoadI64(heapAddressAt(block, 56)) != 1380272203 { heapFail(2002); return; }
+    var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+    var originalLength = __reyRawLoadI64(heapAddressAt(block, 32));
+    var slotCount = __reyRawLoadI64(heapAddressAt(block, 40));
+    var actualClass = __reyRawLoadI64(heapAddressAt(block, 48));
+    if actualClass != classIndex || slotSize < 16 || slotSize % 16 != 0 { heapFail(2002); return; }
+    if slotCount != heapExpectedSlots(classIndex, slotSize) { heapFail(2002); return; }
+    if classIndex == -1 {
+        if slotSize <= 16384 || slotSize > 9223372036854771711 { heapFail(2002); return; }
+        if originalLength != 4096 + slotSize { heapFail(2002); return; }
+    } else {
+        if classIndex < 0 || classIndex > 10 || slotSize != heapSmallClassSize(classIndex) || originalLength != 65536 { heapFail(2002); return; }
+    }
+    if __reyRawLoadI64(heapAddressAt(block, 16)) < 0 || __reyRawLoadI64(heapAddressAt(block, 16)) > slotCount { heapFail(2002); return; }
+    if __reyRawLoadI64(heapAddressAt(block, 64)) < 0 || __reyRawLoadI64(heapAddressAt(block, 64)) > slotCount || __reyRawLoadI64(heapAddressAt(block, 64)) < __reyRawLoadI64(heapAddressAt(block, 16)) { heapFail(2002); return; }
+}
+
+func heapObjectId(heap: __rey_raw_address, object: __rey_raw_address): int {
+    var header = __reyRawLoadI64(object);
+    if header < 1 || header > 8589934591 { heapFail(2002); return 0; }
+    var mark = header / 4294967296;
+    if mark < 0 || mark > 1 { heapFail(2002); return 0; }
+    var id = header - mark * 4294967296;
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    var count = layout.layoutCount(registry);
+    if id < 1 || id > count { heapFail(2002); return 0; }
+    return id;
+}
+
+func heapObjectCheck(heap: __rey_raw_address, object: __rey_raw_address): int {
+    var id = heapObjectId(heap, object);
+    var payloadBytes = __reyRawLoadI64(heapAddressAt(object, 8));
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    if payloadBytes < 0 || payloadBytes != layout.layoutPayloadBytes(registry, id) { heapFail(2002); return 0; }
+    return payloadBytes;
+}
+
+func heapObjectPayload(heap: __rey_raw_address, object: __rey_raw_address, slotSize: int): int {
+    var payloadBytes = heapObjectCheck(heap, object);
+    if payloadBytes > slotSize - 16 { heapFail(2002); return 0; }
+    return payloadBytes;
+}
+
+func heapSlotAt(block: __rey_raw_address, index: int, slotSize: int): __rey_raw_address {
+    return heapAddressAt(block, 4096 + index * slotSize);
+}
+
+func heapInitializeObject(heap: __rey_raw_address, object: __rey_raw_address, id: int, payloadBytes: int): void {
+    __reyRawStoreI64(object, id);
+    __reyRawStoreI64(heapAddressAt(object, 8), payloadBytes);
+    var offset = 0;
+    while offset < payloadBytes {
+        __reyRawStoreByte(heapAddressAt(object, 16 + offset), 0);
+        offset = offset + 1;
+    }
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    var count = layout.layoutReferenceCount(registry, id);
+    var index = 0;
+    while index < count {
+        var referenceOffset = layout.layoutReferenceOffset(registry, id, index);
+        __reyRawStoreAddress(heapAddressAt(object, 16 + referenceOffset), __reyRawNull());
+        index = index + 1;
+    }
+}
+
+func heapPreflightCounts(heap: __rey_raw_address, payloadBytes: int): void {
+    if payloadBytes < 0 || payloadBytes > 9223372036854775791 { heapFail(2001); return; }
+    if __reyRawLoadI64(heapAddressAt(heap, 16)) >= 9223372036854775807 || __reyRawLoadI64(heapAddressAt(heap, 24)) > 9223372036854775807 - payloadBytes { heapFail(2001); return; }
+}
+
+func heapCreateSmallBlock(heap: __rey_raw_address, classIndex: int): __rey_raw_address {
+    var slotSize = heapSmallClassSize(classIndex);
+    var slotCount = 61440 / slotSize;
+    var originalLength = 65536;
+    if __reyRawLoadI64(heapAddressAt(heap, 32)) > 9223372036854775807 - originalLength { heapFail(2001); return __reyRawNull(); }
+    var block = __reyRawMap(originalLength);
+    var headOffset = 128 + classIndex * 8;
+    __reyRawStoreAddress(heapAddressAt(block, 0), __reyRawLoadAddress(heapAddressAt(heap, headOffset)));
+    __reyRawStoreI64(heapAddressAt(block, 8), -1);
+    __reyRawStoreI64(heapAddressAt(block, 16), 0);
+    __reyRawStoreI64(heapAddressAt(block, 24), slotSize);
+    __reyRawStoreI64(heapAddressAt(block, 32), originalLength);
+    __reyRawStoreI64(heapAddressAt(block, 40), slotCount);
+    __reyRawStoreI64(heapAddressAt(block, 48), classIndex);
+    __reyRawStoreI64(heapAddressAt(block, 56), 1380272203);
+    __reyRawStoreI64(heapAddressAt(block, 64), 0);
+    __reyRawStoreAddress(heapAddressAt(heap, headOffset), block);
+    __reyRawStoreI64(heapAddressAt(heap, 32), __reyRawLoadI64(heapAddressAt(heap, 32)) + originalLength);
+    return block;
+}
+
+func heapCreateLargeBlock(heap: __rey_raw_address, slotSize: int): __rey_raw_address {
+    if slotSize > 9223372036854771711 { heapFail(2001); return __reyRawNull(); }
+    var originalLength = 4096 + slotSize;
+    if __reyRawLoadI64(heapAddressAt(heap, 32)) > 9223372036854775807 - originalLength { heapFail(2001); return __reyRawNull(); }
+    var block = __reyRawMap(originalLength);
+    __reyRawStoreAddress(heapAddressAt(block, 0), __reyRawLoadAddress(heapAddressAt(heap, 40)));
+    __reyRawStoreI64(heapAddressAt(block, 8), -1);
+    __reyRawStoreI64(heapAddressAt(block, 16), 0);
+    __reyRawStoreI64(heapAddressAt(block, 24), slotSize);
+    __reyRawStoreI64(heapAddressAt(block, 32), originalLength);
+    __reyRawStoreI64(heapAddressAt(block, 40), 1);
+    __reyRawStoreI64(heapAddressAt(block, 48), -1);
+    __reyRawStoreI64(heapAddressAt(block, 56), 1380272203);
+    __reyRawStoreI64(heapAddressAt(block, 64), 0);
+    __reyRawStoreAddress(heapAddressAt(heap, 40), block);
+    __reyRawStoreI64(heapAddressAt(heap, 32), __reyRawLoadI64(heapAddressAt(heap, 32)) + originalLength);
+    return block;
+}
+
+func heapFindSmallBlock(heap: __rey_raw_address, classIndex: int): __rey_raw_address {
+    var headOffset = 128 + classIndex * 8;
+    var block = __reyRawLoadAddress(heapAddressAt(heap, headOffset));
+    var steps = 0;
+    var limit = __reyRawLoadI64(heapAddressAt(heap, 32)) / 65536;
+    while !__reyRawEqual(block, __reyRawNull()) {
+        if steps >= limit { heapFail(2002); return __reyRawNull(); }
+        heapBlockValidate(block, classIndex);
+        if __reyRawLoadI64(heapAddressAt(block, 8)) != -1 || __reyRawLoadI64(heapAddressAt(block, 64)) < __reyRawLoadI64(heapAddressAt(block, 40)) { return block; }
+        block = __reyRawLoadAddress(heapAddressAt(block, 0));
+        steps = steps + 1;
+    }
+    return heapCreateSmallBlock(heap, classIndex);
+}
+
+func heapTakeSlot(block: __rey_raw_address): __rey_raw_address {
+    var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+    var freeHead = __reyRawLoadI64(heapAddressAt(block, 8));
+    var nextUnused = __reyRawLoadI64(heapAddressAt(block, 64));
+    if freeHead < -1 || freeHead >= nextUnused { heapFail(2002); return __reyRawNull(); }
+    var index = 0;
+    if freeHead != -1 {
+        index = freeHead;
+        if __reyRawLoadByte(heapAddressAt(block, 128 + index)) != 0 { heapFail(2002); return __reyRawNull(); }
+        var freeSlot = heapSlotAt(block, index, slotSize);
+        var nextFree = __reyRawLoadI64(freeSlot);
+        if nextFree < -1 || nextFree >= nextUnused { heapFail(2002); return __reyRawNull(); }
+        if nextFree == index { heapFail(2002); return __reyRawNull(); }
+        if nextFree != -1 && __reyRawLoadByte(heapAddressAt(block, 128 + nextFree)) != 0 { heapFail(2002); return __reyRawNull(); }
+        __reyRawStoreI64(heapAddressAt(block, 8), nextFree);
+    } else {
+        index = nextUnused;
+        if index >= __reyRawLoadI64(heapAddressAt(block, 40)) { heapFail(2002); return __reyRawNull(); }
+        if __reyRawLoadByte(heapAddressAt(block, 128 + index)) != 0 { heapFail(2002); return __reyRawNull(); }
+        __reyRawStoreI64(heapAddressAt(block, 64), index + 1);
+    }
+    __reyRawStoreByte(heapAddressAt(block, 128 + index), 1);
+    __reyRawStoreI64(heapAddressAt(block, 16), __reyRawLoadI64(heapAddressAt(block, 16)) + 1);
+    return heapSlotAt(block, index, slotSize);
+}
+
+func heapAllocateSmall(heap: __rey_raw_address, id: int, payloadBytes: int, slotSize: int, classIndex: int): __rey_raw_address {
+    heapPreflightCounts(heap, payloadBytes);
+    var block = heapFindSmallBlock(heap, classIndex);
+    var object = heapTakeSlot(block);
+    heapInitializeObject(heap, object, id, payloadBytes);
+    __reyRawStoreI64(heapAddressAt(heap, 16), __reyRawLoadI64(heapAddressAt(heap, 16)) + 1);
+    __reyRawStoreI64(heapAddressAt(heap, 24), __reyRawLoadI64(heapAddressAt(heap, 24)) + payloadBytes);
+    return object;
+}
+
+func heapAllocateLarge(heap: __rey_raw_address, id: int, payloadBytes: int, slotSize: int): __rey_raw_address {
+    heapPreflightCounts(heap, payloadBytes);
+    var block = heapCreateLargeBlock(heap, slotSize);
+    var object = heapTakeSlot(block);
+    heapInitializeObject(heap, object, id, payloadBytes);
+    __reyRawStoreI64(heapAddressAt(heap, 16), __reyRawLoadI64(heapAddressAt(heap, 16)) + 1);
+    __reyRawStoreI64(heapAddressAt(heap, 24), __reyRawLoadI64(heapAddressAt(heap, 24)) + payloadBytes);
+    return object;
+}
+
+pub func heapCreate(registry: __rey_raw_address): __rey_raw_address {
+    layout.layoutCount(registry);
+    var heap = __reyRawMap(256);
+    __reyRawStoreI64(heapAddressAt(heap, 0), 1380272200);
+    __reyRawStoreAddress(heapAddressAt(heap, 8), registry);
+    __reyRawStoreI64(heapAddressAt(heap, 16), 0);
+    __reyRawStoreI64(heapAddressAt(heap, 24), 0);
+    __reyRawStoreI64(heapAddressAt(heap, 32), 0);
+    __reyRawStoreAddress(heapAddressAt(heap, 40), __reyRawNull());
+    __reyRawStoreI64(heapAddressAt(heap, 48), 0);
+    __reyRawStoreI64(heapAddressAt(heap, 56), 0);
+    var index = 0;
+    while index < 11 {
+        __reyRawStoreAddress(heapAddressAt(heap, 128 + index * 8), __reyRawNull());
+        index = index + 1;
+    }
+    return heap;
+}
+
+pub func heapRegistry(heap: __rey_raw_address): __rey_raw_address {
+    heapContextValidate(heap);
+    return __reyRawLoadAddress(heapAddressAt(heap, 8));
+}
+
+pub func heapAllocate(heap: __rey_raw_address, layoutId: int): __rey_raw_address {
+    heapContextValidate(heap);
+    var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
+    var payloadBytes = layout.layoutPayloadBytes(registry, layoutId);
+    var referenceCount = layout.layoutReferenceCount(registry, layoutId);
+    var index = 0;
+    while index < referenceCount {
+        layout.layoutReferenceOffset(registry, layoutId, index);
+        index = index + 1;
+    }
+    if payloadBytes > 9223372036854775791 { heapFail(2001); return __reyRawNull(); }
+    var actualSize = 16 + payloadBytes;
+    if actualSize > 9223372036854775791 { heapFail(2001); return __reyRawNull(); }
+    var slotSize = (actualSize + 15) / 16 * 16;
+    if slotSize < actualSize { heapFail(2001); return __reyRawNull(); }
+    var classIndex = heapClassForSize(slotSize);
+    if classIndex == -1 {
+        if slotSize > 9223372036854771711 { heapFail(2001); return __reyRawNull(); }
+        return heapAllocateLarge(heap, layoutId, payloadBytes, slotSize);
+    }
+    return heapAllocateSmall(heap, layoutId, payloadBytes, slotSize, classIndex);
+}
+
+pub func heapMark(heap: __rey_raw_address, object: __rey_raw_address): bool {
+    heapContextValidate(heap);
+    if __reyRawEqual(object, __reyRawNull()) { return false; }
+    heapObjectCheck(heap, object);
+    var header = __reyRawLoadI64(object);
+    var mark = header / 4294967296;
+    if mark == 1 { return false; }
+    __reyRawStoreI64(object, header + 4294967296);
+    return true;
+}
+
+func heapScanList(heap: __rey_raw_address, headOffset: int, classIndex: int, metric: int): int {
+    var block = __reyRawLoadAddress(heapAddressAt(heap, headOffset));
+    var total = 0;
+    var steps = 0;
+    var limit = __reyRawLoadI64(heapAddressAt(heap, 32)) / 4096 + 1;
+    while !__reyRawEqual(block, __reyRawNull()) {
+        if steps >= limit { heapFail(2002); return 0; }
+        heapBlockValidate(block, classIndex);
+        var originalLength = __reyRawLoadI64(heapAddressAt(block, 32));
+        if metric == 2 { total = total + originalLength; }
+        var nextUnused = __reyRawLoadI64(heapAddressAt(block, 64));
+        var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+        var index = 0;
+        if metric == 0 { total = total + __reyRawLoadI64(heapAddressAt(block, 16)); }
+        while metric == 1 && index < nextUnused {
+            if __reyRawLoadByte(heapAddressAt(block, 128 + index)) == 1 {
+                var object = heapSlotAt(block, index, slotSize);
+                total = total + heapObjectPayload(heap, object, slotSize);
+            }
+            index = index + 1;
+        }
+        block = __reyRawLoadAddress(heapAddressAt(block, 0));
+        steps = steps + 1;
+    }
+    return total;
+}
+
+func heapAuditList(heap: __rey_raw_address, headOffset: int, classIndex: int): void {
+    var block = __reyRawLoadAddress(heapAddressAt(heap, headOffset));
+    var steps = 0;
+    var limit = __reyRawLoadI64(heapAddressAt(heap, 32)) / 4096 + 1;
+    while !__reyRawEqual(block, __reyRawNull()) {
+        if steps >= limit { heapFail(2002); return; }
+        heapBlockValidate(block, classIndex);
+        heapBlockAudit(block);
+        block = __reyRawLoadAddress(heapAddressAt(block, 0));
+        steps = steps + 1;
+    }
+}
+
+func heapAuditAll(heap: __rey_raw_address): void {
+    var index = 0;
+    while index < 11 {
+        heapAuditList(heap, 128 + index * 8, index);
+        index = index + 1;
+    }
+    heapAuditList(heap, 40, -1);
+}
+
+func heapScanAll(heap: __rey_raw_address, metric: int): int {
+    var index = 0;
+    var total = 0;
+    while index < 11 {
+        total = total + heapScanList(heap, 128 + index * 8, index, metric);
+        index = index + 1;
+    }
+    total = total + heapScanList(heap, 40, -1, metric);
+    return total;
+}
+
+func heapValidateTotals(heap: __rey_raw_address): void {
+    var objects = heapScanAll(heap, 0);
+    var payloadBytes = heapScanAll(heap, 1);
+    var objectBytes = heapScanAll(heap, 2);
+    if objects != __reyRawLoadI64(heapAddressAt(heap, 16)) || payloadBytes != __reyRawLoadI64(heapAddressAt(heap, 24)) || objectBytes != __reyRawLoadI64(heapAddressAt(heap, 32)) { heapFail(2002); return; }
+}
+
+func heapProcessBlock(heap: __rey_raw_address, block: __rey_raw_address, classIndex: int): int {
+    var nextUnused = __reyRawLoadI64(heapAddressAt(block, 64));
+    var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+    var index = 0;
+    var kept = 0;
+    var reclaimed = 0;
+    while index < nextUnused {
+        if __reyRawLoadByte(heapAddressAt(block, 128 + index)) == 1 {
+            var object = heapSlotAt(block, index, slotSize);
+            heapObjectPayload(heap, object, slotSize);
+            var header = __reyRawLoadI64(object);
+            var mark = header / 4294967296;
+            var id = header - mark * 4294967296;
+            if mark == 1 {
+                __reyRawStoreI64(object, id);
+                kept = kept + 1;
+            } else {
+                __reyRawStoreByte(heapAddressAt(block, 128 + index), 0);
+                reclaimed = reclaimed + 1;
+            }
+        }
+        index = index + 1;
+    }
+    __reyRawStoreI64(heapAddressAt(block, 16), kept);
+    return reclaimed;
+}
+
+func heapRebuildFreeList(block: __rey_raw_address): void {
+    var index = 0;
+    var nextUnused = __reyRawLoadI64(heapAddressAt(block, 64));
+    var slotSize = __reyRawLoadI64(heapAddressAt(block, 24));
+    var freeHead = -1;
+    while index < nextUnused {
+        if __reyRawLoadByte(heapAddressAt(block, 128 + index)) == 0 {
+            var slot = heapSlotAt(block, index, slotSize);
+            __reyRawStoreI64(slot, freeHead);
+            freeHead = index;
+        }
+        index = index + 1;
+    }
+    __reyRawStoreI64(heapAddressAt(block, 8), freeHead);
+}
+
+func heapSweepList(heap: __rey_raw_address, headOffset: int, classIndex: int): int {
+    var block = __reyRawLoadAddress(heapAddressAt(heap, headOffset));
+    var previous = __reyRawNull();
+    var steps = 0;
+    var limit = __reyRawLoadI64(heapAddressAt(heap, 32)) / 4096 + 1;
+    var reclaimed = 0;
+    while !__reyRawEqual(block, __reyRawNull()) {
+        if steps >= limit { heapFail(2002); return 0; }
+        heapBlockValidate(block, classIndex);
+        var next = __reyRawLoadAddress(heapAddressAt(block, 0));
+        reclaimed = reclaimed + heapProcessBlock(heap, block, classIndex);
+        if __reyRawLoadI64(heapAddressAt(block, 16)) == 0 {
+            if __reyRawEqual(previous, __reyRawNull()) {
+                __reyRawStoreAddress(heapAddressAt(heap, headOffset), next);
+            } else {
+                __reyRawStoreAddress(heapAddressAt(previous, 0), next);
+            }
+            var originalLength = __reyRawLoadI64(heapAddressAt(block, 32));
+            __reyRawUnmap(block, originalLength);
+            __reyRawStoreI64(heapAddressAt(heap, 32), __reyRawLoadI64(heapAddressAt(heap, 32)) - originalLength);
+        } else {
+            heapRebuildFreeList(block);
+            previous = block;
+        }
+        block = next;
+        steps = steps + 1;
+    }
+    return reclaimed;
+}
+
+pub func heapSweep(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    heapAuditAll(heap);
+    heapValidateTotals(heap);
+    if __reyRawLoadI64(heapAddressAt(heap, 48)) >= 9223372036854775807 { heapFail(2001); return 0; }
+    var oldObjects = __reyRawLoadI64(heapAddressAt(heap, 16));
+    var reclaimed = 0;
+    var index = 0;
+    while index < 11 {
+        reclaimed = reclaimed + heapSweepList(heap, 128 + index * 8, index);
+        index = index + 1;
+    }
+    reclaimed = reclaimed + heapSweepList(heap, 40, -1);
+    var objects = heapScanAll(heap, 0);
+    var payloadBytes = heapScanAll(heap, 1);
+    var objectBytes = heapScanAll(heap, 2);
+    __reyRawStoreI64(heapAddressAt(heap, 16), objects);
+    __reyRawStoreI64(heapAddressAt(heap, 24), payloadBytes);
+    __reyRawStoreI64(heapAddressAt(heap, 32), objectBytes);
+    __reyRawStoreI64(heapAddressAt(heap, 48), __reyRawLoadI64(heapAddressAt(heap, 48)) + 1);
+    __reyRawStoreI64(heapAddressAt(heap, 56), reclaimed);
+    if oldObjects - objects != reclaimed { heapFail(2002); return 0; }
+    return reclaimed;
+}
+
+func heapReleaseList(heap: __rey_raw_address, headOffset: int, classIndex: int): void {
+    var block = __reyRawLoadAddress(heapAddressAt(heap, headOffset));
+    var steps = 0;
+    var limit = __reyRawLoadI64(heapAddressAt(heap, 32)) / 4096 + 1;
+    while !__reyRawEqual(block, __reyRawNull()) {
+        if steps >= limit { heapFail(2002); return; }
+        heapBlockValidate(block, classIndex);
+        heapBlockAudit(block);
+        var next = __reyRawLoadAddress(heapAddressAt(block, 0));
+        var originalLength = __reyRawLoadI64(heapAddressAt(block, 32));
+        __reyRawUnmap(block, originalLength);
+        block = next;
+        steps = steps + 1;
+    }
+}
+
+pub func heapDestroy(heap: __rey_raw_address): void {
+    heapContextValidate(heap);
+    var index = 0;
+    while index < 11 {
+        heapReleaseList(heap, 128 + index * 8, index);
+        index = index + 1;
+    }
+    heapReleaseList(heap, 40, -1);
+    __reyRawStoreI64(heapAddressAt(heap, 0), 0);
+    __reyRawUnmap(heap, 256);
+}
+
+pub func heapLiveObjects(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return __reyRawLoadI64(heapAddressAt(heap, 16));
+}
+
+pub func heapLivePayloadBytes(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return __reyRawLoadI64(heapAddressAt(heap, 24));
+}
+
+pub func heapRequestedObjectBytes(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return __reyRawLoadI64(heapAddressAt(heap, 32));
+}
+
+pub func heapRequestedMetadataBytes(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return 256;
+}
+
+pub func heapCollectionCount(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return __reyRawLoadI64(heapAddressAt(heap, 48));
+}
+
+pub func heapLastReclaimedObjects(heap: __rey_raw_address): int {
+    heapContextValidate(heap);
+    return __reyRawLoadI64(heapAddressAt(heap, 56));
+}

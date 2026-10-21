@@ -1,0 +1,444 @@
+import ir;
+import ir::{IRProgram, IRFunction, IRType, IRValue, BasicBlock, Instruction, EffectSummary, Escape, SourceRef};
+import ir::liveness::{FunctionLiveness, InstructionLiveness, analyzeProgram};
+import ir::storage::{ProgramSlots, FunctionSlots, ValueSlot, planSlots};
+import frontend::graph::{checkSourceFileGraph};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("ir-storage failure: " + message); exit(1); }
+}
+
+func source(start: int): SourceRef {
+    return ir.sourceRef("storage-fixture.rey", start, start + 1);
+}
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeUnknown());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+}
+
+func makeFunction(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, returnType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("storage-fixture", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func makeProgram(functions: Vec<IRFunction>): IRProgram {
+    return ir.irProgram(0, functions);
+}
+
+func voidEntry(): IRFunction {
+    return makeFunction(0, "entry", [], [], ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source(1)))]);
+}
+
+func findFunctionSlots(programSlots: ProgramSlots, functionId: int): FunctionSlots {
+    var i = 0;
+    loop {
+        if i >= programSlots.functions.len() { break; }
+        if programSlots.functions[i].functionId == functionId { return programSlots.functions[i]; }
+        i = i + 1;
+    }
+    return FunctionSlots { functionId: -1, values: [], slotCount: -1 };
+}
+
+func findSlot(functionSlots: FunctionSlots, valueId: int): int {
+    var i = 0;
+    loop {
+        if i >= functionSlots.values.len() { break; }
+        if functionSlots.values[i].valueId == valueId { return functionSlots.values[i].index; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func expectConflict(functionSlots: FunctionSlots, leftId: int, rightId: int, label: string): void {
+    if leftId == rightId { return; }
+    var leftSlot = findSlot(functionSlots, leftId);
+    var rightSlot = findSlot(functionSlots, rightId);
+    require(leftSlot >= 0 && rightSlot >= 0, label + ": conflict value missing from plan");
+    require(leftSlot != rightSlot, label + ": conflicting values share slot " + leftSlot.toString());
+}
+
+func oracleSetConflicts(functionSlots: FunctionSlots, values: Vec<int>, label: string): void {
+    var left = 0;
+    loop {
+        if left >= values.len() { break; }
+        var right = left + 1;
+        loop {
+            if right >= values.len() { break; }
+            expectConflict(functionSlots, values[left], values[right], label);
+            right = right + 1;
+        }
+        left = left + 1;
+    }
+}
+
+func oracleParameterConflicts(functionSlots: FunctionSlots, parameters: Vec<IRValue>, label: string): void {
+    var i = 0;
+    loop {
+        if i >= parameters.len() { break; }
+        var j = i + 1;
+        loop {
+            if j >= parameters.len() { break; }
+            expectConflict(functionSlots, parameters[i].id, parameters[j].id, label);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+func expectedDefinitions(function: IRFunction): Vec<int> {
+    var values: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= function.parameters.len() { break; }
+        values.push(function.parameters[i].id);
+        i = i + 1;
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        var parameterIndex = 0;
+        loop {
+            if parameterIndex >= block.params.len() { break; }
+            values.push(block.params[parameterIndex].id);
+            parameterIndex = parameterIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var resultId = block.instructions[instructionIndex].resultId;
+            if resultId >= 0 { values.push(resultId); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return values;
+}
+
+func checkFunctionOracle(function: IRFunction, live: FunctionLiveness, planned: FunctionSlots, label: string): void {
+    require(planned.functionId == function.id, label + ": function order or ID differs");
+    var definitions = expectedDefinitions(function);
+    require(planned.values.len() == definitions.len(), label + ": definition count differs");
+    var used: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= planned.values.len() { break; }
+        var value = planned.values[i];
+        require(value.valueId == definitions[i], label + ": definition order differs");
+        require(value.index >= 0 && value.index < planned.slotCount, label + ": slot index out of range");
+        require(planned.slotCount <= planned.values.len(), label + ": slot count exceeds definition count");
+        i = i + 1;
+    }
+    if planned.slotCount == 0 {
+        require(planned.values.len() == 0, label + ": nonempty map has zero slots");
+    } else {
+        i = 0;
+        loop {
+            if i >= planned.slotCount { break; }
+            used.push(0);
+            i = i + 1;
+        }
+        i = 0;
+        loop {
+            if i >= planned.values.len() { break; }
+            var slot = planned.values[i].index;
+            used.set(slot, 1);
+            i = i + 1;
+        }
+        i = 0;
+        loop {
+            if i >= used.len() { break; }
+            require(used[i] == 1, label + ": slots are not contiguous from zero");
+            i = i + 1;
+        }
+    }
+
+    oracleParameterConflicts(planned, function.parameters, label + " formal parameters");
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        var liveBlock = live.blocks[blockIndex];
+        require(liveBlock.blockId == block.id, label + ": liveness block order differs");
+        oracleSetConflicts(planned, liveBlock.liveIn, label + " liveIn");
+        oracleSetConflicts(planned, liveBlock.liveOut, label + " liveOut");
+        oracleSetConflicts(planned, liveBlock.liveAtTerminator, label + " liveAtTerminator");
+        oracleParameterConflicts(planned, block.params, label + " block parameters");
+        var parameterIndex = 0;
+        loop {
+            if parameterIndex >= block.params.len() { break; }
+            var liveIndex = 0;
+            loop {
+                if liveIndex >= liveBlock.liveIn.len() { break; }
+                expectConflict(planned, block.params[parameterIndex].id, liveBlock.liveIn[liveIndex], label + " block parameter versus entry live value");
+                liveIndex = liveIndex + 1;
+            }
+            parameterIndex = parameterIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= liveBlock.instructions.len() { break; }
+            var snapshot: InstructionLiveness = liveBlock.instructions[instructionIndex];
+            oracleSetConflicts(planned, snapshot.liveBefore, label + " liveBefore");
+            oracleSetConflicts(planned, snapshot.liveAfter, label + " liveAfter");
+            var resultId = block.instructions[snapshot.instructionIndex].resultId;
+            if resultId >= 0 {
+                var liveIndex = 0;
+                loop {
+                    if liveIndex >= snapshot.liveAfter.len() { break; }
+                    expectConflict(planned, resultId, snapshot.liveAfter[liveIndex], label + " instruction definition versus liveAfter");
+                    liveIndex = liveIndex + 1;
+                }
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+}
+
+func checkOracle(program: IRProgram, planned: ProgramSlots, label: string): void {
+    var livenessResult = analyzeProgram(program);
+    require(livenessResult.isOk(), label + ": independent liveness failed");
+    var live = livenessResult.unwrap();
+    require(planned.functions.len() == program.functions.len(), label + ": function count differs");
+    require(live.functions.len() == program.functions.len(), label + ": liveness function count differs");
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        checkFunctionOracle(program.functions[i], live.functions[i], planned.functions[i], label);
+        i = i + 1;
+    }
+}
+
+func straightLineProgram(): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(4000000001, 10, source(10)),
+        ir.constI64(7000000003, 20, source(20)),
+        ir.addCheckedI64(8000000009, 4000000001, 7000000003, source(30))
+    ];
+    var body = makeFunction(1, "sparseStraightLine", [], [], ir.irI64(), [ir.basicBlock(91, [], instructions, ir.returnValue(8000000009, source(40)))]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func deadWriteProgram(): IRProgram {
+    var params: Vec<IRValue> = [ir.irValue(81, ir.irI64())];
+    var types: Vec<IRType> = [ir.irI64()];
+    var instructions: Vec<Instruction> = [ir.constI64(9000000011, 3, source(50)), ir.constI64(9000000017, 4, source(60))];
+    var body = makeFunction(1, "deadWritesAcrossLiveValue", params, types, ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(81, source(70)))]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func deadFormalProgram(): IRProgram {
+    var params: Vec<IRValue> = [ir.irValue(101, ir.irI64()), ir.irValue(202, ir.irBool()), ir.irValue(303, ir.irRawAddress())];
+    var types: Vec<IRType> = [ir.irI64(), ir.irBool(), ir.irRawAddress()];
+    var body = makeFunction(1, "deadFormalParameters", params, types, ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source(80)))]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func deadBlockParametersProgram(): IRProgram {
+    var blockParams: Vec<IRValue> = [ir.irValue(8001, ir.irI64()), ir.irValue(8002, ir.irBool())];
+    var entryInstructions: Vec<Instruction> = [ir.constI64(7001, 41, source(90)), ir.constI64(7002, 1, source(100)), ir.constBool(7003, true, source(110))];
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.jump(99, [7002, 7003], source(120)));
+    var continuation = ir.basicBlock(99, blockParams, [], ir.returnValue(7001, source(130)));
+    var body = makeFunction(1, "deadBlockParametersAcrossLiveValue", [], [], ir.irI64(), [entry, continuation]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func parallelSwapProgram(): IRProgram {
+    var params: Vec<IRValue> = [ir.irValue(6101, ir.irI64()), ir.irValue(6102, ir.irI64())];
+    var types: Vec<IRType> = [ir.irI64(), ir.irI64()];
+    var swapped: Vec<IRValue> = [ir.irValue(7101, ir.irI64()), ir.irValue(7102, ir.irI64())];
+    var entry = ir.basicBlock(0, [], [], ir.jump(77, [6102, 6101], source(140)));
+    var destination = ir.basicBlock(77, swapped, [ir.addCheckedI64(8101, 7101, 7102, source(150))], ir.returnValue(8101, source(160)));
+    var body = makeFunction(1, "parallelSwap", params, types, ir.irI64(), [entry, destination]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func loopProgram(): IRProgram {
+    var one = ir.constI64(1001, 1, source(170));
+    var limit = ir.constI64(1002, 8, source(180));
+    var entry = ir.basicBlock(0, [], [one], ir.jump(55, [1001], source(190)));
+    var headerParams: Vec<IRValue> = [ir.irValue(2001, ir.irI64())];
+    var headerInstructions: Vec<Instruction> = [
+        ir.addCheckedI64(2002, 2001, 1001, source(200)),
+        limit,
+        ir.compareI64(2003, ir.compareSlt(), 2002, 1002, source(210))
+    ];
+    var header = ir.basicBlock(55, headerParams, headerInstructions, ir.branch(2003, 55, [2002], 88, [2002], source(220)));
+    var exitParams: Vec<IRValue> = [ir.irValue(3001, ir.irI64())];
+    var exit = ir.basicBlock(88, exitParams, [], ir.returnValue(3001, source(230)));
+    var body = makeFunction(1, "loopCarried", [], [], ir.irI64(), [entry, header, exit]);
+    return makeProgram([voidEntry(), body]);
+}
+
+func callAndRecursionProgram(): IRProgram {
+    var entryInstructions: Vec<Instruction> = [ir.constI64(4001, 5, source(240)), ir.call(4002, ir.irI64(), 1, [4001], source(250))];
+    var entry = makeFunction(0, "entry", [], [], ir.irVoid(), [ir.basicBlock(0, [], entryInstructions, ir.returnVoid(source(260)))]);
+    var helperParams: Vec<IRValue> = [ir.irValue(5001, ir.irI64())];
+    var helperTypes: Vec<IRType> = [ir.irI64()];
+    var helper = makeFunction(1, "callTarget", helperParams, helperTypes, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(5001, source(270)))]);
+    var recursiveParams: Vec<IRValue> = [ir.irValue(6001, ir.irI64())];
+    var recursiveTypes: Vec<IRType> = [ir.irI64()];
+    var recursiveInstructions: Vec<Instruction> = [ir.call(6002, ir.irI64(), 2, [6001], source(280))];
+    var recursive = makeFunction(2, "recursiveCall", recursiveParams, recursiveTypes, ir.irI64(), [ir.basicBlock(0, [], recursiveInstructions, ir.returnValue(6001, source(290)))]);
+    return makeProgram([entry, helper, recursive]);
+}
+
+func rawProgram(): IRProgram {
+    var rawParams: Vec<IRValue> = [ir.irValue(9001, ir.irRawAddress())];
+    var rawTypes: Vec<IRType> = [ir.irRawAddress()];
+    var rawFunction = makeFunction(1, "rawAddressIdentity", rawParams, rawTypes, ir.irRawAddress(), [ir.basicBlock(0, [], [], ir.returnValue(9001, source(300)))]);
+    var size = ir.constI64(9101, 16, source(310));
+    var mapped = ir.rawMap(9102, 9101, source(320));
+    var offset = ir.rawOffset(9103, 9102, 9101, source(330));
+    var loaded = ir.rawLoadI64(9104, 9103, source(340));
+    var compared = ir.rawEqual(9105, 9102, 9103, source(350));
+    var store = ir.rawStoreI64(9103, 9104, source(360));
+    var rawBlock = ir.basicBlock(0, [], [size, mapped, offset, loaded, compared, store], ir.returnVoid(source(370)));
+    var rawOps = makeFunction(2, "rawAddressOperations", [], [], ir.irVoid(), [rawBlock]);
+    return makeProgram([voidEntry(), rawFunction, rawOps]);
+}
+
+func voidOnlyProgram(): IRProgram {
+    return makeProgram([voidEntry()]);
+}
+
+func invalidProgram(): IRProgram {
+    var broken = makeFunction(0, "entry", [], [], ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(999999, source(380)))]);
+    return ir.irProgram(0, [broken]);
+}
+
+func budgetProgram(parameterCount: int): IRProgram {
+    var parameters: Vec<IRValue> = [];
+    var parameterTypes: Vec<IRType> = [];
+    var index = 0;
+    loop {
+        if index >= parameterCount { break; }
+        parameters.push(ir.irValue(100000000000 + index, ir.irI64()));
+        parameterTypes.push(ir.irI64());
+        index = index + 1;
+    }
+    var wide = makeFunction(1, "wideDeadParameterSet", parameters, parameterTypes, ir.irVoid(), [ir.basicBlock(0, [], [], ir.returnVoid(source(390)))]);
+    return makeProgram([voidEntry(), wide]);
+}
+
+func requirePlan(program: IRProgram, label: string): ProgramSlots {
+    var result = planSlots(program);
+    if result.isErr() {
+        var error = result.unwrapErr();
+        eprintln("ir-storage failure: " + label + ": planning failed: " + error);
+        exit(1);
+    }
+    var slots = result.unwrap();
+    checkOracle(program, slots, label);
+    return slots;
+}
+
+func requireSamePlan(left: ProgramSlots, right: ProgramSlots, label: string): void {
+    require(left.functions.len() == right.functions.len(), label + ": function count changed across runs");
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= left.functions.len() { break; }
+        var leftFunction = left.functions[functionIndex];
+        var rightFunction = right.functions[functionIndex];
+        require(leftFunction.functionId == rightFunction.functionId && leftFunction.slotCount == rightFunction.slotCount && leftFunction.values.len() == rightFunction.values.len(), label + ": function map changed across runs");
+        var valueIndex = 0;
+        loop {
+            if valueIndex >= leftFunction.values.len() { break; }
+            require(leftFunction.values[valueIndex].valueId == rightFunction.values[valueIndex].valueId && leftFunction.values[valueIndex].index == rightFunction.values[valueIndex].index, label + ": value slot changed across runs");
+            valueIndex = valueIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+}
+
+func requireSafeSourcePlan(path: string): void {
+    var checked = checkSourceFileGraph(path, "");
+    if checked.isErr() { eprintln("safe source fixture typecheck: " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln("safe source fixture lower: " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    require(verified.ok, "safe source fixture verification: " + verified.errors.join("\n"));
+    program = inferEffects(program);
+    var result = planSlots(program);
+    if result.isErr() { eprintln("safe source workload must fit the deterministic planner budget: " + result.unwrapErr()); exit(1); }
+    var slots = result.unwrap();
+    require(slots.functions.len() >= 8, "safe source workload retains its multi-function call graph");
+    checkOracle(program, slots, "safe source workload");
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "expected safe source fixture path");
+    requireSafeSourcePlan(argv[1]);
+
+    var straightProgram = straightLineProgram();
+    var straight = requirePlan(straightProgram, "sparse straight line");
+    var straightFunction = findFunctionSlots(straight, 1);
+    require(straightFunction.values.len() == 3 && straightFunction.slotCount == 2, "sparse IDs use storage proportional to definitions and dying operands reuse slots");
+    require(straightFunction.values[0].valueId == 4000000001 && straightFunction.values[1].valueId == 7000000003 && straightFunction.values[2].valueId == 8000000009, "definition order is formal, block, instruction order");
+    require(findSlot(straightFunction, 8000000009) == findSlot(straightFunction, 4000000001) || findSlot(straightFunction, 8000000009) == findSlot(straightFunction, 7000000003), "result may reuse a dying operand slot");
+
+    var deadWrites = requirePlan(deadWriteProgram(), "dead instruction results");
+    var deadWriteFunction = findFunctionSlots(deadWrites, 1);
+    require(findSlot(deadWriteFunction, 9000000011) != findSlot(deadWriteFunction, 81), "unused first result cannot overwrite a live formal value");
+    require(findSlot(deadWriteFunction, 9000000017) != findSlot(deadWriteFunction, 81), "unused later result cannot overwrite a live formal value");
+
+    var deadFormals = requirePlan(deadFormalProgram(), "dead formal parameters");
+    var deadFormalFunction = findFunctionSlots(deadFormals, 1);
+    require(findSlot(deadFormalFunction, 101) != findSlot(deadFormalFunction, 202), "dead formal parameters conflict pairwise");
+    require(findSlot(deadFormalFunction, 101) != findSlot(deadFormalFunction, 303) && findSlot(deadFormalFunction, 202) != findSlot(deadFormalFunction, 303), "all dead formal parameter pairs are distinct");
+
+    var deadBlocks = requirePlan(deadBlockParametersProgram(), "dead block parameters and live entry value");
+    var deadBlockFunction = findFunctionSlots(deadBlocks, 1);
+    require(findSlot(deadBlockFunction, 8001) != findSlot(deadBlockFunction, 8002), "dead block parameters conflict pairwise");
+    require(findSlot(deadBlockFunction, 8001) != findSlot(deadBlockFunction, 7001) && findSlot(deadBlockFunction, 8002) != findSlot(deadBlockFunction, 7001), "dead block parameters cannot overwrite a dominating value live at block entry");
+
+    var swaps = requirePlan(parallelSwapProgram(), "parallel edge swap");
+    var swapFunction = findFunctionSlots(swaps, 1);
+    require(findSlot(swapFunction, 6101) != findSlot(swapFunction, 6102), "parallel swap source values remain distinct");
+    require(findSlot(swapFunction, 7101) != findSlot(swapFunction, 7102), "parallel swap target parameters remain distinct");
+
+    var loops = requirePlan(loopProgram(), "loop carried values");
+    require(findFunctionSlots(loops, 1).slotCount > 0, "loop and backedge receive a finite slot plan");
+
+    var calls = requirePlan(callAndRecursionProgram(), "calls and recursion");
+    require(findFunctionSlots(calls, 0).values.len() == 2, "call result is assigned even when dead");
+    require(findFunctionSlots(calls, 2).values.len() == 2, "recursive call result and formal are assigned");
+
+    var raw = requirePlan(rawProgram(), "raw address values and operations");
+    require(findSlot(findFunctionSlots(raw, 1), 9001) >= 0, "raw address formal receives an eight-byte slot");
+    require(findSlot(findFunctionSlots(raw, 2), 9103) >= 0, "raw offset result receives a slot");
+
+    var voidOnly = requirePlan(voidOnlyProgram(), "void-only function");
+    require(voidOnly.functions[0].values.len() == 0 && voidOnly.functions[0].slotCount == 0, "void-only function has no slots");
+
+    var repeated = planSlots(straightProgram);
+    require(repeated.isOk(), "repeat planner invocation succeeds");
+    requireSamePlan(straight, repeated.unwrap(), "repeatable map");
+    var mutatedOutput = straight.functions[1];
+    var originalMappedId = mutatedOutput.values[0].valueId;
+    mutatedOutput.values.set(0, ValueSlot { valueId: -99, index: -99 });
+    straight.functions.set(1, mutatedOutput);
+    require(repeated.unwrap().functions[1].values[0].valueId == originalMappedId, "independent planner outputs do not share mutable slot vectors");
+    require(straightProgram.functions[1].blocks[0].instructions[0].resultId == 4000000001, "planning did not mutate input IR");
+    straightProgram.functions[1].blocks[0].instructions.set(0, ir.constI64(123456789, 0, source(400)));
+    require(repeated.unwrap().functions[1].values[0].valueId == originalMappedId, "slot plan does not alias mutable input IR");
+
+    var invalid = planSlots(invalidProgram());
+    require(invalid.isErr() && invalid.unwrapErr().contains("liveness: IR verification failed"), "malformed IR and liveness errors are propagated");
+
+    var bounded = planSlots(budgetProgram(700));
+    require(bounded.isErr() && bounded.unwrapErr().contains("storage: planning work budget exhausted"), "bounded interference work fails safely without a partial map");
+    println("v0.4 conservative storage planner fixtures passed");
+}

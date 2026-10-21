@@ -1,0 +1,70 @@
+import gc::{gcAllocate, gcCollect, gcCreate, gcDestroy, gcRequestedMetadataBytes, gcRootCount, gcRootPop, gcRootPush, gcRootSet};
+import heap::{heapCreate, heapDestroy, heapLiveObjects};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2199); }
+}
+
+func addressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(2);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    var plainLayout = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    __reyRawUnmap(offsets, 8);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+
+    var first = gcAllocate(collector, nodeLayout, true);
+    var root = gcRootPush(collector, first);
+    var current = first;
+    var index = 0;
+    while index < 127 {
+        var next = gcAllocate(collector, nodeLayout, true);
+        __reyRawStoreAddress(addressAt(next, 16), current);
+        current = next;
+        gcRootSet(collector, root, current);
+        index = index + 1;
+    }
+    __reyRawStoreAddress(addressAt(first, 16), current);
+    var alias = gcRootPush(collector, current);
+    var nullRoot = gcRootPush(collector, __reyRawNull());
+    var holder = gcAllocate(collector, plainLayout, false);
+    var pointerShapedTarget = gcAllocate(collector, nodeLayout, false);
+    __reyRawStoreAddress(addressAt(holder, 16), pointerShapedTarget);
+    var holderRoot = gcRootPush(collector, holder);
+    while gcRootCount(collector) < 9 {
+        gcRootPush(collector, __reyRawNull());
+    }
+    check(gcRootCount(collector) == 9);
+    check(gcRequestedMetadataBytes(collector) == 192);
+    gcRootSet(collector, alias, current);
+    var reclaimed = gcCollect(collector);
+    check(reclaimed == 1);
+    check(heapLiveObjects(heap) == 129);
+
+    var popIndex = 8;
+    while popIndex >= 4 {
+        gcRootPop(collector, popIndex);
+        popIndex = popIndex - 1;
+    }
+    check(gcRootCount(collector) == 4);
+    gcRootSet(collector, alias, __reyRawNull());
+    gcRootPop(collector, holderRoot);
+    gcRootPop(collector, nullRoot);
+    gcRootPop(collector, alias);
+    gcRootSet(collector, root, __reyRawNull());
+    check(gcCollect(collector) == 129);
+    check(heapLiveObjects(heap) == 0);
+    gcRootPop(collector, root);
+    check(gcRootCount(collector) == 0);
+
+    gcDestroy(collector);
+    heapDestroy(heap);
+    layoutRegistryRelease(registry);
+}

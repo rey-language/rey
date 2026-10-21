@@ -38,6 +38,29 @@ func repeatedByte(value: int, count: int): Vec<int> {
 }
 
 func main(): void {
+    var emptyEncoding: Vec<int> = [];
+    require(byteString(emptyEncoding).unwrap() == "", "empty binary encoding");
+    require(byteString([0]).unwrap().len() == 1, "single NUL encoding");
+    var odd = byteString([255, 0, 128]).unwrap();
+    require(odd.len() == 3 && int(odd[0]) == 255 && int(odd[1]) == 0 && int(odd[2]) == 128, "odd binary encoding");
+    var large: Vec<int> = [];
+    var largeIndex = 0;
+    while largeIndex < 100001 {
+        large.push(largeIndex % 256);
+        largeIndex = largeIndex + 1;
+    }
+    var largeResult = byteString(large);
+    require(largeResult.isOk(), "large binary encoding");
+    var largeText = largeResult.unwrap();
+    require(largeText.len() == 100001, "large binary length");
+    largeIndex = 0;
+    while largeIndex < 100001 {
+        require(int(largeText[largeIndex]) == largeIndex % 256, "large binary byte preservation");
+        require(large[largeIndex] == largeIndex % 256, "large input unchanged");
+        largeIndex = largeIndex + 1;
+    }
+    var argv = args();
+    if argv.len() == 2 { writeFile(argv[1], largeText); }
     var empty: Vec<int> = Vec.new();
     require(hashHex(empty) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "FIPS empty hash");
     var abc: Vec<int> = [97, 98, 99];

@@ -1,6 +1,7 @@
 // Direct AArch64 emission for the verified scalar IR slice.
 import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRType, IRValue, CompareI64Predicate};
 import ir::verify::{verifyProgram};
+import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
 
 pub struct NativeFunctionOffset {
     pub functionId: int,
@@ -529,14 +530,24 @@ func resolveFunctionFixups(emitter: Emitter, function: IRFunction, localFixups: 
     }
 }
 
-func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string): void {
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string, layout: FunctionSlots, reuse: bool): void {
     if function.parameters.len() > 8 {
         emitter.error = "native arm64: functions with more than eight scalar arguments are unsupported";
         return;
     }
     var slots = collectSlots(function);
+    var slotCount = slots.len();
+    if reuse {
+        slots = [];
+        var slotIndex = 0;
+        while slotIndex < layout.values.len() {
+            slots.push(ValueSlot { valueId: layout.values[slotIndex].valueId, index: layout.values[slotIndex].index });
+            slotIndex = slotIndex + 1;
+        }
+        slotCount = layout.slotCount;
+    }
     var scratchBytes = maxEdgeParams(function) * 8;
-    var rawFrame = slots.len() * 8 + scratchBytes;
+    var rawFrame = slotCount * 8 + scratchBytes;
     if rawFrame > 4080 {
         emitter.error = "native arm64: stack frame exceeds the encodable 4080-byte limit";
         return;
@@ -556,7 +567,7 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
         putStore(emitter, parameterIndex, slotOffset(slots, function.parameters[parameterIndex].id));
         parameterIndex = parameterIndex + 1;
     }
-    var scratchOffset = slots.len() * 8;
+    var scratchOffset = slotCount * 8;
     var blockIndex = 0;
     loop {
         if blockIndex >= function.blocks.len() { break; }
@@ -608,7 +619,7 @@ func appendStub(emitter: Emitter, targetOS: string, entryFunction: IRFunction): 
     return overflowOffset;
 }
 
-pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, string> {
+func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Result<Arm64Code, string> {
     if targetOS != "darwin" && targetOS != "linux" {
         return Result.Err("native arm64: target OS must be darwin or linux");
     }
@@ -653,12 +664,24 @@ pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, stri
         }
         i = i + 1;
     }
+    var planned = ProgramSlots { functions: [] };
+    if reuse {
+        var result = planSlots(program);
+        if result.isErr() { return Result.Err("native arm64: " + result.unwrapErr()); }
+        planned = result.unwrap();
+        if planned.functions.len() != program.functions.len() { return Result.Err("native arm64: incomplete storage plan"); }
+    }
     var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "" };
     var overflowOffset = appendStub(emitter, targetOS, entryFunction);
     i = 0;
     loop {
         if i >= program.functions.len() { break; }
-        emitFunction(emitter, program.functions[i], overflowOffset, targetOS);
+        var layout = FunctionSlots { functionId: -1, values: [], slotCount: 0 };
+        if reuse {
+            layout = planned.functions[i];
+            if layout.functionId != program.functions[i].id { return Result.Err("native arm64: storage function order mismatch"); }
+        }
+        emitFunction(emitter, program.functions[i], overflowOffset, targetOS, layout, reuse);
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }
@@ -677,4 +700,12 @@ pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, stri
         i = i + 1;
     }
     return Result.Ok(Arm64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions });
+}
+
+pub func emitArm64(program: IRProgram, targetOS: string): Result<Arm64Code, string> {
+    return emitArm64Internal(program, targetOS, false);
+}
+
+pub func emitArm64WithReuse(program: IRProgram, targetOS: string): Result<Arm64Code, string> {
+    return emitArm64Internal(program, targetOS, true);
 }

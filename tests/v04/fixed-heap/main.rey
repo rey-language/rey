@@ -1,0 +1,123 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64, emitArm64WithReuse, Arm64Code};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func exercise(fixtures: string, sourceDirectory: string, outputDirectory: string, name: string, expectedCode: int, reuseSlots: bool): void {
+    var entryPath = sourceDirectory + "/main.rey";
+    var heapPath = sourceDirectory + "/heap/main.rey";
+    var layoutPath = sourceDirectory + "/layout/main.rey";
+    writeFile(entryPath, readFile(fixtures + "/" + name + ".rey"));
+    if name == "empty-counters" {
+        var ordinary = checkSourceFileGraph(entryPath, "");
+        require(ordinary.isErr(), "ordinary checking must not authorize raw runtime units");
+    }
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [heapPath, layoutPath, entryPath]);
+    if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
+    eprintln(name + ": phase check");
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
+    eprintln(name + ": phase lower");
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": " + verified.errors.join("\n")); exit(1); }
+    eprintln(name + ": phase verify");
+    program = inferEffects(program);
+    eprintln(name + ": phase effects");
+    var evaluated = evaluateProgram(program, 2000000, 64);
+    eprintln(name + ": phase eval");
+    if expectedCode == 0 {
+        require(evaluated.ok && evaluated.isVoid, name + ": valid fixture must evaluate to void; evaluator=" + evaluated.error + " isVoid=" + evaluated.isVoid.toString());
+    } else {
+        require(!evaluated.ok, name + ": invalid operation must fail");
+        require(evaluated.error.contains("trusted runtime failure code " + expectedCode.toString()), name + ": evaluator must preserve raw failure code " + expectedCode.toString());
+    }
+
+    var darwin: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if reuseSlots { darwin = emitArm64WithReuse(program, "darwin"); }
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    eprintln(name + ": phase emit-darwin");
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/darwin-" + name, macho.unwrap(), name + " Darwin");
+
+    var linux: Result<Arm64Code, string> = emitArm64(program, "linux");
+    if reuseSlots { linux = emitArm64WithReuse(program, "linux"); }
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    eprintln(name + ": phase emit-linux");
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-" + name, elf.unwrap(), name + " Linux");
+    println("fixed-heap-case " + name + " " + expectedCode.toString());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 5 || argv.len() == 6, "expected fixture directory, staged source directory, output directory, case, and optional --reuse-slots");
+    var selected = argv[4];
+    var reuseSlots = argv.len() == 6 && argv[5] == "--reuse-slots";
+    var fixtures = argv[1];
+    var sourceDirectory = argv[2];
+    var outputDirectory = argv[3];
+    var matched = false;
+    if selected == "empty-counters" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "empty-sweep-count" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "registry-borrowed" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-16-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-32-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-64-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-128-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-256-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-512-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-1024-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-2048-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-4096-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-8192-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "class-16384-boundary" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "multi-slab-16384" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "large-block-size" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "object-zero-and-typed-nulls" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "mark-sweep-stats" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "retained-address" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "slot-reuse-reset" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "large-block-trim" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "empty-slab-trim-mixed" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "independent-heaps" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "destroy-marked" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "context-cycles-300" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 0, reuseSlots); matched = true; }
+    if selected == "invalid-layout-id" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 1003, reuseSlots); matched = true; }
+    if selected == "allocation-size-overflow" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2001, reuseSlots); matched = true; }
+    if selected == "allocation-mapping-length-overflow" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2001, reuseSlots); matched = true; }
+    if selected == "corrupt-context-magic" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-context-reserved" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-context-counters" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-live-count" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-magic" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-class" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-length" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-live-count" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-flag" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-free-head" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-free-head-negative-allocation" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-free-head-out-of-range-allocation" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-small-block-free-self-link-allocation" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-large-block-metadata" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-object-header" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    if selected == "corrupt-object-payload-size" { exercise(fixtures, sourceDirectory, outputDirectory, selected, 2002, reuseSlots); matched = true; }
+    require(matched, "unknown fixture name: " + selected);
+}

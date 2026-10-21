@@ -1,6 +1,7 @@
 // Direct Linux x86-64 emission for the verified scalar IR slice.
 import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRValue, CompareI64Predicate};
 import ir::verify::{verifyProgram};
+import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
 
 pub struct X64FunctionOffset {
     pub functionId: int,
@@ -462,15 +463,25 @@ func resolveLocalFixups(emitter: Emitter, start: int, finish: int, blocks: Vec<B
     }
 }
 
-func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int): void {
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, layout: FunctionSlots, reuse: bool): void {
     if function.parameters.len() > 8 {
         emitter.error = "native x64: functions with more than eight scalar arguments are unsupported";
         return;
     }
     var slots = collectSlots(function);
+    var slotCount = slots.len();
+    if reuse {
+        slots = [];
+        var slotIndex = 0;
+        while slotIndex < layout.values.len() {
+            slots.push(ValueSlot { valueId: layout.values[slotIndex].valueId, index: layout.values[slotIndex].index });
+            slotIndex = slotIndex + 1;
+        }
+        slotCount = layout.slotCount;
+    }
     var scratchCount = maxEdgeParams(function);
     var outgoingBytes = 16;
-    var rawFrame = slots.len() * 8 + scratchCount * 8 + outgoingBytes;
+    var rawFrame = slotCount * 8 + scratchCount * 8 + outgoingBytes;
     if rawFrame > 65520 {
         emitter.error = "native x64: stack frame exceeds the supported 65520-byte limit";
         return;
@@ -494,7 +505,7 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int): 
         }
         parameterIndex = parameterIndex + 1;
     }
-    var scratchStart = slots.len();
+    var scratchStart = slotCount;
     var localBlocks: Vec<BlockOffset> = Vec.new();
     var blockIndex = 0;
     loop {
@@ -530,7 +541,7 @@ func appendEntryStub(emitter: Emitter, entryFunction: IRFunction): void {
     emitByte(emitter, 15); emitByte(emitter, 5);
 }
 
-pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string> {
+func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Result<X64Code, string> {
     if target == "windows-x64" {
         return Result.Err("native x64: windows-x64 is unsupported until an ExitProcess import contract is available");
     }
@@ -571,13 +582,25 @@ pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string
         }
         i = i + 1;
     }
+    var planned = ProgramSlots { functions: [] };
+    if reuse {
+        var result = planSlots(program);
+        if result.isErr() { return Result.Err("native x64: " + result.unwrapErr()); }
+        planned = result.unwrap();
+        if planned.functions.len() != program.functions.len() { return Result.Err("native x64: incomplete storage plan"); }
+    }
     var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "" };
     appendEntryStub(emitter, entryFunction);
     var overflowOffset = -1;
     i = 0;
     loop {
         if i >= program.functions.len() { break; }
-        emitFunction(emitter, program.functions[i], -1);
+        var layout = FunctionSlots { functionId: -1, values: [], slotCount: 0 };
+        if reuse {
+            layout = planned.functions[i];
+            if layout.functionId != program.functions[i].id { return Result.Err("native x64: storage function order mismatch"); }
+        }
+        emitFunction(emitter, program.functions[i], -1, layout, reuse);
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }
@@ -603,4 +626,12 @@ pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string
         i = i + 1;
     }
     return Result.Ok(X64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions });
+}
+
+pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, false);
+}
+
+pub func emitProgramWithReuse(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, true);
 }

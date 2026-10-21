@@ -1,0 +1,16 @@
+import gc::{gcCreate, gcDestroy};
+import heap::{heapCreate, heapDestroy};
+import layout::{layoutRegistryCreate, layoutRegistryRelease};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var heap = heapCreate(registry);
+    var index = 0;
+    while index < 300 {
+        var collector = gcCreate(heap, 0);
+        gcDestroy(collector);
+        index = index + 1;
+    }
+    heapDestroy(heap);
+    layoutRegistryRelease(registry);
+}

@@ -22,7 +22,20 @@ pub func byteString(bytes: Vec<int>): Result<string, string> {
         pieces.push(char(bytes[i]).toString());
         i = i + 1;
     }
-    return Result.Ok(pieces.join(""));
+    // The bootstrap runtime's join repeatedly copies the entire prefix.
+    // Pairwise concatenation bounds retained intermediate bytes to O(n log n).
+    while pieces.len() > 1 {
+        var next: Vec<string> = [];
+        var index = 0;
+        while index < pieces.len() {
+            if index + 1 < pieces.len() { next.push(pieces[index] + pieces[index + 1]); }
+            else { next.push(pieces[index]); }
+            index = index + 2;
+        }
+        pieces = next;
+    }
+    if pieces.len() == 0 { return Result.Ok(""); }
+    return Result.Ok(pieces[0]);
 }
 
 pub func appendU32Le(bytes: Vec<int>, value: int): Result<bool, string> {

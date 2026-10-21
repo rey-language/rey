@@ -1,0 +1,329 @@
+import ir::{IRProgram, IRFunction, BasicBlock, IRValue};
+import ir::liveness::{FunctionLiveness, BlockLiveness, InstructionLiveness, analyzeProgram};
+
+pub struct ValueSlot {
+    pub valueId: int,
+    pub index: int,
+}
+
+pub struct FunctionSlots {
+    pub functionId: int,
+    pub values: Vec<ValueSlot>,
+    pub slotCount: int,
+}
+
+pub struct ProgramSlots {
+    pub functions: Vec<FunctionSlots>,
+}
+
+struct ConflictGraph {
+    pub neighbors: Vec<Vec<int>>,
+    pub seenEdges: HashMap<string, bool>,
+}
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 {
+        budget.set(0, -1);
+        return false;
+    }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func definitionIndex(indexById: HashMap<string, int>, valueId: int, budget: Vec<int>): int {
+    if !charge(budget) { return -1; }
+    var key = valueId.toString();
+    if !indexById.has(key) { return -1; }
+    return indexById.get(key);
+}
+
+func appendDefinition(definitions: Vec<int>, indexById: HashMap<string, int>, valueId: int, budget: Vec<int>): bool {
+    if !charge(budget) { return false; }
+    if valueId < 0 { return false; }
+    var key = valueId.toString();
+    if indexById.has(key) { return false; }
+    indexById.set(key, definitions.len());
+    definitions.push(valueId);
+    return true;
+}
+
+func collectDefinitions(function: IRFunction, indexById: HashMap<string, int>, budget: Vec<int>): Result<Vec<int>, string> {
+    var definitions: Vec<int> = [];
+    var i = 0;
+    loop {
+        if i >= function.parameters.len() { break; }
+        if !appendDefinition(definitions, indexById, function.parameters[i].id, budget) {
+            if budget[0] < 0 { return Result.Err("storage: planning work budget exhausted"); }
+            return Result.Err("storage: verified formal parameter has an invalid value ID");
+        }
+        i = i + 1;
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        var block = function.blocks[blockIndex];
+        var parameterIndex = 0;
+        loop {
+            if parameterIndex >= block.params.len() { break; }
+            if !appendDefinition(definitions, indexById, block.params[parameterIndex].id, budget) {
+                if budget[0] < 0 { return Result.Err("storage: planning work budget exhausted"); }
+                return Result.Err("storage: verified block parameter has an invalid value ID");
+            }
+            parameterIndex = parameterIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var resultId = block.instructions[instructionIndex].resultId;
+            if resultId >= 0 && !appendDefinition(definitions, indexById, resultId, budget) {
+                if budget[0] < 0 { return Result.Err("storage: planning work budget exhausted"); }
+                return Result.Err("storage: verified instruction has an invalid result ID");
+            }
+            if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return Result.Ok(definitions);
+}
+
+func newConflictGraph(definitionCount: int, budget: Vec<int>): Result<ConflictGraph, string> {
+    var neighbors: Vec<Vec<int>> = [];
+    var index = 0;
+    loop {
+        if index >= definitionCount { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        var bucket: Vec<int> = [];
+        neighbors.push(bucket);
+        index = index + 1;
+    }
+    return Result.Ok(ConflictGraph { neighbors: neighbors, seenEdges: HashMap.new() });
+}
+
+func recordConflict(leftId: int, rightId: int, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    if leftId == rightId { return true; }
+    var left = definitionIndex(indexById, leftId, budget);
+    if budget[0] < 0 { return false; }
+    var right = definitionIndex(indexById, rightId, budget);
+    if budget[0] < 0 { return false; }
+    if left < 0 || right < 0 { return false; }
+    if left == right { return true; }
+
+    var first = left;
+    var second = right;
+    if first > second {
+        first = right;
+        second = left;
+    }
+    var edgeKey = first.toString() + ":" + second.toString();
+    if !charge(budget) { return false; }
+    if graph.seenEdges.has(edgeKey) { return true; }
+    if !charge(budget) || !charge(budget) || !charge(budget) { return false; }
+
+    graph.seenEdges.set(edgeKey, true);
+    var firstNeighbors = graph.neighbors[first];
+    firstNeighbors.push(second);
+    graph.neighbors.set(first, firstNeighbors);
+    var secondNeighbors = graph.neighbors[second];
+    secondNeighbors.push(first);
+    graph.neighbors.set(second, secondNeighbors);
+    return true;
+}
+
+func addSetConflicts(values: Vec<int>, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    var leftIndex = 0;
+    loop {
+        if leftIndex >= values.len() { break; }
+        if !charge(budget) { return false; }
+        var rightIndex = leftIndex + 1;
+        loop {
+            if rightIndex >= values.len() { break; }
+            if !charge(budget) { return false; }
+            if !recordConflict(values[leftIndex], values[rightIndex], indexById, graph, budget) { return false; }
+            rightIndex = rightIndex + 1;
+        }
+        leftIndex = leftIndex + 1;
+    }
+    return true;
+}
+
+func addParameterPairConflicts(parameters: Vec<IRValue>, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    var leftIndex = 0;
+    loop {
+        if leftIndex >= parameters.len() { break; }
+        if !charge(budget) { return false; }
+        var rightIndex = leftIndex + 1;
+        loop {
+            if rightIndex >= parameters.len() { break; }
+            if !charge(budget) { return false; }
+            if !recordConflict(parameters[leftIndex].id, parameters[rightIndex].id, indexById, graph, budget) { return false; }
+            rightIndex = rightIndex + 1;
+        }
+        leftIndex = leftIndex + 1;
+    }
+    return true;
+}
+
+func addParameterEntryConflicts(parameters: Vec<IRValue>, liveIn: Vec<int>, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= parameters.len() { break; }
+        if !charge(budget) { return false; }
+        var liveIndex = 0;
+        loop {
+            if liveIndex >= liveIn.len() { break; }
+            if !charge(budget) { return false; }
+            if !recordConflict(parameters[parameterIndex].id, liveIn[liveIndex], indexById, graph, budget) { return false; }
+            liveIndex = liveIndex + 1;
+        }
+        parameterIndex = parameterIndex + 1;
+    }
+    return true;
+}
+
+func addDefinitionLiveAfterConflict(resultId: int, liveAfter: Vec<int>, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    var i = 0;
+    loop {
+        if i >= liveAfter.len() { break; }
+        if !charge(budget) { return false; }
+        if !recordConflict(resultId, liveAfter[i], indexById, graph, budget) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func addBlockConflicts(block: BasicBlock, liveBlock: BlockLiveness, indexById: HashMap<string, int>, graph: ConflictGraph, budget: Vec<int>): bool {
+    if !addSetConflicts(liveBlock.liveIn, indexById, graph, budget) { return false; }
+    if !addSetConflicts(liveBlock.liveOut, indexById, graph, budget) { return false; }
+    if !addSetConflicts(liveBlock.liveAtTerminator, indexById, graph, budget) { return false; }
+    if !addParameterPairConflicts(block.params, indexById, graph, budget) { return false; }
+    if !addParameterEntryConflicts(block.params, liveBlock.liveIn, indexById, graph, budget) { return false; }
+
+    var snapshotIndex = 0;
+    loop {
+        if snapshotIndex >= liveBlock.instructions.len() { break; }
+        if !charge(budget) { return false; }
+        var snapshot: InstructionLiveness = liveBlock.instructions[snapshotIndex];
+        if snapshot.instructionIndex < 0 || snapshot.instructionIndex >= block.instructions.len() {
+            return false;
+        }
+        if !addSetConflicts(snapshot.liveBefore, indexById, graph, budget) { return false; }
+        if !addSetConflicts(snapshot.liveAfter, indexById, graph, budget) { return false; }
+        var resultId = block.instructions[snapshot.instructionIndex].resultId;
+        if resultId >= 0 && !addDefinitionLiveAfterConflict(resultId, snapshot.liveAfter, indexById, graph, budget) {
+            return false;
+        }
+        snapshotIndex = snapshotIndex + 1;
+    }
+    return true;
+}
+
+func colorDefinitions(functionId: int, definitions: Vec<int>, graph: ConflictGraph, budget: Vec<int>): Result<FunctionSlots, string> {
+    var colors: Vec<int> = [];
+    var usedAt: Vec<int> = [];
+    var initIndex = 0;
+    loop {
+        if initIndex >= definitions.len() { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        usedAt.push(-1);
+        initIndex = initIndex + 1;
+    }
+
+    var values: Vec<ValueSlot> = [];
+    var slotCount = 0;
+    var valueIndex = 0;
+    loop {
+        if valueIndex >= definitions.len() { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        var neighbors = graph.neighbors[valueIndex];
+        var neighborIndex = 0;
+        loop {
+            if neighborIndex >= neighbors.len() { break; }
+            if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+            var neighbor = neighbors[neighborIndex];
+            if neighbor < valueIndex {
+                var color = colors[neighbor];
+                if color < 0 || color >= usedAt.len() {
+                    return Result.Err("storage: conflict graph contains an invalid neighbor color");
+                }
+                usedAt.set(color, valueIndex);
+            }
+            neighborIndex = neighborIndex + 1;
+        }
+
+        var candidate = 0;
+        loop {
+            if candidate >= definitions.len() { break; }
+            if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+            if usedAt[candidate] != valueIndex { break; }
+            candidate = candidate + 1;
+        }
+        if candidate >= definitions.len() {
+            return Result.Err("storage: greedy coloring exceeded the definition count");
+        }
+        colors.push(candidate);
+        values.push(ValueSlot { valueId: definitions[valueIndex], index: candidate });
+        if candidate >= slotCount { slotCount = candidate + 1; }
+        valueIndex = valueIndex + 1;
+    }
+    return Result.Ok(FunctionSlots { functionId: functionId, values: values, slotCount: slotCount });
+}
+
+func planFunction(function: IRFunction, liveFunction: FunctionLiveness, budget: Vec<int>): Result<FunctionSlots, string> {
+    var indexById: HashMap<string, int> = HashMap.new();
+    var collected = collectDefinitions(function, indexById, budget);
+    if collected.isErr() { return Result.Err(collected.unwrapErr()); }
+    var definitions = collected.unwrap();
+    var graphResult = newConflictGraph(definitions.len(), budget);
+    if graphResult.isErr() { return Result.Err(graphResult.unwrapErr()); }
+    var graph = graphResult.unwrap();
+    if !addParameterPairConflicts(function.parameters, indexById, graph, budget) {
+        if budget[0] < 0 { return Result.Err("storage: planning work budget exhausted"); }
+        return Result.Err("storage: liveness conflict references an undefined value");
+    }
+    if liveFunction.functionId != function.id || liveFunction.blocks.len() != function.blocks.len() {
+        return Result.Err("storage: liveness result does not match the verified function");
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        var block = function.blocks[blockIndex];
+        var liveBlock = liveFunction.blocks[blockIndex];
+        if liveBlock.blockId != block.id {
+            return Result.Err("storage: liveness result block order does not match the verified function");
+        }
+        if !addBlockConflicts(block, liveBlock, indexById, graph, budget) {
+            if budget[0] < 0 { return Result.Err("storage: planning work budget exhausted"); }
+            return Result.Err("storage: liveness conflict references an undefined value or invalid instruction");
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return colorDefinitions(function.id, definitions, graph, budget);
+}
+
+// Build a stable first-fit slot map without changing the verified SSA program.
+pub func planSlots(program: IRProgram): Result<ProgramSlots, string> {
+    var livenessResult = analyzeProgram(program);
+    if livenessResult.isErr() { return Result.Err(livenessResult.unwrapErr()); }
+    var liveness = livenessResult.unwrap();
+    if liveness.functions.len() != program.functions.len() {
+        return Result.Err("storage: liveness result does not match the verified program");
+    }
+
+    var budget: Vec<int> = [1000000];
+    var functions: Vec<FunctionSlots> = [];
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        if !charge(budget) { return Result.Err("storage: planning work budget exhausted"); }
+        var function = program.functions[functionIndex];
+        var liveFunction = liveness.functions[functionIndex];
+        var planned = planFunction(function, liveFunction, budget);
+        if planned.isErr() { return Result.Err(planned.unwrapErr()); }
+        functions.push(planned.unwrap());
+        functionIndex = functionIndex + 1;
+    }
+    return Result.Ok(ProgramSlots { functions: functions });
+}

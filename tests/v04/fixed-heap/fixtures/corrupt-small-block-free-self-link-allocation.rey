@@ -1,0 +1,16 @@
+import layout;
+import heap;
+
+func main(): void {
+    var registry = layout.layoutRegistryCreate(1);
+    layout.layoutRegisterFixed(registry, 0, __reyRawNull(), 0);
+    var value = heap.heapCreate(registry);
+    var survivor = heap.heapAllocate(value, 1);
+    var freed = heap.heapAllocate(value, 1);
+    var block = __reyRawLoadAddress(__reyRawOffset(value, 128));
+    if !heap.heapMark(value, survivor) { __reyRawFail(2201); }
+    if heap.heapSweep(value) != 1 { __reyRawFail(2202); }
+    if __reyRawLoadI64(__reyRawOffset(block, 8)) != 1 { __reyRawFail(2203); }
+    __reyRawStoreI64(freed, 1);
+    heap.heapAllocate(value, 1);
+}

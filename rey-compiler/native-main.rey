@@ -5,9 +5,9 @@ import frontend::graph::{checkSourceFileGraph};
 import ir::lower::{lowerProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
-import native::arm64::{emitArm64};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
 import native::image::{buildMachOArm64, buildElfArm64};
-import native::x64::{emitProgram};
+import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
 import native::image::x64::{buildElfX64};
 import native::bytes::{byteString};
 import ir::optimize::scalar::{foldConstants};
@@ -15,11 +15,11 @@ import ir::optimize::scalar::{foldConstants};
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants]");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots]");
         return;
     }
     if argv.len() < 7 || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants]");
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots]");
         exit(2);
         return;
     }
@@ -27,6 +27,7 @@ func main(): void {
     var stdRoot = "";
     var hasStdRoot = false;
     var folding = false;
+    var reuse = false;
     var optionIndex = 7;
     while optionIndex < argv.len() {
         if argv[optionIndex] == "--std-root" && !hasStdRoot {
@@ -37,6 +38,9 @@ func main(): void {
             optionIndex = optionIndex + 2;
         } else if argv[optionIndex] == "--fold-constants" && !folding {
             folding = true;
+            optionIndex = optionIndex + 1;
+        } else if argv[optionIndex] == "--reuse-slots" && !reuse {
+            reuse = true;
             optionIndex = optionIndex + 1;
         } else {
             eprintln("unknown or duplicate option: " + argv[optionIndex]); exit(2); return;
@@ -66,11 +70,15 @@ func main(): void {
     }
     var image: Result<Vec<int>, string> = Result.Err("unsupported target");
     if target == "linux-x64" {
-        var code = emitProgram(program, target);
+        var code: Result<X64Code, string> = Result.Err("not emitted");
+        if reuse { code = emitProgramWithReuse(program, target); }
+        else { code = emitProgram(program, target); }
         if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
         image = buildElfX64(code.unwrap());
     } else {
-        var code = emitArm64(program, os);
+        var code: Result<Arm64Code, string> = Result.Err("not emitted");
+        if reuse { code = emitArm64WithReuse(program, os); }
+        else { code = emitArm64(program, os); }
         if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
         if os == "darwin" { image = buildMachOArm64(code.unwrap()); }
         else { image = buildElfArm64(code.unwrap()); }

@@ -46,7 +46,8 @@ TRAPS = {
     "first-trap-before-later-call": "traps/first-trap.rey",
 }
 NATIVE_CASES = {"safe": ("main.rey", 0), "graph": ("graph/main.rey", 0),
-                "std-root": ("std-main.rey", 0), **{name: (path, 1) for name, path in TRAPS.items()}}
+                "std-root": ("std-main.rey", 0), "storage": ("storage.rey", 0),
+                **{name: (path, 1) for name, path in TRAPS.items()}}
 
 
 def digest_bytes(data: bytes) -> str:
@@ -75,6 +76,8 @@ def main() -> int:
                         help="fresh run directory below build/v04/opt-integration")
     parser.add_argument("--linux-docker", action="store_true",
                         help="execute generated Linux images in an already-present local ubuntu:22.04 image")
+    parser.add_argument("--reuse-slots", action="store_true",
+                        help="also opt every native emission into conservative slot reuse")
     parser.add_argument("--image", default="ubuntu:22.04",
                         help="Docker image name for --linux-docker; never pulled")
     args = parser.parse_args()
@@ -89,6 +92,8 @@ def main() -> int:
     records: list[dict] = []
     snapshots: dict[str, dict] = {}
     artifacts: dict[str, dict] = {}
+    modes = [("reuse" if args.reuse_slots else "default", False),
+             ("folded-reuse" if args.reuse_slots else "folded", True)]
     fixture_source = ROOT / "tests/v04/opt-integration"
     staged_fixtures = output / "fixtures"
     shutil.copytree(fixture_source, staged_fixtures)
@@ -215,6 +220,8 @@ def main() -> int:
                        folded: bool = False, std: Path | None = None,
                        flag_order: str = "fold-then-std") -> list[str]:
         command = [str(driver), "build", str(file), "-o", str(artifact), "--target", target]
+        if args.reuse_slots:
+            command.append("--reuse-slots")
         if folded and flag_order == "fold-then-std":
             command.append("--fold-constants")
         if std is not None:
@@ -276,6 +283,9 @@ def main() -> int:
             before = run("safe-" + action + "-default", ir_command(ir_exe, action, safe_source))
             after = run("safe-" + action + "-folded", ir_command(ir_exe, action, safe_source, folded=True))
             compare_processes("safe-" + action + "-same-result", before, after)
+            before = run("storage-" + action + "-default", ir_command(ir_exe, action, source("storage.rey")))
+            after = run("storage-" + action + "-folded", ir_command(ir_exe, action, source("storage.rey"), folded=True))
+            compare_processes("storage-" + action + "-same-result", before, after)
         for name, file in (("graph", graph_source), ("std-root", std_source)):
             for order in ("fold-then-std", "std-then-fold"):
                 before = run(f"{name}-eval-{order}-default",
@@ -329,6 +339,8 @@ def main() -> int:
                                           "--std-root", str(stdroot), "--std-root", str(stdroot)],
             "native-unknown-option": [str(native_exe), "build", str(safe_source), "-o", str(output / "bad-image"),
                                       "--target", "darwin-arm64", "--unknown"],
+            "native-duplicate-reuse": [str(native_exe), "build", str(safe_source), "-o", str(output / "bad-image"),
+                                       "--target", "darwin-arm64", "--reuse-slots", "--reuse-slots"],
         }
         for label, command in ir_bad_commands.items():
             run(label, command, expected=2)
@@ -337,8 +349,7 @@ def main() -> int:
         for target in ("darwin-arm64", "linux-arm64", "linux-x64"):
             for name, (relative, expected) in NATIVE_CASES.items():
                 file = source(relative)
-                for folded in (False, True):
-                    mode = "folded" if folded else "default"
+                for mode, folded in modes:
                     artifact = output / "images" / target / (mode + "-" + name)
                     artifact.parent.mkdir(parents=True, exist_ok=True)
                     order = "fold-then-std"
@@ -364,6 +375,7 @@ def main() -> int:
                         "image": str(artifact.relative_to(ROOT)) if artifact.is_file() else None,
                         "image_sha256": image_sha, "expected_status": expected,
                         "folded": folded, "target": target,
+                        "slot_reuse": args.reuse_slots,
                     }
 
                     if target == "darwin-arm64":
@@ -419,7 +431,7 @@ def main() -> int:
         for target in ("linux-arm64", "linux-x64"):
             case_files = [(name, source(relative), expected)
                           for name, (relative, expected) in NATIVE_CASES.items()]
-            for mode in ("default", "folded"):
+            for mode, _ in modes:
                 case_specs = []
                 all_images = True
                 for name, file, expected in case_files:
@@ -516,6 +528,7 @@ def main() -> int:
         "fixture_sha256": snapshots["fixtures"]["files"],
         "artifacts": artifacts, "docker_image": linux_image_id,
         "linux_docker_requested": args.linux_docker,
+        "slot_reuse_requested": args.reuse_slots,
         "linux_execution_note": "linux-x64 runs in a Linux aarch64 VM are labeled user-mode emulation",
         "records": records, "process_record_count": len(process_records),
         "passed": all(record.get("passed", False) for record in records),

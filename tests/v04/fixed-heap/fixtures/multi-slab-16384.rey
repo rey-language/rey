@@ -1,0 +1,43 @@
+import layout;
+import heap;
+
+func expect(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func at(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func registryFor(payloadBytes: int, first: int, second: int, third: int, referenceCount: int): __rey_raw_address {
+    var registry = layout.layoutRegistryCreate(1);
+    var offsets = __reyRawNull();
+    if referenceCount > 0 {
+        offsets = __reyRawMap(referenceCount * 8);
+        __reyRawStoreI64(offsets, first);
+        if referenceCount > 1 { __reyRawStoreI64(at(offsets, 8), second); }
+        if referenceCount > 2 { __reyRawStoreI64(at(offsets, 16), third); }
+    }
+    layout.layoutRegisterFixed(registry, payloadBytes, offsets, referenceCount);
+    if referenceCount > 0 { __reyRawUnmap(offsets, referenceCount * 8); }
+    return registry;
+}
+
+func main(): void {
+var registry = registryFor(16368, 0, 0, 0, 0);
+var value = heap.heapCreate(registry);
+var first = heap.heapAllocate(value, 1);
+var second = heap.heapAllocate(value, 1);
+var third = heap.heapAllocate(value, 1);
+var fourth = heap.heapAllocate(value, 1);
+expect(heap.heapRequestedObjectBytes(value) == 131072, 501);
+expect(heap.heapLiveObjects(value) == 4 && heap.heapLivePayloadBytes(value) == 65472, 502);
+expect(heap.heapMark(value, fourth), 503);
+expect(heap.heapMark(value, fourth) == false, 504);
+expect(heap.heapSweep(value) == 3, 505);
+expect(heap.heapLiveObjects(value) == 1 && heap.heapLastReclaimedObjects(value) == 3, 506);
+expect(heap.heapRequestedObjectBytes(value) == 65536, 507);
+expect(__reyRawLoadI64(fourth) == 1, 508);
+heap.heapDestroy(value);
+layout.layoutRegistryRelease(registry);
+}

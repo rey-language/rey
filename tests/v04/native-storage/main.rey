@@ -1,0 +1,173 @@
+import ir;
+import ir::{BasicBlock, Escape, Instruction, IRFunction, IRProgram, IRType, IRValue, SourceRef};
+import ir::eval::{evaluateProgram};
+import ir::storage::{planSlots};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
+import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("native-storage", 0, 1); }
+
+func function(id: int, name: string, parameters: Vec<IRValue>, result: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    var types: Vec<IRType> = [];
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    while i < parameters.len() { types.push(parameters[i].ty); escapes.push(ir.escapeUnknown()); i += 1; }
+    var effects = ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+    return ir.irFunction(id, ir.functionKey("native-storage", "", name), ir.functionSignature(types, result), parameters, blocks, effects);
+}
+
+func asserted(program: IRProgram, expected: int): IRProgram {
+    var id = ir.nextFunctionId(program);
+    var wrapper = function(id, "asserted", [], ir.irVoid(), [
+        ir.basicBlock(0, [], [ir.call(0, ir.irI64(), program.entryFunctionId, [], source()), ir.constI64(1, expected, source()), ir.compareI64(2, ir.compareEq(), 0, 1, source())], ir.branch(2, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [], ir.returnVoid(source())),
+        ir.basicBlock(2, [], [ir.constI64(3, 1, source()), ir.constI64(4, 0, source()), ir.divCheckedI64(5, 3, 4, source())], ir.returnVoid(source()))
+    ]);
+    var functions: Vec<IRFunction> = [];
+    var i = 0;
+    while i < program.functions.len() { functions.push(program.functions[i]); i += 1; }
+    functions.push(wrapper);
+    return ir.irProgram(id, functions);
+}
+
+func writeImage(path: string, result: Result<Vec<int>, string>): void {
+    if result.isErr() { eprintln(result.unwrapErr()); exit(1); }
+    var bytes = byteString(result.unwrap());
+    require(bytes.isOk(), "encoding failed");
+    writeFile(path, bytes.unwrap());
+    require(fileExists(path) && readFile(path) == bytes.unwrap(), "image write failed");
+}
+
+func emitCase(directory: string, name: string, input: IRProgram, expected: int, raw: bool): void {
+    var program = asserted(input, expected);
+    var before = ir.printIR(program);
+    var evaluation = evaluateProgram(program, 100000, 64);
+    require(evaluation.ok && evaluation.isVoid, name + " evaluator: " + evaluation.error);
+    var plan = planSlots(program);
+    if plan.isErr() { eprintln(name + ": " + plan.unwrapErr()); exit(1); }
+    var layouts = plan.unwrap().functions;
+    var f = 0;
+    while f < layouts.len() {
+        println("native-storage-plan " + name + " " + layouts[f].functionId.toString() + " " + layouts[f].values.len().toString() + " " + layouts[f].slotCount.toString());
+        f += 1;
+    }
+    var mode = 0;
+    while mode < 2 {
+        var label = "default";
+        if mode == 1 { label = "reuse"; }
+        var targets: Vec<string> = ["darwin", "linux"];
+        var t = 0;
+        while t < targets.len() {
+            var os = targets[t];
+            var code: Result<Arm64Code, string> = Result.Err("not emitted");
+            if mode == 0 { code = emitArm64(program, os); }
+            else { code = emitArm64WithReuse(program, os); }
+            if code.isErr() { eprintln(name + " " + label + ": " + code.unwrapErr()); exit(1); }
+            if name == "chain" && os == "darwin" {
+                var offsets = code.unwrap().functions;
+                var i = 0;
+                while i < offsets.len() {
+                    if offsets[i].functionId == 0 {
+                        var start = offsets[i].offset + 8;
+                        var bytes = code.unwrap().bytes;
+                        var word = bytes[start] + bytes[start + 1] * 256 + bytes[start + 2] * 65536 + bytes[start + 3] * 16777216;
+                        println("native-storage-frame chain " + label + " " + ((word - 3506439167) / 1024).toString());
+                    }
+                    i += 1;
+                }
+            }
+            var image: Result<Vec<int>, string> = Result.Err("not emitted");
+            if os == "darwin" { image = buildMachOArm64(code.unwrap()); }
+            else { image = buildElfArm64(code.unwrap()); }
+            writeImage(directory + "/" + name + "-" + label + "-" + os, image);
+            println("native-storage-image " + name + " " + label + " " + os);
+            t += 1;
+        }
+        var x64: Result<X64Code, string> = Result.Err("not emitted");
+        if mode == 0 { x64 = emitProgram(program, "linux-x64"); }
+        else { x64 = emitProgramWithReuse(program, "linux-x64"); }
+        if raw { require(x64.isErr(), "x64 raw support must fail explicitly"); }
+        else {
+            if x64.isErr() { eprintln(x64.unwrapErr()); exit(1); }
+            writeImage(directory + "/" + name + "-" + label + "-x64", buildElfX64(x64.unwrap()));
+            println("native-storage-image " + name + " " + label + " x64");
+        }
+        require(ir.printIR(program) == before, "native emission mutated IR");
+        mode += 1;
+    }
+}
+
+func deadResult(): IRProgram {
+    return ir.irProgram(0, [function(0, "deadResult", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(900, 9223372036854775807, source()), ir.constI64(2, 17, source()), ir.constI64(4, 31, source()), ir.addCheckedI64(8, 2, 4, source())], ir.returnValue(900, source()))])]);
+}
+
+func deadParameters(): IRProgram {
+    var params: Vec<IRValue> = [];
+    var constants: Vec<Instruction> = [];
+    var arguments: Vec<int> = [];
+    var i = 0;
+    while i < 8 {
+        params.push(ir.irValue(i, ir.irI64()));
+        var value = i + 2;
+        if i == 0 { value = 9223372036854775807; }
+        constants.push(ir.constI64(i, value, source()));
+        arguments.push(i);
+        i += 1;
+    }
+    constants.push(ir.call(8, ir.irI64(), 0, arguments, source()));
+    return ir.irProgram(1, [function(0, "deadParameters", params, ir.irI64(), [ir.basicBlock(0, [], [], ir.returnValue(0, source()))]), function(1, "caller", [], ir.irI64(), [ir.basicBlock(0, [], constants, ir.returnValue(8, source()))])]);
+}
+
+func deadBlockParameters(): IRProgram {
+    return ir.irProgram(0, [function(0, "deadBlockParameters", [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(1, 1000, source()), ir.constI64(2, 2, source()), ir.constI64(3, 77, source())], ir.jump(1, [2, 3], source())),
+        ir.basicBlock(1, [ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irI64())], [ir.addCheckedI64(13, 1, 11, source())], ir.returnValue(13, source()))
+    ])]);
+}
+
+func swapLoop(): IRProgram {
+    return ir.irProgram(0, [function(0, "swapLoop", [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constBool(0, true, source()), ir.constBool(1, false, source()), ir.constI64(2, 11, source()), ir.constI64(3, 22, source())], ir.jump(1, [0, 2, 3], source())),
+        ir.basicBlock(1, [ir.irValue(4, ir.irBool()), ir.irValue(5, ir.irI64()), ir.irValue(6, ir.irI64())], [], ir.branch(4, 1, [1, 6, 5], 2, [5], source())),
+        ir.basicBlock(2, [ir.irValue(7, ir.irI64())], [], ir.returnValue(7, source()))
+    ])]);
+}
+
+func chain(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 0, source())];
+    var current = 0;
+    var i = 1;
+    while i <= 20 {
+        instructions.push(ir.constI64(i * 2 - 1, i, source()));
+        instructions.push(ir.addCheckedI64(i * 2, current, i * 2 - 1, source()));
+        current = i * 2;
+        i += 1;
+    }
+    return ir.irProgram(0, [function(0, "chain", [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(current, source()))])]);
+}
+
+func rawAcrossCall(): IRProgram {
+    var helper = function(0, "helper", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(0, 77, source())], ir.returnValue(0, source()))]);
+    var caller = function(1, "rawAcrossCall", [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 255, source()), ir.rawStoreByte(1, 2, source()), ir.call(3, ir.irI64(), 0, [], source()), ir.rawLoadByte(4, 1, source()), ir.rawUnmap(1, 0, source())], ir.returnValue(4, source()))]);
+    return ir.irProgram(1, [helper, caller]);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "expected image directory");
+    var out = argv[1];
+    emitCase(out, "dead-result", deadResult(), 9223372036854775807, false);
+    emitCase(out, "dead-parameters", deadParameters(), 9223372036854775807, false);
+    emitCase(out, "dead-block-parameters", deadBlockParameters(), 1002, false);
+    emitCase(out, "parallel-swap", swapLoop(), 22, false);
+    emitCase(out, "chain", chain(), 210, false);
+    emitCase(out, "raw-across-call", rawAcrossCall(), 255, true);
+    println("native storage fixtures ready");
+}

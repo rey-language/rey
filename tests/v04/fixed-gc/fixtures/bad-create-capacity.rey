@@ -1,0 +1,9 @@
+import gc::{gcCreate};
+import heap::{heapCreate};
+import layout::{layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var heap = heapCreate(registry);
+    gcCreate(heap, -1);
+}

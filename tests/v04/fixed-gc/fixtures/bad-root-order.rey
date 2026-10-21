@@ -1,0 +1,12 @@
+import gc::{gcCreate, gcRootPop, gcRootPush};
+import heap::{heapCreate};
+import layout::{layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+    gcRootPush(collector, __reyRawNull());
+    gcRootPush(collector, __reyRawNull());
+    gcRootPop(collector, 0);
+}

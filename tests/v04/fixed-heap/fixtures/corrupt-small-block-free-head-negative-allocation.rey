@@ -1,0 +1,21 @@
+import layout;
+import heap;
+
+func registryFor(payloadBytes: int): __rey_raw_address {
+    var registry = layout.layoutRegistryCreate(1);
+    layout.layoutRegisterFixed(registry, payloadBytes, __reyRawNull(), 0);
+    return registry;
+}
+
+func at(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func main(): void {
+    var registry = registryFor(0);
+    var value = heap.heapCreate(registry);
+    heap.heapAllocate(value, 1);
+    var block = __reyRawLoadAddress(at(value, 128));
+    __reyRawStoreI64(at(block, 8), -2);
+    heap.heapAllocate(value, 1);
+}

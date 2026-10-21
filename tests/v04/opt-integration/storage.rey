@@ -1,0 +1,50 @@
+func expect(ok: bool): void {
+    if !ok { var fail = 1 / 0; }
+}
+
+func deadWrites(): int {
+    var kept: int = 9223372036854775807;
+    var deadA = 17;
+    var deadB = 31;
+    var unused = deadA + deadB;
+    return kept;
+}
+
+func firstArgument(a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int): int {
+    return a;
+}
+
+func edgeWrites(choice: bool): int {
+    var kept: int = 1000;
+    var selected: int = 0;
+    var unused: int = 0;
+    if choice {
+        selected = 2;
+        unused = 99;
+    } else {
+        selected = 3;
+        unused = 77;
+    }
+    return kept + selected;
+}
+
+func swaps(): int {
+    var left = 11;
+    var right = 22;
+    var iteration = 0;
+    while iteration < 3 {
+        var previous = left;
+        left = right;
+        right = previous;
+        iteration += 1;
+    }
+    return left * 100 + right;
+}
+
+func main(): void {
+    expect(deadWrites() == 9223372036854775807);
+    expect(firstArgument(9223372036854775807, 2, 3, 4, 5, 6, 7, -1) == 9223372036854775807);
+    expect(edgeWrites(true) == 1002);
+    expect(edgeWrites(false) == 1003);
+    expect(swaps() == 2211);
+}
