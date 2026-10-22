@@ -2,7 +2,9 @@ import ir::{IRProgram, IRFunction, IRValue, IRType, IRTypeKind, BasicBlock, Inst
 import ir;
 import ir::managed::{ManagedProgram, ManagedLayout, ManagedField, ManagedFunction, ManagedAllocation, ManagedDerived, ManagedVariableLayout, ManagedHook};
 import ir::managed::roots::{RuntimeBindings, ManagedHookBinding, lowerManagedRoots};
-import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegionsWithPromotionStress};
+import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegionsCompleted, lowerManagedRegionsWithPromotionStress};
+import ir::managed::completion::{completeManagedMemory};
+import ir::managed::scalar::{applyScalarReplacement};
 import ir::managed::placement::{ManagedStorage, ManagedPlacement, ManagedAllocationPlacement, ManagedCallPlacement, planManagedPlacement};
 import ir::lower::{lowerProgram, lowerManagedProgram};
 import ir::verify::{verifyProgram};
@@ -342,6 +344,7 @@ pub func regionRuntimeUnits(runtimeRoot: string): Vec<string> {
     units.push(root + "/managed/main.rey");
     units.push(root + "/layout/main.rey");
     units.push(root + "/containers/main.rey");
+    units.push(root + "/task/main.rey");
     return units;
 }
 
@@ -408,6 +411,21 @@ func resolveRegionSymbol(program: IRProgram, modules: Vec<string>, name: string,
         index += 1;
     }
     if found < 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+    return Result.Ok(found);
+}
+
+func resolveOptionalRegionSymbol(program: IRProgram, modules: Vec<string>, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): Result<int, string> {
+    var found = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if function.key.name == name && containsString(modules, function.key.module) {
+            if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
+            if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+            found = function.id;
+        }
+        index += 1;
+    }
     return Result.Ok(found);
 }
 
@@ -553,7 +571,17 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         functions.push(copyFunction(function, shift));
         index += 1;
     }
-    var bindings = RegionBindings { create: shifted[0], destroy: shifted[1], storeReference: shifted[2], regionCreate: shifted[3], regionEnd: shifted[4], regionAllocate: shifted[5], allocateDestination: shifted[6], allocateProgram: shifted[7], promoteReference: shifted[8], promotionCount: shifted[9], layoutCreate: shifted[10], layoutRegister: shifted[11], layoutRegisterVariable: shifted[12], layoutRelease: shifted[13], hooks: hooks };
+    var cohortCreate = resolveOptionalRegionSymbol(runtimeProgram, api, "managedRegionCreateCohort", [raw, raw, i64Kind, i64Kind], raw);
+    if cohortCreate.isErr() { return Result.Err(cohortCreate.unwrapErr()); }
+    var cohortId = -1;
+    if cohortCreate.unwrap() >= 0 {
+        var movedCohort = shiftedId(cohortCreate.unwrap(), shift);
+        if movedCohort.isErr() { return Result.Err(movedCohort.unwrapErr()); }
+        var priorCohort = 0;
+        while priorCohort < shifted.len() { if shifted[priorCohort] == movedCohort.unwrap() { return Result.Err("region linker: runtime binding IDs must be unique"); } priorCohort += 1; }
+        cohortId = movedCohort.unwrap();
+    }
+    var bindings = RegionBindings { create: shifted[0], destroy: shifted[1], storeReference: shifted[2], regionCreate: shifted[3], regionEnd: shifted[4], regionAllocate: shifted[5], allocateDestination: shifted[6], allocateProgram: shifted[7], promoteReference: shifted[8], promotionCount: shifted[9], layoutCreate: shifted[10], layoutRegister: shifted[11], layoutRegisterVariable: shifted[12], layoutRelease: shifted[13], cohortCreate: cohortId, hooks: hooks };
     var program = ir.irProgram(input.program.entryFunctionId, functions);
     return Result.Ok(LinkedRegionProgram { module: copyModule(input, program), bindings: bindings });
 }
@@ -589,4 +617,19 @@ pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoo
     var planned = planManagedPlacement(linkedProgram.module);
     if planned.isErr() { return Result.Err(planned.unwrapErr()); }
     return lowerManagedRegionsWithPromotionStress(linkedProgram.module, linkedProgram.bindings, planned.unwrap(), promotionStress);
+}
+
+pub func buildCompletedRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
+    var input = lowerManagedProgram(checked);
+    if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
+    if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
+    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    if linked.isErr() { return Result.Err(linked.unwrapErr()); }
+    var linkedProgram = linked.unwrap();
+    var replaced = applyScalarReplacement(linkedProgram.module);
+    if replaced.isErr() { return Result.Err(replaced.unwrapErr()); }
+    var completed = completeManagedMemory(replaced.unwrap());
+    if completed.isErr() { return Result.Err(completed.unwrapErr()); }
+    return lowerManagedRegionsCompleted(replaced.unwrap(), linkedProgram.bindings, completed.unwrap(), promotionStress);
 }

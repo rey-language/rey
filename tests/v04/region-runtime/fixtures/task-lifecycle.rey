@@ -1,0 +1,53 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocate, managedCreate, managedCurrentRegion, managedDestroy, managedProgramRegion};
+import regions::{regionIsActive, regionIsCurrent, regionKind, regionTaskState};
+import task::{taskCancel, taskCellCreate, taskCellLoad, taskCellRelease, taskCellStore, taskCreate, taskFinish, taskJoin, taskRegion, taskResult, taskState};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+
+    var task = taskCreate(context, program);
+    var region = taskRegion(context, task);
+    check(taskState(context, task) == 1);
+    check(__reyRawEqual(managedCurrentRegion(context), region));
+    check(regionKind(context, region) == 5);
+    check(regionTaskState(context, region) == 1);
+    check(regionIsActive(context, region));
+    check(regionIsCurrent(context, region));
+
+    var object = managedAllocate(context, scalar);
+    __reyRawStoreI64(__reyRawOffset(object, 16), 42);
+    var cell = taskCellCreate(context);
+    taskCellStore(context, cell, 7);
+    check(taskCellLoad(context, cell) == 7);
+    taskCellStore(context, cell, 9);
+    check(taskCellLoad(context, cell) == 9);
+    taskFinish(context, task, 0, object);
+    check(taskState(context, task) == 2);
+    check(regionTaskState(context, region) == 2);
+    check(taskJoin(context, task) == 0);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    var result = taskResult(context, task);
+    check(!__reyRawEqual(result, __reyRawNull()));
+    check(__reyRawLoadI64(__reyRawOffset(result, 16)) == 42);
+
+    var canceled = taskCreate(context, program);
+    var canceledRegion = taskRegion(context, canceled);
+    taskCancel(context, canceled);
+    check(taskState(context, canceled) == 4);
+    check(regionTaskState(context, canceledRegion) == 4);
+    check(taskJoin(context, canceled) == 2208);
+    check(__reyRawEqual(taskResult(context, canceled), __reyRawNull()));
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+
+    taskCellRelease(context, cell);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

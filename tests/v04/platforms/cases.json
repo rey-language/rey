@@ -6,6 +6,7 @@
     "relocatable ELF64 x86-64 object header",
     "windows-x64 PE32+ ExitProcess import",
     "darwin-x64 Mach-O header, dyld, and libSystem",
-    "emitProgram still rejects windows-x64"
+    "emitProgram still rejects windows-x64",
+    "native driver emits linux-x64, windows-x64, darwin-x64, and macos-x64 aliases"
   ]
 }

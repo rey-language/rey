@@ -4,24 +4,25 @@
 import frontend::graph::{checkSourceFileGraph};
 import ir::lower::{lowerProgram};
 import ir::{IRProgram};
-import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram, buildRegionProgram};
+import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram, buildRegionProgram, buildCompletedRegionProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
 import native::image::{buildMachOArm64, buildElfArm64};
-import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
-import native::image::x64::{buildElfX64};
+import native::x64::{X64Code, X64Image, emitProgram, emitProgramWithReuse, emitImage, emitImageWithReuse};
+import native::image::x64::{buildElfX64, buildMachOX64};
+import native::image::pe::{buildPeX64};
 import native::bytes::{byteString};
 import ir::optimize::scalar::{foldConstants};
 
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
         return;
     }
     if argv.len() < 7 || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
         exit(2);
         return;
     }
@@ -91,6 +92,8 @@ func main(): void {
     if target == "darwin-arm64" { os = "darwin"; }
     else if target == "linux-arm64" { os = "linux"; }
     else if target == "linux-x64" { os = "linux"; }
+    else if target == "windows-x64" { os = "windows"; }
+    else if target == "darwin-x64" || target == "macos-x64" { os = "darwin"; target = "darwin-x64"; }
     else { eprintln("unsupported native target: " + target); exit(2); return; }
     var path = argv[2];
     var output = argv[4];
@@ -102,7 +105,7 @@ func main(): void {
     if forceManaged || gcStress || promotionStress || requiresManagedLowering(checked.unwrap()) {
         runtimeRoot = findManagedRuntimeRoot(runtimeRoot, argv[0]);
         if runtimeRoot == "" { eprintln("managed runtime source not found; use --runtime-root <directory>"); exit(1); return; }
-        if regions { lowered = buildRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
+        if regions { lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
         else { lowered = buildManagedProgram(checked.unwrap(), runtimeRoot, stdRoot, gcStress, false); }
     } else {
         lowered = lowerProgram(checked.unwrap());
@@ -124,6 +127,14 @@ func main(): void {
         else { code = emitProgram(program, target); }
         if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
         image = buildElfX64(code.unwrap());
+    } else if target == "windows-x64" || target == "darwin-x64" {
+        var x64: Result<X64Image, string> = Result.Err("not emitted");
+        if reuse { x64 = emitImageWithReuse(program, target); }
+        else { x64 = emitImage(program, target); }
+        if x64.isErr() { eprintln(x64.unwrapErr()); exit(1); return; }
+        var x64Image = x64.unwrap();
+        if target == "windows-x64" { image = buildPeX64(x64Image); }
+        else { image = buildMachOX64(x64Image.code); }
     } else {
         var code: Result<Arm64Code, string> = Result.Err("not emitted");
         if reuse { code = emitArm64WithReuse(program, os); }

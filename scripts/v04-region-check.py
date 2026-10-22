@@ -217,6 +217,12 @@ def compiler_checks(errors):
         body = function_body(text, "buildRegionProgram")
         if "lowerManagedRegionsWithPromotionStress" not in body:
             errors.append("buildRegionProgram does not use the region lowerer")
+        if not re.search(r"\bfunc\s+buildCompletedRegionProgram\b", text):
+            errors.append("missing compiler interface: buildCompletedRegionProgram")
+        completed = function_body(text, "buildCompletedRegionProgram")
+        for required in ("applyScalarReplacement", "completeManagedMemory", "lowerManagedRegionsCompleted"):
+            if required not in completed:
+                errors.append("buildCompletedRegionProgram omits " + required)
         units = function_body(text, "regionRuntimeUnits")
         if "/regions/main.rey" not in units or "/managed/main.rey" not in units:
             errors.append("region runtime units omit the production runtime")
@@ -235,10 +241,10 @@ def compiler_checks(errors):
         if not path.is_file():
             continue
         text = path.read_text()
-        if "buildRegionProgram" not in text:
-            errors.append(f"{path.relative_to(ROOT)} does not use buildRegionProgram")
-        if not re.search(r"buildRegionProgram\s*\([^;]*promotionStress", text, re.S):
-            errors.append(f"{path.relative_to(ROOT)} does not pass promotionStress to buildRegionProgram")
+        if "buildCompletedRegionProgram" not in text:
+            errors.append(f"{path.relative_to(ROOT)} does not use buildCompletedRegionProgram")
+        if not re.search(r"buildCompletedRegionProgram\s*\([^;]*promotionStress", text, re.S):
+            errors.append(f"{path.relative_to(ROOT)} does not pass promotionStress to buildCompletedRegionProgram")
 
 
 def main():

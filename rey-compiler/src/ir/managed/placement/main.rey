@@ -2,7 +2,7 @@ import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
 import ir::managed::{ManagedProgram, ManagedFunction, ManagedAllocation, ManagedVariableLayout, ManagedHook};
 import ir::verify::{verifyProgram};
 
-// Heap is the program-region spelling. Stack is reserved for a later proven-local sector and is never selected.
+// Heap is the program-region spelling. This planner never selects Stack; completion may.
 pub enum ManagedStorage { Heap, Region, Destination, Stack }
 
 pub struct ManagedAllocationPlacement {

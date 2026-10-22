@@ -4,7 +4,7 @@ import frontend::graph::{checkSourceFileGraph};
 import ir::{printIR};
 import ir::{IRProgram};
 import ir::lower::{lowerProgram};
-import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram, buildRegionProgram};
+import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram, buildRegionProgram, buildCompletedRegionProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import ir::eval::{evaluateProgram};
@@ -100,7 +100,7 @@ func main(): void {
     if forceManaged || gcStress || promotionStress || requiresManagedLowering(checked.unwrap()) {
         runtimeRoot = findManagedRuntimeRoot(runtimeRoot, argv[0]);
         if runtimeRoot == "" { eprintln("managed runtime source not found; use --runtime-root <directory>"); exit(1); return; }
-        if regions { lowered = buildRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
+        if regions { lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
         else { lowered = buildManagedProgram(checked.unwrap(), runtimeRoot, stdRoot, gcStress, false); }
     } else {
         lowered = lowerProgram(checked.unwrap());

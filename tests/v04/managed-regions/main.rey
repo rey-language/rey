@@ -76,7 +76,7 @@ func pushRuntime(functions: Vec<IRFunction>, withVec: bool): Vec<IRFunction> {
 func runtimeBindings(withVec: bool): RegionBindings {
     var hooks: Vec<RegionHookBinding> = [];
     if withVec { hooks.push(RegionHookBinding { functionId: 23, runtimeFunctionId: 114, mayCollect: true }); }
-    return RegionBindings { create: 100, destroy: 101, storeReference: 102, regionCreate: 103, regionEnd: 104, regionAllocate: 105, allocateDestination: 106, allocateProgram: 107, promoteReference: 108, promotionCount: 109, layoutCreate: 110, layoutRegister: 111, layoutRegisterVariable: 112, layoutRelease: 113, hooks: hooks };
+    return RegionBindings { create: 100, destroy: 101, storeReference: 102, regionCreate: 103, regionEnd: 104, regionAllocate: 105, allocateDestination: 106, allocateProgram: 107, promoteReference: 108, promotionCount: 109, layoutCreate: 110, layoutRegister: 111, layoutRegisterVariable: 112, layoutRelease: 113, cohortCreate: -1, hooks: hooks };
 }
 
 func nodeLayout(): ManagedLayout {
@@ -464,9 +464,9 @@ func linkUser(): ManagedProgram {
 func assertLink(): void {
     var root = "/synthetic-region-runtime";
     var units = regionRuntimeUnits(root);
-    require(units.len() == 5, "region runtime lists five units");
-    require(units[0] == root + "/main.rey" && units[1] == root + "/regions/main.rey" && units[2] == root + "/managed/main.rey" && units[3] == root + "/layout/main.rey" && units[4] == root + "/containers/main.rey", "region runtime units are main, regions, managed, layout, and containers");
-    var joined = units[0] + units[1] + units[2] + units[3] + units[4];
+    require(units.len() == 6, "region runtime lists six units");
+    require(units[0] == root + "/main.rey" && units[1] == root + "/regions/main.rey" && units[2] == root + "/managed/main.rey" && units[3] == root + "/layout/main.rey" && units[4] == root + "/containers/main.rey" && units[5] == root + "/task/main.rey", "region runtime units are main, regions, managed, layout, containers, and task");
+    var joined = units[0] + units[1] + units[2] + units[3] + units[4] + units[5];
     require(!joined.contains("/gc/") && !joined.contains("/heap/"), "region runtime unit list does not load gc or heap");
     var input = linkUser();
     var linkedResult = linkRegionRuntime(input, regionRuntime(root, "valid"), root);

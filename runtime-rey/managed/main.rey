@@ -1,4 +1,4 @@
-import regions::{regionAllocateCurrent, regionAllocateFixed, regionAllocateSized, regionContextCreate, regionContextDestroy, regionCreate, regionCreateChild, regionCurrent, regionDependencyCount, regionEnd, regionGroupCount, regionLiveObjects, regionLivePayloadBytes, regionObjectCount, regionProgram, regionPromote, regionPromotionCount, regionRequestedBytes, regionRequestedObjectBytes, regionStoreReference, regionUsedBytes};
+import regions::{regionAllocateCurrent, regionAllocateFixed, regionAllocateSized, regionContextCreate, regionContextDestroy, regionCreate, regionCreateChild, regionCreateCohort, regionCurrent, regionDependencyCount, regionEnd, regionGroupCount, regionKind, regionLiveObjects, regionLivePayloadBytes, regionObjectCount, regionProgram, regionPromote, regionPromotionCount, regionRequestedBytes, regionRequestedObjectBytes, regionScratchUsed, regionStoreReference, regionUsedBytes};
 
 pub func managedCreate(registry: __rey_raw_address): __rey_raw_address {
     return regionContextCreate(registry);
@@ -94,6 +94,18 @@ pub func managedRegionUsedBytes(context: __rey_raw_address): int {
 
 pub func managedRegionObjectCount(context: __rey_raw_address): int {
     return regionObjectCount(context);
+}
+
+pub func managedRegionCreateCohort(context: __rey_raw_address, parent: __rey_raw_address, kind: int, budget: int): __rey_raw_address {
+    return regionCreateCohort(context, parent, kind, budget);
+}
+
+pub func managedRegionKind(context: __rey_raw_address, region: __rey_raw_address): int {
+    return regionKind(context, region);
+}
+
+pub func managedRegionScratchUsed(context: __rey_raw_address, region: __rey_raw_address): int {
+    return regionScratchUsed(context, region);
 }
 
 pub func managedRootPush(context: __rey_raw_address): int {

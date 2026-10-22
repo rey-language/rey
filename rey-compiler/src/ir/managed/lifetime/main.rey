@@ -235,6 +235,20 @@ func siteInCycle(function: IRFunction, siteBlockId: int, budget: Vec<int>): bool
     return false;
 }
 
+pub func managedCarriers(function: IRFunction, root: int): Vec<int> {
+    var budget: Vec<int> = [200000];
+    var carriers = carriersOf(function, root, budget);
+    if budget[0] < 0 { return []; }
+    return carriers;
+}
+
+pub func managedBlockInCycle(function: IRFunction, blockId: int): bool {
+    var budget: Vec<int> = [200000];
+    var cyclic = siteInCycle(function, blockId, budget);
+    if budget[0] < 0 { return true; }
+    return cyclic;
+}
+
 func dominatorMatrix(function: IRFunction, budget: Vec<int>): Vec<int> {
     var blockCount = function.blocks.len();
     var cells: Vec<int> = [];
@@ -417,6 +431,104 @@ func stackEscape(function: IRFunction, carriers: Vec<int>, storeFunctionId: int)
             instructionAt = instructionAt + 1;
         }
         if block.terminator.kind == TerminatorKind::Return && hasInt(carriers, block.terminator.valueId) { return "stack allocation escapes through return"; }
+        blockAt = blockAt + 1;
+    }
+    return "";
+}
+
+func layoutIndex(module: ManagedProgram, layoutId: int): int {
+    var index = 0;
+    loop { if index >= module.layouts.len() { break; } if module.layouts[index].id == layoutId { return index; } index = index + 1; }
+    return -1;
+}
+
+func collectDerived(function: IRFunction, carriers: Vec<int>): Vec<int> {
+    var derived: Vec<int> = [];
+    var changed = true;
+    var pass = 0;
+    loop {
+        if !changed || pass > function.blocks.len() + 4 { break; }
+        changed = false;
+        var blockAt = 0;
+        loop {
+            if blockAt >= function.blocks.len() { break; }
+            var block = function.blocks[blockAt];
+            var instructionAt = 0;
+            loop {
+                if instructionAt >= block.instructions.len() { break; }
+                var instruction = block.instructions[instructionAt];
+                if instruction.kind == InstructionKind::RawOffset && instruction.resultId >= 0 && instruction.operands.len() == 2 {
+                    if (hasInt(carriers, instruction.operands[0]) || hasInt(derived, instruction.operands[0])) && addInt(derived, instruction.resultId) { changed = true; }
+                }
+                instructionAt = instructionAt + 1;
+            }
+            var term = block.terminator;
+            if term.kind == TerminatorKind::Jump {
+                var argAt = 0;
+                loop { if argAt >= term.targetArgs.len() { break; } if hasInt(derived, term.targetArgs[argAt]) { var param = targetParam(function, term.targetBlockId, argAt); if param >= 0 && addInt(derived, param) { changed = true; } } argAt = argAt + 1; }
+            } else if term.kind == TerminatorKind::Branch {
+                var argAt = 0;
+                loop { if argAt >= term.trueArgs.len() { break; } if hasInt(derived, term.trueArgs[argAt]) { var param = targetParam(function, term.trueTargetBlockId, argAt); if param >= 0 && addInt(derived, param) { changed = true; } } argAt = argAt + 1; }
+                argAt = 0;
+                loop { if argAt >= term.falseArgs.len() { break; } if hasInt(derived, term.falseArgs[argAt]) { var param = targetParam(function, term.falseTargetBlockId, argAt); if param >= 0 && addInt(derived, param) { changed = true; } } argAt = argAt + 1; }
+            }
+            blockAt = blockAt + 1;
+        }
+        pass = pass + 1;
+    }
+    return derived;
+}
+
+func addressOperandOk(kind: InstructionKind, operandAt: int): bool {
+    if kind == InstructionKind::RawOffset && operandAt == 0 { return true; }
+    if (kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawStoreI64 || kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawStoreByte) && operandAt == 0 { return true; }
+    if kind == InstructionKind::RawEqual { return true; }
+    return false;
+}
+
+pub func stackPlacementRejection(module: ManagedProgram, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>): string {
+    var escape = stackEscape(function, carriers, module.storeReferenceFunctionId);
+    if escape != "" { return escape; }
+    var found = layoutIndex(module, allocation.layoutId);
+    if found < 0 { return "stack allocation layout is missing"; }
+    var layout = module.layouts[found];
+    if layout.payloadBytes > 256 { return "stack allocation exceeds the 256-byte bound"; }
+    var fieldAt = 0;
+    loop { if fieldAt >= layout.fields.len() { break; } if layout.fields[fieldAt].kind == IRTypeKind::RawAddress { return "stack allocation contains a reference field"; } fieldAt = fieldAt + 1; }
+    var variableAt = 0;
+    loop { if variableAt >= module.variableLayouts.len() { break; } if module.variableLayouts[variableAt].layoutId == allocation.layoutId { return "stack allocation has a variable tail"; } variableAt = variableAt + 1; }
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            if block.instructions[instructionAt].kind == InstructionKind::Call && block.instructions[instructionAt].functionId == function.id { return "stack allocation is recursive"; }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    var derived = collectDerived(function, carriers);
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        if block.terminator.kind == TerminatorKind::Return && hasInt(derived, block.terminator.valueId) { return "stack allocation address is not stable"; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                var operand = instruction.operands[operandAt];
+                if hasInt(derived, operand) && !addressOperandOk(instruction.kind, operandAt) { return "stack allocation address is not stable"; }
+                if hasInt(carriers, operand) && !addressOperandOk(instruction.kind, operandAt) { return "stack allocation address is not stable"; }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
         blockAt = blockAt + 1;
     }
     return "";
@@ -633,9 +745,8 @@ pub func verifyManagedRegionPlan(module: ManagedProgram, placement: ManagedPlace
         var carriers = carriersOf(function, allocation.resultId, budget);
         if budget[0] < 0 { return Result.Err("lifetime: analysis work budget exhausted"); }
         if chosen.storage == ManagedStorage::Stack {
-            var escape = stackEscape(function, carriers, module.storeReferenceFunctionId);
-            if escape == "" { escape = "stack storage is not established"; }
-            return Result.Err(lifetimeError(escape, allocation.functionId, allocation.resultId, allocation.blockId, origin));
+            var rejection = stackPlacementRejection(module, function, allocation, carriers);
+            if rejection != "" { return Result.Err(lifetimeError(rejection, allocation.functionId, allocation.resultId, allocation.blockId, origin)); }
         }
         if chosen.storage == ManagedStorage::Destination {
             var reaching = returnReach(function, budget);

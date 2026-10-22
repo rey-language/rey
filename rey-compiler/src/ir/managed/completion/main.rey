@@ -1,0 +1,553 @@
+import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
+import ir::analysis::container::{containerEffect};
+import ir::managed::{ManagedAllocation, ManagedProgram};
+import ir::managed::lifetime::{managedBlockInCycle, managedCarriers, stackPlacementRejection, verifyManagedRegionPlan};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedCallPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
+
+pub struct StackDecision {
+    pub functionId: int,
+    pub resultId: int,
+    pub accepted: bool,
+    pub reason: string,
+}
+
+pub struct CohortSite {
+    pub functionId: int,
+    pub blockId: int,
+    pub resultId: int,
+    pub kind: int,
+    pub scratchBudget: int,
+    pub reason: string,
+}
+
+pub struct ScratchRetention {
+    pub functionId: int,
+    pub resultId: int,
+    pub retainedBytes: int,
+    pub reason: string,
+}
+
+pub struct DeadField {
+    pub functionId: int,
+    pub resultId: int,
+    pub offset: int,
+}
+
+pub struct ScalarCandidate {
+    pub functionId: int,
+    pub resultId: int,
+    pub eligible: bool,
+    pub reason: string,
+}
+
+pub struct DestinationNote {
+    pub functionId: int,
+    pub resultId: int,
+    pub specialized: bool,
+    pub reason: string,
+}
+
+pub struct MemoryCompletion {
+    pub placement: ManagedPlacement,
+    pub stack: Vec<StackDecision>,
+    pub cohorts: Vec<CohortSite>,
+    pub retentions: Vec<ScratchRetention>,
+    pub deadFields: Vec<DeadField>,
+    pub scalars: Vec<ScalarCandidate>,
+    pub destinations: Vec<DestinationNote>,
+    pub containerRetained: Vec<int>,
+}
+
+func hasInt(values: Vec<int>, value: int): bool {
+    var index = 0;
+    loop { if index >= values.len() { break; } if values[index] == value { return true; } index = index + 1; }
+    return false;
+}
+
+func functionIndex(program: IRProgram, functionId: int): int {
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+func blockIndex(function: IRFunction, blockId: int): int {
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } if function.blocks[index].id == blockId { return index; } index = index + 1; }
+    return -1;
+}
+
+func storageCode(storage: ManagedStorage): int {
+    if storage == ManagedStorage::Region { return 1; }
+    if storage == ManagedStorage::Destination { return 2; }
+    if storage == ManagedStorage::Stack { return 3; }
+    return 0;
+}
+
+func storageFromCode(code: int): ManagedStorage {
+    if code == 1 { return ManagedStorage::Region; }
+    if code == 2 { return ManagedStorage::Destination; }
+    if code == 3 { return ManagedStorage::Stack; }
+    return ManagedStorage::Heap;
+}
+
+func layoutPayload(module: ManagedProgram, layoutId: int): int {
+    var index = 0;
+    loop { if index >= module.layouts.len() { break; } if module.layouts[index].id == layoutId { return module.layouts[index].payloadBytes; } index = index + 1; }
+    return -1;
+}
+
+func hookName(module: ManagedProgram, functionId: int): string {
+    var index = 0;
+    loop { if index >= module.hooks.len() { break; } if module.hooks[index].functionId == functionId { return module.hooks[index].runtimeName; } index = index + 1; }
+    return "";
+}
+
+func userFunction(module: ManagedProgram, functionId: int): bool {
+    var index = 0;
+    loop { if index >= module.functions.len() { break; } if module.functions[index].functionId == functionId { return true; } index = index + 1; }
+    return false;
+}
+
+func nameIsRequest(name: string): bool {
+    if name == "request" { return true; }
+    if name.len() >= 7 && name.slice(name.len() - 7, name.len()) == "Request" { return true; }
+    return false;
+}
+
+func usedOutside(function: IRFunction, blockId: int, carriers: Vec<int>): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        if block.id != blockId {
+            var instructionAt = 0;
+            loop {
+                if instructionAt >= block.instructions.len() { break; }
+                var instruction = block.instructions[instructionAt];
+                var operandAt = 0;
+                loop { if operandAt >= instruction.operands.len() { break; } if hasInt(carriers, instruction.operands[operandAt]) { return true; } operandAt = operandAt + 1; }
+                instructionAt = instructionAt + 1;
+            }
+            var term = block.terminator;
+            if term.kind == TerminatorKind::Return && hasInt(carriers, term.valueId) { return true; }
+            if term.kind == TerminatorKind::Branch && hasInt(carriers, term.conditionValueId) { return true; }
+            var argAt = 0;
+            loop { if argAt >= term.targetArgs.len() { break; } if hasInt(carriers, term.targetArgs[argAt]) { return true; } argAt = argAt + 1; }
+            argAt = 0;
+            loop { if argAt >= term.trueArgs.len() { break; } if hasInt(carriers, term.trueArgs[argAt]) { return true; } argAt = argAt + 1; }
+            argAt = 0;
+            loop { if argAt >= term.falseArgs.len() { break; } if hasInt(carriers, term.falseArgs[argAt]) { return true; } argAt = argAt + 1; }
+        }
+        blockAt = blockAt + 1;
+    }
+    return false;
+}
+
+func terminatorPublishes(function: IRFunction, blockId: int, carriers: Vec<int>): bool {
+    var found = blockIndex(function, blockId);
+    if found < 0 { return true; }
+    var term = function.blocks[found].terminator;
+    if term.kind == TerminatorKind::Return && hasInt(carriers, term.valueId) { return true; }
+    if term.kind == TerminatorKind::Branch && hasInt(carriers, term.conditionValueId) { return true; }
+    var argAt = 0;
+    loop { if argAt >= term.targetArgs.len() { break; } if hasInt(carriers, term.targetArgs[argAt]) { return true; } argAt = argAt + 1; }
+    argAt = 0;
+    loop { if argAt >= term.trueArgs.len() { break; } if hasInt(carriers, term.trueArgs[argAt]) { return true; } argAt = argAt + 1; }
+    argAt = 0;
+    loop { if argAt >= term.falseArgs.len() { break; } if hasInt(carriers, term.falseArgs[argAt]) { return true; } argAt = argAt + 1; }
+    return false;
+}
+
+func callPublishes(module: ManagedProgram, function: IRFunction, carriers: Vec<int>): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call || instruction.kind == InstructionKind::RawStoreAddress {
+                var operandAt = 0;
+                loop { if operandAt >= instruction.operands.len() { break; } if hasInt(carriers, instruction.operands[operandAt]) { return true; } operandAt = operandAt + 1; }
+            }
+            if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId {
+                var operandAt = 0;
+                loop { if operandAt >= instruction.operands.len() { break; } if hasInt(carriers, instruction.operands[operandAt]) { return true; } operandAt = operandAt + 1; }
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    return false;
+}
+
+func storePublishes(module: ManagedProgram, function: IRFunction, carriers: Vec<int>): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() == 3 && hasInt(carriers, instruction.operands[2]) { return true; }
+            if instruction.kind == InstructionKind::RawStoreAddress && instruction.operands.len() == 2 && hasInt(carriers, instruction.operands[1]) { return true; }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    return false;
+}
+
+func returned(function: IRFunction, carriers: Vec<int>): bool {
+    var blockAt = 0;
+    loop { if blockAt >= function.blocks.len() { break; } var term = function.blocks[blockAt].terminator; if term.kind == TerminatorKind::Return && hasInt(carriers, term.valueId) { return true; } blockAt = blockAt + 1; }
+    return false;
+}
+
+pub func iterationProof(module: ManagedProgram, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>): string {
+    if carriers.len() == 0 || !hasInt(carriers, allocation.resultId) { return "carrier analysis was incomplete"; }
+    if !managedBlockInCycle(function, allocation.blockId) { return "allocation is not inside a loop"; }
+    var payload = layoutPayload(module, allocation.layoutId);
+    if payload <= 0 || payload > 65536 { return "scratch budget exceeded"; }
+    if usedOutside(function, allocation.blockId, carriers) { return "iteration value is used outside its block"; }
+    if terminatorPublishes(function, allocation.blockId, carriers) { return "iteration value reaches the block terminator"; }
+    if returned(function, carriers) { return "iteration value is returned"; }
+    if storePublishes(module, function, carriers) { return "survivor stored into an older owner"; }
+    if callPublishes(module, function, carriers) { return "iteration value reaches a call"; }
+    return "";
+}
+
+pub func phaseProof(module: ManagedProgram, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>): string {
+    if carriers.len() == 0 || !hasInt(carriers, allocation.resultId) { return "carrier analysis was incomplete"; }
+    if managedBlockInCycle(function, allocation.blockId) { return "phase allocation is inside a loop"; }
+    if function.blocks.len() < 2 { return "phase allocation covers the whole function"; }
+    var found = blockIndex(function, allocation.blockId);
+    if found < 0 { return "phase block is missing"; }
+    var term = function.blocks[found].terminator;
+    if term.kind != TerminatorKind::Jump || term.targetBlockId == allocation.blockId { return "phase block has no later exit"; }
+    var payload = layoutPayload(module, allocation.layoutId);
+    if payload <= 0 || payload > 65536 { return "scratch budget exceeded"; }
+    if usedOutside(function, allocation.blockId, carriers) { return "phase value is used outside its block"; }
+    if terminatorPublishes(function, allocation.blockId, carriers) { return "phase value reaches the block terminator"; }
+    if returned(function, carriers) || storePublishes(module, function, carriers) || callPublishes(module, function, carriers) { return "phase value escapes its block"; }
+    return "";
+}
+
+func containerOperandOk(module: ManagedProgram, instructionFunctionId: int, operandAt: int): bool {
+    var name = hookName(module, instructionFunctionId);
+    if name == "" { return false; }
+    var effect = containerEffect(name);
+    if !effect.known || effect.receiverEscapes || effect.argumentEscapes { return false; }
+    if operandAt > 0 && effect.argumentEscapesToReceiver && effect.receiverEscapes { return false; }
+    return true;
+}
+
+func containerProof(module: ManagedProgram, function: IRFunction, carriers: Vec<int>): string {
+    if carriers.len() == 0 || returned(function, carriers) || storePublishes(module, function, carriers) { return "container value escapes"; }
+    var sawHook = false;
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if hasInt(carriers, instruction.operands[operandAt]) {
+                    if instruction.kind != InstructionKind::Call { return "container value has a non-call use"; }
+                    if instruction.functionId == module.allocateFunctionId || instruction.functionId == module.storeReferenceFunctionId || instruction.functionId == module.collectFunctionId { return "container value reaches a runtime hook"; }
+                    if userFunction(module, instruction.functionId) { return "container value reaches a user call"; }
+                    if !containerOperandOk(module, instruction.functionId, operandAt) { return "container effect is not precise"; }
+                    sawHook = true;
+                }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    if !sawHook { return "container value has no precise hook use"; }
+    return "";
+}
+
+func constOffset(function: IRFunction, valueId: int): int {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::ConstI64 && instruction.resultId == valueId { return instruction.immediate; }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    return -1;
+}
+
+func deadFieldOffsets(function: IRFunction, carriers: Vec<int>): Vec<int> {
+    var stored: Vec<int> = [];
+    var loaded: Vec<int> = [];
+    var addresses: Vec<int> = [];
+    var addressOffsets: Vec<int> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::RawOffset && instruction.operands.len() == 2 && instruction.resultId >= 0 && hasInt(carriers, instruction.operands[0]) {
+                var offset = constOffset(function, instruction.operands[1]);
+                if offset >= 0 { addresses.push(instruction.resultId); addressOffsets.push(offset); }
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.operands.len() > 0 {
+                var addressAt = 0;
+                loop {
+                    if addressAt >= addresses.len() { break; }
+                    if instruction.operands[0] == addresses[addressAt] {
+                        if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte { if !hasInt(stored, addressOffsets[addressAt]) { stored.push(addressOffsets[addressAt]); } }
+                        if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadByte { if !hasInt(loaded, addressOffsets[addressAt]) { loaded.push(addressOffsets[addressAt]); } }
+                    }
+                    addressAt = addressAt + 1;
+                }
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    var dead: Vec<int> = [];
+    var storedAt = 0;
+    loop { if storedAt >= stored.len() { break; } if !hasInt(loaded, stored[storedAt]) { dead.push(stored[storedAt]); } storedAt = storedAt + 1; }
+    return dead;
+}
+
+func identityReason(function: IRFunction, carriers: Vec<int>): string {
+    if carriers.len() == 0 { return "carrier analysis was incomplete"; }
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        if block.terminator.kind == TerminatorKind::Return && hasInt(carriers, block.terminator.valueId) { return "identity is returned"; }
+        if terminatorPublishes(function, block.id, carriers) { return "identity reaches a block edge"; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if hasInt(carriers, instruction.operands[operandAt]) {
+                    if instruction.kind == InstructionKind::Call || instruction.kind == InstructionKind::RawEqual || instruction.kind == InstructionKind::RawStoreAddress || instruction.kind == InstructionKind::RawLoadAddress { return "identity is observed"; }
+                }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    return "";
+}
+
+func addSorted(values: Vec<int>, value: int): Vec<int> {
+    if hasInt(values, value) { return values; }
+    values.push(value);
+    var index = values.len() - 1;
+    loop { if index <= 0 || values[index - 1] <= value { break; } values.set(index, values[index - 1]); index = index - 1; }
+    values.set(index, value);
+    return values;
+}
+
+func copyCalls(calls: Vec<ManagedCallPlacement>): Vec<ManagedCallPlacement> {
+    var copied: Vec<ManagedCallPlacement> = [];
+    var index = 0;
+    loop { if index >= calls.len() { break; } var call = calls[index]; copied.push(ManagedCallPlacement { functionId: call.functionId, blockId: call.blockId, instructionIndex: call.instructionIndex, storage: call.storage }); index = index + 1; }
+    return copied;
+}
+
+pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion, string> {
+    var planned = planManagedPlacement(module);
+    if planned.isErr() { return Result.Err(planned.unwrapErr()); }
+    var base = planned.unwrap();
+    var codes: Vec<int> = [];
+    var destinationCount: Vec<int> = [];
+    var destinationFunctions: Vec<int> = [];
+    var destinations: Vec<DestinationNote> = [];
+    var index = 0;
+    loop {
+        if index >= base.allocations.len() { break; }
+        var item = base.allocations[index];
+        var code = storageCode(item.storage);
+        if code == 2 {
+            var seen = 0;
+            var countAt = 0;
+            loop { if countAt >= destinationFunctions.len() { break; } if destinationFunctions[countAt] == item.functionId { seen = destinationCount[countAt]; } countAt = countAt + 1; }
+            if seen >= 8 {
+                code = 0;
+                destinations.push(DestinationNote { functionId: item.functionId, resultId: item.resultId, specialized: false, reason: "destination specialization cache bound" });
+            } else {
+                var found = false;
+                countAt = 0;
+                loop { if countAt >= destinationFunctions.len() { break; } if destinationFunctions[countAt] == item.functionId { destinationCount.set(countAt, destinationCount[countAt] + 1); found = true; } countAt = countAt + 1; }
+                if !found { destinationFunctions.push(item.functionId); destinationCount.push(1); }
+                destinations.push(DestinationNote { functionId: item.functionId, resultId: item.resultId, specialized: true, reason: "returned construction" });
+            }
+        }
+        codes.push(code);
+        index = index + 1;
+    }
+    var containerRetained: Vec<int> = [];
+    var stack: Vec<StackDecision> = [];
+    var cohorts: Vec<CohortSite> = [];
+    var retentions: Vec<ScratchRetention> = [];
+    var deadFields: Vec<DeadField> = [];
+    var scalars: Vec<ScalarCandidate> = [];
+    index = 0;
+    loop {
+        if index >= module.allocations.len() || index >= codes.len() { break; }
+        var allocation = module.allocations[index];
+        var irIndex = functionIndex(module.program, allocation.functionId);
+        if irIndex < 0 { return Result.Err("completion: allocation function is missing"); }
+        var function = module.program.functions[irIndex];
+        var carriers = managedCarriers(function, allocation.resultId);
+        if codes[index] == 0 && !managedBlockInCycle(function, allocation.blockId) && containerProof(module, function, carriers) == "" {
+            codes.set(index, 1);
+            containerRetained = addSorted(containerRetained, allocation.functionId);
+        }
+        if codes[index] == 1 {
+            var cyclic = managedBlockInCycle(function, allocation.blockId);
+            var reason = "stack carrier analysis was incomplete";
+            if hasInt(carriers, allocation.resultId) { reason = stackPlacementRejection(module, function, allocation, carriers); }
+            if cyclic && reason == "" { reason = "stack allocation is in a cycle"; }
+            if reason == "" { codes.set(index, 3); stack.push(StackDecision { functionId: allocation.functionId, resultId: allocation.resultId, accepted: true, reason: "bounded non-moving stack cohort" }); }
+            else { stack.push(StackDecision { functionId: allocation.functionId, resultId: allocation.resultId, accepted: false, reason: reason }); }
+        }
+        var payload = layoutPayload(module, allocation.layoutId);
+        if payload < 0 { payload = 0; }
+        if codes[index] == 0 {
+            var iteration = iterationProof(module, function, allocation, carriers);
+            if iteration == "" { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 1, scratchBudget: 65536, reason: "loop-local allocation" }); }
+            else if iteration == "survivor stored into an older owner" || iteration == "scratch budget exceeded" { retentions.push(ScratchRetention { functionId: allocation.functionId, resultId: allocation.resultId, retainedBytes: payload, reason: iteration }); }
+        } else if codes[index] == 1 {
+            var phase = phaseProof(module, function, allocation, carriers);
+            if phase == "" { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 2, scratchBudget: 65536, reason: "interior phase dies at its jump" }); }
+        }
+        var identity = identityReason(function, carriers);
+        scalars.push(ScalarCandidate { functionId: allocation.functionId, resultId: allocation.resultId, eligible: identity == "", reason: identity });
+        var dead = deadFieldOffsets(function, carriers);
+        var deadAt = 0;
+        loop { if deadAt >= dead.len() { break; } deadFields.push(DeadField { functionId: allocation.functionId, resultId: allocation.resultId, offset: dead[deadAt] }); deadAt = deadAt + 1; }
+        index = index + 1;
+    }
+    var functionAt = 0;
+    loop {
+        if functionAt >= module.functions.len() { break; }
+        var managedId = module.functions[functionAt].functionId;
+        var irIndex = functionIndex(module.program, managedId);
+        if irIndex >= 0 && nameIsRequest(module.program.functions[irIndex].key.name) {
+            cohorts.push(CohortSite { functionId: managedId, blockId: -1, resultId: -1, kind: 3, scratchBudget: 0, reason: "request-scoped invocation region" });
+        }
+        functionAt = functionAt + 1;
+    }
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    var regionFunctions: Vec<int> = [];
+    index = 0;
+    loop {
+        if index >= base.allocations.len() { break; }
+        var item = base.allocations[index];
+        var storage = storageFromCode(codes[index]);
+        allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: storage });
+        if storage == ManagedStorage::Region { regionFunctions = addSorted(regionFunctions, item.functionId); }
+        index = index + 1;
+    }
+    var callAt = 0;
+    loop { if callAt >= base.calls.len() { break; } if base.calls[callAt].storage == ManagedStorage::Region { regionFunctions = addSorted(regionFunctions, base.calls[callAt].functionId); } callAt = callAt + 1; }
+    var placement = ManagedPlacement { allocations: allocations, calls: copyCalls(base.calls), regionFunctions: regionFunctions };
+    return Result.Ok(MemoryCompletion { placement: placement, stack: stack, cohorts: cohorts, retentions: retentions, deadFields: deadFields, scalars: scalars, destinations: destinations, containerRetained: containerRetained });
+}
+
+func decisionFor(stack: Vec<StackDecision>, functionId: int, resultId: int): int {
+    var index = 0;
+    loop { if index >= stack.len() { break; } if stack[index].functionId == functionId && stack[index].resultId == resultId { return index; } index = index + 1; }
+    return -1;
+}
+
+pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryCompletion): Result<MemoryCompletion, string> {
+    var verified = verifyManagedRegionPlan(module, completion.placement);
+    if verified.isErr() { return Result.Err(verified.unwrapErr()); }
+    var index = 0;
+    loop {
+        if index >= completion.placement.allocations.len() { break; }
+        var item = completion.placement.allocations[index];
+        var decision = decisionFor(completion.stack, item.functionId, item.resultId);
+        if item.storage == ManagedStorage::Stack {
+            if decision < 0 || !completion.stack[decision].accepted { return Result.Err("completion: stack placement has no accepted proof"); }
+            var irIndex = functionIndex(module.program, item.functionId);
+            if irIndex < 0 { return Result.Err("completion: stack function is missing"); }
+            if module.allocations.len() == 0 { return Result.Err("completion: stack allocation annotation is missing"); }
+            var allocationAt = 0;
+            var allocation = module.allocations[0];
+            var foundAllocation = false;
+            loop { if allocationAt >= module.allocations.len() { break; } if module.allocations[allocationAt].functionId == item.functionId && module.allocations[allocationAt].resultId == item.resultId { allocation = module.allocations[allocationAt]; foundAllocation = true; } allocationAt = allocationAt + 1; }
+            if !foundAllocation { return Result.Err("completion: stack allocation annotation is missing"); }
+            var carriers = managedCarriers(module.program.functions[irIndex], item.resultId);
+            var reason = stackPlacementRejection(module, module.program.functions[irIndex], allocation, carriers);
+            if reason != "" || managedBlockInCycle(module.program.functions[irIndex], allocation.blockId) { return Result.Err("completion: stack proof does not hold"); }
+        }
+        index = index + 1;
+    }
+    var cohortAt = 0;
+    loop {
+        if cohortAt >= completion.cohorts.len() { break; }
+        var site = completion.cohorts[cohortAt];
+        var irIndex = functionIndex(module.program, site.functionId);
+        if irIndex < 0 { return Result.Err("completion: cohort function is missing"); }
+        var function = module.program.functions[irIndex];
+        if site.kind == 3 {
+            if site.resultId >= 0 || !nameIsRequest(function.key.name) { return Result.Err("completion: request cohort is not tied to a request function"); }
+        } else if site.kind == 1 || site.kind == 2 {
+            if module.allocations.len() == 0 { return Result.Err("completion: cohort allocation annotation is missing"); }
+            var allocationAt = 0;
+            var allocation = module.allocations[0];
+            var foundAllocation = false;
+            loop { if allocationAt >= module.allocations.len() { break; } if module.allocations[allocationAt].functionId == site.functionId && module.allocations[allocationAt].resultId == site.resultId { allocation = module.allocations[allocationAt]; foundAllocation = true; } allocationAt = allocationAt + 1; }
+            if !foundAllocation { return Result.Err("completion: cohort allocation annotation is missing"); }
+            var carriers = managedCarriers(function, site.resultId);
+            var reason = iterationProof(module, function, allocation, carriers);
+            if site.kind == 2 { reason = phaseProof(module, function, allocation, carriers); }
+            if reason != "" { return Result.Err("completion: cohort proof does not hold: " + reason); }
+            if site.scratchBudget <= 0 || site.scratchBudget > 65536 { return Result.Err("completion: cohort scratch budget is outside its bound"); }
+        } else {
+            return Result.Err("completion: cohort kind is not a region cohort");
+        }
+        cohortAt = cohortAt + 1;
+    }
+    var specialized: Vec<int> = [];
+    var specializedFunctions: Vec<int> = [];
+    var noteAt = 0;
+    loop {
+        if noteAt >= completion.destinations.len() { break; }
+        if completion.destinations[noteAt].specialized {
+            var found = false;
+            var countAt = 0;
+            loop { if countAt >= specializedFunctions.len() { break; } if specializedFunctions[countAt] == completion.destinations[noteAt].functionId { specialized.set(countAt, specialized[countAt] + 1); found = true; if specialized[countAt] > 8 { return Result.Err("completion: destination specialization cache bound exceeded"); } } countAt = countAt + 1; }
+            if !found { specializedFunctions.push(completion.destinations[noteAt].functionId); specialized.push(1); }
+        }
+        noteAt = noteAt + 1;
+    }
+    return Result.Ok(completion);
+}

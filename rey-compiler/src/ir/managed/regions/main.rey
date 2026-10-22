@@ -2,6 +2,7 @@ import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, Fact, Functi
 import ir::managed::{ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram, ManagedVariableLayout};
 import ir::managed::lifetime::{verifyManagedRegionPlan};
 import ir::managed::placement::{ManagedPlacement, ManagedStorage};
+import ir::managed::completion::{CohortSite, MemoryCompletion, verifyMemoryCompletion};
 import ir::verify::{verifyProgram};
 
 pub struct RegionHookBinding {
@@ -25,6 +26,7 @@ pub struct RegionBindings {
     pub layoutRegister: int,
     pub layoutRegisterVariable: int,
     pub layoutRelease: int,
+    pub cohortCreate: int,
     pub hooks: Vec<RegionHookBinding>,
 }
 
@@ -243,6 +245,11 @@ func validateBindings(program: IRProgram, bindings: RegionBindings): string {
     if !signatureMatches(program, bindings.layoutRegister, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64], IRTypeKind::I64) { return "managed regions: layoutRegister binding signature mismatch"; }
     if !signatureMatches(program, bindings.layoutRegisterVariable, [IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::I64], IRTypeKind::I64) { return "managed regions: layoutRegisterVariable binding signature mismatch"; }
     if !signatureMatches(program, bindings.layoutRelease, [IRTypeKind::RawAddress], IRTypeKind::Void) { return "managed regions: layoutRelease binding signature mismatch"; }
+    if bindings.cohortCreate < 0 { return ""; }
+    if functionIndex(program, bindings.cohortCreate) < 0 { return "managed regions: cohort creation binding is missing"; }
+    var cohortIndex = 0;
+    loop { if cohortIndex >= 14 { break; } if bindingIdAt(bindings, cohortIndex) == bindings.cohortCreate { return "managed regions: runtime binding IDs must be unique"; } cohortIndex = cohortIndex + 1; }
+    if !signatureMatches(program, bindings.cohortCreate, [IRTypeKind::RawAddress, IRTypeKind::RawAddress, IRTypeKind::I64, IRTypeKind::I64], IRTypeKind::RawAddress) { return "managed regions: cohortCreate binding signature mismatch"; }
     return "";
 }
 
@@ -583,7 +590,60 @@ func callDestination(storage: ManagedStorage, regionId: int, destinationId: int,
     return nullId;
 }
 
-func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bindings: RegionBindings, managed: ManagedFunction, promotionStress: bool): Result<IRFunction, string> {
+func functionHasStack(placement: ManagedPlacement, functionId: int): bool {
+    var index = 0;
+    loop { if index >= placement.allocations.len() { break; } if placement.allocations[index].functionId == functionId && placement.allocations[index].storage == ManagedStorage::Stack { return true; } index = index + 1; }
+    return false;
+}
+
+func functionUsesCohort(cohorts: Vec<CohortSite>, functionId: int): bool {
+    var index = 0;
+    loop { if index >= cohorts.len() { break; } if cohorts[index].functionId == functionId { return true; } index = index + 1; }
+    return false;
+}
+
+func requestCohort(cohorts: Vec<CohortSite>, functionId: int): bool {
+    var index = 0;
+    loop { if index >= cohorts.len() { break; } var site = cohorts[index]; if site.functionId == functionId && site.kind == 3 && site.resultId < 0 { return true; } index = index + 1; }
+    return false;
+}
+
+func allocationCohortKind(cohorts: Vec<CohortSite>, functionId: int, blockId: int, resultId: int): int {
+    var index = 0;
+    loop { if index >= cohorts.len() { break; } var site = cohorts[index]; if site.functionId == functionId && site.blockId == blockId && site.resultId == resultId && (site.kind == 1 || site.kind == 2) { return site.kind; } index = index + 1; }
+    return 0;
+}
+
+func blockCohortSummary(cohorts: Vec<CohortSite>, functionId: int, blockId: int): Vec<int> {
+    var kind = 0;
+    var total = 0;
+    var index = 0;
+    loop {
+        if index >= cohorts.len() { break; }
+        var site = cohorts[index];
+        if site.functionId == functionId && site.blockId == blockId && site.resultId >= 0 && (site.kind == 1 || site.kind == 2) {
+            if kind != 0 && kind != site.kind { return [-2, 0]; }
+            kind = site.kind;
+            if site.scratchBudget <= 0 || total > 1048576 - site.scratchBudget { return [-1, 0]; }
+            total = total + site.scratchBudget;
+        }
+        index = index + 1;
+    }
+    return [kind, total];
+}
+
+func emitCohort(instructions: Vec<Instruction>, next: Vec<int>, bindings: RegionBindings, contextId: int, parentId: int, kind: int, budget: int, source: SourceRef): Result<int, string> {
+    var kindId = nextValue(next);
+    var budgetId = nextValue(next);
+    var region = nextValue(next);
+    if kindId < 0 || budgetId < 0 || region < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
+    instructions.push(constI64(kindId, kind, source));
+    instructions.push(constI64(budgetId, budget, source));
+    if !emitCall(instructions, next, irRawAddress(), region, bindings.cohortCreate, [contextId, parentId, kindId, budgetId], source) { return Result.Err("managed regions: failed to emit cohort creation"); }
+    return Result.Ok(region);
+}
+
+func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bindings: RegionBindings, managed: ManagedFunction, promotionStress: bool, cohorts: Vec<CohortSite>): Result<IRFunction, string> {
     var found = functionIndex(module.program, managed.functionId);
     if found < 0 { return Result.Err("managed regions: user function is missing"); }
     var input = module.program.functions[found];
@@ -602,6 +662,10 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
     var signature = FunctionSignature { parameterTypes: parameterTypes, returnType: IRType { kind: input.signature.returnType.kind } };
     var nullId = -1;
     var regionId = -1;
+    var stackRegionId = -1;
+    var hasStack = functionHasStack(placement, input.id);
+    if (hasStack || functionUsesCohort(cohorts, input.id)) && bindings.cohortCreate < 0 { return Result.Err("managed regions: cohort creation binding is missing"); }
+    if hasStack && input.blocks.len() == 0 { return Result.Err("managed regions: stack placement has no entry block"); }
     var outputBlocks: Vec<BasicBlock> = [];
     var blockAt = 0;
     loop {
@@ -613,11 +677,25 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
             if nullId < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
             instructions.push(rawNull(nullId, generatedSource()));
             if regionFunction(placement, input.id) {
-                regionId = nextValue(next);
-                if regionId < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
-                if !emitCall(instructions, next, irRawAddress(), regionId, bindings.regionCreate, [contextId], generatedSource()) { return Result.Err("managed regions: failed to emit regionCreate"); }
+                if requestCohort(cohorts, input.id) {
+                    var created = emitCohort(instructions, next, bindings, contextId, nullId, 3, 0, generatedSource());
+                    if created.isErr() { return Result.Err(created.unwrapErr()); }
+                    regionId = created.unwrap();
+                } else {
+                    regionId = nextValue(next);
+                    if regionId < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
+                    if !emitCall(instructions, next, irRawAddress(), regionId, bindings.regionCreate, [contextId], generatedSource()) { return Result.Err("managed regions: failed to emit regionCreate"); }
+                }
+            }
+            if hasStack {
+                var stackParent = nullId;
+                if regionId >= 0 { stackParent = regionId; }
+                var createdStack = emitCohort(instructions, next, bindings, contextId, stackParent, 4, 4096, generatedSource());
+                if createdStack.isErr() { return Result.Err(createdStack.unwrapErr()); }
+                stackRegionId = createdStack.unwrap();
             }
         }
+        var blockCohortId = -1;
         var instructionAt = 0;
         loop {
             if instructionAt >= originalBlock.instructions.len() { break; }
@@ -647,9 +725,32 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
                 var groupValue = nextValue(next);
                 if groupValue < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
                 instructions.push(constI64(groupValue, groupId, instruction.source));
+                var cohortKind = allocationCohortKind(cohorts, input.id, originalBlock.id, instruction.resultId);
+                if cohortKind != 0 && blockCohortId < 0 {
+                    var summary = blockCohortSummary(cohorts, input.id, originalBlock.id);
+                    if summary[0] < 0 { return Result.Err("managed regions: block cohort is mixed or its scratch budget is invalid"); }
+                    var cohortParent = nullId;
+                    if stackRegionId >= 0 { cohortParent = stackRegionId; }
+                    else if regionId >= 0 { cohortParent = regionId; }
+                    var createdBlock = emitCohort(instructions, next, bindings, contextId, cohortParent, summary[0], summary[1], instruction.source);
+                    if createdBlock.isErr() { return Result.Err(createdBlock.unwrapErr()); }
+                    blockCohortId = createdBlock.unwrap();
+                }
                 var args: Vec<int> = [contextId];
                 var target = bindings.allocateProgram;
-                if storage == ManagedStorage::Region {
+                if cohortKind != 0 {
+                    if blockCohortId < 0 { return Result.Err("managed regions: iteration cohort is missing"); }
+                    args.push(blockCohortId);
+                    args.push(instruction.operands[0]);
+                    args.push(groupValue);
+                    target = bindings.regionAllocate;
+                } else if storage == ManagedStorage::Stack {
+                    if stackRegionId < 0 { return Result.Err("managed regions: stack cohort is missing"); }
+                    args.push(stackRegionId);
+                    args.push(instruction.operands[0]);
+                    args.push(groupValue);
+                    target = bindings.regionAllocate;
+                } else if storage == ManagedStorage::Region {
                     if regionId < 0 { return Result.Err("managed regions: region placement has no function region"); }
                     args.push(regionId);
                     args.push(instruction.operands[0]);
@@ -665,7 +766,7 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
                     args.push(groupValue);
                     target = bindings.allocateProgram;
                 } else {
-                    return Result.Err("managed regions: stack storage is not lowered");
+                    return Result.Err("managed regions: unrecognized allocation storage");
                 }
                 if !emitCall(instructions, next, irRawAddress(), instruction.resultId, target, args, instruction.source) { return Result.Err("managed regions: failed to emit allocation"); }
             } else if isStore {
@@ -681,6 +782,7 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
                 args.push(contextId);
                 var destination = nullId;
                 var placementIndex = callPlacementIndex(placement, input.id, originalBlock.id, instructionAt);
+                if placementIndex >= 0 && placement.calls[placementIndex].storage == ManagedStorage::Stack { return Result.Err("managed regions: stack storage is not lowered for call results"); }
                 if placementIndex >= 0 { destination = callDestination(placement.calls[placementIndex].storage, regionId, destinationId, nullId); }
                 if destination < 0 { return Result.Err("managed regions: call destination is unavailable"); }
                 args.push(destination);
@@ -704,6 +806,12 @@ func lowerUserFunction(module: ManagedProgram, placement: ManagedPlacement, bind
             var promotedId = nextValue(next);
             if promotedId < 0 { return Result.Err("managed regions: SSA value ID space exhausted"); }
             if !emitCall(instructions, next, irRawAddress(), promotedId, bindings.promoteReference, [contextId, term.valueId, destinationId], term.source) { return Result.Err("managed regions: failed to emit return promotion"); }
+        }
+        if blockCohortId >= 0 {
+            if !emitCall(instructions, next, irVoid(), -1, bindings.regionEnd, [contextId, blockCohortId], term.source) { return Result.Err("managed regions: failed to emit cohort end"); }
+        }
+        if term.kind == TerminatorKind::Return && stackRegionId >= 0 {
+            if !emitCall(instructions, next, irVoid(), -1, bindings.regionEnd, [contextId, stackRegionId], term.source) { return Result.Err("managed regions: failed to emit stack cohort end"); }
         }
         if term.kind == TerminatorKind::Return && regionId >= 0 {
             if !emitCall(instructions, next, irVoid(), -1, bindings.regionEnd, [contextId, regionId], term.source) { return Result.Err("managed regions: failed to emit regionEnd"); }
@@ -838,7 +946,7 @@ pub func lowerManagedRegionsWithPromotionStress(module: ManagedProgram, bindings
     var managedAt = 0;
     loop {
         if managedAt >= module.functions.len() { break; }
-        var functionResult = lowerUserFunction(module, placement, bindings, module.functions[managedAt], promotionStress);
+        var functionResult = lowerUserFunction(module, placement, bindings, module.functions[managedAt], promotionStress, []);
         if functionResult.isErr() { return Result.Err(functionResult.unwrapErr()); }
         var function = functionResult.unwrap();
         var found = functionIndex(lowered, function.id);
@@ -859,4 +967,48 @@ pub func lowerManagedRegionsWithPromotionStress(module: ManagedProgram, bindings
 
 pub func lowerManagedRegions(module: ManagedProgram, bindings: RegionBindings, placements: ManagedPlacement): Result<IRProgram, string> {
     return lowerManagedRegionsWithPromotionStress(module, bindings, placements, false);
+}
+
+pub func lowerManagedRegionsCompleted(module: ManagedProgram, bindings: RegionBindings, completion: MemoryCompletion, promotionStress: bool): Result<IRProgram, string> {
+    var checked = verifyMemoryCompletion(module, completion);
+    if checked.isErr() { return Result.Err(checked.unwrapErr()); }
+    var accepted = checked.unwrap();
+    var verification = verifyProgram(module.program);
+    if !verification.ok { return Result.Err("managed regions: linked input IR verification failed"); }
+    var bindingError = validateBindings(module.program, bindings);
+    if bindingError != "" { return Result.Err(bindingError); }
+    var separationError = validateHookSeparation(module, bindings);
+    if separationError != "" { return Result.Err(separationError); }
+    var layoutError = validateLayouts(module.layouts, module.variableLayouts);
+    if layoutError != "" { return Result.Err(layoutError); }
+    var referenceError = validateReferences(module);
+    if referenceError != "" { return Result.Err(referenceError); }
+    var allocationError = validateAllocations(module);
+    if allocationError != "" { return Result.Err(allocationError); }
+    var mainIndex = functionIndex(module.program, module.program.entryFunctionId);
+    if mainIndex < 0 || managedIndex(module.functions, module.program.entryFunctionId) < 0 { return Result.Err("managed regions: program entry must be a managed user function"); }
+    var verified = verifyManagedRegionPlan(module, accepted.placement);
+    if verified.isErr() { return Result.Err(verified.unwrapErr()); }
+    var placement = verified.unwrap();
+    var lowered = copyProgram(module.program);
+    var managedAt = 0;
+    loop {
+        if managedAt >= module.functions.len() { break; }
+        var functionResult = lowerUserFunction(module, placement, bindings, module.functions[managedAt], promotionStress, accepted.cohorts);
+        if functionResult.isErr() { return Result.Err(functionResult.unwrapErr()); }
+        var function = functionResult.unwrap();
+        var found = functionIndex(lowered, function.id);
+        if found < 0 { return Result.Err("managed regions: transformed user function disappeared"); }
+        lowered.functions.set(found, function);
+        managedAt = managedAt + 1;
+    }
+    var wrapperId = nextFunctionId(lowered);
+    if wrapperId < 0 { return Result.Err("managed regions: function ID space exhausted"); }
+    var wrapperResult = emitWrapper(lowered, module, bindings, module.program.entryFunctionId, wrapperId);
+    if wrapperResult.isErr() { return Result.Err(wrapperResult.unwrapErr()); }
+    var output = appendFunction(IRProgram { entryFunctionId: wrapperId, functions: lowered.functions }, wrapperResult.unwrap());
+    output.entryFunctionId = wrapperId;
+    var outputVerification = verifyProgram(output);
+    if !outputVerification.ok { return Result.Err("managed regions: lowered IR verification failed"); }
+    return Result.Ok(output);
 }

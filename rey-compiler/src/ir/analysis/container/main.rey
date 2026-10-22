@@ -1,0 +1,28 @@
+// Precise effects for runtime container helpers. Unknown names stay conservative.
+
+pub struct ContainerEffect {
+    pub known: bool,
+    pub receiverEscapes: bool,
+    pub argumentEscapes: bool,
+    pub argumentEscapesToReceiver: bool,
+    pub freshResult: bool,
+}
+
+func effect(known: bool, receiverEscapes: bool, argumentEscapes: bool, argumentEscapesToReceiver: bool, freshResult: bool): ContainerEffect {
+    return ContainerEffect { known: known, receiverEscapes: receiverEscapes, argumentEscapes: argumentEscapes, argumentEscapesToReceiver: argumentEscapesToReceiver, freshResult: freshResult };
+}
+
+func localEffect(): ContainerEffect { return effect(true, false, false, false, false); }
+func copyingEffect(): ContainerEffect { return effect(true, false, false, false, true); }
+func pushEffect(): ContainerEffect { return effect(true, false, false, true, false); }
+func unknownEffect(): ContainerEffect { return effect(false, true, true, false, false); }
+
+pub func containerEffect(name: string): ContainerEffect {
+    if name == "managedVecLength" || name == "managedVecCapacity" || name == "managedVecGetI64" || name == "managedVecPopI64" || name == "managedVecTruncate" || name == "managedVecSetI64" || name == "managedVecPushI64" { return localEffect(); }
+    if name == "managedStringLength" || name == "managedStringByte" || name == "managedStringEqual" || name == "managedStringCompare" || name == "managedStringHash" || name == "managedStringIndexOf" || name == "managedStringContains" || name == "managedStringStartsWith" || name == "managedStringEndsWith" { return localEffect(); }
+    if name == "managedStringSlice" || name == "managedStringConcat" || name == "managedStringFromInt" || name == "managedStringCase" || name == "managedStringTrim" || name == "managedStringRepeat" || name == "managedStringReplace" || name == "managedStringPad" { return copyingEffect(); }
+    if name == "managedMapLength" || name == "managedMapHas" || name == "managedMapGetI64" || name == "managedMapSetI64" || name == "managedMapDelete" || name == "managedMapCreate" || name == "managedVecCreate" { return localEffect(); }
+    if name == "managedVecSetReference" || name == "managedVecPushReference" || name == "managedMapSetReference" { return pushEffect(); }
+    if name == "managedVecGetReference" || name == "managedVecPopReference" || name == "managedMapGetReference" { return effect(true, false, true, false, false); }
+    return unknownEffect();
+}

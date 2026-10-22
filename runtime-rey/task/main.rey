@@ -1,0 +1,146 @@
+import regions::{regionCreateCohort, regionCurrent, regionEnd, regionIsActive, regionIsCurrent, regionProgram, regionPromote, regionSetTaskState};
+
+func taskFail(code: int): void {
+    __reyRawFail(code);
+    return;
+}
+
+func taskAddress(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func taskCheck(task: __rey_raw_address, context: __rey_raw_address): void {
+    if __reyRawEqual(task, __reyRawNull()) || __reyRawLoadI64(task) != 1380272226 { taskFail(2204); return; }
+    if !__reyRawEqual(__reyRawLoadAddress(taskAddress(task, 8)), context) { taskFail(2204); return; }
+}
+
+pub func taskCreate(context: __rey_raw_address, parent: __rey_raw_address): __rey_raw_address {
+    var actual = parent;
+    if __reyRawEqual(actual, __reyRawNull()) { actual = regionCurrent(context); }
+    var region = regionCreateCohort(context, actual, 5, 0);
+    if __reyRawEqual(region, __reyRawNull()) { return __reyRawNull(); }
+    regionSetTaskState(context, region, 1);
+    var task = __reyRawMap(64);
+    __reyRawStoreI64(task, 1380272226);
+    __reyRawStoreAddress(taskAddress(task, 8), context);
+    __reyRawStoreAddress(taskAddress(task, 16), region);
+    __reyRawStoreI64(taskAddress(task, 24), 1);
+    __reyRawStoreI64(taskAddress(task, 32), 0);
+    __reyRawStoreAddress(taskAddress(task, 40), __reyRawNull());
+    __reyRawStoreAddress(taskAddress(task, 48), actual);
+    __reyRawStoreI64(taskAddress(task, 56), 0);
+    return task;
+}
+
+pub func taskRegion(context: __rey_raw_address, task: __rey_raw_address): __rey_raw_address {
+    taskCheck(task, context);
+    return __reyRawLoadAddress(taskAddress(task, 16));
+}
+
+pub func taskState(context: __rey_raw_address, task: __rey_raw_address): int {
+    taskCheck(task, context);
+    return __reyRawLoadI64(taskAddress(task, 24));
+}
+
+pub func taskTransfer(context: __rey_raw_address, task: __rey_raw_address, object: __rey_raw_address): __rey_raw_address {
+    taskCheck(task, context);
+    if __reyRawLoadI64(taskAddress(task, 24)) != 1 { taskFail(2206); return __reyRawNull(); }
+    if __reyRawEqual(object, __reyRawNull()) { return __reyRawNull(); }
+    var transferred = regionPromote(context, object, __reyRawLoadAddress(taskAddress(task, 16)));
+    __reyRawStoreAddress(taskAddress(task, 40), transferred);
+    return transferred;
+}
+
+pub func taskFinish(context: __rey_raw_address, task: __rey_raw_address, status: int, result: __rey_raw_address): void {
+    taskCheck(task, context);
+    var state = __reyRawLoadI64(taskAddress(task, 24));
+    if state != 1 && state != 4 { taskFail(2206); return; }
+    if state == 1 {
+        var next = 2;
+        if status != 0 { next = 3; }
+        __reyRawStoreI64(taskAddress(task, 24), next);
+        regionSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), next);
+    }
+    __reyRawStoreI64(taskAddress(task, 32), status);
+    __reyRawStoreAddress(taskAddress(task, 40), result);
+}
+
+pub func taskCancel(context: __rey_raw_address, task: __rey_raw_address): void {
+    taskCheck(task, context);
+    if __reyRawLoadI64(taskAddress(task, 24)) != 1 { return; }
+    __reyRawStoreI64(taskAddress(task, 24), 4);
+    regionSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), 4);
+}
+
+pub func taskJoin(context: __rey_raw_address, task: __rey_raw_address): int {
+    taskCheck(task, context);
+    var state = __reyRawLoadI64(taskAddress(task, 24));
+    if state == 1 { taskFail(2207); return 0; }
+    var region = __reyRawLoadAddress(taskAddress(task, 16));
+    if regionIsActive(context, region) && !regionIsCurrent(context, region) { taskFail(2203); return 0; }
+    var result = __reyRawLoadAddress(taskAddress(task, 40));
+    if !__reyRawEqual(result, __reyRawNull()) {
+        var promoted = regionPromote(context, result, __reyRawLoadAddress(taskAddress(task, 48)));
+        __reyRawStoreAddress(taskAddress(task, 40), promoted);
+    }
+    if regionIsCurrent(context, region) { regionEnd(context, region); }
+    var status = __reyRawLoadI64(taskAddress(task, 32));
+    if state == 4 && status == 0 { return 2208; }
+    return status;
+}
+
+pub func taskResult(context: __rey_raw_address, task: __rey_raw_address): __rey_raw_address {
+    taskCheck(task, context);
+    if __reyRawLoadI64(taskAddress(task, 24)) == 1 { taskFail(2206); return __reyRawNull(); }
+    return __reyRawLoadAddress(taskAddress(task, 40));
+}
+
+func cellCheck(context: __rey_raw_address, cell: __rey_raw_address): void {
+    regionProgram(context);
+    if __reyRawEqual(cell, __reyRawNull()) || __reyRawLoadI64(cell) != 1380272227 { taskFail(2204); return; }
+    if !__reyRawEqual(__reyRawLoadAddress(taskAddress(cell, 24)), context) { taskFail(2204); return; }
+}
+
+pub func taskCellCreate(context: __rey_raw_address): __rey_raw_address {
+    regionProgram(context);
+    var cell = __reyRawMap(32);
+    __reyRawStoreI64(cell, 1380272227);
+    __reyRawStoreI64(taskAddress(cell, 8), 0);
+    __reyRawStoreI64(taskAddress(cell, 16), 0);
+    __reyRawStoreAddress(taskAddress(cell, 24), context);
+    return cell;
+}
+
+pub func taskCellLock(context: __rey_raw_address, cell: __rey_raw_address): void {
+    cellCheck(context, cell);
+    if __reyRawLoadI64(taskAddress(cell, 8)) != 0 { taskFail(2209); return; }
+    __reyRawStoreI64(taskAddress(cell, 8), 1);
+}
+
+pub func taskCellUnlock(context: __rey_raw_address, cell: __rey_raw_address): void {
+    cellCheck(context, cell);
+    if __reyRawLoadI64(taskAddress(cell, 8)) != 1 { taskFail(2209); return; }
+    __reyRawStoreI64(taskAddress(cell, 8), 0);
+}
+
+pub func taskCellStore(context: __rey_raw_address, cell: __rey_raw_address, value: int): void {
+    taskCellLock(context, cell);
+    __reyRawStoreI64(taskAddress(cell, 16), value);
+    taskCellUnlock(context, cell);
+}
+
+pub func taskCellLoad(context: __rey_raw_address, cell: __rey_raw_address): int {
+    taskCellLock(context, cell);
+    var value = __reyRawLoadI64(taskAddress(cell, 16));
+    taskCellUnlock(context, cell);
+    return value;
+}
+
+pub func taskCellRelease(context: __rey_raw_address, cell: __rey_raw_address): void {
+    cellCheck(context, cell);
+    if __reyRawLoadI64(taskAddress(cell, 8)) != 0 { taskFail(2209); return; }
+    __reyRawStoreI64(cell, 0);
+    __reyRawUnmap(cell, 32);
+}
+
+func main(): void {}

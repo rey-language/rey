@@ -45,6 +45,20 @@ func regionStoreZero(base: __rey_raw_address, offset: int, bytes: int): void {
     }
 }
 
+func regionCohortValid(region: __rey_raw_address): bool {
+    var kind = __reyRawLoadI64(regionAddressAt(region, 96));
+    var budget = __reyRawLoadI64(regionAddressAt(region, 104));
+    var used = __reyRawLoadI64(regionAddressAt(region, 112));
+    var taskState = __reyRawLoadI64(regionAddressAt(region, 120));
+    if kind < 0 || kind > 5 || budget < 0 || used < 0 || taskState < 0 { return false; }
+    if kind == 0 { return budget == 0 && used == 0 && taskState == 0; }
+    if budget > 1048576 { return false; }
+    if budget == 0 && used != 0 { return false; }
+    if budget > 0 && used > budget { return false; }
+    if kind == 5 { return taskState <= 4; }
+    return taskState == 0;
+}
+
 func regionContextValidate(context: __rey_raw_address): void {
     if __reyRawEqual(context, __reyRawNull()) { regionFail(2202); return; }
     if __reyRawLoadI64(context) != 1380272220 { regionFail(2202); return; }
@@ -77,11 +91,7 @@ func regionContextValidate(context: __rey_raw_address): void {
         if __reyRawLoadI64(regionAddressAt(region, 72)) != 0 { regionFail(2202); return; }
         var serial = __reyRawLoadI64(regionAddressAt(region, 24));
         if serial < 0 || serial >= previousSerial { regionFail(2202); return; }
-        var regionReserved = 96;
-        while regionReserved < 128 {
-            if __reyRawLoadI64(regionAddressAt(region, regionReserved)) != 0 { regionFail(2202); return; }
-            regionReserved = regionReserved + 8;
-        }
+        if !regionCohortValid(region) { regionFail(2202); return; }
         previousSerial = serial;
         last = region;
         region = __reyRawLoadAddress(regionAddressAt(region, 8));
@@ -442,6 +452,9 @@ func regionAllocate(context: __rey_raw_address, region: __rey_raw_address, layou
         if field < 0 || field % 8 != 0 || payload < 8 || field > payload - 8 { regionFail(2203); return __reyRawNull(); }
         fieldIndex = fieldIndex + 1;
     }
+    var scratchBudget = __reyRawLoadI64(regionAddressAt(region, 104));
+    var scratchUsed = __reyRawLoadI64(regionAddressAt(region, 112));
+    if scratchBudget > 0 && (scratchUsed > scratchBudget || payload > scratchBudget - scratchUsed) { regionFail(2205); return __reyRawNull(); }
     var slot = regionSlotBytes(payload);
     if slot < 96 || slot > 9223372036854775807 - 8 { regionFail(2201); return __reyRawNull(); }
     var groupObjects = 0;
@@ -462,6 +475,7 @@ func regionAllocate(context: __rey_raw_address, region: __rey_raw_address, layou
     __reyRawStoreI64(regionAddressAt(group, 48), groupObjects + 1);
     __reyRawStoreI64(regionAddressAt(region, 56), regionObjects + 1);
     __reyRawStoreI64(regionAddressAt(context, 64), contextObjects + 1);
+    if scratchBudget > 0 { __reyRawStoreI64(regionAddressAt(region, 112), regionAdd(scratchUsed, payload)); }
     return object;
 }
 
@@ -929,6 +943,62 @@ pub func regionUsedBytes(context: __rey_raw_address): int {
 pub func regionObjectCount(context: __rey_raw_address): int {
     regionContextValidate(context);
     return regionCheckedObjects(context);
+}
+
+pub func regionCreateCohort(context: __rey_raw_address, parent: __rey_raw_address, kind: int, budget: int): __rey_raw_address {
+    regionContextValidate(context);
+    if kind < 1 || kind > 5 || budget < 0 || budget > 1048576 { regionFail(2203); return __reyRawNull(); }
+    var actual = parent;
+    if __reyRawEqual(actual, __reyRawNull()) { actual = __reyRawLoadAddress(regionAddressAt(context, 24)); }
+    var active = regionFindActive(context, actual);
+    if __reyRawEqual(active, __reyRawNull()) { regionFail(2204); return __reyRawNull(); }
+    var region = regionPush(context, active);
+    if __reyRawEqual(region, __reyRawNull()) { return __reyRawNull(); }
+    __reyRawStoreI64(regionAddressAt(region, 96), kind);
+    __reyRawStoreI64(regionAddressAt(region, 104), budget);
+    __reyRawStoreI64(regionAddressAt(region, 112), 0);
+    __reyRawStoreI64(regionAddressAt(region, 120), 0);
+    return region;
+}
+
+pub func regionKind(context: __rey_raw_address, region: __rey_raw_address): int {
+    regionContextValidate(context);
+    var active = regionFindActive(context, region);
+    if __reyRawEqual(active, __reyRawNull()) { regionFail(2204); return -1; }
+    return __reyRawLoadI64(regionAddressAt(active, 96));
+}
+
+pub func regionScratchUsed(context: __rey_raw_address, region: __rey_raw_address): int {
+    regionContextValidate(context);
+    var active = regionFindActive(context, region);
+    if __reyRawEqual(active, __reyRawNull()) { regionFail(2204); return -1; }
+    return __reyRawLoadI64(regionAddressAt(active, 112));
+}
+
+pub func regionSetTaskState(context: __rey_raw_address, region: __rey_raw_address, state: int): void {
+    regionContextValidate(context);
+    if state < 0 || state > 4 { regionFail(2203); return; }
+    var active = regionFindActive(context, region);
+    if __reyRawEqual(active, __reyRawNull()) { regionFail(2204); return; }
+    if __reyRawLoadI64(regionAddressAt(active, 96)) != 5 { regionFail(2203); return; }
+    __reyRawStoreI64(regionAddressAt(active, 120), state);
+}
+
+pub func regionTaskState(context: __rey_raw_address, region: __rey_raw_address): int {
+    regionContextValidate(context);
+    var active = regionFindActive(context, region);
+    if __reyRawEqual(active, __reyRawNull()) { regionFail(2204); return -1; }
+    return __reyRawLoadI64(regionAddressAt(active, 120));
+}
+
+pub func regionIsActive(context: __rey_raw_address, region: __rey_raw_address): bool {
+    regionContextValidate(context);
+    return !__reyRawEqual(regionFindActive(context, region), __reyRawNull());
+}
+
+pub func regionIsCurrent(context: __rey_raw_address, region: __rey_raw_address): bool {
+    regionContextValidate(context);
+    return __reyRawEqual(__reyRawLoadAddress(regionAddressAt(context, 24)), region);
 }
 
 func main(): void {}

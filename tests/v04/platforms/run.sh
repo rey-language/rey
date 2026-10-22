@@ -3,6 +3,11 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 ENGINE=${REY_ENGINE:-"$ROOT/build/release/v0.3.1/macos-arm64-winruntime/package/rey-v0.3.1-macos-arm64/bin/rey"}
 RUNTIME=${REY_RUNTIME:-"$ROOT/build/release/v0.3.1/macos-arm64-winruntime/package/rey-v0.3.1-macos-arm64/bin/runtime"}
+export REY_ENGINE="$ENGINE"
+export REY_RUNTIME="$RUNTIME"
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export CC=/usr/bin/clang
+export CXX=/usr/bin/clang++
 test -x "$ENGINE"
 test -d "$RUNTIME"
 OUT="$ROOT/build/v04/platforms"

@@ -13,7 +13,7 @@ func require(ok: bool, message: string): void {
 }
 
 func expectedCode(name: string): int {
-    if name == "region-basic" || name == "program-region" || name == "group-separation" || name == "promotion-address-identity" || name == "promotion-older-source" || name == "promotion-null" || name == "promotion-dependency-chain" || name == "promotion-cycle" || name == "store-promotes-younger" || name == "store-records-older" || name == "destination-construction" || name == "container-current-region" || name == "repeated-request-plateau" || name == "long-lived-graph-retention" { return 0; }
+    if name == "region-basic" || name == "program-region" || name == "group-separation" || name == "promotion-address-identity" || name == "promotion-older-source" || name == "promotion-null" || name == "promotion-dependency-chain" || name == "promotion-cycle" || name == "store-promotes-younger" || name == "store-records-older" || name == "destination-construction" || name == "container-current-region" || name == "repeated-request-plateau" || name == "long-lived-graph-retention" || name == "task-lifecycle" { return 0; }
     if name == "region-end-lifo" || name == "region-end-program" { return 2203; }
     if name == "double-end" { return 2204; }
     return -1;
@@ -51,7 +51,9 @@ func exercise(fixtures: string, sourceDirectory: string, outputDirectory: string
     var containersPath = sourceDirectory + "/containers/main.rey";
     writeFile(entryPath, readFile(fixtures + "/" + name + ".rey"));
     require(checkSourceFileGraph(entryPath, "").isErr(), name + ": ordinary source checking must not authorize raw runtime units");
-    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [layoutPath, regionsPath, managedPath, containersPath, entryPath]);
+    var units: Vec<string> = [layoutPath, regionsPath, managedPath, containersPath, entryPath];
+    if name == "task-lifecycle" { units.push(sourceDirectory + "/task/main.rey"); }
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
     if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
     var lowered = lowerProgram(checked.unwrap());
     if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
