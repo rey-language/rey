@@ -1,0 +1,690 @@
+import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, SourceRef, TerminatorKind, sourceRef};
+import ir::managed::{ManagedAllocation, ManagedFunction, ManagedProgram};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedCallPlacement, ManagedPlacement, ManagedStorage};
+import ir::verify::{verifyProgram};
+
+struct FlowEdge { pub arg: int, pub param: int }
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 { budget.set(0, -1); return false; }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func hasInt(values: Vec<int>, value: int): bool {
+    var index = 0;
+    loop { if index >= values.len() { break; } if values[index] == value { return true; } index = index + 1; }
+    return false;
+}
+
+func addInt(values: Vec<int>, value: int): bool {
+    if value < 0 || hasInt(values, value) { return false; }
+    values.push(value);
+    return true;
+}
+
+func functionIndex(program: IRProgram, functionId: int): int {
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+func managedIndex(functions: Vec<ManagedFunction>, functionId: int): int {
+    var index = 0;
+    loop { if index >= functions.len() { break; } if functions[index].functionId == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+func blockIndex(function: IRFunction, blockId: int): int {
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } if function.blocks[index].id == blockId { return index; } index = index + 1; }
+    return -1;
+}
+
+func allocationIndex(allocations: Vec<ManagedAllocation>, functionId: int, resultId: int): int {
+    var index = 0;
+    loop { if index >= allocations.len() { break; } if allocations[index].functionId == functionId && allocations[index].resultId == resultId { return index; } index = index + 1; }
+    return -1;
+}
+
+func allocationPlacementIndex(placement: ManagedPlacement, functionId: int, resultId: int): int {
+    var index = 0;
+    loop { if index >= placement.allocations.len() { break; } var item = placement.allocations[index]; if item.functionId == functionId && item.resultId == resultId { return index; } index = index + 1; }
+    return -1;
+}
+
+func callPlacementIndex(placement: ManagedPlacement, functionId: int, blockId: int, instructionIndex: int): int {
+    var index = 0;
+    loop { if index >= placement.calls.len() { break; } var item = placement.calls[index]; if item.functionId == functionId && item.blockId == blockId && item.instructionIndex == instructionIndex { return index; } index = index + 1; }
+    return -1;
+}
+
+func emptySource(): SourceRef { return sourceRef("", 0, 0); }
+
+func sourceText(source: SourceRef): string {
+    return source.unitId + ":" + source.start.toString() + "-" + source.end.toString();
+}
+
+func lifetimeError(reason: string, functionId: int, resultId: int, blockId: int, source: SourceRef): string {
+    return "lifetime: " + reason + " (functionId=" + functionId.toString() + ", resultId=" + resultId.toString() + ", blockId=" + blockId.toString() + ", source=" + sourceText(source) + ")";
+}
+
+func lifetimeUseError(reason: string, functionId: int, blockId: int, instructionIndex: int, source: SourceRef): string {
+    return "lifetime: " + reason + " (functionId=" + functionId.toString() + ", blockId=" + blockId.toString() + ", instructionIndex=" + instructionIndex.toString() + ", source=" + sourceText(source) + ")";
+}
+
+func copyPlacement(placement: ManagedPlacement): ManagedPlacement {
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    var index = 0;
+    loop { if index >= placement.allocations.len() { break; } allocations.push(placement.allocations[index]); index = index + 1; }
+    var calls: Vec<ManagedCallPlacement> = [];
+    index = 0;
+    loop { if index >= placement.calls.len() { break; } calls.push(placement.calls[index]); index = index + 1; }
+    var regionFunctions: Vec<int> = [];
+    index = 0;
+    loop { if index >= placement.regionFunctions.len() { break; } regionFunctions.push(placement.regionFunctions[index]); index = index + 1; }
+    return ManagedPlacement { allocations: allocations, calls: calls, regionFunctions: regionFunctions };
+}
+
+func allocationSource(function: IRFunction, blockId: int, resultId: int, allocateFunctionId: int): SourceRef {
+    var blockAt = blockIndex(function, blockId);
+    if blockAt < 0 { return emptySource(); }
+    var block = function.blocks[blockAt];
+    var index = 0;
+    loop {
+        if index >= block.instructions.len() { break; }
+        var instruction = block.instructions[index];
+        if instruction.resultId == resultId && instruction.kind == InstructionKind::Call && instruction.functionId == allocateFunctionId { return instruction.source; }
+        index = index + 1;
+    }
+    return emptySource();
+}
+
+func flowEdges(function: IRFunction, budget: Vec<int>): Vec<FlowEdge> {
+    var edges: Vec<FlowEdge> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        if !charge(budget) { return edges; }
+        var block = function.blocks[blockAt];
+        var term = block.terminator;
+        if term.kind == TerminatorKind::Jump {
+            var targetAt = blockIndex(function, term.targetBlockId);
+            if targetAt >= 0 {
+                var target = function.blocks[targetAt];
+                var argAt = 0;
+                loop {
+                    if argAt >= term.targetArgs.len() || argAt >= target.params.len() { break; }
+                    edges.push(FlowEdge { arg: term.targetArgs[argAt], param: target.params[argAt].id });
+                    argAt = argAt + 1;
+                }
+            }
+        } else if term.kind == TerminatorKind::Branch {
+            var trueAt = blockIndex(function, term.trueTargetBlockId);
+            if trueAt >= 0 {
+                var target = function.blocks[trueAt];
+                var argAt = 0;
+                loop { if argAt >= term.trueArgs.len() || argAt >= target.params.len() { break; } edges.push(FlowEdge { arg: term.trueArgs[argAt], param: target.params[argAt].id }); argAt = argAt + 1; }
+            }
+            var falseAt = blockIndex(function, term.falseTargetBlockId);
+            if falseAt >= 0 {
+                var target = function.blocks[falseAt];
+                var argAt = 0;
+                loop { if argAt >= term.falseArgs.len() || argAt >= target.params.len() { break; } edges.push(FlowEdge { arg: term.falseArgs[argAt], param: target.params[argAt].id }); argAt = argAt + 1; }
+            }
+        }
+        blockAt = blockAt + 1;
+    }
+    return edges;
+}
+
+func carriersOf(function: IRFunction, root: int, budget: Vec<int>): Vec<int> {
+    var carriers: Vec<int> = [];
+    carriers.push(root);
+    var edges = flowEdges(function, budget);
+    var changed = true;
+    var pass = 0;
+    loop {
+        if !changed || pass > edges.len() + 2 { break; }
+        changed = false;
+        var index = 0;
+        loop {
+            if index >= edges.len() { break; }
+            if !charge(budget) { return carriers; }
+            if hasInt(carriers, edges[index].arg) && addInt(carriers, edges[index].param) { changed = true; }
+            index = index + 1;
+        }
+        pass = pass + 1;
+    }
+    return carriers;
+}
+
+func returnReach(function: IRFunction, budget: Vec<int>): Vec<int> {
+    var reaching: Vec<int> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var term = function.blocks[blockAt].terminator;
+        if term.kind == TerminatorKind::Return && term.valueId >= 0 { addInt(reaching, term.valueId); }
+        blockAt = blockAt + 1;
+    }
+    var edges = flowEdges(function, budget);
+    var changed = true;
+    var pass = 0;
+    loop {
+        if !changed || pass > edges.len() + reaching.len() + 2 { break; }
+        changed = false;
+        var index = 0;
+        loop {
+            if index >= edges.len() { break; }
+            if !charge(budget) { return reaching; }
+            if hasInt(reaching, edges[index].param) && addInt(reaching, edges[index].arg) { changed = true; }
+            index = index + 1;
+        }
+        pass = pass + 1;
+    }
+    return reaching;
+}
+
+func targetParam(function: IRFunction, blockId: int, argIndex: int): int {
+    var targetAt = blockIndex(function, blockId);
+    if targetAt < 0 || argIndex < 0 || argIndex >= function.blocks[targetAt].params.len() { return -1; }
+    return function.blocks[targetAt].params[argIndex].id;
+}
+
+func siteInCycle(function: IRFunction, siteBlockId: int, budget: Vec<int>): bool {
+    var size = function.blocks.len();
+    if size > 2048 { return true; }
+    var start = blockIndex(function, siteBlockId);
+    if start < 0 || size == 0 { return true; }
+    var visited: Vec<bool> = [];
+    var index = 0;
+    loop { if index >= size { break; } if !charge(budget) { return true; } visited.push(false); index = index + 1; }
+    var worklist: Vec<int> = [];
+    var entryTerm = function.blocks[start].terminator;
+    if entryTerm.kind == TerminatorKind::Jump {
+        var next = blockIndex(function, entryTerm.targetBlockId);
+        if next == start { return true; }
+        if next >= 0 { visited.set(next, true); worklist.push(next); }
+    } else if entryTerm.kind == TerminatorKind::Branch {
+        var trueNext = blockIndex(function, entryTerm.trueTargetBlockId);
+        if trueNext == start { return true; }
+        if trueNext >= 0 && !visited[trueNext] { visited.set(trueNext, true); worklist.push(trueNext); }
+        var falseNext = blockIndex(function, entryTerm.falseTargetBlockId);
+        if falseNext == start { return true; }
+        if falseNext >= 0 && !visited[falseNext] { visited.set(falseNext, true); worklist.push(falseNext); }
+    }
+    loop {
+        if worklist.len() == 0 { break; }
+        if !charge(budget) { return true; }
+        var current = worklist.pop();
+        var term = function.blocks[current].terminator;
+        if term.kind == TerminatorKind::Jump {
+            var nextBlock = blockIndex(function, term.targetBlockId);
+            if nextBlock == start { return true; }
+            if nextBlock >= 0 && !visited[nextBlock] { visited.set(nextBlock, true); worklist.push(nextBlock); }
+        } else if term.kind == TerminatorKind::Branch {
+            var trueBlock = blockIndex(function, term.trueTargetBlockId);
+            if trueBlock == start { return true; }
+            if trueBlock >= 0 && !visited[trueBlock] { visited.set(trueBlock, true); worklist.push(trueBlock); }
+            var falseBlock = blockIndex(function, term.falseTargetBlockId);
+            if falseBlock == start { return true; }
+            if falseBlock >= 0 && !visited[falseBlock] { visited.set(falseBlock, true); worklist.push(falseBlock); }
+        }
+    }
+    return false;
+}
+
+func dominatorMatrix(function: IRFunction, budget: Vec<int>): Vec<int> {
+    var blockCount = function.blocks.len();
+    var cells: Vec<int> = [];
+    if blockCount <= 0 || blockCount > 2048 { return cells; }
+    var edges: Vec<int> = [];
+    var cell = 0;
+    var limit = blockCount * blockCount;
+    loop { if cell >= limit { break; } if !charge(budget) { return []; } edges.push(0); cells.push(0); cell = cell + 1; }
+    var blockAt = 0;
+    loop {
+        if blockAt >= blockCount { break; }
+        var term = function.blocks[blockAt].terminator;
+        if term.kind == TerminatorKind::Jump {
+            var next = blockIndex(function, term.targetBlockId);
+            if next >= 0 { edges.set(blockAt * blockCount + next, 1); }
+        } else if term.kind == TerminatorKind::Branch {
+            var trueNext = blockIndex(function, term.trueTargetBlockId);
+            if trueNext >= 0 { edges.set(blockAt * blockCount + trueNext, 1); }
+            var falseNext = blockIndex(function, term.falseTargetBlockId);
+            if falseNext >= 0 { edges.set(blockAt * blockCount + falseNext, 1); }
+        }
+        blockAt = blockAt + 1;
+    }
+    var reachable: Vec<int> = [];
+    var reachAt = 0;
+    loop { if reachAt >= blockCount { break; } reachable.push(0); reachAt = reachAt + 1; }
+    if blockCount > 0 { reachable.set(0, 1); }
+    var reachPass = 0;
+    var reachChanged = true;
+    loop {
+        if reachPass >= blockCount || !reachChanged { break; }
+        reachChanged = false;
+        var fromIndex = 0;
+        loop {
+            if fromIndex >= blockCount { break; }
+            if reachable[fromIndex] != 0 {
+                var toIndex = 0;
+                loop {
+                    if toIndex >= blockCount { break; }
+                    if !charge(budget) { return []; }
+                    if edges[fromIndex * blockCount + toIndex] != 0 && reachable[toIndex] == 0 { reachable.set(toIndex, 1); reachChanged = true; }
+                    toIndex = toIndex + 1;
+                }
+            }
+            fromIndex = fromIndex + 1;
+        }
+        reachPass = reachPass + 1;
+    }
+    blockAt = 0;
+    loop {
+        if blockAt >= blockCount { break; }
+        var candidate = 0;
+        loop {
+            if candidate >= blockCount { break; }
+            if blockAt == 0 { if candidate == 0 { cells.set(candidate, 1); } }
+            else if reachable[blockAt] != 0 && reachable[candidate] != 0 { cells.set(blockAt * blockCount + candidate, 1); }
+            candidate = candidate + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    var domPass = 0;
+    var domChanged = true;
+    loop {
+        if domPass >= blockCount || !domChanged { break; }
+        var nextCells: Vec<int> = [];
+        cell = 0;
+        loop { if cell >= limit { break; } nextCells.push(0); cell = cell + 1; }
+        blockAt = 0;
+        loop {
+            if blockAt >= blockCount { break; }
+            if blockAt == 0 { nextCells.set(0, 1); }
+            else if reachable[blockAt] != 0 {
+                var candidateIndex = 0;
+                loop {
+                    if candidateIndex >= blockCount { break; }
+                    if !charge(budget) { return []; }
+                    var inAll = 1;
+                    var hasPredecessor = 0;
+                    var predecessor = 0;
+                    loop {
+                        if predecessor >= blockCount { break; }
+                        if edges[predecessor * blockCount + blockAt] != 0 && reachable[predecessor] != 0 {
+                            hasPredecessor = 1;
+                            if cells[predecessor * blockCount + candidateIndex] == 0 { inAll = 0; }
+                        }
+                        predecessor = predecessor + 1;
+                    }
+                    if hasPredecessor == 0 { inAll = 0; }
+                    if candidateIndex == blockAt { inAll = 1; }
+                    nextCells.set(blockAt * blockCount + candidateIndex, inAll);
+                    candidateIndex = candidateIndex + 1;
+                }
+            }
+            blockAt = blockAt + 1;
+        }
+        domChanged = false;
+        cell = 0;
+        loop { if cell >= cells.len() || cell >= nextCells.len() { break; } if cells[cell] != nextCells[cell] { domChanged = true; } cell = cell + 1; }
+        cells = nextCells;
+        domPass = domPass + 1;
+    }
+    return cells;
+}
+
+func dominates(matrix: Vec<int>, blockCount: int, dominator: int, block: int): bool {
+    if dominator < 0 || block < 0 || blockCount <= 0 { return false; }
+    if dominator == block { return true; }
+    var index = block * blockCount + dominator;
+    if index < 0 || index >= matrix.len() { return false; }
+    return matrix[index] != 0;
+}
+
+func ownerStorage(module: ManagedProgram, placement: ManagedPlacement, functionId: int, ownerId: int): ManagedStorage {
+    var allocationAt = allocationIndex(module.allocations, functionId, ownerId);
+    if allocationAt < 0 { return ManagedStorage::Region; }
+    var placementAt = allocationPlacementIndex(placement, functionId, ownerId);
+    if placementAt < 0 { return ManagedStorage::Region; }
+    return placement.allocations[placementAt].storage;
+}
+
+func promotionDominates(module: ManagedProgram, placement: ManagedPlacement, function: IRFunction, carriers: Vec<int>, matrix: Vec<int>, budget: Vec<int>): bool {
+    var blockCount = function.blocks.len();
+    var stores: Vec<int> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            if !charge(budget) { return false; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() == 3 && hasInt(carriers, instruction.operands[2]) {
+                var storage = ownerStorage(module, placement, function.id, instruction.operands[0]);
+                if storage == ManagedStorage::Heap || storage == ManagedStorage::Destination { stores.push(blockAt); }
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    if stores.len() == 0 || matrix.len() == 0 { return false; }
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var term = function.blocks[blockAt].terminator;
+        if term.kind == TerminatorKind::Return && hasInt(carriers, term.valueId) {
+            var dominated = false;
+            var storeAt = 0;
+            loop {
+                if storeAt >= stores.len() { break; }
+                if dominates(matrix, blockCount, stores[storeAt], blockAt) { dominated = true; }
+                storeAt = storeAt + 1;
+            }
+            if !dominated { return false; }
+        }
+        blockAt = blockAt + 1;
+    }
+    return true;
+}
+
+func stackEscape(function: IRFunction, carriers: Vec<int>, storeFunctionId: int): string {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if hasInt(carriers, instruction.operands[operandAt]) {
+                    if instruction.kind == InstructionKind::RawStoreAddress { return "stack allocation escapes through raw store"; }
+                    if instruction.kind == InstructionKind::Call && instruction.functionId == storeFunctionId { return "stack allocation escapes through store"; }
+                    if instruction.kind == InstructionKind::Call { return "stack allocation escapes through call"; }
+                }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        if block.terminator.kind == TerminatorKind::Return && hasInt(carriers, block.terminator.valueId) { return "stack allocation escapes through return"; }
+        blockAt = blockAt + 1;
+    }
+    return "";
+}
+
+func destinationOutsideReturn(module: ManagedProgram, function: IRFunction, carriers: Vec<int>, reaching: Vec<int>, budget: Vec<int>): string {
+    var reaches = false;
+    var carrierAt = 0;
+    loop { if carrierAt >= carriers.len() { break; } if hasInt(reaching, carriers[carrierAt]) { reaches = true; } carrierAt = carrierAt + 1; }
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            if !charge(budget) { return "analysis work budget exhausted"; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if hasInt(carriers, instruction.operands[operandAt]) {
+                    var allowed = false;
+                    if instruction.kind == InstructionKind::RawEqual { allowed = true; }
+                    if instruction.kind == InstructionKind::RawStoreAddress {
+                        allowed = false;
+                    } else if instruction.kind != InstructionKind::Call {
+                        // Raw offset/load/store on the object does not publish the
+                        // reference; RawStoreAddress is rejected by rawStoreBypass.
+                        allowed = true;
+                    }
+                    if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() == 3 {
+                        if operandAt == 2 && hasInt(reaching, instruction.operands[0]) { allowed = true; reaches = true; }
+                        if operandAt == 0 && hasInt(reaching, instruction.operands[0]) { allowed = true; }
+                    } else if instruction.kind == InstructionKind::Call && managedIndex(module.functions, instruction.functionId) >= 0 {
+                        if instruction.resultId >= 0 && hasInt(reaching, instruction.resultId) { allowed = true; reaches = true; }
+                    }
+                    if !allowed { return "destination allocation is reachable outside its return"; }
+                }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        var term = block.terminator;
+        if term.kind == TerminatorKind::Return && hasInt(carriers, term.valueId) { reaches = true; }
+        if term.kind == TerminatorKind::Jump {
+            var argAt = 0;
+            loop {
+                if argAt >= term.targetArgs.len() { break; }
+                if hasInt(carriers, term.targetArgs[argAt]) {
+                    var param = targetParam(function, term.targetBlockId, argAt);
+                    if !hasInt(carriers, param) && !hasInt(reaching, param) { return "destination allocation is reachable outside its return"; }
+                }
+                argAt = argAt + 1;
+            }
+        } else if term.kind == TerminatorKind::Branch {
+            var argAt = 0;
+            loop {
+                if argAt >= term.trueArgs.len() { break; }
+                if hasInt(carriers, term.trueArgs[argAt]) {
+                    var param = targetParam(function, term.trueTargetBlockId, argAt);
+                    if !hasInt(carriers, param) && !hasInt(reaching, param) { return "destination allocation is reachable outside its return"; }
+                }
+                argAt = argAt + 1;
+            }
+            argAt = 0;
+            loop {
+                if argAt >= term.falseArgs.len() { break; }
+                if hasInt(carriers, term.falseArgs[argAt]) {
+                    var param = targetParam(function, term.falseTargetBlockId, argAt);
+                    if !hasInt(carriers, param) && !hasInt(reaching, param) { return "destination allocation is reachable outside its return"; }
+                }
+                argAt = argAt + 1;
+            }
+        }
+        blockAt = blockAt + 1;
+    }
+    if !reaches { return "destination allocation is reachable outside its return"; }
+    return "";
+}
+
+func regionUseSurvives(module: ManagedProgram, placement: ManagedPlacement, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>, budget: Vec<int>): string {
+    var reaching = returnReach(function, budget);
+    var returned = false;
+    var returnBlock = allocation.blockId;
+    var returnSource = emptySource();
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if hasInt(carriers, instruction.operands[operandAt]) {
+                    if instruction.kind == InstructionKind::RawStoreAddress {
+                        return lifetimeUseError("direct raw store bypasses the reference store hook", function.id, block.id, instructionAt, instruction.source);
+                    }
+                    if instruction.kind == InstructionKind::Call {
+                        var userCall = managedIndex(module.functions, instruction.functionId) >= 0;
+                        var storeCall = instruction.functionId == module.storeReferenceFunctionId;
+                        var privateHook = instruction.functionId == module.allocateFunctionId || instruction.functionId == module.collectFunctionId;
+                        if !userCall && !storeCall && !privateHook {
+                            return lifetimeError("region allocation escapes through an unknown call", allocation.functionId, allocation.resultId, block.id, instruction.source);
+                        }
+                        if userCall && instruction.resultId >= 0 && hasInt(reaching, instruction.resultId) {
+                            returned = true;
+                            returnBlock = block.id;
+                            returnSource = instruction.source;
+                        }
+                    }
+                }
+                operandAt = operandAt + 1;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        if block.terminator.kind == TerminatorKind::Return && hasInt(carriers, block.terminator.valueId) {
+            returned = true;
+            returnBlock = block.id;
+            returnSource = block.terminator.source;
+        }
+        blockAt = blockAt + 1;
+    }
+    if !returned { return ""; }
+    var matrix = dominatorMatrix(function, budget);
+    if budget[0] < 0 { return "lifetime: analysis work budget exhausted"; }
+    if promotionDominates(module, placement, function, carriers, matrix, budget) { return ""; }
+    return lifetimeError("returned region allocation is not proven to survive region end", allocation.functionId, allocation.resultId, returnBlock, returnSource);
+}
+
+func rawStoreBypass(module: ManagedProgram): string {
+    var functionAt = 0;
+    loop {
+        if functionAt >= module.functions.len() { break; }
+        var managed = module.functions[functionAt];
+        var realAt = functionIndex(module.program, managed.functionId);
+        if realAt >= 0 {
+            var function = module.program.functions[realAt];
+            var blockAt = 0;
+            loop {
+                if blockAt >= function.blocks.len() { break; }
+                var block = function.blocks[blockAt];
+                var instructionAt = 0;
+                loop {
+                    if instructionAt >= block.instructions.len() { break; }
+                    var instruction = block.instructions[instructionAt];
+                    if instruction.kind == InstructionKind::RawStoreAddress {
+                        return lifetimeUseError("direct raw store bypasses the reference store hook", managed.functionId, block.id, instructionAt, instruction.source);
+                    }
+                    instructionAt = instructionAt + 1;
+                }
+                blockAt = blockAt + 1;
+            }
+        }
+        functionAt = functionAt + 1;
+    }
+    return "";
+}
+
+pub func verifyManagedRegionPlan(module: ManagedProgram, placement: ManagedPlacement): Result<ManagedPlacement, string> {
+    var verification = verifyProgram(module.program);
+    if !verification.ok { return Result.Err("lifetime: IR verification failed"); }
+    var budget: Vec<int> = [750000];
+    var allocationAt = 0;
+    loop {
+        if allocationAt >= module.allocations.len() { break; }
+        if !charge(budget) { return Result.Err("lifetime: analysis work budget exhausted"); }
+        var allocation = module.allocations[allocationAt];
+        var matches = 0;
+        var placementAt = 0;
+        loop {
+            if placementAt >= placement.allocations.len() { break; }
+            var item = placement.allocations[placementAt];
+            if item.functionId == allocation.functionId && item.resultId == allocation.resultId { matches = matches + 1; }
+            placementAt = placementAt + 1;
+        }
+        if matches == 0 { return Result.Err(lifetimeError("allocation has no placement", allocation.functionId, allocation.resultId, allocation.blockId, emptySource())); }
+        if matches != 1 { return Result.Err(lifetimeError("allocation has more than one placement", allocation.functionId, allocation.resultId, allocation.blockId, emptySource())); }
+        allocationAt = allocationAt + 1;
+    }
+    var placementAt = 0;
+    loop {
+        if placementAt >= placement.allocations.len() { break; }
+        var item = placement.allocations[placementAt];
+        if allocationIndex(module.allocations, item.functionId, item.resultId) < 0 {
+            return Result.Err(lifetimeError("placement does not match an allocation annotation", item.functionId, item.resultId, -1, emptySource()));
+        }
+        placementAt = placementAt + 1;
+    }
+    var rawStore = rawStoreBypass(module);
+    if rawStore != "" { return Result.Err(rawStore); }
+    allocationAt = 0;
+    loop {
+        if allocationAt >= module.allocations.len() { break; }
+        if !charge(budget) { return Result.Err("lifetime: analysis work budget exhausted"); }
+        var allocation = module.allocations[allocationAt];
+        var chosenAt = allocationPlacementIndex(placement, allocation.functionId, allocation.resultId);
+        var chosen = placement.allocations[chosenAt];
+        var realAt = functionIndex(module.program, allocation.functionId);
+        if realAt < 0 { return Result.Err(lifetimeError("allocation function does not exist", allocation.functionId, allocation.resultId, allocation.blockId, emptySource())); }
+        var function = module.program.functions[realAt];
+        var cyclic = siteInCycle(function, allocation.blockId, budget);
+        if budget[0] < 0 { return Result.Err("lifetime: analysis work budget exhausted"); }
+        var origin = allocationSource(function, allocation.blockId, allocation.resultId, module.allocateFunctionId);
+        if cyclic && chosen.storage != ManagedStorage::Heap {
+            return Result.Err(lifetimeError("unproven cyclic placement cannot use an invocation region or destination", allocation.functionId, allocation.resultId, allocation.blockId, origin));
+        }
+        if chosen.storage == ManagedStorage::Region && !hasInt(placement.regionFunctions, allocation.functionId) {
+            return Result.Err(lifetimeError("region placement has no invocation region", allocation.functionId, allocation.resultId, allocation.blockId, origin));
+        }
+        var carriers = carriersOf(function, allocation.resultId, budget);
+        if budget[0] < 0 { return Result.Err("lifetime: analysis work budget exhausted"); }
+        if chosen.storage == ManagedStorage::Stack {
+            var escape = stackEscape(function, carriers, module.storeReferenceFunctionId);
+            if escape == "" { escape = "stack storage is not established"; }
+            return Result.Err(lifetimeError(escape, allocation.functionId, allocation.resultId, allocation.blockId, origin));
+        }
+        if chosen.storage == ManagedStorage::Destination {
+            var reaching = returnReach(function, budget);
+            var outside = destinationOutsideReturn(module, function, carriers, reaching, budget);
+            if outside != "" { return Result.Err(lifetimeError(outside, allocation.functionId, allocation.resultId, allocation.blockId, origin)); }
+        }
+        if chosen.storage == ManagedStorage::Region {
+            var survived = regionUseSurvives(module, placement, function, allocation, carriers, budget);
+            if survived != "" { return Result.Err(survived); }
+        }
+        allocationAt = allocationAt + 1;
+    }
+    var userAt = 0;
+    loop {
+        if userAt >= module.functions.len() { break; }
+        var managed = module.functions[userAt];
+        var realAt = functionIndex(module.program, managed.functionId);
+        if realAt >= 0 {
+            var function = module.program.functions[realAt];
+            var blockAt = 0;
+            loop {
+                if blockAt >= function.blocks.len() { break; }
+                var block = function.blocks[blockAt];
+                var instructionAt = 0;
+                loop {
+                    if instructionAt >= block.instructions.len() { break; }
+                    var instruction = block.instructions[instructionAt];
+                    if instruction.kind == InstructionKind::Call && managedIndex(module.functions, instruction.functionId) >= 0 && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                        var callAt = callPlacementIndex(placement, managed.functionId, block.id, instructionAt);
+                        if callAt < 0 { return Result.Err(lifetimeUseError("user call has no placement", managed.functionId, block.id, instructionAt, instruction.source)); }
+                        var callStorage = placement.calls[callAt].storage;
+                        var cyclicCall = siteInCycle(function, block.id, budget);
+                        if cyclicCall && callStorage != ManagedStorage::Heap {
+                            return Result.Err(lifetimeUseError("unproven cyclic placement cannot use an invocation region or destination", managed.functionId, block.id, instructionAt, instruction.source));
+                        }
+                        if callStorage == ManagedStorage::Region && !hasInt(placement.regionFunctions, managed.functionId) {
+                            return Result.Err(lifetimeUseError("region call placement has no invocation region", managed.functionId, block.id, instructionAt, instruction.source));
+                        }
+                        if callStorage == ManagedStorage::Stack {
+                            return Result.Err(lifetimeUseError("stack storage is not established", managed.functionId, block.id, instructionAt, instruction.source));
+                        }
+                    }
+                    instructionAt = instructionAt + 1;
+                }
+                blockAt = blockAt + 1;
+            }
+        }
+        userAt = userAt + 1;
+    }
+    if budget[0] < 0 { return Result.Err("lifetime: analysis work budget exhausted"); }
+    return Result.Ok(copyPlacement(placement));
+}

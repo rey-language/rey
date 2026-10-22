@@ -450,6 +450,13 @@ def main() -> int:
         return 0
 
     env = os.environ.copy()
+    # The pinned seed invokes the host Clang. Swiftly-managed shims may point at
+    # a removed toolchain, so pin the system toolchain for seed-driven gates.
+    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    env["CC"] = "/usr/bin/clang"
+    env["CXX"] = "/usr/bin/clang++"
+    for key in ("CLANG", "LD", "LLVM_CONFIG", "REY_RUNTIME_DIR"):
+        env.pop(key, None)
     env["LC_ALL"] = "C"
     started_at = utc_now()
     version_run = run_bounded(

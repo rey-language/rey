@@ -1,0 +1,59 @@
+import containers::{managedVecCapacity, managedVecCreate, managedVecLength};
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedCurrentRegion, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedProgramRegion, managedRegionCreate, managedRegionEnd, managedRegionGroupCount, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRequestedObjectBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(2);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var headerLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var dataLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    var child = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), child));
+    var vector = managedVecCreate(context, headerLayout, dataLayout, 1);
+    check(managedVecLength(context, vector) == 0);
+    check(managedVecCapacity(context, vector) == 1);
+    check(__reyRawLoadI64(vector) == 8589934592 + headerLayout);
+    var backing = __reyRawLoadAddress(__reyRawOffset(vector, 16));
+    check(__reyRawLoadI64(backing) == 8589934592 + dataLayout);
+    check(__reyRawLoadI64(__reyRawOffset(backing, 16)) == 0);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(backing, 24)), __reyRawNull()));
+    check(managedLiveObjects(context) == 2);
+    check(managedLivePayloadBytes(context) == 24);
+    check(managedRequestedObjectBytes(context) == 64);
+    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionUsedBytes(context) == 216);
+    check(managedRegionObjectCount(context) == 2);
+    check(managedRegionGroupCount(context) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(child, 56)) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(__reyRawLoadAddress(__reyRawOffset(child, 40)), 24)) == 0);
+    managedRegionEnd(context, child);
+    check(managedLiveObjects(context) == 0);
+    check(managedRegionRequestedBytes(context) == 0);
+    check(managedRegionUsedBytes(context) == 0);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    var kept = managedVecCreate(context, headerLayout, dataLayout, 1);
+    check(managedVecLength(context, kept) == 0);
+    check(__reyRawLoadI64(kept) == 8589934592 + headerLayout);
+    check(managedLiveObjects(context) == 2);
+    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionUsedBytes(context) == 216);
+    var nested = managedRegionCreate(context);
+    managedRegionEnd(context, nested);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(managedLiveObjects(context) == 2);
+    check(managedLivePayloadBytes(context) == 24);
+    check(managedRequestedObjectBytes(context) == 64);
+    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionObjectCount(context) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 2);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,51 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateDestination, managedCreate, managedCurrentRegion, managedDestroy, managedLiveObjects, managedProgramRegion, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    var outer = managedRegionCreate(context);
+    var inner = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), inner));
+    var escaped = managedAllocateDestination(context, __reyRawNull(), scalar, 1);
+    var built = managedAllocateDestination(context, outer, scalar, 2);
+    var temporary = managedRegionAllocate(context, inner, scalar, 3);
+    var alias = built;
+    check(!__reyRawEqual(escaped, built) && !__reyRawEqual(built, temporary));
+    check(managedLiveObjects(context) == 3);
+    check(managedRegionObjectCount(context) == 3);
+    check(managedRegionRequestedBytes(context) == 12288);
+    check(managedRegionUsedBytes(context) == 312);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 56)) == 1);
+    var programGroup = __reyRawLoadAddress(__reyRawOffset(program, 40));
+    check(__reyRawLoadI64(__reyRawOffset(programGroup, 24)) == 1);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(programGroup, 16)), program));
+    var outerGroup = __reyRawLoadAddress(__reyRawOffset(outer, 40));
+    check(__reyRawLoadI64(__reyRawOffset(outerGroup, 24)) == 2);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(outerGroup, 16)), outer));
+    managedRegionEnd(context, inner);
+    check(__reyRawEqual(alias, built));
+    check(__reyRawLoadI64(built) == 8589934592 + scalar);
+    check(managedLiveObjects(context) == 2);
+    check(managedRegionRequestedBytes(context) == 8192);
+    check(managedRegionUsedBytes(context) == 208);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 1);
+    managedRegionEnd(context, outer);
+    check(managedLiveObjects(context) == 1);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionUsedBytes(context) == 104);
+    check(__reyRawLoadI64(escaped) == 8589934592 + scalar);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

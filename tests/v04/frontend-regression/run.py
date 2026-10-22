@@ -23,7 +23,9 @@ SEED = REPO / "build/release/v0.3.1/macos-arm64-winruntime/package/rey-v0.3.1-ma
 RUNTIME = SEED.parent / "runtime"
 BASELINE_REV = "6b36981"
 FIXTURE_PATH = Path("tests/native-typecheck")
-FRONTEND_MODULES = ("lexer", "parser", "typecheck", "diagnostics")
+# Swiftly-managed toolchains can shadow the system clang used by the pinned seed.
+SEED_ENV = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin",
+                CC="/usr/bin/clang", CXX="/usr/bin/clang++")
 
 
 def sha256_file(path: Path) -> str:
@@ -141,9 +143,9 @@ def prepare_tree(source_root: Path, fixture_root: Path, driver_source: Path, des
     staged_fixture.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(fixture_root, staged_fixture)
     shutil.copy2(driver_source, src_root / "frontend-main.rey")
-    positive = staged_fixture / "positive"
-    for module in FRONTEND_MODULES:
-        shutil.copytree(src_root / module, positive / module)
+    # Leave lexer/parser/typecheck/diagnostics only under src/. A second tree
+    # beside the fixtures makes `import lexer` bind one Token/Span/Program
+    # while the compiler's own imports bind another, so nominal identity fails.
     (staged_fixture / "stdroot").mkdir()
     files = tree_hashes(src_root)
     return {
@@ -245,7 +247,7 @@ def build_snapshot(name: str, snapshot: dict[str, Any], output: Path, timeout: f
     src_root = Path(snapshot["src"])
     binary = output / "snapshots" / name / "rey-frontend"
     argv = [str(SEED), "build", str(src_root / "frontend-main.rey"), "-o", str(binary), "--runtime-dir", str(RUNTIME)]
-    result = run_bounded(argv, src_root, timeout)
+    result = run_bounded(argv, src_root, timeout, env=SEED_ENV)
     result["binary"] = str(binary)
     result["binary_sha256"] = sha256_file(binary) if result["status"] == 0 and binary.is_file() else None
     return result

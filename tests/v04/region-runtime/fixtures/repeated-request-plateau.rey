@@ -1,0 +1,38 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDependencyCount, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedPromotionCount, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionGroupCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRequestedObjectBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    check(managedRegionRequestedBytes(context) == 0);
+    var round = 0;
+    while round < 8 {
+        var region = managedRegionCreate(context);
+        var object = managedRegionAllocate(context, region, scalar, 1);
+        check(__reyRawLoadI64(object) == 8589934592 + scalar);
+        check(managedRegionRequestedBytes(context) == 4096);
+        check(managedRegionUsedBytes(context) == 104);
+        check(managedLiveObjects(context) == 1);
+        check(managedLivePayloadBytes(context) == 8);
+        check(managedRequestedObjectBytes(context) == 32);
+        check(managedRegionGroupCount(context) == 1);
+        managedRegionEnd(context, region);
+        check(managedRegionRequestedBytes(context) == 0);
+        check(managedRegionUsedBytes(context) == 0);
+        check(managedLiveObjects(context) == 0);
+        check(managedLivePayloadBytes(context) == 0);
+        check(managedRequestedObjectBytes(context) == 0);
+        check(managedRegionGroupCount(context) == 0);
+        round = round + 1;
+    }
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    check(managedRegionRequestedBytes(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

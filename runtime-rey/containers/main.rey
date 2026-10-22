@@ -1,5 +1,5 @@
 import layout::{layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
-import managed::{managedAllocateSized, managedLiveObjects, managedRootPop, managedRootPush, managedRootSet, managedStoreReference};
+import managed::{managedAllocateSized, managedLiveObjects, managedStoreReference};
 
 func containersAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
     return __reyRawOffset(base, offset);
@@ -21,8 +21,16 @@ func containersRegistry(context: __rey_raw_address): __rey_raw_address {
 func containersHeapLayout(context: __rey_raw_address, object: __rey_raw_address): int {
     if __reyRawEqual(object, __reyRawNull()) { containersFail(2205); return 0; }
     var header = __reyRawLoadI64(object);
-    if header < 1 || header > 8589934591 { containersFail(2205); return 0; }
-    var layoutId = header % 4294967296;
+    var layoutId = 0;
+    if header >= 8589934592 {
+        layoutId = header - 8589934592;
+        if layoutId < 1 || layoutId > 4294967295 { containersFail(2205); return 0; }
+    } else {
+        if header < 1 || header > 8589934591 { containersFail(2205); return 0; }
+        var mark = header / 4294967296;
+        if mark < 0 || mark > 1 { containersFail(2205); return 0; }
+        layoutId = header - mark * 4294967296;
+    }
     var registry = containersRegistry(context);
     var payloadBytes = __reyRawLoadI64(containersAddressAt(object, 8));
     if layoutId < 1 || !layoutPayloadSizeValid(registry, layoutId, payloadBytes) { containersFail(2205); return 0; }
@@ -583,13 +591,10 @@ pub func managedVecCreate(context: __rey_raw_address, headerLayoutId: int, dataL
         return __reyRawNull();
     }
     var vector = managedAllocateSized(context, headerLayoutId, 8);
-    var vectorSlot = managedRootPush(context);
-    managedRootSet(context, vectorSlot, vector);
     var payloadBytes = 8 + capacity * 8;
     var backing = managedAllocateSized(context, dataLayoutId, payloadBytes);
     __reyRawStoreI64(containersAddressAt(backing, 16), 0);
     managedStoreReference(context, vector, 0, backing);
-    managedRootPop(context, vectorSlot);
     return vector;
 }
 
@@ -646,8 +651,6 @@ func containersVecGrow(context: __rey_raw_address, vector: __rey_raw_address, da
         newCapacity = newCapacity * 2;
     }
     var payloadBytes = 8 + newCapacity * 8;
-    var vectorSlot = managedRootPush(context);
-    managedRootSet(context, vectorSlot, vector);
     var newBacking = managedAllocateSized(context, dataLayoutId, payloadBytes);
     var length = __reyRawLoadI64(containersAddressAt(backing, 16));
     var index = 0;
@@ -664,12 +667,9 @@ func containersVecGrow(context: __rey_raw_address, vector: __rey_raw_address, da
     }
     __reyRawStoreI64(containersAddressAt(newBacking, 16), length);
     managedStoreReference(context, vector, 0, newBacking);
-    managedRootPop(context, vectorSlot);
 }
 
 pub func managedVecPushI64(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: int): void {
-    var vectorSlot = managedRootPush(context);
-    managedRootSet(context, vectorSlot, vector);
     var backing = containersVecBacking(context, vector);
     var actualLayoutId = containersVecRequireKind(context, backing, 1);
     if actualLayoutId != dataLayoutId { containersFail(2203); return; }
@@ -679,14 +679,9 @@ pub func managedVecPushI64(context: __rey_raw_address, vector: __rey_raw_address
     backing = containersVecBacking(context, vector);
     __reyRawStoreI64(containersVecTailAddress(backing, length), value);
     __reyRawStoreI64(containersAddressAt(backing, 16), length + 1);
-    managedRootPop(context, vectorSlot);
 }
 
 pub func managedVecPushReference(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: __rey_raw_address): void {
-    var vectorSlot = managedRootPush(context);
-    managedRootSet(context, vectorSlot, vector);
-    var valueSlot = managedRootPush(context);
-    managedRootSet(context, valueSlot, value);
     var backing = containersVecBacking(context, vector);
     var actualLayoutId = containersVecRequireKind(context, backing, 2);
     if actualLayoutId != dataLayoutId { containersFail(2203); return; }
@@ -695,8 +690,6 @@ pub func managedVecPushReference(context: __rey_raw_address, vector: __rey_raw_a
     if length >= managedVecCapacity(context, vector) { containersVecGrow(context, vector, dataLayoutId, length + 1); }
     backing = containersVecBacking(context, vector);
     managedStoreReference(context, backing, 8 + length * 8, value);
-    managedRootPop(context, valueSlot);
-    managedRootPop(context, vectorSlot);
 }
 
 pub func managedVecPopI64(context: __rey_raw_address, vector: __rey_raw_address): int {
@@ -849,12 +842,8 @@ func containersMapGrow(context: __rey_raw_address, map: __rey_raw_address, bucke
     if oldCapacity <= 0 || oldCapacity > 1152921504606846966 / 2 { containersFail(2201); return; }
     var newCapacity = oldCapacity * 2;
     var payloadBytes = 8 + newCapacity * 8;
-    var mapSlot = managedRootPush(context);
-    managedRootSet(context, mapSlot, map);
     var newBuckets = managedAllocateSized(context, bucketsLayoutId, payloadBytes);
     containersMapInitializeBuckets(newBuckets, newCapacity);
-    var newSlot = managedRootPush(context);
-    managedRootSet(context, newSlot, newBuckets);
     var oldIndex = 0;
     while oldIndex < oldCapacity {
         var node = __reyRawLoadAddress(containersAddressAt(oldBuckets, 24 + oldIndex * 8));
@@ -874,8 +863,6 @@ func containersMapGrow(context: __rey_raw_address, map: __rey_raw_address, bucke
         oldIndex = oldIndex + 1;
     }
     managedStoreReference(context, map, 0, newBuckets);
-    managedRootPop(context, newSlot);
-    managedRootPop(context, mapSlot);
 }
 
 pub func managedMapCreate(context: __rey_raw_address, mapLayoutId: int, bucketsLayoutId: int): __rey_raw_address {
@@ -890,12 +877,9 @@ pub func managedMapCreate(context: __rey_raw_address, mapLayoutId: int, bucketsL
         return __reyRawNull();
     }
     var map = managedAllocateSized(context, mapLayoutId, 16);
-    var mapSlot = managedRootPush(context);
-    managedRootSet(context, mapSlot, map);
     var buckets = managedAllocateSized(context, bucketsLayoutId, 8 + 8 * 8);
     containersMapInitializeBuckets(buckets, 8);
     managedStoreReference(context, map, 0, buckets);
-    managedRootPop(context, mapSlot);
     return map;
 }
 
@@ -924,24 +908,12 @@ pub func managedMapGetReference(context: __rey_raw_address, map: __rey_raw_addre
 
 func containersMapInsert(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, scalarValue: int, referenceValue: __rey_raw_address, storesReference: bool): void {
     containersMapValidateNodeLayout(context, nodeLayoutId, storesReference);
-    var mapSlot = managedRootPush(context);
-    managedRootSet(context, mapSlot, map);
-    var keySlot = managedRootPush(context);
-    managedRootSet(context, keySlot, key);
-    var valueSlot = -1;
-    if storesReference {
-        valueSlot = managedRootPush(context);
-        managedRootSet(context, valueSlot, referenceValue);
-    }
     managedStringLength(context, key);
     var existing = containersMapFind(context, map, key);
     if !__reyRawEqual(existing, __reyRawNull()) {
         if containersMapNodeIsReference(context, existing) != storesReference { containersFail(2203); return; }
         if storesReference { managedStoreReference(context, existing, 8, referenceValue); }
         else { __reyRawStoreI64(containersAddressAt(existing, 24), scalarValue); }
-        if storesReference { managedRootPop(context, valueSlot); }
-        managedRootPop(context, keySlot);
-        managedRootPop(context, mapSlot);
         return;
     }
     var buckets = containersMapBuckets(context, map);
@@ -961,9 +933,6 @@ func containersMapInsert(context: __rey_raw_address, map: __rey_raw_address, nod
     managedStoreReference(context, node, 16, head);
     managedStoreReference(context, buckets, 8 + bucket * 8, node);
     __reyRawStoreI64(containersAddressAt(map, 24), length + 1);
-    if storesReference { managedRootPop(context, valueSlot); }
-    managedRootPop(context, keySlot);
-    managedRootPop(context, mapSlot);
 }
 
 pub func managedMapSetI64(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, value: int): void {

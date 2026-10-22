@@ -1,4 +1,4 @@
-struct Point { x: int }
+struct Point { pub x: int }
 
 func stringLength(value: string?): int {
     if value != null {

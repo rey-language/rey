@@ -1,4 +1,5 @@
 func run(): int {
+    // mutable bindings cannot be captured; const capture stays legal
     var base: int = 5;
     var add = (value: int) => value + base;
     return add(2);

@@ -1,0 +1,520 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef, TerminatorKind};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
+import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegions, lowerManagedRegionsWithPromotionStress};
+import ir::managed::lifetime::{verifyManagedRegionPlan};
+import ir::managed::link::{LinkedRegionProgram, buildManagedProgram, linkRegionRuntime, regionRuntimeUnits};
+import ir::verify::{verifyProgram};
+import typecheck::{CheckedProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-regions-fixture.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop { if i >= parameterCount { break; } escapes.push(Escape::Unknown); i = i + 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("managed-regions-fixture", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func straight(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var terminator = ir.returnVoid(source());
+    if returnId >= 0 { terminator = ir.returnValue(returnId, source()); }
+    return makeFunction(id, name, parameterTypes, returnType, parameters, [ir.basicBlock(0, [], instructions, terminator)]);
+}
+
+func binding(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType): IRFunction {
+    var parameters: Vec<IRValue> = [];
+    var i = 0;
+    loop { if i >= parameterTypes.len() { break; } parameters.push(ir.irValue(100 + i, parameterTypes[i])); i = i + 1; }
+    var instructions: Vec<Instruction> = [];
+    var returnId = -1;
+    if returnType.kind == IRTypeKind::RawAddress { instructions.push(ir.rawNull(0, source())); returnId = 0; }
+    else if returnType.kind == IRTypeKind::I64 { instructions.push(ir.constI64(0, 0, source())); returnId = 0; }
+    return straight(id, name, parameterTypes, returnType, parameters, instructions, returnId);
+}
+
+func allocationHook(): IRFunction { return straight(20, "allocate", [ir.irI64()], ir.irRawAddress(), [ir.irValue(10, ir.irI64())], [ir.rawNull(0, source())], 0); }
+func storeHook(): IRFunction { return straight(21, "store", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), [ir.irValue(10, ir.irRawAddress()), ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irRawAddress())], [], -1); }
+func collectHook(): IRFunction { return straight(22, "collect", [], ir.irVoid(), [], [], -1); }
+func vecHook(): IRFunction { return straight(23, "vecCreateStub", [], ir.irRawAddress(), [], [ir.rawNull(0, source())], 0); }
+
+func pushRuntime(functions: Vec<IRFunction>, withVec: bool): Vec<IRFunction> {
+    var out: Vec<IRFunction> = [];
+    var i = 0;
+    loop { if i >= functions.len() { break; } out.push(functions[i]); i = i + 1; }
+    out.push(allocationHook());
+    out.push(storeHook());
+    out.push(collectHook());
+    if withVec { out.push(vecHook()); }
+    out.push(binding(100, "managedCreate", [ir.irRawAddress()], ir.irRawAddress()));
+    out.push(binding(101, "managedDestroy", [ir.irRawAddress()], ir.irVoid()));
+    out.push(binding(102, "managedStoreReference", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid()));
+    out.push(binding(103, "managedRegionCreate", [ir.irRawAddress()], ir.irRawAddress()));
+    out.push(binding(104, "managedRegionEnd", [ir.irRawAddress(), ir.irRawAddress()], ir.irVoid()));
+    out.push(binding(105, "managedRegionAllocate", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    out.push(binding(106, "managedAllocateDestination", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    out.push(binding(107, "managedAllocateProgram", [ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    out.push(binding(108, "managedPromoteReference", [ir.irRawAddress(), ir.irRawAddress(), ir.irRawAddress()], ir.irRawAddress()));
+    out.push(binding(109, "managedPromotionCount", [ir.irRawAddress()], ir.irI64()));
+    out.push(binding(110, "layoutRegistryCreate", [ir.irI64()], ir.irRawAddress()));
+    out.push(binding(111, "layoutRegisterFixed", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64()], ir.irI64()));
+    out.push(binding(112, "layoutRegisterVariable", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irI64()));
+    out.push(binding(113, "layoutRegistryRelease", [ir.irRawAddress()], ir.irVoid()));
+    if withVec { out.push(binding(114, "managedVecCreate", [ir.irRawAddress()], ir.irRawAddress())); }
+    return out;
+}
+
+func runtimeBindings(withVec: bool): RegionBindings {
+    var hooks: Vec<RegionHookBinding> = [];
+    if withVec { hooks.push(RegionHookBinding { functionId: 23, runtimeFunctionId: 114, mayCollect: true }); }
+    return RegionBindings { create: 100, destroy: 101, storeReference: 102, regionCreate: 103, regionEnd: 104, regionAllocate: 105, allocateDestination: 106, allocateProgram: 107, promoteReference: 108, promotionCount: 109, layoutCreate: 110, layoutRegister: 111, layoutRegisterVariable: 112, layoutRelease: 113, hooks: hooks };
+}
+
+func nodeLayout(): ManagedLayout {
+    var fields: Vec<ManagedField> = [ManagedField { name: "child", offset: 0, kind: IRTypeKind::RawAddress, layoutId: 1 }];
+    return ManagedLayout { id: 1, key: "fixture::Node", payloadBytes: 8, fields: fields };
+}
+
+func userMeta(functionId: int, references: Vec<int>, parameterLayouts: Vec<int>, returnLayout: int): ManagedFunction {
+    return ManagedFunction { functionId: functionId, referenceValues: references, parameterLayouts: parameterLayouts, returnLayout: returnLayout };
+}
+
+func allocAnn(functionId: int, blockId: int, resultId: int): ManagedAllocation {
+    return ManagedAllocation { functionId: functionId, blockId: blockId, resultId: resultId, layoutId: 1 };
+}
+
+func place(functionId: int, resultId: int, storage: ManagedStorage): ManagedAllocationPlacement {
+    return ManagedAllocationPlacement { functionId: functionId, resultId: resultId, storage: storage };
+}
+
+func managedModule(entryId: int, users: Vec<IRFunction>, managed: Vec<ManagedFunction>, allocations: Vec<ManagedAllocation>, derived: Vec<ManagedDerived>, withVec: bool): ManagedProgram {
+    var hooks: Vec<ManagedHook> = [];
+    if withVec { hooks.push(ManagedHook { functionId: 23, runtimeName: "managedVecCreate", mayCollect: true }); }
+    return ManagedProgram { program: ir.irProgram(entryId, pushRuntime(users, withVec)), layouts: [nodeLayout()], functions: managed, allocations: allocations, derived: derived, allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: hooks };
+}
+
+func voidMain(): IRFunction { return straight(10, "main", [], ir.irVoid(), [], [], -1); }
+
+func allocInstructions(resultId: int): Vec<Instruction> {
+    var previous = resultId - 1;
+    return [ir.constI64(previous, 1, source()), ir.call(resultId, ir.irRawAddress(), 20, [previous], source())];
+}
+
+func successModule(): ManagedProgram {
+    var mainInstructions: Vec<Instruction> = [ir.call(-1, ir.irVoid(), 11, [], source()), ir.call(-1, ir.irVoid(), 22, [], source())];
+    var mainFn = straight(10, "main", [], ir.irVoid(), [], mainInstructions, -1);
+    var regionLocal = straight(11, "regionLocal", [], ir.irVoid(), [], allocInstructions(1), -1);
+    var destinationReturn = straight(12, "destinationReturn", [], ir.irRawAddress(), [], allocInstructions(1), 1);
+    var programInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constI64(2, 1, source()), ir.call(3, ir.irRawAddress(), 20, [2], source()), ir.constI64(4, 0, source()), ir.call(-1, ir.irVoid(), 21, [1, 4, 3], source())];
+    var programGraph = straight(13, "programGraph", [], ir.irRawAddress(), [], programInstructions, 1);
+    var groupInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constI64(2, 1, source()), ir.call(3, ir.irRawAddress(), 20, [2], source())];
+    var groupPair = straight(14, "groupPair", [], ir.irVoid(), [], groupInstructions, -1);
+    var aliasEntry = ir.basicBlock(0, [], allocInstructions(1), ir.jump(1, [1], source()));
+    var aliasBody = ir.basicBlock(1, [ir.irValue(2, ir.irRawAddress())], [ir.rawEqual(3, 2, 2, source())], ir.returnVoid(source()));
+    var aliasLocal = makeFunction(15, "aliasLocal", [], ir.irVoid(), [], [aliasEntry, aliasBody]);
+    var cyclicEntry = ir.basicBlock(0, [], [], ir.jump(1, [], source()));
+    var cyclicInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constBool(2, true, source())];
+    var cyclicBody = ir.basicBlock(1, [], cyclicInstructions, ir.branch(2, 1, [], 2, [], source()));
+    var cyclicExit = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    var cyclicHeap = makeFunction(16, "cyclicHeap", [], ir.irVoid(), [], [cyclicEntry, cyclicBody, cyclicExit]);
+    var promotedInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constI64(3, 1, source()), ir.call(2, ir.irRawAddress(), 20, [3], source()), ir.constI64(4, 0, source()), ir.call(-1, ir.irVoid(), 21, [2, 4, 1], source())];
+    var promotedReturn = straight(17, "promotedReturn", [], ir.irRawAddress(), [], promotedInstructions, 1);
+    var containerReturn = straight(18, "containerReturn", [], ir.irRawAddress(), [], [ir.call(1, ir.irRawAddress(), 23, [], source())], 1);
+    var users: Vec<IRFunction> = [mainFn, regionLocal, destinationReturn, programGraph, groupPair, aliasLocal, cyclicHeap, promotedReturn, containerReturn];
+    var managed: Vec<ManagedFunction> = [
+        userMeta(10, [], [], 0), userMeta(11, [1], [], 0), userMeta(12, [1], [], 1), userMeta(13, [1, 3], [], 1), userMeta(14, [1, 3], [], 0), userMeta(15, [1, 2], [], 0), userMeta(16, [1], [], 0), userMeta(17, [1, 2], [], 1), userMeta(18, [1], [], 1),
+    ];
+    var allocations: Vec<ManagedAllocation> = [allocAnn(11, 0, 1), allocAnn(12, 0, 1), allocAnn(13, 0, 1), allocAnn(13, 0, 3), allocAnn(14, 0, 1), allocAnn(14, 0, 3), allocAnn(15, 0, 1), allocAnn(16, 1, 1), allocAnn(17, 0, 1), allocAnn(17, 0, 2)];
+    return managedModule(10, users, managed, allocations, [], true);
+}
+
+func successPlacement(): ManagedPlacement {
+    var allocations: Vec<ManagedAllocationPlacement> = [
+        place(11, 1, ManagedStorage::Region), place(12, 1, ManagedStorage::Destination), place(13, 1, ManagedStorage::Heap), place(13, 3, ManagedStorage::Heap), place(14, 1, ManagedStorage::Region), place(14, 3, ManagedStorage::Region), place(15, 1, ManagedStorage::Region), place(16, 1, ManagedStorage::Heap), place(17, 1, ManagedStorage::Region), place(17, 2, ManagedStorage::Heap),
+    ];
+    return ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [11, 14, 15, 17] };
+}
+
+func functionIndex(program: IRProgram, id: int): int {
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } if program.functions[i].id == id { return i; } i = i + 1; }
+    return -1;
+}
+
+func functionById(program: IRProgram, id: int): IRFunction { return program.functions[functionIndex(program, id)]; }
+
+func countCalls(function: IRFunction, target: int): int {
+    var count = 0;
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].kind == InstructionKind::Call && block.instructions[ii].functionId == target { count = count + 1; } ii = ii + 1; } bi = bi + 1; }
+    return count;
+}
+
+func countProgramCalls(program: IRProgram, target: int): int {
+    var count = 0;
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } count = count + countCalls(program.functions[i], target); i = i + 1; }
+    return count;
+}
+
+func firstCallIndex(function: IRFunction, target: int): int {
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } if block.instructions[ii].kind == InstructionKind::Call && block.instructions[ii].functionId == target { return ii; } ii = ii + 1; } bi = bi + 1; }
+    return -1;
+}
+
+func nthCall(function: IRFunction, target: int, ordinal: int): Instruction {
+    var seen = 0;
+    var bi = 0;
+    loop {
+        if bi >= function.blocks.len() { break; }
+        var block = function.blocks[bi];
+        var ii = 0;
+        loop {
+            if ii >= block.instructions.len() { break; }
+            var instruction = block.instructions[ii];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == target { if seen == ordinal { return instruction; } seen = seen + 1; }
+            ii = ii + 1;
+        }
+        bi = bi + 1;
+    }
+    return function.blocks[0].instructions[0];
+}
+
+func constImmediate(function: IRFunction, valueId: int): int {
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.kind == InstructionKind::ConstI64 && instruction.resultId == valueId { return instruction.immediate; } ii = ii + 1; } bi = bi + 1; }
+    return -1;
+}
+
+func isRawNull(function: IRFunction, valueId: int): bool {
+    var bi = 0;
+    loop { if bi >= function.blocks.len() { break; } var block = function.blocks[bi]; var ii = 0; loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.kind == InstructionKind::RawNull && instruction.resultId == valueId { return true; } ii = ii + 1; } bi = bi + 1; }
+    return false;
+}
+
+func returnBlock(function: IRFunction): BasicBlock {
+    var i = 0;
+    loop { if i >= function.blocks.len() { break; } if function.blocks[i].terminator.kind == TerminatorKind::Return { return function.blocks[i]; } i = i + 1; }
+    return function.blocks[0];
+}
+
+func wrapperOf(program: IRProgram): IRFunction {
+    var i = 0;
+    loop { if i >= program.functions.len() { break; } var function = program.functions[i]; if function.key.module == "managed-regions" && function.key.name == "entry" { return function; } i = i + 1; }
+    return program.functions[0];
+}
+
+func assertSuccess(): void {
+    var module = successModule();
+    var placement = successPlacement();
+    var verified = verifyManagedRegionPlan(module, placement);
+    if verified.isErr() { require(false, "accepted plan: " + verified.unwrapErr()); }
+    var accepted = verified.unwrap();
+    require(accepted.allocations.len() == 10 && accepted.regionFunctions.len() == 4, "verifier returns the full plan");
+    var originalAlloc = functionById(module.program, 11).blocks[0].instructions[1].functionId;
+    var originalHook = functionById(module.program, 18).blocks[0].instructions[0].functionId;
+    var bindings = runtimeBindings(true);
+    var lowered = lowerManagedRegions(module, bindings, placement);
+    if lowered.isErr() { require(false, "region lowering: " + lowered.unwrapErr()); }
+    require(functionById(module.program, 11).blocks[0].instructions[1].functionId == originalAlloc && originalAlloc == 20, "lowering leaves the input allocation call unchanged");
+    require(functionById(module.program, 18).blocks[0].instructions[0].functionId == originalHook && originalHook == 23, "lowering leaves the input hook call unchanged");
+    require(module.program.entryFunctionId == 10, "lowering leaves the input entry unchanged");
+    var output = lowered.unwrap();
+    var verifiedOutput = verifyProgram(output);
+    require(verifiedOutput.ok, "lowered region IR verifies");
+    var wrapper = wrapperOf(output);
+    require(output.entryFunctionId == wrapper.id && wrapper.parameters.len() == 0 && wrapper.signature.returnType.kind == IRTypeKind::Void && wrapper.key.name == "entry", "entry wrapper has no parameters and returns void");
+    require(firstCallIndex(wrapper, bindings.layoutCreate) < firstCallIndex(wrapper, bindings.create) && firstCallIndex(wrapper, bindings.create) < firstCallIndex(wrapper, 10) && firstCallIndex(wrapper, 10) < firstCallIndex(wrapper, bindings.destroy) && firstCallIndex(wrapper, bindings.destroy) < firstCallIndex(wrapper, bindings.layoutRelease), "wrapper orders registry, context, main, destroy, and release");
+    require(nthCall(wrapper, bindings.create, 0).operands.len() == 1, "context creation takes only the registry");
+    var mainCall = nthCall(wrapper, 10, 0);
+    require(mainCall.operands.len() == 2 && isRawNull(wrapper, mainCall.operands[1]), "wrapper calls main with context and a null destination");
+    require(countCalls(wrapper, bindings.layoutRegister) == 1 && countCalls(wrapper, bindings.layoutRegisterVariable) == 0, "wrapper registers the one fixed layout");
+    var loweredMain = functionById(output, 10);
+    require(loweredMain.parameters.len() == 2 && loweredMain.parameters[0].ty.kind == IRTypeKind::RawAddress && loweredMain.parameters[1].ty.kind == IRTypeKind::RawAddress, "user functions gain hidden context and destination parameters");
+    require(loweredMain.effects.argumentEscapes.len() == 2 && loweredMain.effects.argumentEscapes[0] == Escape::NoEscape && loweredMain.effects.argumentEscapes[1] == Escape::NoEscape, "hidden parameters do not escape");
+    var regionFn = functionById(output, 11);
+    var regionCall = nthCall(regionFn, bindings.regionAllocate, 0);
+    require(countCalls(regionFn, bindings.regionCreate) == 1 && countCalls(regionFn, bindings.regionEnd) == 1 && countCalls(regionFn, bindings.promoteReference) == 0, "invocation region brackets a void region function");
+    require(regionCall.operands.len() == 4 && regionCall.operands[0] == regionFn.parameters[0].id && constImmediate(regionFn, regionCall.operands[2]) == 1 && constImmediate(regionFn, regionCall.operands[3]) == 1 && regionCall.operands[2] != regionCall.operands[3], "region allocation passes context, region, layout 1, and group 1");
+    var destinationFn = functionById(output, 12);
+    var destinationCall = nthCall(destinationFn, bindings.allocateDestination, 0);
+    var destinationReturn = returnBlock(destinationFn);
+    var destinationPromote = destinationReturn.instructions[destinationReturn.instructions.len() - 1];
+    require(countCalls(destinationFn, bindings.regionCreate) == 0 && countCalls(destinationFn, bindings.regionEnd) == 0 && countCalls(destinationFn, bindings.promoteReference) == 1, "destination construction has no invocation region");
+    require(destinationCall.operands.len() == 4 && destinationCall.operands[1] == destinationFn.parameters[1].id && constImmediate(destinationFn, destinationCall.operands[2]) == 1 && constImmediate(destinationFn, destinationCall.operands[3]) == 2, "destination allocation uses the hidden destination and group 2");
+    require(destinationPromote.functionId == bindings.promoteReference && destinationPromote.operands.len() == 3 && destinationPromote.operands[1] == 1 && destinationPromote.operands[2] == destinationFn.parameters[1].id && destinationReturn.terminator.valueId == 1, "returned destination reference is promoted and the original address is returned");
+    var programFn = functionById(output, 13);
+    var firstProgram = nthCall(programFn, bindings.allocateProgram, 0);
+    var secondProgram = nthCall(programFn, bindings.allocateProgram, 1);
+    var stored = nthCall(programFn, bindings.storeReference, 0);
+    require(countCalls(programFn, bindings.allocateProgram) == 2 && countCalls(programFn, bindings.regionCreate) == 0 && countCalls(programFn, bindings.promoteReference) == 1, "heap spelling allocates in the program region and still promotes a returned reference");
+    require(constImmediate(programFn, firstProgram.operands[2]) == 3 && constImmediate(programFn, secondProgram.operands[2]) == 4, "program allocations keep module-global group ids 3 and 4");
+    require(stored.operands.len() == 4 && stored.operands[1] == 1 && stored.operands[2] == 4 && stored.operands[3] == 3, "reference store keeps the original owner, offset, and value");
+    var groupFn = functionById(output, 14);
+    require(constImmediate(groupFn, nthCall(groupFn, bindings.regionAllocate, 0).operands[3]) == 5 && constImmediate(groupFn, nthCall(groupFn, bindings.regionAllocate, 1).operands[3]) == 6, "two region allocations in one function receive distinct group ids");
+    var aliasFn = functionById(output, 15);
+    require(countCalls(aliasFn, bindings.regionAllocate) == 1 && nthCall(aliasFn, bindings.regionAllocate, 0).resultId == 1 && aliasFn.blocks[0].terminator.targetArgs.len() == 1 && aliasFn.blocks[0].terminator.targetArgs[0] == 1, "alias edge keeps the allocation SSA identity");
+    var cyclicFn = functionById(output, 16);
+    require(countCalls(cyclicFn, bindings.allocateProgram) == 1 && countCalls(cyclicFn, bindings.regionCreate) == 0 && constImmediate(cyclicFn, nthCall(cyclicFn, bindings.allocateProgram, 0).operands[2]) == 8, "cyclic site falls back to the program region with group 8");
+    var promotedFn = functionById(output, 17);
+    var promotedBlock = returnBlock(promotedFn);
+    var promotedLen = promotedBlock.instructions.len();
+    require(countCalls(promotedFn, bindings.regionAllocate) == 1 && countCalls(promotedFn, bindings.allocateProgram) == 1 && constImmediate(promotedFn, nthCall(promotedFn, bindings.regionAllocate, 0).operands[3]) == 9 && constImmediate(promotedFn, nthCall(promotedFn, bindings.allocateProgram, 0).operands[2]) == 10, "promoted return keeps region group 9 and program group 10");
+    require(promotedBlock.instructions[promotedLen - 2].functionId == bindings.promoteReference && promotedBlock.instructions[promotedLen - 1].functionId == bindings.regionEnd && promotedBlock.instructions[promotedLen - 2].operands[1] == 1 && promotedBlock.terminator.valueId == 1, "return promotion runs before region end and preserves the address");
+    var containerFn = functionById(output, 18);
+    var containerReturn = returnBlock(containerFn);
+    var containerLast = containerReturn.instructions[containerReturn.instructions.len() - 1];
+    require(countCalls(containerFn, bindings.regionCreate) == 0 && countCalls(containerFn, bindings.regionEnd) == 0 && countCalls(containerFn, 23) == 0 && nthCall(containerFn, 114, 0).operands.len() == 1, "container hook is rewritten with context and has no invocation region");
+    require(containerLast.functionId == bindings.promoteReference && containerLast.operands[1] == 1 && containerLast.operands[2] == containerFn.parameters[1].id && containerReturn.terminator.valueId == 1, "borrowed container return is promoted before the caller observes it");
+    require(countProgramCalls(output, 22) == 0 && countProgramCalls(output, bindings.promoteReference) == 4 && countProgramCalls(output, bindings.promotionCount) == 0, "collect calls are dropped and only raw returns are promoted");
+    var printed = ir.printIR(output);
+    require(!printed.contains("managedCollect") && !printed.contains("managedRootPush") && !printed.contains("managedRootSet") && !printed.contains("managedRootPop") && !printed.contains("/gc/") && !printed.contains("/heap/"), "printed region IR has no collector, root, gc, or heap symbols");
+    var stressed = lowerManagedRegionsWithPromotionStress(module, bindings, placement, true);
+    if stressed.isErr() { require(false, "promotion stress: " + stressed.unwrapErr()); }
+    var stressedProgram = stressed.unwrap();
+    var stressedMain = functionById(stressedProgram, 10);
+    require(countProgramCalls(stressedProgram, bindings.promotionCount) == 1 && countCalls(stressedMain, bindings.promotionCount) == 1 && firstCallIndex(stressedMain, bindings.promotionCount) < firstCallIndex(stressedMain, 11) && countProgramCalls(stressedProgram, 22) == 0, "promotion stress reads the promotion count before the user call and does not collect");
+}
+
+func requireFailure(failed: bool, message: string, fragment: string, label: string): void {
+    require(failed, label + " should fail");
+    require(message.contains(fragment), label + " diagnostic: " + message);
+}
+
+func placementText(result: Result<ManagedPlacement, string>): string {
+    if result.isErr() { return result.unwrapErr(); }
+    return "";
+}
+
+func programText(result: Result<IRProgram, string>): string {
+    if result.isErr() { return result.unwrapErr(); }
+    return "";
+}
+
+func linkText(result: Result<LinkedRegionProgram, string>): string {
+    if result.isErr() { return result.unwrapErr(); }
+    return "";
+}
+
+func returnedRegionModule(): ManagedProgram {
+    var body = straight(11, "returnedRegion", [], ir.irRawAddress(), [], allocInstructions(1), 1);
+    return managedModule(10, [voidMain(), body], [userMeta(10, [], [], 0), userMeta(11, [1], [], 1)], [allocAnn(11, 0, 1)], [], false);
+}
+
+func aliasReturnModule(): ManagedProgram {
+    var entry = ir.basicBlock(0, [], allocInstructions(1), ir.jump(1, [1], source()));
+    var body = ir.basicBlock(1, [ir.irValue(2, ir.irRawAddress())], [], ir.returnValue(2, source()));
+    var function = makeFunction(11, "aliasReturn", [], ir.irRawAddress(), [], [entry, body]);
+    return managedModule(10, [voidMain(), function], [userMeta(10, [], [], 0), userMeta(11, [1, 2], [], 1)], [allocAnn(11, 0, 1)], [], false);
+}
+
+func rawStoreModule(): ManagedProgram {
+    var parameters: Vec<IRValue> = [ir.irValue(0, ir.irRawAddress()), ir.irValue(4, ir.irRawAddress())];
+    var instructions: Vec<Instruction> = [ir.constI64(1, 16, source()), ir.rawOffset(2, 0, 1, source()), ir.rawStoreAddress(2, 4, source())];
+    var function = straight(11, "rawStore", [ir.irRawAddress(), ir.irRawAddress()], ir.irVoid(), parameters, instructions, -1);
+    var derived: Vec<ManagedDerived> = [ManagedDerived { functionId: 11, valueId: 2, ownerId: 0 }];
+    return managedModule(10, [voidMain(), function], [userMeta(10, [], [], 0), userMeta(11, [0, 4], [1, 1], 0)], [], derived, false);
+}
+
+func localAllocModule(name: string, returnId: int, references: Vec<int>, returnLayout: int): ManagedProgram {
+    var function = straight(11, name, [], ir.irVoid(), [], allocInstructions(1), returnId);
+    if returnId >= 0 { function = straight(11, name, [], ir.irRawAddress(), [], allocInstructions(1), returnId); }
+    return managedModule(10, [voidMain(), function], [userMeta(10, [], [], 0), userMeta(11, references, [], returnLayout)], [allocAnn(11, 0, 1)], [], false);
+}
+
+func cyclicModule(): ManagedProgram {
+    var entry = ir.basicBlock(0, [], [], ir.jump(1, [], source()));
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constBool(2, true, source())];
+    var body = ir.basicBlock(1, [], instructions, ir.branch(2, 1, [], 2, [], source()));
+    var exitBlock = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    var function = makeFunction(10, "cyclicEntry", [], ir.irVoid(), [], [entry, body, exitBlock]);
+    return managedModule(10, [function], [userMeta(10, [1], [], 0)], [allocAnn(10, 1, 1)], [], false);
+}
+
+func assertRejections(): void {
+    var returned = returnedRegionModule();
+    var returnedPlace = ManagedPlacement { allocations: [place(11, 1, ManagedStorage::Region)], calls: [], regionFunctions: [11] };
+    var returnedPlan = verifyManagedRegionPlan(returned, returnedPlace);
+    var returnedText = placementText(returnedPlan);
+    requireFailure(returnedText != "", returnedText, "returned region", "returned region object");
+    require(returnedText.contains("functionId=11"), "returned region diagnostic names the function: " + returnedText);
+    var returnedLower = lowerManagedRegions(returned, runtimeBindings(false), returnedPlace);
+    var returnedLowerText = programText(returnedLower);
+    requireFailure(returnedLowerText != "", returnedLowerText, "returned region", "lowering a returned region");
+    var alias = aliasReturnModule();
+    var aliasPlace = ManagedPlacement { allocations: [place(11, 1, ManagedStorage::Region)], calls: [], regionFunctions: [11] };
+    var aliasPlan = verifyManagedRegionPlan(alias, aliasPlace);
+    var aliasText = placementText(aliasPlan);
+    requireFailure(aliasText != "", aliasText, "returned region", "aliased region return");
+    require(aliasText.contains("resultId=1"), "aliased region return names the allocation: " + aliasText);
+    var rawStore = rawStoreModule();
+    var emptyPlace = ManagedPlacement { allocations: [], calls: [], regionFunctions: [] };
+    var rawPlan = verifyManagedRegionPlan(rawStore, emptyPlace);
+    var rawText = placementText(rawPlan);
+    requireFailure(rawText != "", rawText, "raw store", "direct raw store");
+    var rawLower = lowerManagedRegions(rawStore, runtimeBindings(false), emptyPlace);
+    var rawLowerText = programText(rawLower);
+    requireFailure(rawLowerText != "", rawLowerText, "raw store", "lowering a direct raw store");
+    var destination = localAllocModule("unusedDestination", -1, [1], 0);
+    var destinationPlace = ManagedPlacement { allocations: [place(11, 1, ManagedStorage::Destination)], calls: [], regionFunctions: [] };
+    var destinationPlan = verifyManagedRegionPlan(destination, destinationPlace);
+    var destinationText = placementText(destinationPlan);
+    requireFailure(destinationText != "", destinationText, "destination", "destination that does not reach a return");
+    var stack = localAllocModule("stackReturn", 1, [1], 1);
+    var stackPlace = ManagedPlacement { allocations: [place(11, 1, ManagedStorage::Stack)], calls: [], regionFunctions: [] };
+    var stackPlan = verifyManagedRegionPlan(stack, stackPlace);
+    var stackText = placementText(stackPlan);
+    requireFailure(stackText != "", stackText, "stack", "stack return");
+    require(stackText.contains("return"), "stack return diagnostic names the return: " + stackText);
+    var missing = localAllocModule("missingPlacement", -1, [1], 0);
+    var missingPlan = verifyManagedRegionPlan(missing, emptyPlace);
+    var missingText = placementText(missingPlan);
+    requireFailure(missingText != "", missingText, "no placement", "allocation without a placement");
+    var cyclic = cyclicModule();
+    var cyclicPlace = ManagedPlacement { allocations: [place(10, 1, ManagedStorage::Region)], calls: [], regionFunctions: [10] };
+    var cyclicPlan = verifyManagedRegionPlan(cyclic, cyclicPlace);
+    var cyclicText = placementText(cyclicPlan);
+    requireFailure(cyclicText != "", cyclicText, "cyclic", "hand-written cyclic region");
+    var planned = planManagedPlacement(cyclic);
+    if planned.isErr() { require(false, "cyclic planner: " + planned.unwrapErr()); }
+    var plan = planned.unwrap();
+    require(plan.allocations.len() == 1 && plan.allocations[0].storage == ManagedStorage::Heap && plan.regionFunctions.len() == 0, "planner falls cyclic placement back to the program region");
+    var cyclicLower = lowerManagedRegions(cyclic, runtimeBindings(false), plan);
+    if cyclicLower.isErr() { require(false, "cyclic program fallback: " + cyclicLower.unwrapErr()); }
+    var cyclicOutput = cyclicLower.unwrap();
+    var cyclicFn = functionById(cyclicOutput, 10);
+    require(countCalls(cyclicFn, 107) == 1 && countCalls(cyclicFn, 103) == 0 && countCalls(cyclicFn, 108) == 0 && constImmediate(cyclicFn, nthCall(cyclicFn, 107, 0).operands[2]) == 1, "planned cyclic fallback allocates in the program region");
+}
+
+func runtimeFunction(id: int, module: string, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var parameterTypes: Vec<IRType> = [];
+    var parameters: Vec<IRValue> = [];
+    var index = 0;
+    loop { if index >= parameterKinds.len() { break; } parameterTypes.push(IRType { kind: parameterKinds[index] }); parameters.push(ir.irValue(100 + index, IRType { kind: parameterKinds[index] })); index = index + 1; }
+    var terminator = ir.returnVoid(source());
+    if returnKind != IRTypeKind::Void { terminator = ir.returnValue(returnId, source()); }
+    return ir.irFunction(id, ir.functionKey(module, "", name), ir.functionSignature(parameterTypes, IRType { kind: returnKind }), parameters, [ir.basicBlock(0, [], instructions, terminator)], effects(parameterKinds.len()));
+}
+
+func plainRuntime(id: int, module: string, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    var returnId = -1;
+    if returnKind == IRTypeKind::I64 { instructions.push(ir.constI64(0, 0, source())); returnId = 0; }
+    else if returnKind == IRTypeKind::RawAddress { instructions.push(ir.rawNull(0, source())); returnId = 0; }
+    return runtimeFunction(id, module, name, parameterKinds, returnKind, instructions, returnId);
+}
+
+func regionRuntime(root: string, mode: string): IRProgram {
+    var managedPath = root + "/managed/main.rey";
+    var regionsPath = root + "/regions/main.rey";
+    var layoutPath = root + "/layout/main.rey";
+    var containersPath = root + "/containers/main.rey";
+    var raw = IRTypeKind::RawAddress;
+    var i64Kind = IRTypeKind::I64;
+    var functions: Vec<IRFunction> = [];
+    if mode == "badSignature" { functions.push(plainRuntime(1, managedPath, "managedCreate", [raw, IRTypeKind::Bool], raw)); }
+    else if mode == "wrongPath" { functions.push(plainRuntime(1, root + "/other/main.rey", "managedCreate", [raw], raw)); }
+    else if mode != "missingCreate" { functions.push(plainRuntime(1, managedPath, "managedCreate", [raw], raw)); }
+    if mode == "valid" { functions.push(runtimeFunction(2, managedPath, "managedDestroy", [raw], IRTypeKind::Void, [ir.call(0, ir.irRawAddress(), 1, [100], source())], -1)); }
+    else { functions.push(plainRuntime(2, managedPath, "managedDestroy", [raw], IRTypeKind::Void)); }
+    functions.push(plainRuntime(3, managedPath, "managedStoreReference", [raw, raw, i64Kind, raw], IRTypeKind::Void));
+    functions.push(plainRuntime(4, managedPath, "managedAllocateProgram", [raw, i64Kind, i64Kind], raw));
+    functions.push(plainRuntime(5, managedPath, "managedPromoteReference", [raw, raw, raw], raw));
+    functions.push(plainRuntime(6, managedPath, "managedPromotionCount", [raw], i64Kind));
+    functions.push(plainRuntime(7, regionsPath, "managedRegionCreate", [raw], raw));
+    functions.push(plainRuntime(8, regionsPath, "managedRegionEnd", [raw, raw], IRTypeKind::Void));
+    functions.push(plainRuntime(9, regionsPath, "managedRegionAllocate", [raw, raw, i64Kind, i64Kind], raw));
+    functions.push(plainRuntime(10, regionsPath, "managedAllocateDestination", [raw, raw, i64Kind, i64Kind], raw));
+    functions.push(plainRuntime(11, layoutPath, "layoutRegistryCreate", [i64Kind], raw));
+    functions.push(plainRuntime(12, layoutPath, "layoutRegisterFixed", [raw, i64Kind, raw, i64Kind], i64Kind));
+    functions.push(plainRuntime(13, layoutPath, "layoutRegisterVariable", [raw, i64Kind, raw, i64Kind, i64Kind], i64Kind));
+    functions.push(plainRuntime(14, layoutPath, "layoutRegistryRelease", [raw], IRTypeKind::Void));
+    functions.push(plainRuntime(40, containersPath, "managedStringConcat", [raw, i64Kind, raw, raw], raw));
+    functions.push(plainRuntime(200, root + "/main.rey", "runtimeEntry", [], IRTypeKind::Void));
+    if mode == "duplicateCreate" {
+        var duplicate = plainRuntime(103, regionsPath, "managedCreate", [raw], raw);
+        var key = duplicate.key;
+        key.owner = "alternate";
+        duplicate.key = key;
+        functions.push(duplicate);
+    }
+    if mode == "gcModule" { functions.push(plainRuntime(90, root + "/gc/main.rey", "helper", [], IRTypeKind::Void)); }
+    if mode == "collectorName" { functions.push(plainRuntime(91, managedPath, "managedCollect", [], IRTypeKind::Void)); }
+    return ir.irProgram(200, functions);
+}
+
+func linkUser(): ManagedProgram {
+    var mainFn = ir.irFunction(10, ir.functionKey("managed-regions-user", "", "main"), ir.functionSignature([], ir.irVoid()), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))], effects(0));
+    var hook = plainRuntime(11, "managed-regions-user", "hookStub", [IRTypeKind::I64, IRTypeKind::RawAddress, IRTypeKind::RawAddress], IRTypeKind::RawAddress);
+    var fields: Vec<ManagedField> = [ManagedField { name: "child", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    var hooks: Vec<ManagedHook> = [ManagedHook { functionId: 11, runtimeName: "managedStringConcat", mayCollect: false }];
+    return ManagedProgram { program: ir.irProgram(10, [mainFn, hook]), layouts: [ManagedLayout { id: 1, key: "fixture::Cell", payloadBytes: 8, fields: fields }], functions: [userMeta(10, [], [], 0)], allocations: [], derived: [], allocateFunctionId: 12, storeReferenceFunctionId: 13, collectFunctionId: 14, variableLayouts: [], hooks: hooks };
+}
+
+func assertLink(): void {
+    var root = "/synthetic-region-runtime";
+    var units = regionRuntimeUnits(root);
+    require(units.len() == 5, "region runtime lists five units");
+    require(units[0] == root + "/main.rey" && units[1] == root + "/regions/main.rey" && units[2] == root + "/managed/main.rey" && units[3] == root + "/layout/main.rey" && units[4] == root + "/containers/main.rey", "region runtime units are main, regions, managed, layout, and containers");
+    var joined = units[0] + units[1] + units[2] + units[3] + units[4];
+    require(!joined.contains("/gc/") && !joined.contains("/heap/"), "region runtime unit list does not load gc or heap");
+    var input = linkUser();
+    var linkedResult = linkRegionRuntime(input, regionRuntime(root, "valid"), root);
+    if linkedResult.isErr() { require(false, "region link: " + linkedResult.unwrapErr()); }
+    var linked = linkedResult.unwrap();
+    var shift = ir.nextFunctionId(input.program);
+    require(shift == 12, "user function ids shift runtime ids by 12");
+    require(linked.module.program.functions.len() == input.program.functions.len() + regionRuntime(root, "valid").functions.len(), "linked program copies user and runtime functions");
+    require(linked.bindings.create == 1 + shift && linked.bindings.allocateProgram == 4 + shift && linked.bindings.promoteReference == 5 + shift && linked.bindings.layoutRelease == 14 + shift, "region binding ids are the runtime ids plus the user shift");
+    require(linked.bindings.hooks.len() == 1 && linked.bindings.hooks[0].runtimeFunctionId == 40 + shift && !linked.bindings.hooks[0].mayCollect, "container hook remaps and keeps its collection flag");
+    var destroyIndex = functionIndex(linked.module.program, 2 + shift);
+    require(destroyIndex >= 0 && linked.module.program.functions[destroyIndex].blocks[0].instructions[0].functionId == 1 + shift, "runtime call targets are remapped");
+    var linkedModule = linked.module;
+    var linkedLayouts = linkedModule.layouts;
+    var copiedLayout = linkedLayouts[0];
+    var copiedFields = copiedLayout.fields;
+    copiedFields.set(0, ManagedField { name: "child", offset: 8, kind: IRTypeKind::I64, layoutId: 0 });
+    copiedLayout.fields = copiedFields;
+    linkedLayouts.set(0, copiedLayout);
+    linkedModule.layouts = linkedLayouts;
+    require(input.layouts[0].fields[0].offset == 0, "linked layout metadata is a deep copy");
+    var missing = linkRegionRuntime(input, regionRuntime(root, "missingCreate"), root);
+    var missingText = linkText(missing);
+    requireFailure(missingText != "", missingText, "managedCreate", "missing managedCreate");
+    var duplicate = linkRegionRuntime(input, regionRuntime(root, "duplicateCreate"), root);
+    var duplicateText = linkText(duplicate);
+    requireFailure(duplicateText != "", duplicateText, "ambiguous", "duplicate managedCreate");
+    var wrongPath = linkRegionRuntime(input, regionRuntime(root, "wrongPath"), root);
+    var wrongPathText = linkText(wrongPath);
+    requireFailure(wrongPathText != "", wrongPathText, "missing", "managedCreate outside the region modules");
+    var badSignature = linkRegionRuntime(input, regionRuntime(root, "badSignature"), root);
+    var badSignatureText = linkText(badSignature);
+    requireFailure(badSignatureText != "", badSignatureText, "signature mismatch", "old managedCreate signature");
+    var gcModule = linkRegionRuntime(input, regionRuntime(root, "gcModule"), root);
+    var gcText = linkText(gcModule);
+    requireFailure(gcText != "", gcText, "gc", "gc module");
+    var collector = linkRegionRuntime(input, regionRuntime(root, "collectorName"), root);
+    var collectorText = linkText(collector);
+    requireFailure(collectorText != "", collectorText, "managedCollect", "collector function name");
+    var checked = CheckedProgram { entryPath: "", units: [], edges: [], expressions: [], bindings: [], fieldInitializers: [], symbols: [], nominalLayouts: [] };
+    var legacy = buildManagedProgram(checked, root, "", false, true);
+    var legacyText = programText(legacy);
+    requireFailure(legacyText != "", legacyText, "buildRegionProgram", "legacy builder asked to lower regions");
+}
+
+func main(): void {
+    assertSuccess();
+    assertRejections();
+    assertLink();
+    println("managed-regions: static assertions passed");
+}

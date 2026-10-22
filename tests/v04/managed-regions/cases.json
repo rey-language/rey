@@ -1,0 +1,27 @@
+{
+  "runner": "tests/v04/managed-regions/main.rey",
+  "successLine": "managed-regions: static assertions passed",
+  "cases": [
+    "region allocation IR",
+    "destination construction",
+    "program region fallback",
+    "group-id constants",
+    "return promotion before region end",
+    "borrowed container return promotion",
+    "no collect or root calls",
+    "no gc or heap module load",
+    "returned region lifetime rejection",
+    "alias identity",
+    "alias return rejection",
+    "cyclic placement fallback",
+    "cyclic region rejection",
+    "destination not returned",
+    "stack escape",
+    "missing placement",
+    "direct raw store",
+    "wrapper shape",
+    "promotion stress",
+    "region runtime link and remap",
+    "legacy buildManagedProgram regions=true rejection"
+  ]
+}

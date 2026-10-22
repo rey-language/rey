@@ -1,0 +1,51 @@
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func makeValues(seed: int): Vec<int> {
+    var values: Vec<int> = [seed, seed + 1];
+    values.push(seed + 2);
+    return values;
+}
+
+func makeMap(seed: int): HashMap<string, int> {
+    var values: HashMap<string, int> = {"a": seed};
+    values.set("b", seed + 1);
+    return values;
+}
+
+func makeText(seed: int): string {
+    var text: string = "value";
+    return text + seed.toString();
+}
+
+func main(): void {
+    var values: Vec<int> = makeValues(7);
+    sourcecheck(values.len() == 3);
+    sourcecheck(values[0] == 7);
+    sourcecheck(values[1] == 8);
+    sourcecheck(values[2] == 9);
+    values.push(10);
+    sourcecheck(values.len() == 4);
+    var alias: Vec<int> = values;
+    alias[1] = 42;
+    sourcecheck(values[1] == 42);
+
+    var map: HashMap<string, int> = makeMap(3);
+    sourcecheck(map.len() == 2);
+    sourcecheck(map["a"] == 3);
+    sourcecheck(map["b"] == 4);
+    map.set("c", 5);
+    sourcecheck(map["c"] == 5);
+    var mapAlias: HashMap<string, int> = map;
+    mapAlias["a"] = 30;
+    sourcecheck(map["a"] == 30);
+
+    var text: string = makeText(8);
+    sourcecheck(text == "value8");
+    return;
+}

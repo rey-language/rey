@@ -1662,6 +1662,9 @@ func lookupIdentifier(ctx: TypecheckContext, env: TypeEnv, name: string, span: i
     }
     var found = lookupEnv(env, name);
     if found.found {
+        if found.crossedLambda && !found.symbol.isConst {
+            addError(ctx, "lambda cannot capture mutable binding '" + name + "'", span);
+        }
         if found.crossedLambda && typeContainsRawAddress(found.symbol.ty) {
             addError(ctx, "raw addresses cannot be captured by closures", span);
         }
@@ -3166,8 +3169,9 @@ func inferAssignExpr(ctx: TypecheckContext, env: TypeEnv, binary: BinaryExpr): T
     } else {
         var accessPayload = fieldAccessPayload(binary.left);
         var indexed = indexPayload(binary.left);
-        if accessPayload == null && indexed == null { addError(ctx, "assignment target is not an lvalue", binary.span.start); }
-        else { targetType = inferExpr(ctx, env, binary.left); }
+        if accessPayload != null { targetType = inferExpr(ctx, env, binary.left); }
+        else if indexed != null { targetType = inferExpr(ctx, env, binary.left); }
+        else { addError(ctx, "assignment target is not an lvalue", binary.span.start); }
     }
     var valueType = inferExpr(ctx, env, binary.right);
     if binary.op == "=" {

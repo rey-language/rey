@@ -13,6 +13,8 @@ import subprocess
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
+SEED_ENV = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin",
+                CC="/usr/bin/clang", CXX="/usr/bin/clang++")
 NORMAL = "zero-initialized i64-min i64-max byte-zero byte-127 byte-128 byte-255 offset-access null-equal null-not-mapping-equal same-mapping-equal distinct-mappings-not-equal separate-mappings raw-call-block-param address-cell-null address-cell-roundtrip".split()
 ERRORS = "map-size-zero map-size-negative map-size-too-large offset-null offset-negative offset-overflow load-i64-unaligned store-i64-unaligned store-byte-negative store-byte-overflow unmap-size-zero unmap-syscall-failure load-address-unaligned store-address-unaligned".split()
 EXPECTED = {**dict.fromkeys(NORMAL, 2), **dict.fromkeys(ERRORS, 1)}
@@ -63,7 +65,7 @@ def main():
         print(label, "PASS" if record["passed"] else "FAIL", flush=True)
         return record, stdout
 
-    version, stdout = run("version", [str(engine), "--version"])
+    version, stdout = run("version", [str(engine), "--version"], env=SEED_ENV)
     version["passed"] = version["passed"] and stdout.strip() == b"rey 0.3.1"
     empty_path = output / "empty-path"
     empty_path.mkdir()
@@ -83,7 +85,7 @@ def main():
         shutil.copyfile(ROOT / "tests/v04" / name / "main.rey", project / "src/main.rey")
         snapshots[name] = {str(p.relative_to(project)): digest(p) for p in sorted((project / "src").rglob("*.rey"))}
         executable = project / "fixture"
-        built, _ = run(name + "-build", [str(engine), "build", str(project / "src/main.rey"), "-o", str(executable), "--runtime-dir", str(runtime)])
+        built, _ = run(name + "-build", [str(engine), "build", str(project / "src/main.rey"), "-o", str(executable), "--runtime-dir", str(runtime)], env=SEED_ENV)
         if not built["passed"]:
             continue
         command = [str(executable)]

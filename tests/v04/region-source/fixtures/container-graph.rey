@@ -1,0 +1,48 @@
+struct Node {
+    pub value: int,
+    pub children: Vec<Node>,
+    pub labels: HashMap<string, int>,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func leaf(value: int): Node {
+    var children: Vec<Node> = [];
+    var labels: HashMap<string, int> = {"value": value};
+    return Node { value: value, children: children, labels: labels };
+}
+
+func makeTree(depth: int): Node {
+    if depth == 0 {
+        return leaf(0);
+    }
+    var left: Node = makeTree(depth - 1);
+    var right: Node = makeTree(depth - 1);
+    var children: Vec<Node> = [left];
+    children.push(right);
+    var labels: HashMap<string, int> = {"depth": depth};
+    return Node { value: depth, children: children, labels: labels };
+}
+
+func main(): void {
+    var tree: Node = makeTree(2);
+    sourcecheck(tree.value == 2);
+    sourcecheck(tree.children.len() == 2);
+    sourcecheck(tree.labels["depth"] == 2);
+    var left: Node = tree.children[0];
+    sourcecheck(left.value == 1);
+    sourcecheck(left.children.len() == 2);
+    left.children[0].value = 7;
+    sourcecheck(tree.children[0].children[0].value == 7);
+    var alias: Node = tree;
+    alias.children.push(leaf(9));
+    sourcecheck(tree.children.len() == 3);
+    sourcecheck(tree.children[2].value == 9);
+    return;
+}

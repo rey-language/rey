@@ -1,0 +1,19 @@
+{
+  "region-basic": 0,
+  "program-region": 0,
+  "group-separation": 0,
+  "promotion-address-identity": 0,
+  "promotion-older-source": 0,
+  "promotion-null": 0,
+  "promotion-dependency-chain": 0,
+  "promotion-cycle": 0,
+  "store-promotes-younger": 0,
+  "store-records-older": 0,
+  "destination-construction": 0,
+  "region-end-lifo": 2203,
+  "region-end-program": 2203,
+  "double-end": 2204,
+  "container-current-region": 0,
+  "repeated-request-plateau": 0,
+  "long-lived-graph-retention": 0
+}

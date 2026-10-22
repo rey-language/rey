@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Gate fixed-layout runtime source with an explicit historical seed."""
+"""Gate historical fixed-layout runtime source with an explicit pinned seed.
+
+The managed-runtime and managed-containers suites belong to the retired
+collector/root contract. They are available only through the explicit
+--historical-managed switch and are not part of v0.4 region acceptance.
+"""
 import argparse
 import hashlib
 import io
@@ -40,10 +45,16 @@ def main():
     script_hash = digest(Path(__file__))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--suites", nargs="+", choices=MODULES, default=list(MODULES))
+    parser.add_argument("--suites", nargs="+", choices=MODULES,
+                        default=["fixed-heap", "fixed-gc"])
+    parser.add_argument("--historical-managed", action="store_true",
+                        help="opt into the retired managed-runtime/managed-containers collector suites")
     parser.add_argument("--linux-docker", action="store_true")
     parser.add_argument("--reuse-slots", action="store_true")
     args = parser.parse_args()
+    managed_suites = {"managed-runtime", "managed-containers"}
+    if managed_suites.intersection(args.suites) and not args.historical_managed:
+        parser.error("managed-runtime/managed-containers are historical; pass --historical-managed explicitly")
     output = args.output_dir.resolve()
     if not output.is_relative_to(ROOT / "build/v04/memory-integration"):
         parser.error("output must be below build/v04/memory-integration")
@@ -81,7 +92,8 @@ def main():
         raise SystemExit("pinned seed/runtime missing or mismatched")
     version, stdout = run("seed-version", [str(SEED), "--version"])
     version["passed"] = version["passed"] and stdout.strip() == b"rey 0.3.1"
-    seed_env = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin")
+    seed_env = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin",
+                    CC="/usr/bin/clang", CXX="/usr/bin/clang++")
     empty_path = output / "empty-path"
     empty_path.mkdir()
     native_env = dict(os.environ, PATH=str(empty_path))
@@ -205,7 +217,9 @@ def main():
                   linux_requested=args.linux_docker, linux_image=linux_image, reuse_slots=args.reuse_slots,
                   passed=all(r["passed"] for r in records),
                   native_only_cases=[suite + "/" + case for suite in args.suites for name, case in NATIVE_ONLY if name == suite],
-                  limitation="runtime APIs with explicit construction roots; named bounded-evaluator omissions retain native assertions and interpreted smaller twins; compiler-generated roots are gated separately; no RSS/timing claim")
+                  limitation=("historical fixed-layout suites only; managed-runtime/managed-containers require --historical-managed "
+                               "and are not v0.4 region acceptance; named bounded-evaluator omissions retain native assertions "
+                               "and interpreted smaller twins; no RSS/timing claim"))
     (output / "result.json").write_text(json.dumps(report, indent=2) + "\n")
     print("memory integration", "PASS" if report["passed"] else "FAIL", len(records), "checks", flush=True)
     return 0 if report["passed"] else 1

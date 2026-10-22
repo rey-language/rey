@@ -4,12 +4,15 @@ import argparse
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
+SEED_ENV = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin",
+                CC="/usr/bin/clang", CXX="/usr/bin/clang++")
 
 
 def digest(path):
@@ -39,9 +42,9 @@ def main():
                               check=True, capture_output=True, timeout=10).stdout
     records, snapshots = [], {}
 
-    def run(label, command, expected=0, marker=""):
+    def run(label, command, expected=0, marker="", env=None):
         try:
-            result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=120)
+            result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=120, env=env)
             code, stdout, stderr, error = result.returncode, result.stdout, result.stderr, None
         except (OSError, subprocess.TimeoutExpired) as exc:
             code, stdout, stderr, error = None, b"", b"", str(exc)
@@ -53,7 +56,7 @@ def main():
         print(label, "PASS" if record["passed"] else "FAIL", flush=True)
         return record["passed"]
 
-    run("version", [str(engine), "--version"], marker="rey 0.3.1")
+    run("version", [str(engine), "--version"], marker="rey 0.3.1", env=SEED_ENV)
     mains = {"image": ROOT / "tests/v04/x64-image/main.rey", "emitter": ROOT / "tests/v04/x64/main.rey",
              "driver": ROOT / "rey-compiler/native-main.rey"}
     for name, main_source in mains.items():
@@ -75,7 +78,7 @@ def main():
     for name in mains:
         project = output / name
         executable = project / "fixture"
-        if not run(name + "-build", [str(engine), "build", str(project / "src/main.rey"), "-o", str(executable), "--runtime-dir", str(runtime)]):
+        if not run(name + "-build", [str(engine), "build", str(project / "src/main.rey"), "-o", str(executable), "--runtime-dir", str(runtime)], env=SEED_ENV):
             continue
         if name == "driver":
             continue

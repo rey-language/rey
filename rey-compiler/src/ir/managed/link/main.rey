@@ -1,7 +1,8 @@
-import ir::{IRProgram, IRFunction, IRValue, IRType, BasicBlock, Instruction, InstructionKind, Terminator, SourceRef, EffectSummary, Escape};
+import ir::{IRProgram, IRFunction, IRValue, IRType, IRTypeKind, BasicBlock, Instruction, InstructionKind, Terminator, SourceRef, EffectSummary, Escape};
 import ir;
 import ir::managed::{ManagedProgram, ManagedLayout, ManagedField, ManagedFunction, ManagedAllocation, ManagedDerived, ManagedVariableLayout, ManagedHook};
 import ir::managed::roots::{RuntimeBindings, ManagedHookBinding, lowerManagedRoots};
+import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegionsWithPromotionStress};
 import ir::managed::placement::{ManagedStorage, ManagedPlacement, ManagedAllocationPlacement, ManagedCallPlacement, planManagedPlacement};
 import ir::lower::{lowerProgram, lowerManagedProgram};
 import ir::verify::{verifyProgram};
@@ -308,6 +309,9 @@ pub func requiresManagedLowering(checked: CheckedProgram): bool {
 }
 
 pub func buildManagedProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, stress: bool, regions: bool): Result<IRProgram, string> {
+    if regions {
+        return Result.Err("managed linker: buildManagedProgram does not lower region placements; pass regions=false for the legacy collector runtime, or call buildRegionProgram");
+    }
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
     var runtime = loadManagedRuntime(runtimeRoot, stdRoot);
@@ -315,19 +319,274 @@ pub func buildManagedProgram(checked: CheckedProgram, runtimeRoot: string, stdRo
     var linked = linkManagedRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
     if linked.isErr() { return Result.Err(linked.unwrapErr()); }
     var module = linked.unwrap().module;
-    var placements = ManagedPlacement { allocations: [], calls: [], regionFunctions: [] };
-    if regions {
-        var planned = planManagedPlacement(module);
-        if planned.isErr() { return Result.Err(planned.unwrapErr()); }
-        placements = planned.unwrap();
-    } else {
-        var allocations: Vec<ManagedAllocationPlacement> = [];
-        var index = 0;
-        while index < module.allocations.len() {
-            var item = module.allocations[index];
-            allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: ManagedStorage::Heap }); index += 1;
-        }
-        placements = ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [] };
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    var index = 0;
+    while index < module.allocations.len() {
+        var item = module.allocations[index];
+        allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: ManagedStorage::Heap }); index += 1;
     }
+    var placements = ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [] };
     return lowerManagedRoots(module, linked.unwrap().bindings, placements, stress);
+}
+
+pub struct LinkedRegionProgram {
+    pub module: ManagedProgram,
+    pub bindings: RegionBindings,
+}
+
+pub func regionRuntimeUnits(runtimeRoot: string): Vec<string> {
+    var root = canonicalSourcePath(runtimeRoot);
+    var units: Vec<string> = [];
+    units.push(root + "/main.rey");
+    units.push(root + "/regions/main.rey");
+    units.push(root + "/managed/main.rey");
+    units.push(root + "/layout/main.rey");
+    units.push(root + "/containers/main.rey");
+    return units;
+}
+
+func forbiddenRuntimeModule(module: string): bool {
+    if module.contains("/gc/") || module.endsWith("/gc/main.rey") { return true; }
+    if module.contains("/heap/") || module.endsWith("/heap/main.rey") { return true; }
+    return false;
+}
+
+func forbiddenRuntimeName(name: string): bool {
+    if name == "managedCollect" || name == "gcCollect" || name == "gcCreate" || name == "gcDestroy" || name == "gcRegisterRootRange" || name == "gcUnregisterRootRange" { return true; }
+    if name == "heapCreate" || name == "heapDestroy" || name == "heapAllocate" || name == "heapAllocateSized" { return true; }
+    return false;
+}
+
+func forbiddenRuntimeProgram(program: IRProgram): string {
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if forbiddenRuntimeModule(function.key.module) { return "region linker: refused to load gc or heap module " + function.key.module; }
+        if forbiddenRuntimeName(function.key.name) { return "region linker: refused to load collector or heap function " + function.key.name; }
+        index += 1;
+    }
+    return "";
+}
+
+func requiredRuntimeModulesPresent(program: IRProgram, root: string): string {
+    var suffixes: Vec<string> = ["/regions/main.rey", "/managed/main.rey", "/layout/main.rey", "/containers/main.rey"];
+    var suffixIndex = 0;
+    while suffixIndex < suffixes.len() {
+        var expected = root + suffixes[suffixIndex];
+        var found = false;
+        var index = 0;
+        while index < program.functions.len() {
+            if program.functions[index].key.module == expected { found = true; }
+            index += 1;
+        }
+        if !found { return "region linker: runtime graph did not include " + expected; }
+        suffixIndex += 1;
+    }
+    return "";
+}
+
+func regionSymbolSignature(function: IRFunction, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): bool {
+    if function.signature.returnType.kind != returnKind || function.parameters.len() != parameterKinds.len() || function.signature.parameterTypes.len() != parameterKinds.len() { return false; }
+    var index = 0;
+    while index < parameterKinds.len() {
+        if function.parameters[index].ty.kind != parameterKinds[index] || function.signature.parameterTypes[index].kind != parameterKinds[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+func resolveRegionSymbol(program: IRProgram, modules: Vec<string>, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): Result<int, string> {
+    var found = -1;
+    var index = 0;
+    while index < program.functions.len() {
+        var function = program.functions[index];
+        if function.key.name == name && containsString(modules, function.key.module) {
+            if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
+            if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+            found = function.id;
+        }
+        index += 1;
+    }
+    if found < 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+    return Result.Ok(found);
+}
+
+func containsString(values: Vec<string>, value: string): bool {
+    var index = 0;
+    while index < values.len() { if values[index] == value { return true; } index += 1; }
+    return false;
+}
+
+func regionApiModules(root: string): Vec<string> {
+    var modules: Vec<string> = [];
+    modules.push(root + "/regions/main.rey");
+    modules.push(root + "/managed/main.rey");
+    return modules;
+}
+
+func layoutModule(root: string): Vec<string> {
+    var modules: Vec<string> = [];
+    modules.push(root + "/layout/main.rey");
+    return modules;
+}
+
+func hookModules(root: string): Vec<string> {
+    var modules = regionApiModules(root);
+    modules.push(root + "/containers/main.rey");
+    return modules;
+}
+
+func shiftedId(id: int, shift: int): Result<int, string> {
+    if id < 0 || shift < 0 || id > 9223372036854775807 - shift { return Result.Err("region linker: exhausted function IDs"); }
+    return Result.Ok(id + shift);
+}
+
+pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, runtimeRoot: string): Result<LinkedRegionProgram, string> {
+    var userVerified = verifyProgram(input.program);
+    if !userVerified.ok { return Result.Err("region linker: invalid user IR: " + userVerified.errors.join("\n")); }
+    var runtimeVerified = verifyProgram(runtimeProgram);
+    if !runtimeVerified.ok { return Result.Err("region linker: invalid runtime IR: " + runtimeVerified.errors.join("\n")); }
+    var forbidden = forbiddenRuntimeProgram(runtimeProgram);
+    if forbidden != "" { return Result.Err(forbidden); }
+    var root = canonicalSourcePath(runtimeRoot);
+    var shift = ir.nextFunctionId(input.program);
+    if shift < 0 { return Result.Err("region linker: exhausted function IDs"); }
+    var raw = IRTypeKind::RawAddress;
+    var i64Kind = IRTypeKind::I64;
+    var voidKind = IRTypeKind::Void;
+    var api = regionApiModules(root);
+    var layouts = layoutModule(root);
+    var create = resolveRegionSymbol(runtimeProgram, api, "managedCreate", [raw], raw);
+    if create.isErr() { return Result.Err(create.unwrapErr()); }
+    var destroy = resolveRegionSymbol(runtimeProgram, api, "managedDestroy", [raw], voidKind);
+    if destroy.isErr() { return Result.Err(destroy.unwrapErr()); }
+    var storeReference = resolveRegionSymbol(runtimeProgram, api, "managedStoreReference", [raw, raw, i64Kind, raw], voidKind);
+    if storeReference.isErr() { return Result.Err(storeReference.unwrapErr()); }
+    var regionCreate = resolveRegionSymbol(runtimeProgram, api, "managedRegionCreate", [raw], raw);
+    if regionCreate.isErr() { return Result.Err(regionCreate.unwrapErr()); }
+    var regionEnd = resolveRegionSymbol(runtimeProgram, api, "managedRegionEnd", [raw, raw], voidKind);
+    if regionEnd.isErr() { return Result.Err(regionEnd.unwrapErr()); }
+    var regionAllocate = resolveRegionSymbol(runtimeProgram, api, "managedRegionAllocate", [raw, raw, i64Kind, i64Kind], raw);
+    if regionAllocate.isErr() { return Result.Err(regionAllocate.unwrapErr()); }
+    var allocateDestination = resolveRegionSymbol(runtimeProgram, api, "managedAllocateDestination", [raw, raw, i64Kind, i64Kind], raw);
+    if allocateDestination.isErr() { return Result.Err(allocateDestination.unwrapErr()); }
+    var allocateProgram = resolveRegionSymbol(runtimeProgram, api, "managedAllocateProgram", [raw, i64Kind, i64Kind], raw);
+    if allocateProgram.isErr() { return Result.Err(allocateProgram.unwrapErr()); }
+    var promoteReference = resolveRegionSymbol(runtimeProgram, api, "managedPromoteReference", [raw, raw, raw], raw);
+    if promoteReference.isErr() { return Result.Err(promoteReference.unwrapErr()); }
+    var promotionCount = resolveRegionSymbol(runtimeProgram, api, "managedPromotionCount", [raw], i64Kind);
+    if promotionCount.isErr() { return Result.Err(promotionCount.unwrapErr()); }
+    var layoutCreate = resolveRegionSymbol(runtimeProgram, layouts, "layoutRegistryCreate", [i64Kind], raw);
+    if layoutCreate.isErr() { return Result.Err(layoutCreate.unwrapErr()); }
+    var layoutRegister = resolveRegionSymbol(runtimeProgram, layouts, "layoutRegisterFixed", [raw, i64Kind, raw, i64Kind], i64Kind);
+    if layoutRegister.isErr() { return Result.Err(layoutRegister.unwrapErr()); }
+    var layoutRegisterVariable = resolveRegionSymbol(runtimeProgram, layouts, "layoutRegisterVariable", [raw, i64Kind, raw, i64Kind, i64Kind], i64Kind);
+    if layoutRegisterVariable.isErr() { return Result.Err(layoutRegisterVariable.unwrapErr()); }
+    var layoutRelease = resolveRegionSymbol(runtimeProgram, layouts, "layoutRegistryRelease", [raw], voidKind);
+    if layoutRelease.isErr() { return Result.Err(layoutRelease.unwrapErr()); }
+    var ids: Vec<int> = [create.unwrap(), destroy.unwrap(), storeReference.unwrap(), regionCreate.unwrap(), regionEnd.unwrap(), regionAllocate.unwrap(), allocateDestination.unwrap(), allocateProgram.unwrap(), promoteReference.unwrap(), promotionCount.unwrap(), layoutCreate.unwrap(), layoutRegister.unwrap(), layoutRegisterVariable.unwrap(), layoutRelease.unwrap()];
+    var shifted: Vec<int> = [];
+    var index = 0;
+    while index < ids.len() {
+        var moved = shiftedId(ids[index], shift);
+        if moved.isErr() { return Result.Err(moved.unwrapErr()); }
+        var prior = 0;
+        while prior < shifted.len() { if shifted[prior] == moved.unwrap() { return Result.Err("region linker: runtime binding IDs must be unique"); } prior += 1; }
+        shifted.push(moved.unwrap());
+        index += 1;
+    }
+    var hooks: Vec<RegionHookBinding> = [];
+    var hookModulesForRoot = hookModules(root);
+    index = 0;
+    while index < input.hooks.len() {
+        var hook = input.hooks[index];
+        var runtimeHook = -1;
+        var functionIndex = 0;
+        while functionIndex < runtimeProgram.functions.len() {
+            var function = runtimeProgram.functions[functionIndex];
+            if function.key.name == hook.runtimeName && containsString(hookModulesForRoot, function.key.module) {
+                if runtimeHook >= 0 { return Result.Err("region linker: missing or ambiguous runtime hook " + hook.runtimeName); }
+                runtimeHook = function.id;
+            }
+            functionIndex += 1;
+        }
+        if runtimeHook < 0 { return Result.Err("region linker: missing or ambiguous runtime hook " + hook.runtimeName); }
+        var runtimeFunction = runtimeProgram.functions[0];
+        var runtimeFound = false;
+        functionIndex = 0;
+        while functionIndex < runtimeProgram.functions.len() {
+            if runtimeProgram.functions[functionIndex].id == runtimeHook { runtimeFunction = runtimeProgram.functions[functionIndex]; runtimeFound = true; }
+            functionIndex += 1;
+        }
+        if !runtimeFound { return Result.Err("region linker: missing or ambiguous runtime hook " + hook.runtimeName); }
+        var stubIndex = 0;
+        var stubFound = false;
+        var stub = input.program.functions[0];
+        while stubIndex < input.program.functions.len() {
+            if input.program.functions[stubIndex].id == hook.functionId { stub = input.program.functions[stubIndex]; stubFound = true; }
+            stubIndex += 1;
+        }
+        if !stubFound { return Result.Err("region linker: managed hook stub function is missing"); }
+        if runtimeFunction.parameters.len() != stub.parameters.len() + 1 || runtimeFunction.signature.returnType.kind != stub.signature.returnType.kind || runtimeFunction.parameters[0].ty.kind != IRTypeKind::RawAddress { return Result.Err("region linker: hook runtime signature must prepend one raw context parameter"); }
+        var parameterIndex = 0;
+        while parameterIndex < stub.parameters.len() {
+            if runtimeFunction.parameters[parameterIndex + 1].ty.kind != stub.parameters[parameterIndex].ty.kind { return Result.Err("region linker: hook runtime signature must prepend one raw context parameter"); }
+            parameterIndex += 1;
+        }
+        var movedHook = shiftedId(runtimeHook, shift);
+        if movedHook.isErr() { return Result.Err(movedHook.unwrapErr()); }
+        var priorHook = 0;
+        while priorHook < hooks.len() {
+            if hooks[priorHook].functionId == hook.functionId || hooks[priorHook].runtimeFunctionId == movedHook.unwrap() { return Result.Err("region linker: managed hook stub and runtime IDs must be unique"); }
+            priorHook += 1;
+        }
+        hooks.push(RegionHookBinding { functionId: hook.functionId, runtimeFunctionId: movedHook.unwrap(), mayCollect: hook.mayCollect });
+        index += 1;
+    }
+    var functions: Vec<IRFunction> = [];
+    index = 0;
+    while index < input.program.functions.len() { functions.push(copyFunction(input.program.functions[index], 0)); index += 1; }
+    index = 0;
+    while index < runtimeProgram.functions.len() {
+        var function = runtimeProgram.functions[index];
+        if function.id > 9223372036854775807 - shift { return Result.Err("region linker: exhausted function IDs"); }
+        functions.push(copyFunction(function, shift));
+        index += 1;
+    }
+    var bindings = RegionBindings { create: shifted[0], destroy: shifted[1], storeReference: shifted[2], regionCreate: shifted[3], regionEnd: shifted[4], regionAllocate: shifted[5], allocateDestination: shifted[6], allocateProgram: shifted[7], promoteReference: shifted[8], promotionCount: shifted[9], layoutCreate: shifted[10], layoutRegister: shifted[11], layoutRegisterVariable: shifted[12], layoutRelease: shifted[13], hooks: hooks };
+    var program = ir.irProgram(input.program.entryFunctionId, functions);
+    return Result.Ok(LinkedRegionProgram { module: copyModule(input, program), bindings: bindings });
+}
+
+pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgram, string> {
+    var root = canonicalSourcePath(runtimeRoot);
+    var units = regionRuntimeUnits(root);
+    var index = 0;
+    while index < units.len() {
+        if !fileExists(units[index]) { return Result.Err("region linker: missing runtime unit " + units[index]); }
+        index += 1;
+    }
+    var checked = checkSourceFileGraphWithRuntime(root + "/main.rey", stdRoot, units);
+    if checked.isErr() { return Result.Err(checked.unwrapErr()); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
+    var program = lowered.unwrap();
+    var forbidden = forbiddenRuntimeProgram(program);
+    if forbidden != "" { return Result.Err(forbidden); }
+    var present = requiredRuntimeModulesPresent(program, root);
+    if present != "" { return Result.Err(present); }
+    return Result.Ok(program);
+}
+
+pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
+    var input = lowerManagedProgram(checked);
+    if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
+    if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
+    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    if linked.isErr() { return Result.Err(linked.unwrapErr()); }
+    var linkedProgram = linked.unwrap();
+    var planned = planManagedPlacement(linkedProgram.module);
+    if planned.isErr() { return Result.Err(planned.unwrapErr()); }
+    return lowerManagedRegionsWithPromotionStress(linkedProgram.module, linkedProgram.bindings, planned.unwrap(), promotionStress);
 }

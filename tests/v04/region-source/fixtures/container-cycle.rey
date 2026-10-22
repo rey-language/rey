@@ -1,0 +1,43 @@
+struct Node {
+    pub value: int,
+    pub children: Vec<Node>,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func makeRoot(value: int): Node {
+    var children: Vec<Node> = [];
+    return Node { value: value, children: children };
+}
+
+func makeGraph(value: int): Node {
+    var root: Node = makeRoot(value);
+    var child: Node = makeRoot(value + 1);
+    root.children.push(child);
+    child.children.push(root);
+    return root;
+}
+
+func main(): void {
+    var root: Node = makeGraph(1);
+    sourcecheck(root.value == 1);
+    sourcecheck(root.children.len() == 1);
+    sourcecheck(root.children[0].value == 2);
+    root.children[0].value = 20;
+    sourcecheck(root.children[0].value == 20);
+    root.children.push(root);
+    sourcecheck(root.children.len() == 2);
+    sourcecheck(root.children[1].value == 1);
+    root.children[1].value = 10;
+    sourcecheck(root.value == 10);
+    var alias: Node = root;
+    alias.value = 11;
+    sourcecheck(root.children[1].value == 11);
+    return;
+}

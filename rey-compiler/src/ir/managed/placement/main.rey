@@ -2,7 +2,8 @@ import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
 import ir::managed::{ManagedProgram, ManagedFunction, ManagedAllocation, ManagedVariableLayout, ManagedHook};
 import ir::verify::{verifyProgram};
 
-pub enum ManagedStorage { Heap, Region, Destination }
+// Heap is the program-region spelling. Stack is reserved for a later proven-local sector and is never selected.
+pub enum ManagedStorage { Heap, Region, Destination, Stack }
 
 pub struct ManagedAllocationPlacement {
     pub functionId: int,
@@ -509,6 +510,7 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
     loop {
         if ai >= module.allocations.len() { break; }
         var allocation = module.allocations[ai];
+        // 0 keeps the Heap spelling and means the program region, including cyclic and unproven escapes.
         var selected = 0;
         var cyclic = true;
         var irIndex = irFunctionIndex(program, allocation.functionId);
@@ -594,6 +596,7 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
     loop {
         if ai >= module.allocations.len() { break; }
         var allocation = module.allocations[ai];
+        // Heap reaches the program region. This revision does not publish stack objects.
         var storage = ManagedStorage::Heap;
         if storageByAllocation[ai] == 1 { storage = ManagedStorage::Region; }
         else if storageByAllocation[ai] == 2 { storage = ManagedStorage::Destination; }

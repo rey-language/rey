@@ -1,0 +1,36 @@
+{
+  "container-cycle.rey": {
+    "expect": "ok",
+    "native_only": false
+  },
+  "container-return.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Container construction and growth complete in 2000734 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-nested.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Nested struct/vector/map construction and cyclic aliasing complete in 2478393 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-graph.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Recursive container graph construction and aliasing complete in 7123419 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-region-return.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Return promotion of a container allocated in a callee invocation region completes in 3028589 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-region-local.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Local container allocation, storage, and region-end release complete in 3966447 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-caller-region.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Nested callee-to-caller container returns complete in 2130881 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  }
+}

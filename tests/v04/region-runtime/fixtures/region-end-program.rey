@@ -1,0 +1,8 @@
+import layout::{layoutRegistryCreate};
+import managed::{managedCreate, managedProgramRegion, managedRegionEnd};
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var context = managedCreate(registry);
+    managedRegionEnd(context, managedProgramRegion(context));
+}

@@ -15,6 +15,8 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+SEED_ENV = dict(os.environ, PATH="/usr/bin:/bin:/usr/sbin:/sbin",
+                CC="/usr/bin/clang", CXX="/usr/bin/clang++")
 
 
 def digest(path: Path) -> str:
@@ -66,7 +68,7 @@ def main() -> int:
         print(label + ": " + ("PASS" if passed else "FAIL"), flush=True)
         return dict(record, stdout=stdout)
 
-    version = run("version", [str(engine), "--version"], contains="rey 0.3.1")
+    version = run("version", [str(engine), "--version"], contains="rey 0.3.1", env=SEED_ENV)
     if version["stdout"].strip() != b"rey 0.3.1":
         version["passed"] = False
         records[-1]["passed"] = False
@@ -86,7 +88,7 @@ def main() -> int:
             )
         executable = project / "fixture"
         result = run(label + "-build", [str(engine), "build", str(project / "src/main.rey"),
-                     "-o", str(executable), "--runtime-dir", str(runtime)])
+                     "-o", str(executable), "--runtime-dir", str(runtime)], env=SEED_ENV)
         return executable if result["passed"] else None
 
     if version["passed"]:

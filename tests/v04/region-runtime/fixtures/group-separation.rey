@@ -1,0 +1,75 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionGroupCount, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRequestedObjectBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var region = managedRegionCreate(context);
+    var first = managedRegionAllocate(context, region, scalar, 1);
+    var second = managedRegionAllocate(context, region, scalar, 1);
+    var third = managedRegionAllocate(context, region, scalar, 2);
+    check(!__reyRawEqual(first, second) && !__reyRawEqual(first, third));
+    check(managedRegionGroupCount(context) == 2);
+    check(managedRegionObjectCount(context) == 3);
+    check(managedLiveObjects(context) == 3);
+    check(managedLivePayloadBytes(context) == 24);
+    check(managedRequestedObjectBytes(context) == 96);
+    check(managedRegionRequestedBytes(context) == 8192);
+    check(managedRegionUsedBytes(context) == 304);
+    check(__reyRawLoadI64(__reyRawOffset(region, 48)) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(region, 56)) == 3);
+    var seenFirst = false;
+    var seenSecond = false;
+    var group = __reyRawLoadAddress(__reyRawOffset(region, 40));
+    var steps = 0;
+    while !__reyRawEqual(group, __reyRawNull()) {
+        check(steps < 2);
+        var groupId = __reyRawLoadI64(__reyRawOffset(group, 24));
+        var chunk = __reyRawLoadAddress(__reyRawOffset(group, 32));
+        check(__reyRawLoadI64(__reyRawOffset(group, 40)) == 1);
+        check(__reyRawLoadI64(chunk) == 1380272223);
+        check(__reyRawLoadI64(__reyRawOffset(chunk, 24)) == 4096);
+        var data = __reyRawLoadAddress(__reyRawOffset(chunk, 16));
+        if groupId == 1 {
+            seenFirst = true;
+            check(__reyRawLoadI64(__reyRawOffset(group, 48)) == 2);
+            check(__reyRawLoadI64(__reyRawOffset(chunk, 32)) == 200);
+            check(__reyRawEqual(__reyRawOffset(data, 80), first));
+            check(__reyRawEqual(__reyRawOffset(data, 176), second));
+        } else {
+            check(groupId == 2);
+            seenSecond = true;
+            check(__reyRawLoadI64(__reyRawOffset(group, 48)) == 1);
+            check(__reyRawLoadI64(__reyRawOffset(chunk, 32)) == 104);
+            check(__reyRawEqual(__reyRawOffset(data, 80), third));
+        }
+        group = __reyRawLoadAddress(__reyRawOffset(group, 8));
+        steps = steps + 1;
+    }
+    check(seenFirst && seenSecond);
+    var again = managedRegionCreate(context);
+    managedRegionAllocate(context, again, scalar, 1);
+    managedRegionEnd(context, again);
+    check(managedRegionRequestedBytes(context) == 8192);
+    check(managedRegionObjectCount(context) == 3);
+    managedRegionEnd(context, region);
+    check(managedRegionRequestedBytes(context) == 0);
+    check(managedRegionUsedBytes(context) == 0);
+    check(managedRegionObjectCount(context) == 0);
+    check(managedRegionGroupCount(context) == 0);
+    check(managedLiveObjects(context) == 0);
+    var reused = managedRegionCreate(context);
+    managedRegionAllocate(context, reused, scalar, 1);
+    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionGroupCount(context) == 1);
+    managedRegionEnd(context, reused);
+    check(managedRegionRequestedBytes(context) == 0);
+    check(managedLiveObjects(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}
