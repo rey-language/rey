@@ -1,0 +1,114 @@
+import ir::cache;
+import ir::cache::{CacheRequest, FunctionSnapshot, KnownEffect, UnitSnapshot};
+import std::fs;
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func functionSnapshot(name: string, body: string, effect: string): FunctionSnapshot {
+    return FunctionSnapshot {
+        name: name, bodyDigest: body, effectDigest: effect, layoutDigest: "layout",
+        inlineDigest: "inline", specializationDigest: "spec",
+    };
+}
+
+func unit(id: string, source: string, deps: Vec<string>, functions: Vec<FunctionSnapshot>, target: string): UnitSnapshot {
+    return UnitSnapshot {
+        unitId: id, sourceDigest: source, dependencyUnitIds: deps, functions: functions,
+        compilerAbi: cache.compilerAbi(), runtimeAbi: cache.runtimeAbi(), target: target,
+        semanticFlags: "default", optimization: "none",
+    };
+}
+
+func requestFor(unitId: string, effect: string): CacheRequest {
+    var keys: Vec<string> = Vec.new();
+    return CacheRequest {
+        kind: "ir", unitId: unitId, sourceDigest: "source", dependencyDigest: "deps",
+        compilerAbi: cache.compilerAbi(), runtimeAbi: cache.runtimeAbi(), target: "linux-x64",
+        semanticFlags: "default", optimization: "none", effectDigest: effect, layoutDigest: "layout",
+        inlineDigest: "inline", specializationDigest: "spec", dependencyKeys: keys,
+    };
+}
+
+func main(): void {
+    var previous: Vec<UnitSnapshot> = Vec.new();
+    var current: Vec<UnitSnapshot> = Vec.new();
+    var unchanged = cache.planRebuild(previous, current);
+    require(unchanged.kind == "noop", "empty plans are no-ops");
+
+    var mainFns: Vec<FunctionSnapshot> = Vec.new();
+    mainFns.push(functionSnapshot("main", "body-a", "effect-a"));
+    var helperFns: Vec<FunctionSnapshot> = Vec.new();
+    helperFns.push(functionSnapshot("helper", "helper-a", "effect-h"));
+    var noDeps: Vec<string> = Vec.new();
+    var mainDeps: Vec<string> = Vec.new();
+    mainDeps.push("helper");
+    previous.push(unit("helper", "helper-source", noDeps, helperFns, "linux-x64"));
+    previous.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    current.push(unit("helper", "helper-source", noDeps, helperFns, "linux-x64"));
+    current.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var same = cache.planRebuild(previous, current);
+    require(same.kind == "noop" && same.rebuildUnits.len() == 0, "unchanged fingerprints do not rebuild");
+
+    var editedHelper: Vec<FunctionSnapshot> = Vec.new();
+    editedHelper.push(functionSnapshot("helper", "helper-b", "effect-h"));
+    var edited: Vec<UnitSnapshot> = Vec.new();
+    edited.push(unit("helper", "helper-source-b", noDeps, editedHelper, "linux-x64"));
+    edited.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var one = cache.planRebuild(previous, edited);
+    require(one.kind == "one-function" && one.functionName == "helper" && one.relink, "a single function body edit is classified as one function and still requires a relink");
+    require(one.rebuildUnits.len() == 1 && one.rebuildUnits[0] == "helper", "an unchanged effect, layout, inline, or specialization fingerprint does not rebuild callers");
+
+    var effectHelper: Vec<FunctionSnapshot> = Vec.new();
+    effectHelper.push(functionSnapshot("helper", "helper-b", "effect-b"));
+    var effectEdit: Vec<UnitSnapshot> = Vec.new();
+    effectEdit.push(unit("helper", "helper-source-b", noDeps, effectHelper, "linux-x64"));
+    effectEdit.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var affected = cache.planRebuild(previous, effectEdit);
+    require(affected.kind == "one-function", "an effect change on one function stays a one-function edit");
+    require(affected.rebuildUnits.len() == 2, "callers rebuild when a callee effect fingerprint changes");
+
+    var retargeted: Vec<UnitSnapshot> = Vec.new();
+    retargeted.push(unit("helper", "helper-source", noDeps, helperFns, "windows-x64"));
+    retargeted.push(unit("main", "main-source", mainDeps, mainFns, "windows-x64"));
+    var full = cache.planRebuild(previous, retargeted);
+    require(full.kind == "full", "an ABI target change is a full rebuild");
+
+    var trusted = KnownEffect { functionName: "main", trusted: true, allocates: "no", blocks: "no", path: "main" };
+    var callees: Vec<KnownEffect> = Vec.new();
+    callees.push(KnownEffect { functionName: "foreign", trusted: false, allocates: "no", blocks: "no", path: "main -> foreign" });
+    var unknown = cache.checkNoHeap(trusted, callees);
+    require(!unknown.ok && unknown.status == "unknown", "an untrusted callee is not a successful no-heap proof");
+    var blocking: Vec<KnownEffect> = Vec.new();
+    blocking.push(KnownEffect { functionName: "sleep", trusted: true, allocates: "no", blocks: "yes", path: "main -> sleep" });
+    var blocked = cache.checkNoBlocking(trusted, blocking);
+    require(!blocked.ok && blocked.status == "established" && blocked.path == "main -> sleep", "a known blocking callee names its path");
+
+    var argv = args();
+    require(argv.len() == 2, "cache directory argument required");
+    var opened = cache.openStore(argv[1], "build-1", 1000000);
+    require(opened.isOk(), "store opens");
+    var store = opened.unwrap();
+    var request = requestFor("main", "effect-a");
+    var missed = cache.lookup(store, request);
+    require(!missed.accepted && missed.payload == "" && missed.reason == "absent", "a missing record is not a hit");
+    var stored = cache.commit(store, request, "payload-v1");
+    require(stored.isOk(), "commit publishes a record");
+    var hit = cache.lookup(store, request);
+    require(hit.accepted && hit.reason == "hit" && hit.payload == "payload-v1", "a matching identity reads the stored payload");
+    var stale = cache.lookup(store, requestFor("main", "effect-b"));
+    require(!stale.accepted && stale.payload == "", "a changed effect digest cannot read the old payload");
+    var collision = cache.commit(store, request, "payload-v2");
+    require(collision.isErr(), "a different payload for the same key is rejected");
+    var afterCollision = cache.lookup(store, request);
+    require(!afterCollision.accepted && afterCollision.payload == "", "a rejected collision does not leave the old payload accepted");
+    var again = cache.commit(store, request, "payload-v1");
+    require(again.isOk(), "the original payload can be stored after the collision was discarded");
+    var path = cache.artifactPath(store, again.unwrap());
+    fs.write(path, "not a cache record");
+    var corrupt = cache.lookup(store, request);
+    require(!corrupt.accepted && corrupt.reason == "corrupt" && corrupt.payload == "", "a corrupt record is never returned as output");
+    require(!fs.isFile(path), "corrupt records are removed from the object directory");
+    println("v0.4 incremental cache fixtures passed");
+}

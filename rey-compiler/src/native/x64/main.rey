@@ -1,4 +1,9 @@
-// Direct Linux x86-64 emission for the verified scalar IR slice.
+// Direct x86-64 emission. linux-x64 keeps the SysV syscall image that the
+// existing executable writer consumes. windows-x64 and darwin-x64 are additional
+// cross-output targets; emitProgram still accepts only linux-x64.
+// abi linux-x64 syscall-exit 60 convention sysv shadow 0 stack-align 16 red-zone 128 loader none
+// abi windows-x64 syscall-exit -1 convention win64 shadow 32 stack-align 16 red-zone 0 loader kernel32.dll symbol ExitProcess
+// abi darwin-x64 syscall-exit 33554433 convention sysv shadow 0 stack-align 16 red-zone 128 loader /usr/lib/dyld symbol direct-syscall
 import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRValue, CompareI64Predicate};
 import ir::verify::{verifyProgram};
 import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
@@ -13,6 +18,36 @@ pub struct X64Code {
     pub entryOffset: int,
     pub functions: Vec<X64FunctionOffset>,
 }
+
+pub struct X64Relocation {
+    pub offset: int,
+    pub kind: int,
+    pub symbol: string,
+}
+
+pub struct X64Import {
+    pub library: string,
+    pub symbol: string,
+}
+
+pub struct X64Frame {
+    pub functionId: int,
+    pub offset: int,
+    pub frameBytes: int,
+}
+
+pub struct X64Image {
+    pub code: X64Code,
+    pub target: string,
+    pub convention: string,
+    pub relocations: Vec<X64Relocation>,
+    pub imports: Vec<X64Import>,
+    pub frames: Vec<X64Frame>,
+    pub maxFrameBytes: int,
+    pub stackMetadata: string,
+}
+
+pub func relocationRipDisp32(): int { return 1; }
 
 struct ValueSlot {
     pub valueId: int,
@@ -37,6 +72,10 @@ struct Emitter {
     pub functions: Vec<X64FunctionOffset>,
     pub fixups: Vec<Fixup>,
     pub error: string,
+    pub convention: string,
+    pub relocations: Vec<X64Relocation>,
+    pub frames: Vec<X64Frame>,
+    pub maxFrame: int,
 }
 
 func emitByte(emitter: Emitter, value: int): void {
@@ -388,6 +427,29 @@ func emitInstruction(emitter: Emitter, instruction: Instruction, slots: Vec<Valu
         emitStoreValue(emitter, slots, 0, instruction.resultId);
         return;
     }
+    if instruction.kind == InstructionKind::Call && emitter.convention == "win64" {
+        var count = instruction.operands.len();
+        var i = 4;
+        loop {
+            if i >= count { break; }
+            emitLoadValue(emitter, slots, 0, instruction.operands[i]);
+            emitStoreRsp(emitter, 0, 32 + (i - 4) * 8);
+            i = i + 1;
+        }
+        var winRegisters: Vec<int> = [1, 2, 8, 9];
+        i = 0;
+        loop {
+            if i >= count || i >= 4 { break; }
+            emitLoadValue(emitter, slots, winRegisters[i], instruction.operands[i]);
+            i = i + 1;
+        }
+        emitByte(emitter, 232);
+        var winCall = emitter.bytes.len();
+        emitI32(emitter, 0);
+        emitter.fixups.push(Fixup { offset: winCall, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
+        if instruction.resultId >= 0 { emitStoreValue(emitter, slots, 0, instruction.resultId); }
+        return;
+    }
     if instruction.kind == InstructionKind::Call {
         var count = instruction.operands.len();
         var i = 6;
@@ -481,7 +543,18 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     }
     var scratchCount = maxEdgeParams(function);
     var outgoingBytes = 16;
-    var requiredOutgoingBytes = (maxCallArguments(function) - 6) * 8;
+    var registerCount = 6;
+    var incomingBase = 16;
+    if emitter.convention == "win64" {
+        outgoingBytes = 32;
+        registerCount = 4;
+        incomingBase = 48;
+    }
+    var requiredOutgoingBytes = (maxCallArguments(function) - registerCount) * 8;
+    if emitter.convention == "win64" {
+        if requiredOutgoingBytes < 0 { requiredOutgoingBytes = 0; }
+        requiredOutgoingBytes = requiredOutgoingBytes + 32;
+    }
     if requiredOutgoingBytes > outgoingBytes { outgoingBytes = requiredOutgoingBytes; }
     var rawFrame = slotCount * 8 + scratchCount * 8 + outgoingBytes;
     if rawFrame > 65520 {
@@ -492,17 +565,20 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     if frameSize % 16 != 0 { frameSize = frameSize + (16 - frameSize % 16); }
     var start = emitter.bytes.len();
     emitter.functions.push(X64FunctionOffset { functionId: function.id, offset: start });
+    emitter.frames.push(X64Frame { functionId: function.id, offset: start, frameBytes: frameSize });
+    if frameSize > emitter.maxFrame { emitter.maxFrame = frameSize; }
     emitByte(emitter, 85);
     emitByte(emitter, 72); emitByte(emitter, 137); emitByte(emitter, 229);
     emitByte(emitter, 72); emitByte(emitter, 129); emitByte(emitter, 236); emitU32(emitter, frameSize);
     var argumentRegisters: Vec<int> = [7, 6, 2, 1, 8, 9];
+    if emitter.convention == "win64" { argumentRegisters = [1, 2, 8, 9]; }
     var parameterIndex = 0;
     loop {
         if parameterIndex >= function.parameters.len() { break; }
         var parameter = function.parameters[parameterIndex];
-        if parameterIndex < 6 { emitStoreValue(emitter, slots, argumentRegisters[parameterIndex], parameter.id); }
+        if parameterIndex < registerCount { emitStoreValue(emitter, slots, argumentRegisters[parameterIndex], parameter.id); }
         else {
-            emitLoadPositive(emitter, 0, 16 + (parameterIndex - 6) * 8);
+            emitLoadPositive(emitter, 0, incomingBase + (parameterIndex - registerCount) * 8);
             emitStoreValue(emitter, slots, 0, parameter.id);
         }
         parameterIndex = parameterIndex + 1;
@@ -529,27 +605,43 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     resolveLocalFixups(emitter, start, emitter.bytes.len(), localBlocks, epilogueOffset);
 }
 
-func appendEntryStub(emitter: Emitter, entryFunction: IRFunction): void {
+func appendEntryStub(emitter: Emitter, entryFunction: IRFunction, exitNumber: int): void {
     emitByte(emitter, 232);
     var callOffset = emitter.bytes.len();
     emitI32(emitter, 0);
     emitter.fixups.push(Fixup { offset: callOffset, kind: 3, targetFunctionId: entryFunction.id, targetBlockId: -1, targetOffset: -1 });
+    if emitter.convention == "win64" {
+        if entryFunction.signature.returnType.kind == IRTypeKind::Void {
+            emitByte(emitter, 49); emitByte(emitter, 201);
+        } else {
+            emitByte(emitter, 137); emitByte(emitter, 193);
+        }
+        emitByte(emitter, 255); emitByte(emitter, 21);
+        var dispAt = emitter.bytes.len();
+        emitI32(emitter, 0);
+        emitter.relocations.push(X64Relocation { offset: dispAt, kind: relocationRipDisp32(), symbol: "ExitProcess" });
+        return;
+    }
     if entryFunction.signature.returnType.kind == IRTypeKind::Void {
         emitByte(emitter, 49); emitByte(emitter, 255);
     } else {
         emitByte(emitter, 137); emitByte(emitter, 199);
     }
-    emitLoadImmediate32(emitter, 0, 60);
+    emitLoadImmediate32(emitter, 0, exitNumber);
     emitByte(emitter, 15); emitByte(emitter, 5);
 }
 
-func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Result<X64Code, string> {
-    if target == "windows-x64" {
-        return Result.Err("native x64: windows-x64 is unsupported until an ExitProcess import contract is available");
-    }
-    if target != "linux-x64" {
-        return Result.Err("native x64: target must be linux-x64");
-    }
+func canonicalTarget(target: string): string {
+    if target == "macos-x64" { return "darwin-x64"; }
+    return target;
+}
+
+func emitImageInternal(program: IRProgram, target: string, reuse: bool): Result<X64Image, string> {
+    var canonical = canonicalTarget(target);
+    var convention = "";
+    if canonical == "linux-x64" || canonical == "darwin-x64" { convention = "sysv"; }
+    if canonical == "windows-x64" { convention = "win64"; }
+    if convention == "" { return Result.Err("native x64: target must be linux-x64, darwin-x64, or windows-x64"); }
     var verification = verifyProgram(program);
     if !verification.ok {
         if verification.errors.len() > 0 { return Result.Err("native x64: invalid IR: " + verification.errors[0]); }
@@ -591,8 +683,12 @@ func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Resul
         planned = result.unwrap();
         if planned.functions.len() != program.functions.len() { return Result.Err("native x64: incomplete storage plan"); }
     }
-    var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "" };
-    appendEntryStub(emitter, entryFunction);
+    var noneRelocations: Vec<X64Relocation> = Vec.new();
+    var noneFrames: Vec<X64Frame> = Vec.new();
+    var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "", convention: convention, relocations: noneRelocations, frames: noneFrames, maxFrame: 0 };
+    var exitNumber = 60;
+    if canonical == "darwin-x64" { exitNumber = 33554433; }
+    appendEntryStub(emitter, entryFunction, exitNumber);
     var overflowOffset = -1;
     i = 0;
     loop {
@@ -607,9 +703,17 @@ func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Resul
         i = i + 1;
     }
     overflowOffset = emitter.bytes.len();
-    emitLoadImmediate32(emitter, 7, 1);
-    emitLoadImmediate32(emitter, 0, 60);
-    emitByte(emitter, 15); emitByte(emitter, 5);
+    if convention == "win64" {
+        emitLoadImmediate32(emitter, 1, 1);
+        emitByte(emitter, 255); emitByte(emitter, 21);
+        var overflowDisp = emitter.bytes.len();
+        emitI32(emitter, 0);
+        emitter.relocations.push(X64Relocation { offset: overflowDisp, kind: relocationRipDisp32(), symbol: "ExitProcess" });
+    } else {
+        emitLoadImmediate32(emitter, 7, 1);
+        emitLoadImmediate32(emitter, 0, exitNumber);
+        emitByte(emitter, 15); emitByte(emitter, 5);
+    }
     i = 0;
     loop {
         if i >= emitter.fixups.len() { break; }
@@ -627,7 +731,31 @@ func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Resul
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }
-    return Result.Ok(X64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions });
+    var imports: Vec<X64Import> = Vec.new();
+    var stackMetadata = "sysv;frame-pointer;red-zone-unused;exit-syscall=60";
+    if canonical == "windows-x64" {
+        imports.push(X64Import { library: "kernel32.dll", symbol: "ExitProcess" });
+        stackMetadata = "win64;frame-pointer;shadow=32;exit-import=kernel32.dll!ExitProcess";
+    } else if canonical == "darwin-x64" {
+        stackMetadata = "sysv;frame-pointer;red-zone-unused;exit-syscall=33554433;loader=dyld;dylib=libSystem";
+    }
+    return Result.Ok(X64Image {
+        code: X64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions },
+        target: canonical,
+        convention: convention,
+        relocations: emitter.relocations,
+        imports: imports,
+        frames: emitter.frames,
+        maxFrameBytes: emitter.maxFrame,
+        stackMetadata: stackMetadata,
+    });
+}
+
+func emitProgramInternal(program: IRProgram, target: string, reuse: bool): Result<X64Code, string> {
+    if target != "linux-x64" { return Result.Err("native x64: target must be linux-x64"); }
+    var image = emitImageInternal(program, target, reuse);
+    if image.isErr() { return Result.Err(image.unwrapErr()); }
+    return Result.Ok(image.unwrap().code);
 }
 
 pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string> {
@@ -636,4 +764,12 @@ pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string
 
 pub func emitProgramWithReuse(program: IRProgram, target: string): Result<X64Code, string> {
     return emitProgramInternal(program, target, true);
+}
+
+pub func emitImage(program: IRProgram, target: string): Result<X64Image, string> {
+    return emitImageInternal(program, target, false);
+}
+
+pub func emitImageWithReuse(program: IRProgram, target: string): Result<X64Image, string> {
+    return emitImageInternal(program, target, true);
 }

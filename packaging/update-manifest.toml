@@ -1,0 +1,11 @@
+# Unpublished v0.4 update manifest. Empty URLs are intentional.
+
+version = "0.4.0"
+package_contract = "rey-package-1"
+status = "blocked"
+
+darwin-arm64-status = "blocked"
+darwin-x86_64-status = "blocked"
+linux-aarch64-status = "blocked"
+linux-x86_64-status = "blocked"
+windows-x86_64-status = "blocked"

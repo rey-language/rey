@@ -1,0 +1,11 @@
+{
+  "fixture": "tests/v04/cache/main.rey",
+  "covers": [
+    "noop when fingerprints match",
+    "one-function edit does not rebuild callers whose effect fingerprint is unchanged",
+    "effect fingerprint changes rebuild dependents",
+    "target changes force a full rebuild",
+    "untrusted no-heap callee stays unknown",
+    "corrupt and colliding cache records do not return a payload"
+  ]
+}

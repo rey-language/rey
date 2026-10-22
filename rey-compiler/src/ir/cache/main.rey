@@ -1,0 +1,742 @@
+// Dependency-aware incremental cache. A source-text key is not sufficient:
+// the lookup key includes transitive dependency identity, compiler and runtime
+// ABI, target, semantic flags, optimization settings, and the effect, layout,
+// inline, and specialization fingerprints supplied by the caller.
+import std::fs;
+import ir::{IRProgram, printIR};
+import native::bytes::{sha256};
+
+pub struct FunctionSnapshot {
+    pub name: string,
+    pub bodyDigest: string,
+    pub effectDigest: string,
+    pub layoutDigest: string,
+    pub inlineDigest: string,
+    pub specializationDigest: string,
+}
+
+pub struct UnitSnapshot {
+    pub unitId: string,
+    pub sourceDigest: string,
+    pub dependencyUnitIds: Vec<string>,
+    pub functions: Vec<FunctionSnapshot>,
+    pub compilerAbi: string,
+    pub runtimeAbi: string,
+    pub target: string,
+    pub semanticFlags: string,
+    pub optimization: string,
+}
+
+pub struct EditPlan {
+    pub kind: string,
+    pub functionName: string,
+    pub reasons: Vec<string>,
+    pub rebuildUnits: Vec<string>,
+    pub relink: bool,
+}
+
+pub struct CacheRequest {
+    pub kind: string,
+    pub unitId: string,
+    pub sourceDigest: string,
+    pub dependencyDigest: string,
+    pub compilerAbi: string,
+    pub runtimeAbi: string,
+    pub target: string,
+    pub semanticFlags: string,
+    pub optimization: string,
+    pub effectDigest: string,
+    pub layoutDigest: string,
+    pub inlineDigest: string,
+    pub specializationDigest: string,
+    pub dependencyKeys: Vec<string>,
+}
+
+pub struct CacheArtifact {
+    pub request: CacheRequest,
+    pub payload: string,
+    pub sequence: int,
+}
+
+pub struct CacheDecision {
+    pub hit: bool,
+    pub accepted: bool,
+    pub reason: string,
+    pub key: string,
+    pub payload: string,
+}
+
+pub struct CacheStore {
+    pub root: string,
+    pub buildId: string,
+    pub maxBytes: int,
+    pub error: string,
+    pub protectedKeys: Vec<string>,
+}
+
+pub struct KnownEffect {
+    pub functionName: string,
+    pub trusted: bool,
+    pub allocates: string,
+    pub blocks: string,
+    pub path: string,
+}
+
+pub struct ContractResult {
+    pub ok: bool,
+    pub status: string,
+    pub path: string,
+    pub message: string,
+}
+
+pub func cacheFormatVersion(): int { return 1; }
+
+pub func compilerAbi(): string { return "rey-ir-cache-1"; }
+
+pub func runtimeAbi(): string { return "rey-region-v0.4"; }
+
+pub func miss(reason: string): CacheDecision {
+    return CacheDecision { hit: false, accepted: false, reason: reason, key: "", payload: "" };
+}
+
+func hexDigit(value: int): string {
+    var digits = "0123456789abcdef";
+    return digits[value].toString();
+}
+
+func hexByte(value: int): string {
+    return hexDigit(value / 16) + hexDigit(value % 16);
+}
+
+func textBytes(text: string): Vec<int> {
+    var bytes: Vec<int> = Vec.new();
+    var i = 0;
+    while i < text.len() {
+        bytes.push(int(text[i]));
+        i = i + 1;
+    }
+    return bytes;
+}
+
+pub func digestText(text: string): Result<string, string> {
+    var hashed = sha256(textBytes(text));
+    if hashed.isErr() { return Result.Err(hashed.unwrapErr()); }
+    var bytes = hashed.unwrap();
+    if bytes.len() != 32 { return Result.Err("incremental cache: digest length is not 32 bytes"); }
+    var hex = "";
+    var i = 0;
+    while i < bytes.len() {
+        hex = hex + hexByte(bytes[i]);
+        i = i + 1;
+    }
+    return Result.Ok(hex);
+}
+
+pub func digestProgram(program: IRProgram): Result<string, string> {
+    return digestText(printIR(program));
+}
+
+func sortStrings(values: Vec<string>): Vec<string> {
+    var pending: Vec<string> = Vec.new();
+    var i = 0;
+    while i < values.len() {
+        pending.push(values[i]);
+        i = i + 1;
+    }
+    var sorted: Vec<string> = Vec.new();
+    while pending.len() > 0 {
+        var best = 0;
+        var j = 1;
+        while j < pending.len() {
+            if pending[j] < pending[best] { best = j; }
+            j = j + 1;
+        }
+        sorted.push(pending[best]);
+        var next: Vec<string> = Vec.new();
+        var k = 0;
+        while k < pending.len() {
+            if k != best { next.push(pending[k]); }
+            k = k + 1;
+        }
+        pending = next;
+    }
+    return sorted;
+}
+
+func joinComma(values: Vec<string>): string {
+    if values.len() == 0 { return "-"; }
+    var text = values[0];
+    var i = 1;
+    while i < values.len() {
+        text = text + "," + values[i];
+        i = i + 1;
+    }
+    return text;
+}
+
+pub func transitiveDigest(unitDigests: Vec<string>): Result<string, string> {
+    return digestText(joinComma(sortStrings(unitDigests)));
+}
+
+func canonicalRequest(request: CacheRequest): string {
+    var keys = sortStrings(request.dependencyKeys);
+    return "kind=" + request.kind + "\nunit=" + request.unitId + "\nsource=" + request.sourceDigest
+        + "\ndependencies=" + request.dependencyDigest + "\ncompilerAbi=" + request.compilerAbi
+        + "\nruntimeAbi=" + request.runtimeAbi + "\ntarget=" + request.target
+        + "\nflags=" + request.semanticFlags + "\noptimization=" + request.optimization
+        + "\neffect=" + request.effectDigest + "\nlayout=" + request.layoutDigest
+        + "\ninline=" + request.inlineDigest + "\nspecialization=" + request.specializationDigest
+        + "\ndependency-keys=" + joinComma(keys) + "\n";
+}
+
+func flat(text: string): bool { return !text.contains("\n") && !text.contains("\r"); }
+
+pub func requestKey(request: CacheRequest): Result<string, string> {
+    if !flat(request.kind) || !flat(request.unitId) || !flat(request.sourceDigest) || !flat(request.dependencyDigest)
+        || !flat(request.compilerAbi) || !flat(request.runtimeAbi) || !flat(request.target) || !flat(request.semanticFlags)
+        || !flat(request.optimization) || !flat(request.effectDigest) || !flat(request.layoutDigest)
+        || !flat(request.inlineDigest) || !flat(request.specializationDigest) {
+        return Result.Err("identity field contains a line break");
+    }
+    var i = 0;
+    while i < request.dependencyKeys.len() {
+        if request.dependencyKeys[i] == "" || !flat(request.dependencyKeys[i]) || request.dependencyKeys[i].contains(",") || request.dependencyKeys[i] == "-" {
+            return Result.Err("dependency key is not a single cache key");
+        }
+        i = i + 1;
+    }
+    return digestText(canonicalRequest(request));
+}
+
+func safeBuildId(buildId: string): bool {
+    if buildId.len() == 0 || buildId.len() > 64 { return false; }
+    var i = 0;
+    while i < buildId.len() {
+        var byte = int(buildId[i]);
+        var digit = byte >= 48 && byte <= 57;
+        var lower = byte >= 97 && byte <= 122;
+        var upper = byte >= 65 && byte <= 90;
+        var mark = buildId[i].toString() == "-" || buildId[i].toString() == "_" || buildId[i].toString() == ".";
+        if !digit && !lower && !upper && !mark { return false; }
+        i = i + 1;
+    }
+    return buildId != "." && buildId != "..";
+}
+
+pub func openStore(root: string, buildId: string, maxBytes: int): Result<CacheStore, string> {
+    if root == "" || root.contains("\n") { return Result.Err("incremental cache: root is empty"); }
+    if !safeBuildId(buildId) { return Result.Err("incremental cache: build id must be a single path segment"); }
+    if maxBytes < 1 { return Result.Err("incremental cache: byte budget must be positive"); }
+    fs.mkdirAll(root);
+    fs.mkdirAll(fs.join(root, "objects"));
+    fs.mkdirAll(fs.join(root, "staging"));
+    fs.mkdirAll(fs.join(root, "quarantine"));
+    fs.mkdirAll(fs.join(fs.join(root, "builds"), buildId));
+    var marker = fs.join(fs.join(fs.join(root, "builds"), buildId), "open");
+    fs.write(marker, buildId + "\n");
+    if fs.read(marker) != buildId + "\n" { return Result.Err("incremental cache: could not record the build marker"); }
+    var none: Vec<string> = Vec.new();
+    return Result.Ok(CacheStore { root: root, buildId: buildId, maxBytes: maxBytes, error: "", protectedKeys: none });
+}
+
+func objectPath(store: CacheStore, key: string): string {
+    return fs.join(fs.join(fs.join(store.root, "objects"), key.slice(0, 2)), key + ".record");
+}
+
+pub func artifactPath(store: CacheStore, key: string): string { return objectPath(store, key); }
+
+func headerLine(text: string, prefix: string): string {
+    if text.len() <= prefix.len() || !text.startsWith(prefix) { return ""; }
+    return text.slice(prefix.len(), text.len());
+}
+
+func isHex(text: string, count: int): bool {
+    if text.len() != count { return false; }
+    var i = 0;
+    while i < text.len() {
+        var byte = int(text[i]);
+        var digit = byte >= 48 && byte <= 57;
+        var lower = byte >= 97 && byte <= 102;
+        if !digit && !lower { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func splitKeys(text: string): Vec<string> {
+    var keys: Vec<string> = Vec.new();
+    if text == "-" || text == "" { return keys; }
+    var parts = text.split(",");
+    var i = 0;
+    while i < parts.len() {
+        keys.push(parts[i]);
+        i = i + 1;
+    }
+    return keys;
+}
+
+func digits(text: string): bool {
+    if text.len() == 0 { return false; }
+    var i = 0;
+    while i < text.len() {
+        var byte = int(text[i]);
+        if byte < 48 || byte > 57 { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func parseRecord(text: string): Result<CacheArtifact, string> {
+    var marker = "\nend-header\n";
+    var at = text.indexOf(marker);
+    if at < 0 { return Result.Err("missing header"); }
+    var header = text.slice(0, at);
+    var rest = text.slice(at + marker.len(), text.len());
+    var lines = header.split("\n");
+    if lines.len() != 19 { return Result.Err("header line count"); }
+    if lines[0] != "rey-cache 1" { return Result.Err("version"); }
+    var sequenceText = headerLine(lines[1], "sequence ");
+    var kind = headerLine(lines[2], "kind ");
+    var unitId = headerLine(lines[3], "unit ");
+    var key = headerLine(lines[4], "key ");
+    var sourceDigest = headerLine(lines[5], "source ");
+    var dependencyDigest = headerLine(lines[6], "dependencies ");
+    var compiler = headerLine(lines[7], "compilerAbi ");
+    var runtime = headerLine(lines[8], "runtimeAbi ");
+    var target = headerLine(lines[9], "target ");
+    var flags = headerLine(lines[10], "flags ");
+    var optimization = headerLine(lines[11], "optimization ");
+    var effectDigest = headerLine(lines[12], "effect ");
+    var layoutDigest = headerLine(lines[13], "layout ");
+    var inlineDigest = headerLine(lines[14], "inline ");
+    var specializationDigest = headerLine(lines[15], "specialization ");
+    var dependencyText = headerLine(lines[16], "dependency-keys ");
+    var payloadDigest = headerLine(lines[17], "payload-digest ");
+    var payloadCountText = headerLine(lines[18], "payload-bytes ");
+    if !digits(sequenceText) || !digits(payloadCountText) { return Result.Err("numeric field"); }
+    if !isHex(key, 64) || !isHex(payloadDigest, 64) { return Result.Err("digest field"); }
+    var payloadCount = payloadCountText.toInt();
+    if payloadCount < 0 || rest.len() < payloadCount + 1 { return Result.Err("truncated payload"); }
+    var payload = rest.slice(0, payloadCount);
+    var trailer = rest.slice(payloadCount, rest.len());
+    if trailer != "\n" + payloadDigest + "\n" { return Result.Err("trailer"); }
+    var actual = digestText(payload);
+    if actual.isErr() { return Result.Err(actual.unwrapErr()); }
+    if actual.unwrap() != payloadDigest { return Result.Err("payload digest"); }
+    var request = CacheRequest {
+        kind: kind, unitId: unitId, sourceDigest: sourceDigest, dependencyDigest: dependencyDigest,
+        compilerAbi: compiler, runtimeAbi: runtime, target: target, semanticFlags: flags, optimization: optimization,
+        effectDigest: effectDigest, layoutDigest: layoutDigest, inlineDigest: inlineDigest,
+        specializationDigest: specializationDigest, dependencyKeys: splitKeys(dependencyText),
+    };
+    var expected = requestKey(request);
+    if expected.isErr() { return Result.Err(expected.unwrapErr()); }
+    if expected.unwrap() != key { return Result.Err("key does not match identity"); }
+    return Result.Ok(CacheArtifact { request: request, payload: payload, sequence: sequenceText.toInt() });
+}
+
+func encodeRecord(artifact: CacheArtifact, key: string, payloadDigest: string): string {
+    var request = artifact.request;
+    var header = "rey-cache 1\nsequence " + artifact.sequence.toString() + "\nkind " + request.kind
+        + "\nunit " + request.unitId + "\nkey " + key + "\nsource " + request.sourceDigest
+        + "\ndependencies " + request.dependencyDigest + "\ncompilerAbi " + request.compilerAbi
+        + "\nruntimeAbi " + request.runtimeAbi + "\ntarget " + request.target
+        + "\nflags " + request.semanticFlags + "\noptimization " + request.optimization
+        + "\neffect " + request.effectDigest + "\nlayout " + request.layoutDigest
+        + "\ninline " + request.inlineDigest + "\nspecialization " + request.specializationDigest
+        + "\ndependency-keys " + joinComma(sortStrings(request.dependencyKeys))
+        + "\npayload-digest " + payloadDigest + "\npayload-bytes " + artifact.payload.len().toString()
+        + "\nend-header\n";
+    return header + artifact.payload + "\n" + payloadDigest + "\n";
+}
+
+func quarantinePath(store: CacheStore, path: string): void {
+    if !fs.isFile(path) { return; }
+    var dir = fs.join(fs.join(store.root, "quarantine"), store.buildId);
+    fs.mkdirAll(dir);
+    var dest = fs.join(dir, fs.basename(path));
+    if fs.exists(dest) { fs.remove(dest); }
+    fs.move(path, dest);
+    if fs.isFile(path) { fs.remove(path); }
+}
+
+pub func lookup(store: CacheStore, request: CacheRequest): CacheDecision {
+    if store.error != "" { return miss("store-error"); }
+    var keyResult = requestKey(request);
+    if keyResult.isErr() { return miss("digest-failed"); }
+    var key = keyResult.unwrap();
+    var path = objectPath(store, key);
+    if !fs.isFile(path) { return miss("absent"); }
+    var text = fs.read(path);
+    var parsed = parseRecord(text);
+    if parsed.isErr() {
+        quarantinePath(store, objectPath(store, key));
+        return miss("corrupt");
+    }
+    var artifact = parsed.unwrap();
+    if canonicalRequest(artifact.request) != canonicalRequest(request) {
+        quarantinePath(store, objectPath(store, key));
+        return miss("stale-identity");
+    }
+    return CacheDecision { hit: true, accepted: true, reason: "hit", key: key, payload: artifact.payload };
+}
+
+func nextSequence(store: CacheStore): Result<int, string> {
+    var path = fs.join(store.root, "sequence.txt");
+    var current = 0;
+    if fs.isFile(path) {
+        var text = fs.read(path).trim();
+        if !digits(text) { return Result.Err("incremental cache: sequence file is corrupt"); }
+        current = text.toInt();
+    }
+    if current == 9223372036854775807 { return Result.Err("incremental cache: sequence space is exhausted"); }
+    var next = current + 1;
+    var temp = fs.join(fs.join(fs.join(store.root, "staging"), store.buildId), "sequence.txt");
+    fs.mkdirAll(fs.dirname(temp));
+    fs.write(temp, next.toString() + "\n");
+    if fs.read(temp) != next.toString() + "\n" { return Result.Err("incremental cache: sequence write was not durable"); }
+    if fs.exists(path) { fs.remove(path); }
+    fs.move(temp, path);
+    if !fs.isFile(path) || fs.read(path) != next.toString() + "\n" {
+        return Result.Err("incremental cache: sequence publish failed");
+    }
+    return Result.Ok(next);
+}
+
+func protect(store: CacheStore, key: string): void {
+    var i = 0;
+    while i < store.protectedKeys.len() {
+        if store.protectedKeys[i] == key { return; }
+        i = i + 1;
+    }
+    store.protectedKeys.push(key);
+}
+
+func isProtected(store: CacheStore, key: string): bool {
+    var i = 0;
+    while i < store.protectedKeys.len() {
+        if store.protectedKeys[i] == key { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+struct StoredSize { pub key: string, pub sequence: int, pub bytes: int, }
+
+func collectSizes(store: CacheStore, sizes: Vec<StoredSize>, dir: string, depth: int): Result<bool, string> {
+    if depth > 4 { return Result.Ok(true); }
+    if !fs.isDir(dir) { return Result.Ok(true); }
+    var names = fs.list(dir);
+    var i = 0;
+    while i < names.len() {
+        if sizes.len() > 100000 { return Result.Err("incremental cache: object directory exceeds the scan bound"); }
+        var path = fs.join(dir, names[i]);
+        if fs.isDir(path) {
+            var nested = collectSizes(store, sizes, path, depth + 1);
+            if nested.isErr() { return nested; }
+        } else if fs.isFile(path) && path.endsWith(".record") {
+            var text = fs.read(path);
+            var parsed = parseRecord(text);
+            if parsed.isErr() {
+                quarantinePath(store, path);
+            } else {
+                var artifact = parsed.unwrap();
+                var keyResult = requestKey(artifact.request);
+                if keyResult.isOk() {
+                    sizes.push(StoredSize { key: keyResult.unwrap(), sequence: artifact.sequence, bytes: text.len() });
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return Result.Ok(true);
+}
+
+pub func prune(store: CacheStore): Result<int, string> {
+    var sizes: Vec<StoredSize> = Vec.new();
+    var collected = collectSizes(store, sizes, fs.join(store.root, "objects"), 0);
+    if collected.isErr() { return Result.Err(collected.unwrapErr()); }
+    var total = 0;
+    var i = 0;
+    while i < sizes.len() {
+        total = total + sizes[i].bytes;
+        i = i + 1;
+    }
+    var removed = 0;
+    while total > store.maxBytes {
+        var best = -1;
+        var j = 0;
+        while j < sizes.len() {
+            if sizes[j].bytes >= 0 && !isProtected(store, sizes[j].key) {
+                if best < 0 || sizes[j].sequence < sizes[best].sequence || (sizes[j].sequence == sizes[best].sequence && sizes[j].key < sizes[best].key) {
+                    best = j;
+                }
+            }
+            j = j + 1;
+        }
+        if best < 0 { return Result.Err("incremental cache: protected records exceed the byte budget"); }
+        quarantinePath(store, objectPath(store, sizes[best].key));
+        total = total - sizes[best].bytes;
+        sizes.set(best, StoredSize { key: sizes[best].key, sequence: sizes[best].sequence, bytes: -1 });
+        removed = removed + 1;
+    }
+    return Result.Ok(removed);
+}
+
+pub func commit(store: CacheStore, request: CacheRequest, payload: string): Result<string, string> {
+    if store.error != "" { return Result.Err("incremental cache: store is closed"); }
+    var keyResult = requestKey(request);
+    if keyResult.isErr() { return Result.Err("incremental cache: " + keyResult.unwrapErr()); }
+    var payloadDigest = digestText(payload);
+    if payloadDigest.isErr() { return Result.Err("incremental cache: " + payloadDigest.unwrapErr()); }
+    var key = keyResult.unwrap();
+    var path = objectPath(store, key);
+    if fs.isFile(path) {
+        var existing = parseRecord(fs.read(path));
+        if existing.isErr() {
+            quarantinePath(store, objectPath(store, key));
+            return Result.Err("incremental cache: existing record is corrupt and was not reused");
+        }
+        var prior = existing.unwrap();
+        if prior.payload == payload && canonicalRequest(prior.request) == canonicalRequest(request) {
+            protect(store, key);
+            return Result.Ok(key);
+        }
+        quarantinePath(store, objectPath(store, key));
+        return Result.Err("incremental cache: key collision produced a different payload; stale output was not accepted");
+    }
+    var sequence = nextSequence(store);
+    if sequence.isErr() { return Result.Err(sequence.unwrapErr()); }
+    var artifact = CacheArtifact { request: request, payload: payload, sequence: sequence.unwrap() };
+    var encoded = encodeRecord(artifact, key, payloadDigest.unwrap());
+    var stageDir = fs.join(fs.join(store.root, "staging"), store.buildId);
+    fs.mkdirAll(stageDir);
+    var temp = fs.join(stageDir, key + ".partial");
+    fs.write(temp, encoded);
+    if !fs.isFile(temp) || fs.read(temp) != encoded {
+        if fs.exists(temp) { fs.remove(temp); }
+        return Result.Err("incremental cache: staged record did not match the bytes just written");
+    }
+    fs.mkdirAll(fs.dirname(path));
+    if fs.exists(path) { fs.remove(path); }
+    fs.move(temp, path);
+    if !fs.isFile(path) || fs.read(path) != encoded {
+        if fs.exists(path) { fs.remove(path); }
+        return Result.Err("incremental cache: published record failed verification and was discarded");
+    }
+    protect(store, key);
+    var pruned = prune(store);
+    if pruned.isErr() {
+        quarantinePath(store, objectPath(store, key));
+        return Result.Err(pruned.unwrapErr());
+    }
+    if !fs.isFile(path) { return Result.Err("incremental cache: prune removed the record just written"); }
+    return Result.Ok(key);
+}
+
+func unitIndex(units: Vec<UnitSnapshot>, unitId: string): int {
+    var i = 0;
+    while i < units.len() {
+        if units[i].unitId == unitId { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func functionNamed(functions: Vec<FunctionSnapshot>, name: string): int {
+    var i = 0;
+    while i < functions.len() {
+        if functions[i].name == name { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func sameIdentity(left: UnitSnapshot, right: UnitSnapshot): bool {
+    return left.compilerAbi == right.compilerAbi && left.runtimeAbi == right.runtimeAbi
+        && left.target == right.target && left.semanticFlags == right.semanticFlags
+        && left.optimization == right.optimization;
+}
+
+func summaryChanged(left: FunctionSnapshot, right: FunctionSnapshot): bool {
+    return left.effectDigest != right.effectDigest || left.layoutDigest != right.layoutDigest
+        || left.inlineDigest != right.inlineDigest || left.specializationDigest != right.specializationDigest;
+}
+
+pub func planRebuild(previous: Vec<UnitSnapshot>, current: Vec<UnitSnapshot>): EditPlan {
+    var reasons: Vec<string> = Vec.new();
+    var rebuild: Vec<string> = Vec.new();
+    if previous.len() == 0 && current.len() == 0 {
+        return EditPlan { kind: "noop", functionName: "", reasons: reasons, rebuildUnits: rebuild, relink: false };
+    }
+    var dirty: Vec<int> = Vec.new();
+    var interfaceDirty: Vec<int> = Vec.new();
+    var i = 0;
+    while i < current.len() {
+        dirty.push(0);
+        interfaceDirty.push(0);
+        i = i + 1;
+    }
+    var identityChanged = false;
+    var bodyChanges = 0;
+    var changedFunction = "";
+    var shapeChanged = false;
+    i = 0;
+    while i < current.len() {
+        var prior = unitIndex(previous, current[i].unitId);
+        if prior < 0 {
+            dirty.set(i, 1);
+            interfaceDirty.set(i, 1);
+            shapeChanged = true;
+            reasons.push("added unit " + current[i].unitId);
+        } else if !sameIdentity(previous[prior], current[i]) {
+            identityChanged = true;
+            dirty.set(i, 1);
+            interfaceDirty.set(i, 1);
+            reasons.push("abi or settings changed for " + current[i].unitId);
+        } else {
+            if previous[prior].sourceDigest != current[i].sourceDigest {
+                dirty.set(i, 1);
+                reasons.push("source changed for " + current[i].unitId);
+            }
+            var p = 0;
+            while p < previous[prior].functions.len() {
+                if functionNamed(current[i].functions, previous[prior].functions[p].name) < 0 {
+                    shapeChanged = true;
+                    dirty.set(i, 1);
+                    interfaceDirty.set(i, 1);
+                    reasons.push("removed function " + current[i].unitId + "::" + previous[prior].functions[p].name);
+                }
+                p = p + 1;
+            }
+            var c = 0;
+            while c < current[i].functions.len() {
+                var name = current[i].functions[c].name;
+                var oldIndex = functionNamed(previous[prior].functions, name);
+                if oldIndex < 0 {
+                    shapeChanged = true;
+                    dirty.set(i, 1);
+                    interfaceDirty.set(i, 1);
+                    reasons.push("added function " + current[i].unitId + "::" + name);
+                } else {
+                    var oldFunction = previous[prior].functions[oldIndex];
+                    var newFunction = current[i].functions[c];
+                    if oldFunction.bodyDigest != newFunction.bodyDigest {
+                        bodyChanges = bodyChanges + 1;
+                        changedFunction = name;
+                        dirty.set(i, 1);
+                        reasons.push("function body changed " + current[i].unitId + "::" + name);
+                    }
+                    if summaryChanged(oldFunction, newFunction) {
+                        dirty.set(i, 1);
+                        interfaceDirty.set(i, 1);
+                        reasons.push("effect layout inline or specialization changed " + current[i].unitId + "::" + name);
+                    }
+                }
+                c = c + 1;
+            }
+        }
+        i = i + 1;
+    }
+    i = 0;
+    while i < previous.len() {
+        if unitIndex(current, previous[i].unitId) < 0 {
+            shapeChanged = true;
+            reasons.push("removed unit " + previous[i].unitId);
+        }
+        i = i + 1;
+    }
+    var guard = 0;
+    var spread = true;
+    while spread {
+        guard = guard + 1;
+            if guard > current.len() * current.len() + 1 {
+            var all = 0;
+            while all < dirty.len() {
+                dirty.set(all, 1);
+                interfaceDirty.set(all, 1);
+                all = all + 1;
+            }
+            reasons.push("dependency walk exceeded its bound and invalidated every current unit");
+            break;
+        }
+        spread = false;
+        var unit = 0;
+        while unit < current.len() {
+            if dirty[unit] == 0 {
+                var dep = 0;
+                while dep < current[unit].dependencyUnitIds.len() {
+                    var depIndex = unitIndex(current, current[unit].dependencyUnitIds[dep]);
+                    if depIndex < 0 {
+                        dirty.set(unit, 1);
+                        interfaceDirty.set(unit, 1);
+                        spread = true;
+                        reasons.push("missing dependency " + current[unit].unitId + " -> " + current[unit].dependencyUnitIds[dep]);
+                    } else if interfaceDirty[depIndex] == 1 {
+                        dirty.set(unit, 1);
+                        interfaceDirty.set(unit, 1);
+                        spread = true;
+                        reasons.push("dependency interface changed " + current[unit].unitId + " -> " + current[unit].dependencyUnitIds[dep]);
+                    }
+                    dep = dep + 1;
+                }
+            }
+            unit = unit + 1;
+        }
+    }
+    i = 0;
+    while i < current.len() {
+        if dirty[i] == 1 { rebuild.push(current[i].unitId); }
+        i = i + 1;
+    }
+    if identityChanged || shapeChanged || bodyChanges > 1 {
+        return EditPlan { kind: "full", functionName: "", reasons: reasons, rebuildUnits: rebuild, relink: rebuild.len() > 0 };
+    }
+    if rebuild.len() == 0 {
+        return EditPlan { kind: "noop", functionName: "", reasons: reasons, rebuildUnits: rebuild, relink: false };
+    }
+    if bodyChanges == 1 {
+        return EditPlan { kind: "one-function", functionName: changedFunction, reasons: reasons, rebuildUnits: rebuild, relink: true };
+    }
+    return EditPlan { kind: "dependency", functionName: "", reasons: reasons, rebuildUnits: rebuild, relink: true };
+}
+
+func contractStatus(root: KnownEffect, callees: Vec<KnownEffect>, field: string): ContractResult {
+    var rows: Vec<KnownEffect> = Vec.new();
+    rows.push(root);
+    var i = 0;
+    while i < callees.len() { rows.push(callees[i]); i = i + 1; }
+    i = 0;
+    while i < rows.len() {
+        var row = rows[i];
+        var value = row.allocates;
+        if field == "blocks" { value = row.blocks; }
+        if !row.trusted || value == "unknown" || value == "" {
+            return ContractResult { ok: false, status: "unknown", path: row.path, message: row.functionName + " has no trusted " + field + " summary" };
+        }
+        if value == "yes" {
+            return ContractResult { ok: false, status: "established", path: row.path, message: row.functionName + " violates the contract" };
+        }
+        if value != "no" {
+            return ContractResult { ok: false, status: "unknown", path: row.path, message: row.functionName + " has an unrecognized summary" };
+        }
+        i = i + 1;
+    }
+    return ContractResult { ok: true, status: "established", path: root.path, message: "known callees satisfy the contract" };
+}
+
+pub func checkNoHeap(root: KnownEffect, callees: Vec<KnownEffect>): ContractResult {
+    return contractStatus(root, callees, "allocates");
+}
+
+pub func checkNoBlocking(root: KnownEffect, callees: Vec<KnownEffect>): ContractResult {
+    return contractStatus(root, callees, "blocks");
+}
+
+pub func explanationLine(status: string, text: string): string {
+    if status != "established" && status != "estimate" && status != "observation" && status != "unavailable" {
+        return "unavailable: unrecognized explanation status";
+    }
+    if text == "" { return status + ": unavailable"; }
+    return status + ": " + text;
+}
