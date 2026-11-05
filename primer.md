@@ -2,8 +2,9 @@
 
 ## Current session — 2026-11-05
 
-- User asked to open and merge the current v4 branch PR. The checkout is `codex-v0.4`; origin's default branch is `master` (there is no `main`), and the user authorized using the default. The branch has three commits ahead of origin plus a large uncommitted v0.4 worktree. No PR has been opened or merged yet.
-- Fixed stale region-handle reuse by identifying handles with the owning registry mapping and allocating serials registry-wide, including program regions. Native Linux x64 tests passed for address reuse and stale child/program handles; the cross-registry namespace check has a reviewer-confirmed equal-serial assertion. Full S0→H→S1→S2→S3 verification is running against the corrected source at `/tmp/rey-pr-v04-finalfix-20261105`.
+- User asked to open and merge the current v4 branch PR. The checkout is `codex-v0.4`; origin's default branch is `master` (there is no `main`), and the user authorized using the default. Commit `b164516` records the current 213-file change; the branch is four commits ahead of origin. No PR has been opened or merged yet.
+- Fixed stale region-handle reuse by identifying handles with the owning registry mapping and allocating serials registry-wide, including program regions. Earlier native Linux x64 runs passed address-reuse and stale child/program-handle rejection before the final equal-serial namespace assertion; a reviewer confirmed that assertion isolates the registry namespace, but the exact final fixture rerun did not complete.
+- Full S0→H→S1→S2→S3 verification passed from `/tmp/rey-pr-v04-finalfix-20261105`. S2→S3 took 27:08 at 9,524,552 KiB peak RSS; S2 and S3 were byte-identical. S2's six smoke fixtures passed. Builds used `--selfhost-fast-exit`; a normal-teardown test-driver build and a direct fixture compile were stopped after they remained in cleanup/analysis for over 15 minutes. Treat normal teardown and the final namespace assertion as not yet verified.
 - The release-readiness document still marks v0.4 release gates blocked: native hardware coverage across five platforms, full conformance, clean normal-teardown bootstrap, package evidence, and performance scorecard are not established. Keep any PR description explicit that this is development work, not a release.
 
 ## Current session follow-up — 2026-11-04
