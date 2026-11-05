@@ -1,0 +1,48 @@
+pub struct Span { pub start: int, pub end: int, pub line: int, pub column: int }
+pub enum Expr { Error(ErrorExpr), Literal(LiteralExpr), Identifier(IdentifierExpr), Binary(BinaryExpr), Unary(UnaryExpr), Update(UpdateExpr), Call(CallExpr), EnumVariant(EnumVariantExpr), Index(IndexExpr), FieldAccess(FieldAccessExpr), Lambda(LambdaExpr), Match(MatchExpr), If(IfExpr), Tuple(TupleExpr), Array(ArrayExpr), Dict(DictExpr), StructLiteral(StructLiteralExpr) }
+pub struct ErrorExpr { pub value: int, pub span: Span }
+pub struct LiteralExpr { pub value: int, pub span: Span }
+pub struct IdentifierExpr { pub value: int, pub span: Span }
+pub struct BinaryExpr { pub value: int, pub span: Span }
+pub struct UnaryExpr { pub value: int, pub span: Span }
+pub struct UpdateExpr { pub value: int, pub span: Span }
+pub struct CallExpr { pub callee: Expr, pub args: Vec<Expr>, pub span: Span }
+pub struct EnumVariantExpr { pub value: int, pub span: Span }
+pub struct IndexExpr { pub value: int, pub span: Span }
+pub struct FieldAccessExpr { pub value: int, pub span: Span }
+pub struct LambdaExpr { pub value: int, pub span: Span }
+pub struct MatchExpr { pub value: int, pub span: Span }
+pub struct IfExpr { pub value: int, pub span: Span }
+pub struct TupleExpr { pub value: int, pub span: Span }
+pub struct ArrayExpr { pub value: int, pub span: Span }
+pub struct DictExpr { pub value: int, pub span: Span }
+pub struct StructLiteralExpr { pub value: int, pub span: Span }
+func exprSpan(expr: Expr): Span {
+    match expr {
+        Expr::Error(p) => { return p.span; }, Expr::Literal(p) => { return p.span; }, Expr::Identifier(p) => { return p.span; }, Expr::Binary(p) => { return p.span; }, Expr::Unary(p) => { return p.span; }, Expr::Update(p) => { return p.span; }, Expr::Call(p) => { return p.span; }, Expr::EnumVariant(p) => { return p.span; }, Expr::Index(p) => { return p.span; }, Expr::FieldAccess(p) => { return p.span; }, Expr::Lambda(p) => { return p.span; }, Expr::Match(p) => { return p.span; }, Expr::If(p) => { return p.span; }, Expr::Tuple(p) => { return p.span; }, Expr::Array(p) => { return p.span; }, Expr::Dict(p) => { return p.span; }, Expr::StructLiteral(p) => { return p.span; },
+    }
+    return Span { start: 0, end: 0, line: 1, column: 0 };
+}
+func exprName(expr: Expr): string {
+    match expr {
+        Expr::Error(_) => { return "Error"; }, Expr::Literal(_) => { return "Literal"; }, Expr::Identifier(_) => { return "Identifier"; }, Expr::Binary(_) => { return "Binary"; }, Expr::Unary(_) => { return "Unary"; }, Expr::Update(_) => { return "Update"; }, Expr::Call(_) => { return "Call"; }, Expr::EnumVariant(_) => { return "EnumVariant"; }, Expr::Index(_) => { return "Index"; }, Expr::FieldAccess(_) => { return "FieldAccess"; }, Expr::Lambda(_) => { return "Lambda"; }, Expr::Match(_) => { return "Match"; }, Expr::If(_) => { return "If"; }, Expr::Tuple(_) => { return "Tuple"; }, Expr::Array(_) => { return "Array"; }, Expr::Dict(_) => { return "Dict"; }, Expr::StructLiteral(_) => { return "StructLiteral"; },
+    }
+    return "?";
+}
+func inferCall(tag: string, env: int, expr: CallExpr, original: Expr): string {
+    var inner = inferExpr(tag, env, expr.args[0]);
+    var s = exprSpan(original);
+    return exprName(original) + ":" + s.start.toString() + "/" + inner;
+}
+func inferExpr(tag: string, env: int, expr: Expr): string {
+    match expr {
+        Expr::Error(p) => { return "Error" + p.value.toString(); }, Expr::Literal(p) => { return "Literal" + p.value.toString(); }, Expr::Identifier(p) => { return "Identifier" + p.value.toString(); }, Expr::Binary(p) => { return "Binary" + p.value.toString(); }, Expr::Unary(p) => { return "Unary" + p.value.toString(); }, Expr::Update(p) => { return "Update" + p.value.toString(); }, Expr::Call(call) => { return inferCall(tag, env, call, expr); }, Expr::EnumVariant(p) => { return "EnumVariant" + p.value.toString(); }, Expr::Index(p) => { return "Index" + p.value.toString(); }, Expr::FieldAccess(p) => { return "FieldAccess" + p.value.toString(); }, Expr::Lambda(p) => { return "Lambda" + p.value.toString(); }, Expr::Match(p) => { return "Match" + p.value.toString(); }, Expr::If(p) => { return "If" + p.value.toString(); }, Expr::Tuple(p) => { return "Tuple" + p.value.toString(); }, Expr::Array(p) => { return "Array" + p.value.toString(); }, Expr::Dict(p) => { return "Dict" + p.value.toString(); }, Expr::StructLiteral(p) => { return "StructLiteral" + p.value.toString(); },
+    }
+    return "?";
+}
+func main(): void {
+    var lit = Expr::Literal(LiteralExpr { value: 7, span: Span { start: 32, end: 39, line: 2, column: 13 } });
+    var callee = Expr::Identifier(IdentifierExpr { value: 1, span: Span { start: 24, end: 31, line: 2, column: 5 } });
+    var call = Expr::Call(CallExpr { callee: callee, args: [lit], span: Span { start: 24, end: 40, line: 2, column: 5 } });
+    if inferExpr("t", 0, call) != "Call:24/Literal7" { exit(1); }
+}

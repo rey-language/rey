@@ -13,17 +13,7 @@ func validateBytes(bytes: Vec<int>): bool {
     return true;
 }
 
-pub func byteString(bytes: Vec<int>): Result<string, string> {
-    if !validateBytes(bytes) { return Result.Err(byteError()); }
-    var pieces: Vec<string> = Vec.new();
-    var i = 0;
-    loop {
-        if i >= bytes.len() { break; }
-        pieces.push(char(bytes[i]).toString());
-        i = i + 1;
-    }
-    // The bootstrap runtime's join repeatedly copies the entire prefix.
-    // Pairwise concatenation bounds retained intermediate bytes to O(n log n).
+func joinPieces(pieces: Vec<string>): string {
     while pieces.len() > 1 {
         var next: Vec<string> = [];
         var index = 0;
@@ -34,8 +24,46 @@ pub func byteString(bytes: Vec<int>): Result<string, string> {
         }
         pieces = next;
     }
-    if pieces.len() == 0 { return Result.Ok(""); }
-    return Result.Ok(pieces[0]);
+    if pieces.len() == 0 { return ""; }
+    return pieces[0];
+}
+
+func chunkString(bytes: Vec<int>, characters: Vec<string>, start: int, count: int): string {
+    var pieces: Vec<string> = [];
+    var n = 0;
+    loop {
+        if n >= count { break; }
+        var group: Vec<string> = [];
+        var groupCount = 0;
+        while groupCount < 64 && n < count {
+            group.push(characters[bytes[start + n]]);
+            groupCount = groupCount + 1;
+            n = n + 1;
+        }
+        pieces.push(group.join(""));
+    }
+    return joinPieces(pieces);
+}
+
+pub func byteString(bytes: Vec<int>): Result<string, string> {
+    if !validateBytes(bytes) { return Result.Err(byteError()); }
+    if bytes.len() == 0 { return Result.Ok(""); }
+    var characters: Vec<string> = [];
+    var character = 0;
+    while character < 256 {
+        characters.push(string(char(character)));
+        character = character + 1;
+    }
+    var pieces: Vec<string> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= bytes.len() { break; }
+        var count = 256;
+        if i + count > bytes.len() { count = bytes.len() - i; }
+        pieces.push(chunkString(bytes, characters, i, count));
+        i = i + count;
+    }
+    return Result.Ok(joinPieces(pieces));
 }
 
 pub func appendU32Le(bytes: Vec<int>, value: int): Result<bool, string> {

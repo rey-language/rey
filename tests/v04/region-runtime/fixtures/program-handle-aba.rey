@@ -1,0 +1,16 @@
+import host::{hostExit};
+import layout::{layoutRegistryCreate, layoutRegistryRelease};
+import regions::{regionContextCreate, regionContextDestroy, regionHandleProgram, regionHandleIsActive};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var first = regionContextCreate(registry);
+    var stale = regionHandleProgram(first);
+    regionContextDestroy(first);
+    var second = regionContextCreate(registry);
+    if !__reyRawEqual(first, second) { hostExit(77); }
+    if !regionHandleIsActive(second, stale) { hostExit(1); }
+    hostExit(0);
+    regionContextDestroy(second);
+    layoutRegistryRelease(registry);
+}

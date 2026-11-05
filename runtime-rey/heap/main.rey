@@ -56,7 +56,7 @@ func heapContextValidate(heap: __rey_raw_address): void {
     if __reyRawLoadI64(heapAddressAt(heap, 0)) != 1380272200 { heapFail(2002); return; }
     if __reyRawLoadI64(heapAddressAt(heap, 16)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 24)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 32)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 48)) < 0 || __reyRawLoadI64(heapAddressAt(heap, 56)) < 0 { heapFail(2002); return; }
     var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
-    layout.layoutCount(registry);
+    layout.layoutCountFast(registry);
     __reyRawLoadAddress(heapAddressAt(heap, 40));
     var index = 0;
     while index < 11 {
@@ -144,7 +144,7 @@ func heapObjectId(heap: __rey_raw_address, object: __rey_raw_address): int {
     if mark < 0 || mark > 1 { heapFail(2002); return 0; }
     var id = header - mark * 4294967296;
     var registry = __reyRawLoadAddress(heapAddressAt(heap, 8));
-    var count = layout.layoutCount(registry);
+    var count = layout.layoutCountFast(registry);
     if id < 1 || id > count { heapFail(2002); return 0; }
     return id;
 }
@@ -298,7 +298,7 @@ func heapAllocateLarge(heap: __rey_raw_address, id: int, payloadBytes: int, slot
 }
 
 pub func heapCreate(registry: __rey_raw_address): __rey_raw_address {
-    layout.layoutCount(registry);
+    layout.layoutCountFast(registry);
     var heap = __reyRawMap(256);
     __reyRawStoreI64(heapAddressAt(heap, 0), 1380272200);
     __reyRawStoreAddress(heapAddressAt(heap, 8), registry);

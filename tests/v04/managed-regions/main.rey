@@ -2,6 +2,7 @@ import ir;
 import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef, TerminatorKind};
 import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram};
 import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
+import ir::managed::completion::{completeManagedMemory};
 import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegions, lowerManagedRegionsWithPromotionStress};
 import ir::managed::lifetime::{verifyManagedRegionPlan};
 import ir::managed::link::{LinkedRegionProgram, buildManagedProgram, linkRegionRuntime, regionRuntimeUnits};
@@ -464,9 +465,9 @@ func linkUser(): ManagedProgram {
 func assertLink(): void {
     var root = "/synthetic-region-runtime";
     var units = regionRuntimeUnits(root);
-    require(units.len() == 6, "region runtime lists six units");
-    require(units[0] == root + "/main.rey" && units[1] == root + "/regions/main.rey" && units[2] == root + "/managed/main.rey" && units[3] == root + "/layout/main.rey" && units[4] == root + "/containers/main.rey" && units[5] == root + "/task/main.rey", "region runtime units are main, regions, managed, layout, containers, and task");
-    var joined = units[0] + units[1] + units[2] + units[3] + units[4] + units[5];
+    require(units.len() == 7, "region runtime lists seven units");
+    require(units[0] == root + "/main.rey" && units[1] == root + "/regions/main.rey" && units[2] == root + "/managed/main.rey" && units[3] == root + "/layout/main.rey" && units[4] == root + "/containers/main.rey" && units[5] == root + "/task/main.rey" && units[6] == root + "/host/main.rey", "region runtime units are main, regions, managed, layout, containers, task, and host");
+    var joined = units[0] + units[1] + units[2] + units[3] + units[4] + units[5] + units[6];
     require(!joined.contains("/gc/") && !joined.contains("/heap/"), "region runtime unit list does not load gc or heap");
     var input = linkUser();
     var linkedResult = linkRegionRuntime(input, regionRuntime(root, "valid"), root);
@@ -512,9 +513,59 @@ func assertLink(): void {
     requireFailure(legacyText != "", legacyText, "buildRegionProgram", "legacy builder asked to lower regions");
 }
 
+func callerRetainModule(): ManagedProgram {
+    var makeInstructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 23, [], source())];
+    var makeFn = straight(11, "makeValues", [], ir.irRawAddress(), [], makeInstructions, 1);
+    var keepInstructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 11, [], source()), ir.rawEqual(2, 1, 1, source())];
+    var keepFn = straight(10, "retain", [], ir.irVoid(), [], keepInstructions, -1);
+    var managed: Vec<ManagedFunction> = [userMeta(10, [1], [], 0), userMeta(11, [1], [], 1)];
+    return managedModule(10, [keepFn, makeFn], managed, [], [], true);
+}
+
+func unknownRetainModule(): ManagedProgram {
+    var makeInstructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 23, [], source())];
+    var makeFn = straight(11, "makeValues", [], ir.irRawAddress(), [], makeInstructions, 1);
+    var keepInstructions: Vec<Instruction> = [ir.call(1, ir.irRawAddress(), 11, [], source()), ir.call(-1, ir.irVoid(), 40, [1], source())];
+    var keepFn = straight(10, "publish", [], ir.irVoid(), [], keepInstructions, -1);
+    var managed: Vec<ManagedFunction> = [userMeta(10, [1], [], 0), userMeta(11, [1], [], 1)];
+    var module = managedModule(10, [keepFn, makeFn], managed, [], [], true);
+    var functions = module.program.functions;
+    functions.push(straight(40, "unknownCallee", [ir.irRawAddress()], ir.irVoid(), [ir.irValue(0, ir.irRawAddress())], [], -1));
+    module.program.functions = functions;
+    return module;
+}
+
+func scalarLayout(): ManagedLayout {
+    var fields: Vec<ManagedField> = [ManagedField { name: "value", offset: 0, kind: IRTypeKind::I64, layoutId: 0 }];
+    return ManagedLayout { id: 1, key: "fixture::Temp", payloadBytes: 8, fields: fields };
+}
+
+func stackLocalModule(): ManagedProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.constI64(2, 0, source()), ir.rawOffset(3, 1, 2, source()), ir.rawLoadI64(4, 3, source())];
+    var body = straight(10, "localTemp", [], ir.irVoid(), [], instructions, -1);
+    var hooks: Vec<ManagedHook> = [];
+    return ManagedProgram { program: ir.irProgram(10, pushRuntime([body], false)), layouts: [scalarLayout()], functions: [userMeta(10, [1], [], 0)], allocations: [allocAnn(10, 0, 1)], derived: [], allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: hooks };
+}
+
+func assertCallerAndStack(): void {
+    var retained = planManagedPlacement(callerRetainModule());
+    if retained.isErr() { require(false, "caller retain planner: " + retained.unwrapErr()); }
+    var retainedPlan = retained.unwrap();
+    require(retainedPlan.calls.len() == 1 && retainedPlan.calls[0].storage == ManagedStorage::Region && retainedPlan.regionFunctions.len() == 1 && retainedPlan.regionFunctions[0] == 10, "container returned to a local caller stays in the caller region");
+    var published = planManagedPlacement(unknownRetainModule());
+    if published.isErr() { require(false, "unknown callee planner: " + published.unwrapErr()); }
+    var publishedPlan = published.unwrap();
+    require(publishedPlan.calls.len() == 1 && publishedPlan.calls[0].storage == ManagedStorage::Heap && publishedPlan.regionFunctions.len() == 0, "unknown callee still places the returned container in the program region");
+    var stacked = completeManagedMemory(stackLocalModule());
+    if stacked.isErr() { require(false, "stack planner: " + stacked.unwrapErr()); }
+    var stackPlan = stacked.unwrap();
+    require(stackPlan.placement.allocations.len() == 1 && stackPlan.placement.allocations[0].storage == ManagedStorage::Stack && stackPlan.stack.len() == 1 && stackPlan.stack[0].accepted, "scalar local with a stable address uses stack placement");
+}
+
 func main(): void {
     assertSuccess();
     assertRejections();
     assertLink();
+    assertCallerAndStack();
     println("managed-regions: static assertions passed");
 }

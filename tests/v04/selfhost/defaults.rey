@@ -1,0 +1,12 @@
+func add(left: int, right: int = 5): int {
+    return left + right;
+}
+
+func main(): void {
+    if add(2) != 7 {
+        var failure = 9223372036854775807 + 1;
+    }
+    if add(2, 3) != 5 {
+        var failure = 9223372036854775807 + 1;
+    }
+}

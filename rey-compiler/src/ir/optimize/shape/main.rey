@@ -1,0 +1,371 @@
+import ir::{BasicBlock, EffectSummary, Escape, FunctionKey, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, SourceRef, Terminator, TerminatorKind, constBool, constI64};
+import ir::verify::{verifyProgram};
+
+pub struct IdPair {
+    pub fromId: int,
+    pub toId: int,
+}
+
+pub struct FoldedNumber {
+    pub folded: bool,
+    pub traps: bool,
+    pub value: int,
+}
+
+pub func i64Minimum(): int { return -9223372036854775807 - 1; }
+pub func i64Maximum(): int { return 9223372036854775807; }
+
+pub func copyType(ty: IRType): IRType { return IRType { kind: ty.kind }; }
+pub func copySource(source: SourceRef): SourceRef { return SourceRef { unitId: source.unitId, start: source.start, end: source.end }; }
+pub func copyKey(key: FunctionKey): FunctionKey { return FunctionKey { module: key.module, owner: key.owner, name: key.name }; }
+
+pub func copyIds(source: Vec<int>): Vec<int> {
+    var output: Vec<int> = [];
+    var index = 0;
+    loop { if index >= source.len() { break; } output.push(source[index]); index = index + 1; }
+    return output;
+}
+
+pub func copyTypes(source: Vec<IRType>): Vec<IRType> {
+    var output: Vec<IRType> = [];
+    var index = 0;
+    loop { if index >= source.len() { break; } output.push(copyType(source[index])); index = index + 1; }
+    return output;
+}
+
+pub func copyEscapes(source: Vec<Escape>): Vec<Escape> {
+    var output: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= source.len() { break; } output.push(source[index]); index = index + 1; }
+    return output;
+}
+
+pub func copyValues(source: Vec<IRValue>): Vec<IRValue> {
+    var output: Vec<IRValue> = [];
+    var index = 0;
+    loop { if index >= source.len() { break; } output.push(IRValue { id: source[index].id, ty: copyType(source[index].ty) }); index = index + 1; }
+    return output;
+}
+
+pub func copyEffects(effects: EffectSummary): EffectSummary {
+    return EffectSummary { readsMemory: effects.readsMemory, writesMemory: effects.writesMemory, allocates: effects.allocates, mayBlock: effects.mayBlock, synchronizes: effects.synchronizes, unresolvedCallees: effects.unresolvedCallees, argumentEscapes: copyEscapes(effects.argumentEscapes), resultEscape: effects.resultEscape };
+}
+
+pub func copyInstruction(instructionValue: Instruction): Instruction {
+    return Instruction { kind: instructionValue.kind, resultId: instructionValue.resultId, ty: copyType(instructionValue.ty), operands: copyIds(instructionValue.operands), immediate: instructionValue.immediate, comparison: instructionValue.comparison, functionId: instructionValue.functionId, source: copySource(instructionValue.source) };
+}
+
+pub func copyTerminator(term: Terminator): Terminator {
+    return Terminator { kind: term.kind, targetBlockId: term.targetBlockId, targetArgs: copyIds(term.targetArgs), conditionValueId: term.conditionValueId, trueTargetBlockId: term.trueTargetBlockId, trueArgs: copyIds(term.trueArgs), falseTargetBlockId: term.falseTargetBlockId, falseArgs: copyIds(term.falseArgs), valueId: term.valueId, source: copySource(term.source) };
+}
+
+pub func copyBlock(block: BasicBlock): BasicBlock {
+    var instructions: Vec<Instruction> = [];
+    var index = 0;
+    loop { if index >= block.instructions.len() { break; } instructions.push(copyInstruction(block.instructions[index])); index = index + 1; }
+    return BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) };
+}
+
+pub func copyFunction(function: IRFunction): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } blocks.push(copyBlock(function.blocks[index])); index = index + 1; }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: copyType(function.signature.returnType) }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+pub func copyProgram(program: IRProgram): IRProgram {
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(copyFunction(program.functions[index])); index = index + 1; }
+    return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+}
+
+pub func verifyCopy(program: IRProgram, label: string): Result<IRProgram, string> {
+    var verified = verifyProgram(program);
+    if !verified.ok { return Result.Err(label + ": " + verified.errors.join("\n")); }
+    return Result.Ok(program);
+}
+
+pub func functionIndex(program: IRProgram, functionId: int): int {
+    var index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        if program.functions[index].id == functionId { return index; }
+        index = index + 1;
+    }
+    return -1;
+}
+
+pub func findFunctionNamed(program: IRProgram, name: string): int {
+    var index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        if program.functions[index].key.name == name { return index; }
+        index = index + 1;
+    }
+    return -1;
+}
+
+pub func blockIndex(function: IRFunction, blockId: int): int {
+    var index = 0;
+    loop {
+        if index >= function.blocks.len() { break; }
+        if function.blocks[index].id == blockId { return index; }
+        index = index + 1;
+    }
+    return -1;
+}
+
+pub func instructionCount(function: IRFunction): int {
+    var total = 0;
+    var index = 0;
+    loop {
+        if index >= function.blocks.len() { break; }
+        total = total + function.blocks[index].instructions.len();
+        index = index + 1;
+    }
+    return total;
+}
+
+pub func maxValueId(function: IRFunction): int {
+    var maxId = -1;
+    var index = 0;
+    loop {
+        if index >= function.parameters.len() { break; }
+        if function.parameters[index].id > maxId { maxId = function.parameters[index].id; }
+        index = index + 1;
+    }
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var paramIndex = 0;
+        loop {
+            if paramIndex >= block.params.len() { break; }
+            if block.params[paramIndex].id > maxId { maxId = block.params[paramIndex].id; }
+            paramIndex = paramIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            if block.instructions[instructionIndex].resultId > maxId { maxId = block.instructions[instructionIndex].resultId; }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return maxId;
+}
+
+pub func maxBlockId(function: IRFunction): int {
+    var maxId = -1;
+    var index = 0;
+    loop {
+        if index >= function.blocks.len() { break; }
+        if function.blocks[index].id > maxId { maxId = function.blocks[index].id; }
+        index = index + 1;
+    }
+    return maxId;
+}
+
+pub func mapId(pairs: Vec<IdPair>, id: int): int {
+    var index = 0;
+    loop {
+        if index >= pairs.len() { break; }
+        if pairs[index].fromId == id { return pairs[index].toId; }
+        index = index + 1;
+    }
+    return id;
+}
+
+pub func mapIds(pairs: Vec<IdPair>, ids: Vec<int>): Vec<int> {
+    var output: Vec<int> = [];
+    var index = 0;
+    loop { if index >= ids.len() { break; } output.push(mapId(pairs, ids[index])); index = index + 1; }
+    return output;
+}
+
+func rewriteInstructionIds(instructionValue: Instruction, pairs: Vec<IdPair>, replaceResult: bool): Instruction {
+    var resultId = instructionValue.resultId;
+    if replaceResult && resultId >= 0 { resultId = mapId(pairs, resultId); }
+    return Instruction { kind: instructionValue.kind, resultId: resultId, ty: copyType(instructionValue.ty), operands: mapIds(pairs, instructionValue.operands), immediate: instructionValue.immediate, comparison: instructionValue.comparison, functionId: instructionValue.functionId, source: copySource(instructionValue.source) };
+}
+
+func rewriteTerminatorIds(term: Terminator, pairs: Vec<IdPair>): Terminator {
+    var valueId = term.valueId;
+    if valueId >= 0 { valueId = mapId(pairs, valueId); }
+    var condition = term.conditionValueId;
+    if condition >= 0 { condition = mapId(pairs, condition); }
+    return Terminator { kind: term.kind, targetBlockId: term.targetBlockId, targetArgs: mapIds(pairs, term.targetArgs), conditionValueId: condition, trueTargetBlockId: term.trueTargetBlockId, trueArgs: mapIds(pairs, term.trueArgs), falseTargetBlockId: term.falseTargetBlockId, falseArgs: mapIds(pairs, term.falseArgs), valueId: valueId, source: copySource(term.source) };
+}
+
+pub func replaceValueUses(function: IRFunction, fromId: int, toId: int): IRFunction {
+    if fromId == toId { return function; }
+    var pairs: Vec<IdPair> = [IdPair { fromId: fromId, toId: toId }];
+    var blocks: Vec<BasicBlock> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            instructions.push(rewriteInstructionIds(block.instructions[instructionIndex], pairs, false));
+            instructionIndex = instructionIndex + 1;
+        }
+        blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: rewriteTerminatorIds(block.terminator, pairs) });
+        blockCursor = blockCursor + 1;
+    }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: copyType(function.signature.returnType) }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+pub func findInstruction(function: IRFunction, resultId: int): Instruction {
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = block.instructions[instructionIndex];
+            if instructionValue.resultId == resultId { return copyInstruction(instructionValue); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return constI64(-1, 0, SourceRef { unitId: "", start: 0, end: 0 });
+}
+
+pub func constantI64(function: IRFunction, valueId: int): FoldedNumber {
+    var instructionValue = findInstruction(function, valueId);
+    if instructionValue.resultId == valueId && instructionValue.kind == InstructionKind::ConstI64 {
+        return FoldedNumber { folded: true, traps: false, value: instructionValue.immediate };
+    }
+    return FoldedNumber { folded: false, traps: false, value: 0 };
+}
+
+pub func constantBool(function: IRFunction, valueId: int): FoldedNumber {
+    var instructionValue = findInstruction(function, valueId);
+    if instructionValue.resultId == valueId && instructionValue.kind == InstructionKind::ConstBool {
+        return FoldedNumber { folded: true, traps: false, value: instructionValue.immediate };
+    }
+    return FoldedNumber { folded: false, traps: false, value: 0 };
+}
+
+pub func foldChecked(kind: InstructionKind, left: int, right: int): FoldedNumber {
+    var minimum = i64Minimum();
+    var maximum = i64Maximum();
+    if kind == InstructionKind::AddCheckedI64 {
+        if right > 0 && left > maximum - right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        if right < 0 && left < minimum - right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        return FoldedNumber { folded: true, traps: false, value: left + right };
+    }
+    if kind == InstructionKind::SubCheckedI64 {
+        if right < 0 && left > maximum + right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        if right > 0 && left < minimum + right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        return FoldedNumber { folded: true, traps: false, value: left - right };
+    }
+    if kind == InstructionKind::MulCheckedI64 {
+        if left == 0 || right == 0 { return FoldedNumber { folded: true, traps: false, value: 0 }; }
+        if left > 0 {
+            if right > 0 && left > maximum / right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+            if right < 0 && right < minimum / left { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        } else {
+            if right > 0 && left < minimum / right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+            if right < 0 && left < maximum / right { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        }
+        return FoldedNumber { folded: true, traps: false, value: left * right };
+    }
+    if kind == InstructionKind::DivCheckedI64 || kind == InstructionKind::RemCheckedI64 {
+        if right == 0 || (left == minimum && right == -1) { return FoldedNumber { folded: false, traps: true, value: 0 }; }
+        if kind == InstructionKind::DivCheckedI64 { return FoldedNumber { folded: true, traps: false, value: left / right }; }
+        return FoldedNumber { folded: true, traps: false, value: left % right };
+    }
+    return FoldedNumber { folded: false, traps: false, value: 0 };
+}
+
+pub func checkedCanTrap(kind: InstructionKind, leftKnown: bool, left: int, rightKnown: bool, right: int): bool {
+    if !leftKnown || !rightKnown { return true; }
+    var folded = foldChecked(kind, left, right);
+    return folded.traps || !folded.folded;
+}
+
+pub func isCheckedArithmetic(kind: InstructionKind): bool {
+    return kind == InstructionKind::AddCheckedI64 || kind == InstructionKind::SubCheckedI64 || kind == InstructionKind::MulCheckedI64 || kind == InstructionKind::DivCheckedI64 || kind == InstructionKind::RemCheckedI64;
+}
+
+pub func isPureScalar(kind: InstructionKind): bool {
+    return kind == InstructionKind::ConstI64 || kind == InstructionKind::ConstBool || kind == InstructionKind::CompareI64 || kind == InstructionKind::CompareBool || isCheckedArithmetic(kind);
+}
+
+pub func identityOperand(function: IRFunction, instructionValue: Instruction): int {
+    if instructionValue.operands.len() != 2 { return -1; }
+    var left = instructionValue.operands[0];
+    var right = instructionValue.operands[1];
+    var rightConst = constantI64(function, right);
+    var leftConst = constantI64(function, left);
+    if instructionValue.kind == InstructionKind::AddCheckedI64 {
+        if rightConst.folded && rightConst.value == 0 { return left; }
+        if leftConst.folded && leftConst.value == 0 { return right; }
+    }
+    if instructionValue.kind == InstructionKind::SubCheckedI64 && rightConst.folded && rightConst.value == 0 { return left; }
+    if instructionValue.kind == InstructionKind::MulCheckedI64 {
+        if rightConst.folded && rightConst.value == 1 { return left; }
+        if leftConst.folded && leftConst.value == 1 { return right; }
+    }
+    if instructionValue.kind == InstructionKind::DivCheckedI64 && rightConst.folded && rightConst.value == 1 { return left; }
+    return -1;
+}
+
+pub func containsId(ids: Vec<int>, id: int): bool {
+    var index = 0;
+    loop { if index >= ids.len() { break; } if ids[index] == id { return true; } index = index + 1; }
+    return false;
+}
+
+pub func pushUnique(ids: Vec<int>, id: int) {
+    if id < 0 || containsId(ids, id) { return; }
+    ids.push(id);
+}
+
+pub func collectUses(function: IRFunction): Vec<int> {
+    var uses: Vec<int> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var operands = block.instructions[instructionIndex].operands;
+            var operandIndex = 0;
+            loop { if operandIndex >= operands.len() { break; } pushUnique(uses, operands[operandIndex]); operandIndex = operandIndex + 1; }
+            instructionIndex = instructionIndex + 1;
+        }
+        var term = block.terminator;
+        pushUnique(uses, term.conditionValueId);
+        pushUnique(uses, term.valueId);
+        var argIndex = 0;
+        loop { if argIndex >= term.targetArgs.len() { break; } pushUnique(uses, term.targetArgs[argIndex]); argIndex = argIndex + 1; }
+        argIndex = 0;
+        loop { if argIndex >= term.trueArgs.len() { break; } pushUnique(uses, term.trueArgs[argIndex]); argIndex = argIndex + 1; }
+        argIndex = 0;
+        loop { if argIndex >= term.falseArgs.len() { break; } pushUnique(uses, term.falseArgs[argIndex]); argIndex = argIndex + 1; }
+        blockCursor = blockCursor + 1;
+    }
+    return uses;
+}
+
+pub func successorIds(term: Terminator): Vec<int> {
+    var ids: Vec<int> = [];
+    if term.kind == TerminatorKind::Jump { ids.push(term.targetBlockId); }
+    if term.kind == TerminatorKind::Branch {
+        ids.push(term.trueTargetBlockId);
+        if term.falseTargetBlockId != term.trueTargetBlockId { ids.push(term.falseTargetBlockId); }
+    }
+    return ids;
+}
+
+pub func boolConst(resultId: int, value: bool, source: SourceRef): Instruction {
+    return constBool(resultId, value, source);
+}

@@ -1,0 +1,354 @@
+import ir::{IRProgram, IRFunction, BasicBlock, InstructionKind, TerminatorKind};
+import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
+
+pub enum RegisterLocationKind {
+    Register,
+    Spill,
+}
+
+pub struct RegisterLocation {
+    pub kind: RegisterLocationKind,
+    // Physical x64 register ID or zero-based spill slot, according to kind.
+    pub index: int,
+}
+
+pub struct ValueRegister {
+    pub valueId: int,
+    pub location: RegisterLocation,
+}
+
+pub struct RegisterCopy {
+    pub source: RegisterLocation,
+    pub destination: RegisterLocation,
+}
+
+pub struct EdgeRegisterCopies {
+    pub sourceBlockId: int,
+    pub targetBlockId: int,
+    // 0 is a jump, 1 is a branch's true edge, and 2 is its false edge.
+    pub arm: int,
+    // Moves are ordered and safe to execute one at a time. Cycles use R10.
+    pub copies: Vec<RegisterCopy>,
+}
+
+pub struct FunctionRegisterPlan {
+    pub functionId: int,
+    pub locations: Vec<ValueRegister>,
+    // These are callee-saved registers the emitter must preserve in its frame.
+    pub savedRegisters: Vec<int>,
+    pub spillCount: int,
+    pub rawArgumentsReserved: bool,
+    pub edges: Vec<EdgeRegisterCopies>,
+}
+
+pub struct ProgramRegisterPlan {
+    pub functions: Vec<FunctionRegisterPlan>,
+}
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 {
+        budget.set(0, -1);
+        return false;
+    }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func registerLocation(registerId: int): RegisterLocation {
+    return RegisterLocation { kind: RegisterLocationKind::Register, index: registerId };
+}
+
+func spillLocation(spillIndex: int): RegisterLocation {
+    return RegisterLocation { kind: RegisterLocationKind::Spill, index: spillIndex };
+}
+
+func sameLocation(left: RegisterLocation, right: RegisterLocation): bool {
+    return left.kind == right.kind && left.index == right.index;
+}
+
+func replaceCopySource(copies: Vec<RegisterCopy>, source: RegisterLocation, replacement: RegisterLocation, budget: Vec<int>): bool {
+    var i = 0;
+    loop {
+        if i >= copies.len() { break; }
+        if !charge(budget) { return false; }
+        var copy = copies[i];
+        if sameLocation(copy.source, source) {
+            copy.source = replacement;
+            copies.set(i, copy);
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+func scheduleCopies(input: Vec<RegisterCopy>, budget: Vec<int>): Result<Vec<RegisterCopy>, string> {
+    var pending: Vec<RegisterCopy> = [];
+    var inputIndex = 0;
+    loop {
+        if inputIndex >= input.len() { break; }
+        if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+        var copy = input[inputIndex];
+        if !sameLocation(copy.source, copy.destination) { pending.push(copy); }
+        inputIndex = inputIndex + 1;
+    }
+
+    var ordered: Vec<RegisterCopy> = [];
+    var cycleScratch = registerLocation(10);
+    while pending.len() > 0 {
+        var safeIndex = -1;
+        var candidateIndex = 0;
+        loop {
+            if candidateIndex >= pending.len() { break; }
+            if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+            var destination = pending[candidateIndex].destination;
+            var isSource = false;
+            var sourceIndex = 0;
+            loop {
+                if sourceIndex >= pending.len() { break; }
+                if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+                if sameLocation(destination, pending[sourceIndex].source) {
+                    isSource = true;
+                    break;
+                }
+                sourceIndex = sourceIndex + 1;
+            }
+            if !isSource {
+                safeIndex = candidateIndex;
+                break;
+            }
+            candidateIndex = candidateIndex + 1;
+        }
+
+        if safeIndex >= 0 {
+            ordered.push(pending[safeIndex]);
+            var rest: Vec<RegisterCopy> = [];
+            var pendingIndex = 0;
+            loop {
+                if pendingIndex >= pending.len() { break; }
+                if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+                if pendingIndex != safeIndex { rest.push(pending[pendingIndex]); }
+                pendingIndex = pendingIndex + 1;
+            }
+            pending = rest;
+        } else {
+            // Saving one source breaks the cycle without changing any source's
+            // value. The allocator never assigns volatile R10 to an SSA value.
+            var savedSource = pending[0].source;
+            if sameLocation(savedSource, cycleScratch) {
+                return Result.Err("registers: parallel-copy scratch is already live");
+            }
+            ordered.push(RegisterCopy { source: savedSource, destination: cycleScratch });
+            if !replaceCopySource(pending, savedSource, cycleScratch, budget) {
+                return Result.Err("registers: planning work budget exhausted");
+            }
+        }
+    }
+    return Result.Ok(ordered);
+}
+
+func findLocationIndex(indexById: HashMap<string, int>, valueId: int, budget: Vec<int>): int {
+    if !charge(budget) { return -1; }
+    var key = valueId.toString();
+    if !indexById.has(key) { return -1; }
+    return indexById.get(key);
+}
+
+func valueLocation(locations: Vec<ValueRegister>, indexById: HashMap<string, int>, valueId: int, budget: Vec<int>): RegisterLocation {
+    var index = findLocationIndex(indexById, valueId, budget);
+    if index < 0 || index >= locations.len() { return spillLocation(-1); }
+    return locations[index].location;
+}
+
+func findBlockIndex(blockIndexes: HashMap<string, int>, blockId: int, budget: Vec<int>): int {
+    if !charge(budget) { return -1; }
+    var key = blockId.toString();
+    if !blockIndexes.has(key) { return -1; }
+    return blockIndexes.get(key);
+}
+
+func appendEdgeCopies(edges: Vec<EdgeRegisterCopies>, function: IRFunction, blockIndexes: HashMap<string, int>, indexById: HashMap<string, int>, locations: Vec<ValueRegister>, sourceBlockId: int, targetBlockId: int, arm: int, arguments: Vec<int>, budget: Vec<int>): string {
+    var targetIndex = findBlockIndex(blockIndexes, targetBlockId, budget);
+    if budget[0] < 0 { return "registers: planning work budget exhausted"; }
+    if targetIndex < 0 || targetIndex >= function.blocks.len() {
+        return "registers: verified edge target is missing";
+    }
+    var target = function.blocks[targetIndex];
+    if target.params.len() != arguments.len() {
+        return "registers: verified edge parameter count does not match arguments";
+    }
+
+    var parallel: Vec<RegisterCopy> = [];
+    var argumentIndex = 0;
+    loop {
+        if argumentIndex >= arguments.len() { break; }
+        if !charge(budget) { return "registers: planning work budget exhausted"; }
+        var source = valueLocation(locations, indexById, arguments[argumentIndex], budget);
+        if budget[0] < 0 { return "registers: planning work budget exhausted"; }
+        if source.index < 0 { return "registers: edge argument has no allocated location"; }
+        var destination = valueLocation(locations, indexById, target.params[argumentIndex].id, budget);
+        if budget[0] < 0 { return "registers: planning work budget exhausted"; }
+        if destination.index < 0 { return "registers: block parameter has no allocated location"; }
+        if !sameLocation(source, destination) {
+            parallel.push(RegisterCopy { source: source, destination: destination });
+        }
+        argumentIndex = argumentIndex + 1;
+    }
+
+    var scheduled = scheduleCopies(parallel, budget);
+    if scheduled.isErr() { return scheduled.unwrapErr(); }
+    edges.push(EdgeRegisterCopies {
+        sourceBlockId: sourceBlockId,
+        targetBlockId: targetBlockId,
+        arm: arm,
+        copies: scheduled.unwrap(),
+    });
+    return "";
+}
+
+func usesRawArguments(program: IRProgram): bool {
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var blockIndex = 0;
+        loop {
+            if blockIndex >= program.functions[functionIndex].blocks.len() { break; }
+            var instructions = program.functions[functionIndex].blocks[blockIndex].instructions;
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= instructions.len() { break; }
+                var kind = instructions[instructionIndex].kind;
+                if kind == InstructionKind::RawArg || kind == InstructionKind::RawArgCount { return true; }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockIndex = blockIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+    return false;
+}
+
+func availableRegisters(rawArgumentsReserved: bool): Vec<int> {
+    var registers: Vec<int> = [3, 12, 13, 14, 15];
+    if rawArgumentsReserved { registers = [3, 14, 15]; }
+    return registers;
+}
+
+func buildFunctionPlan(function: IRFunction, layout: FunctionSlots, reuseSpills: bool, rawArgumentsReserved: bool, budget: Vec<int>): Result<FunctionRegisterPlan, string> {
+    if layout.functionId != function.id {
+        return Result.Err("registers: storage function order does not match the IR function");
+    }
+    var registers = availableRegisters(rawArgumentsReserved);
+    var locations: Vec<ValueRegister> = [];
+    var indexById: HashMap<string, int> = HashMap.new();
+    var savedRegisters: Vec<int> = [];
+    var spillCount = 0;
+    if reuseSpills && layout.slotCount > registers.len() {
+        spillCount = layout.slotCount - registers.len();
+    }
+
+    var valueIndex = 0;
+    loop {
+        if valueIndex >= layout.values.len() { break; }
+        if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+        var value = layout.values[valueIndex];
+        if value.index < 0 || value.index >= layout.slotCount {
+            return Result.Err("registers: storage plan contains an invalid slot");
+        }
+        var location = spillLocation(-1);
+        if value.index < registers.len() {
+            var registerId = registers[value.index];
+            location = registerLocation(registerId);
+            var alreadySaved = false;
+            var savedIndex = 0;
+            loop {
+                if savedIndex >= savedRegisters.len() { break; }
+                if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+                if savedRegisters[savedIndex] == registerId { alreadySaved = true; break; }
+                savedIndex = savedIndex + 1;
+            }
+            if !alreadySaved { savedRegisters.push(registerId); }
+        } else if reuseSpills {
+            location = spillLocation(value.index - registers.len());
+        } else {
+            location = spillLocation(spillCount);
+            spillCount = spillCount + 1;
+        }
+        if value.valueId < 0 || indexById.has(value.valueId.toString()) {
+            return Result.Err("registers: storage plan contains an invalid or duplicate SSA value ID");
+        }
+        indexById.set(value.valueId.toString(), locations.len());
+        locations.push(ValueRegister { valueId: value.valueId, location: location });
+        valueIndex = valueIndex + 1;
+    }
+
+    var blockIndexes: HashMap<string, int> = HashMap.new();
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+        var blockId = function.blocks[blockIndex].id;
+        var key = blockId.toString();
+        if blockIndexes.has(key) { return Result.Err("registers: verified function has a duplicate block ID"); }
+        blockIndexes.set(key, blockIndex);
+        blockIndex = blockIndex + 1;
+    }
+
+    var edges: Vec<EdgeRegisterCopies> = [];
+    blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+        var block: BasicBlock = function.blocks[blockIndex];
+        var terminator = block.terminator;
+        if terminator.kind == TerminatorKind::Jump {
+            var edgeError = appendEdgeCopies(edges, function, blockIndexes, indexById, locations, block.id, terminator.targetBlockId, 0, terminator.targetArgs, budget);
+            if edgeError != "" { return Result.Err(edgeError); }
+        } else if terminator.kind == TerminatorKind::Branch {
+            var trueError = appendEdgeCopies(edges, function, blockIndexes, indexById, locations, block.id, terminator.trueTargetBlockId, 1, terminator.trueArgs, budget);
+            if trueError != "" { return Result.Err(trueError); }
+            var falseError = appendEdgeCopies(edges, function, blockIndexes, indexById, locations, block.id, terminator.falseTargetBlockId, 2, terminator.falseArgs, budget);
+            if falseError != "" { return Result.Err(falseError); }
+        } else if terminator.kind != TerminatorKind::Return {
+            return Result.Err("registers: verified function has an unsupported terminator");
+        }
+        blockIndex = blockIndex + 1;
+    }
+
+    return Result.Ok(FunctionRegisterPlan {
+        functionId: function.id,
+        locations: locations,
+        savedRegisters: savedRegisters,
+        spillCount: spillCount,
+        rawArgumentsReserved: rawArgumentsReserved,
+        edges: edges,
+    });
+}
+
+// Allocate values across the whole function. The shared callee-saved pool is
+// valid for SysV and Win64 and survives calls and syscalls. Spill coloring is
+// reused only when requested; volatile ABI registers stay available as scratch.
+pub func planRegistersFromSlots(program: IRProgram, storage: ProgramSlots, reuseSpills: bool): Result<ProgramRegisterPlan, string> {
+    if storage.functions.len() != program.functions.len() {
+        return Result.Err("registers: storage plan does not match the verified program");
+    }
+
+    var rawArgumentsReserved = usesRawArguments(program);
+    var functions: Vec<FunctionRegisterPlan> = [];
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var budget: Vec<int> = [1000000];
+        if !charge(budget) { return Result.Err("registers: planning work budget exhausted"); }
+        var planned = buildFunctionPlan(program.functions[functionIndex], storage.functions[functionIndex], reuseSpills, rawArgumentsReserved, budget);
+        if planned.isErr() { return Result.Err(planned.unwrapErr()); }
+        functions.push(planned.unwrap());
+        functionIndex = functionIndex + 1;
+    }
+    return Result.Ok(ProgramRegisterPlan { functions: functions });
+}
+
+pub func planRegisters(program: IRProgram, reuseSpills: bool): Result<ProgramRegisterPlan, string> {
+    var storageResult = planSlots(program);
+    if storageResult.isErr() { return Result.Err(storageResult.unwrapErr()); }
+    return planRegistersFromSlots(program, storageResult.unwrap(), reuseSpills);
+}

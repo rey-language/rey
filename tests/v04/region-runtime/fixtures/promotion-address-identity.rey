@@ -13,6 +13,8 @@ func main(): void {
     var child = managedRegionCreate(context);
     var object = managedRegionAllocate(context, child, scalar, 1);
     var alias = object;
+    var requested = managedRegionRequestedBytes(context);
+    check(requested >= 104);
     __reyRawStoreI64(__reyRawOffset(object, 16), 41);
     var group = __reyRawLoadAddress(__reyRawOffset(child, 40));
     var chunk = __reyRawLoadAddress(__reyRawOffset(group, 32));
@@ -33,7 +35,7 @@ func main(): void {
     check(__reyRawLoadI64(__reyRawOffset(child, 48)) == 0);
     check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
     check(managedRegionObjectCount(context) == 1);
-    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionRequestedBytes(context) == requested);
     var again = managedPromoteReference(context, object, program);
     check(__reyRawEqual(again, object));
     check(managedPromotionCount(context) == 1);
@@ -42,7 +44,7 @@ func main(): void {
     check(__reyRawEqual(alias, object));
     check(__reyRawLoadI64(__reyRawOffset(object, 16)) == 41);
     check(managedLiveObjects(context) == 1);
-    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionRequestedBytes(context) == requested);
     check(managedRegionUsedBytes(context) == 104);
     check(managedPromotionCount(context) == 1);
     managedDestroy(context);

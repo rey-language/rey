@@ -1,0 +1,411 @@
+import ir;
+import ir::{BasicBlock, CompareI64Predicate, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, IRValue, Terminator, TerminatorKind};
+import ir::optimize::shape::{IdPair, checkedCanTrap, collectUses, constantI64, containsId, copyEffects, copyFunction, copyInstruction, copyKey, copyTerminator, copyTypes, copyValues, findInstruction, isCheckedArithmetic, replaceValueUses, successorIds, verifyCopy};
+
+func keepInstruction(function: IRFunction, instructionValue: Instruction, uses: Vec<int>): bool {
+    if instructionValue.resultId < 0 || containsId(uses, instructionValue.resultId) { return true; }
+    if instructionValue.kind == InstructionKind::ConstI64 || instructionValue.kind == InstructionKind::ConstBool || instructionValue.kind == InstructionKind::CompareI64 || instructionValue.kind == InstructionKind::CompareBool { return false; }
+    if !isCheckedArithmetic(instructionValue.kind) || instructionValue.operands.len() != 2 { return true; }
+    var left = constantI64(function, instructionValue.operands[0]);
+    var right = constantI64(function, instructionValue.operands[1]);
+    if instructionValue.kind == InstructionKind::AddCheckedI64 || instructionValue.kind == InstructionKind::SubCheckedI64 {
+        if right.folded && right.value == 0 { return false; }
+    }
+    if instructionValue.kind == InstructionKind::MulCheckedI64 && ((right.folded && right.value == 1) || (left.folded && left.value == 1)) { return false; }
+    if instructionValue.kind == InstructionKind::DivCheckedI64 && right.folded && right.value == 1 { return false; }
+    return checkedCanTrap(instructionValue.kind, left.folded, left.value, right.folded, right.value);
+}
+
+func eliminateFunction(function: IRFunction): IRFunction {
+    var current = function;
+    var guard = 0;
+    loop {
+        if guard >= 16 { break; }
+        var uses = collectUses(current);
+        var removed = false;
+        var blocks: Vec<BasicBlock> = [];
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= current.blocks.len() { break; }
+            var block = current.blocks[blockCursor];
+            var instructions: Vec<Instruction> = [];
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= block.instructions.len() { break; }
+                var instructionValue = block.instructions[instructionIndex];
+                if keepInstruction(current, instructionValue, uses) { instructions.push(copyInstruction(instructionValue)); }
+                else { removed = true; }
+                instructionIndex = instructionIndex + 1;
+            }
+            blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) });
+            blockCursor = blockCursor + 1;
+        }
+        current = IRFunction { id: current.id, key: copyKey(current.key), signature: FunctionSignature { parameterTypes: copyTypes(current.signature.parameterTypes), returnType: current.signature.returnType }, parameters: copyValues(current.parameters), blocks: blocks, effects: copyEffects(current.effects) };
+        if !removed { break; }
+        guard = guard + 1;
+    }
+    return current;
+}
+
+pub func eliminateDeadValues(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "dead-value input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(eliminateFunction(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "dead-value output");
+}
+
+func memoryKind(kind: InstructionKind): int {
+    if kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawStoreI64 { return 1; }
+    if kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawStoreByte { return 2; }
+    if kind == InstructionKind::RawLoadAddress || kind == InstructionKind::RawStoreAddress { return 3; }
+    if kind == InstructionKind::Call || kind == InstructionKind::RawMap || kind == InstructionKind::RawUnmap || kind == InstructionKind::RawFail || kind == InstructionKind::RawSyscall || kind == InstructionKind::RawHostSyscall { return 4; }
+    return 0;
+}
+
+func isStore(kind: InstructionKind): bool {
+    return kind == InstructionKind::RawStoreI64 || kind == InstructionKind::RawStoreByte || kind == InstructionKind::RawStoreAddress;
+}
+
+func isLoad(kind: InstructionKind): bool {
+    return kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawLoadAddress;
+}
+
+func forwardLoads(function: IRFunction): IRFunction {
+    var current = function;
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= current.blocks.len() { break; }
+        var block = current.blocks[blockCursor];
+        var addressIds: Vec<int> = [];
+        var valueIds: Vec<int> = [];
+        var widths: Vec<int> = [];
+        var pairs: Vec<IdPair> = [];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = copyInstruction(block.instructions[instructionIndex]);
+            var kindCode = memoryKind(instructionValue.kind);
+            // calls, mappings, and syscalls can change any tracked address
+            if kindCode == 4 { addressIds = []; valueIds = []; widths = []; }
+            if isStore(instructionValue.kind) && instructionValue.operands.len() == 2 {
+                // a different address SSA value may still alias, so drop every slot
+                var storedId = resolvedForward(pairs, instructionValue.operands[1]);
+                addressIds = [];
+                valueIds = [];
+                widths = [];
+                rememberSlot(addressIds, valueIds, widths, instructionValue.operands[0], storedId, kindCode);
+                instructions.push(instructionValue);
+            } else if isLoad(instructionValue.kind) && instructionValue.operands.len() == 1 {
+                var slot = findSlot(addressIds, widths, instructionValue.operands[0], kindCode);
+                if slot >= 0 {
+                    var target = resolvedForward(pairs, valueIds[slot]);
+                    if target != instructionValue.resultId { pairs.push(IdPair { fromId: instructionValue.resultId, toId: target }); }
+                    else { instructions.push(instructionValue); }
+                } else {
+                    rememberSlot(addressIds, valueIds, widths, instructionValue.operands[0], instructionValue.resultId, kindCode);
+                    instructions.push(instructionValue);
+                }
+            } else { instructions.push(instructionValue); }
+            instructionIndex = instructionIndex + 1;
+        }
+        var blocks: Vec<BasicBlock> = [];
+        var copyIndex = 0;
+        loop {
+            if copyIndex >= current.blocks.len() { break; }
+            if copyIndex == blockCursor { blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) }); }
+            else { blocks.push(current.blocks[copyIndex]); }
+            copyIndex = copyIndex + 1;
+        }
+        current = IRFunction { id: current.id, key: copyKey(current.key), signature: current.signature, parameters: current.parameters, blocks: blocks, effects: current.effects };
+        var pairIndex = 0;
+        loop {
+            if pairIndex >= pairs.len() { break; }
+            current = replaceValueUses(current, pairs[pairIndex].fromId, pairs[pairIndex].toId);
+            pairIndex = pairIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return current;
+}
+
+func resolvedForward(pairs: Vec<IdPair>, valueId: int): int {
+    var currentId = valueId;
+    var guard = 0;
+    loop {
+        if guard > pairs.len() { break; }
+        var mapped = currentId;
+        var index = 0;
+        loop {
+            if index >= pairs.len() { break; }
+            if pairs[index].fromId == currentId { mapped = pairs[index].toId; break; }
+            index = index + 1;
+        }
+        if mapped == currentId { break; }
+        currentId = mapped;
+        guard = guard + 1;
+    }
+    return currentId;
+}
+
+func findSlot(addressIds: Vec<int>, widths: Vec<int>, addressId: int, width: int): int {
+    var index = 0;
+    loop {
+        if index >= addressIds.len() || index >= widths.len() { break; }
+        if addressIds[index] == addressId && widths[index] == width { return index; }
+        index = index + 1;
+    }
+    return -1;
+}
+
+func rememberSlot(addressIds: Vec<int>, valueIds: Vec<int>, widths: Vec<int>, addressId: int, valueId: int, width: int) {
+    var slot = findSlot(addressIds, widths, addressId, width);
+    if slot >= 0 {
+        valueIds.set(slot, valueId);
+        return;
+    }
+    addressIds.push(addressId);
+    valueIds.push(valueId);
+    widths.push(width);
+}
+
+pub func eliminateRedundantLoads(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "redundant-load input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(forwardLoads(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "redundant-load output");
+}
+
+func eliminateZeroesInFunction(function: IRFunction): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var drop: Vec<int> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = block.instructions[instructionIndex];
+            if instructionValue.kind == InstructionKind::RawStoreI64 && instructionValue.operands.len() == 2 {
+                var stored = constantI64(function, instructionValue.operands[1]);
+                if stored.folded && stored.value == 0 && overwrittenLater(block.instructions, instructionIndex, instructionValue.operands[0]) { drop.push(instructionIndex); }
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        var instructions: Vec<Instruction> = [];
+        instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            if !containsId(drop, instructionIndex) { instructions.push(copyInstruction(block.instructions[instructionIndex])); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) });
+        blockCursor = blockCursor + 1;
+    }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: function.signature, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+func overwrittenLater(instructions: Vec<Instruction>, start: int, addressId: int): bool {
+    var index = start + 1;
+    loop {
+        if index >= instructions.len() { break; }
+        var instructionValue = instructions[index];
+        var kindCode = memoryKind(instructionValue.kind);
+        if kindCode != 0 {
+            if instructionValue.kind == InstructionKind::RawStoreI64 && instructionValue.operands.len() == 2 && instructionValue.operands[0] == addressId { return true; }
+            return false;
+        }
+        index = index + 1;
+    }
+    return false;
+}
+
+pub func eliminateRedundantZeroes(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "redundant-zero input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(eliminateZeroesInFunction(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "redundant-zero output");
+}
+
+func reachableSet(function: IRFunction): Vec<int> {
+    var marks: Vec<int> = [];
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } marks.push(0); index = index + 1; }
+    if marks.len() > 0 { marks.set(0, 1); }
+    var guard = 0;
+    loop {
+        if guard >= function.blocks.len() { break; }
+        var changed = false;
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= function.blocks.len() { break; }
+            if marks[blockCursor] != 0 {
+                var targets = successorIds(function.blocks[blockCursor].terminator);
+                var targetIndex = 0;
+                loop {
+                    if targetIndex >= targets.len() { break; }
+                    var found = blockIndexOf(function, targets[targetIndex]);
+                    if found >= 0 && marks[found] == 0 { marks.set(found, 1); changed = true; }
+                    targetIndex = targetIndex + 1;
+                }
+            }
+            blockCursor = blockCursor + 1;
+        }
+        if !changed { break; }
+        guard = guard + 1;
+    }
+    return marks;
+}
+
+func blockIndexOf(function: IRFunction, blockId: int): int {
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } if function.blocks[index].id == blockId { return index; } index = index + 1; }
+    return -1;
+}
+
+func foldConstantBranches(function: IRFunction): IRFunction {
+    var current = function;
+    var guard = 0;
+    loop {
+        if guard >= current.blocks.len() + 1 { break; }
+        var folded = false;
+        var blocks: Vec<BasicBlock> = [];
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= current.blocks.len() { break; }
+            var block = current.blocks[blockCursor];
+            var term = copyTerminator(block.terminator);
+            if term.kind == TerminatorKind::Branch {
+                var condition = findInstruction(current, term.conditionValueId);
+                if condition.kind == InstructionKind::ConstBool && condition.resultId == term.conditionValueId {
+                    if condition.immediate != 0 { term = ir.jump(term.trueTargetBlockId, term.trueArgs, term.source); }
+                    else { term = ir.jump(term.falseTargetBlockId, term.falseArgs, term.source); }
+                    folded = true;
+                }
+            }
+            blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: block.instructions, terminator: term });
+            blockCursor = blockCursor + 1;
+        }
+        current = IRFunction { id: current.id, key: current.key, signature: current.signature, parameters: current.parameters, blocks: blocks, effects: current.effects };
+        var marks = reachableSet(current);
+        var kept: Vec<BasicBlock> = [];
+        blockCursor = 0;
+        loop {
+            if blockCursor >= current.blocks.len() { break; }
+            if marks[blockCursor] != 0 { kept.push(current.blocks[blockCursor]); }
+            else { folded = true; }
+            blockCursor = blockCursor + 1;
+        }
+        current = IRFunction { id: current.id, key: current.key, signature: current.signature, parameters: current.parameters, blocks: kept, effects: current.effects };
+        if !folded { break; }
+        guard = guard + 1;
+    }
+    return current;
+}
+
+pub func simplifyLoops(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "loop simplification input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(foldConstantBranches(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "loop simplification output");
+}
+
+func negatePredicate(predicate: CompareI64Predicate): CompareI64Predicate {
+    if predicate == CompareI64Predicate::Eq { return CompareI64Predicate::Ne; }
+    if predicate == CompareI64Predicate::Ne { return CompareI64Predicate::Eq; }
+    if predicate == CompareI64Predicate::Slt { return CompareI64Predicate::Sge; }
+    if predicate == CompareI64Predicate::Sle { return CompareI64Predicate::Sgt; }
+    if predicate == CompareI64Predicate::Sgt { return CompareI64Predicate::Sle; }
+    return CompareI64Predicate::Slt;
+}
+
+func onlyPredecessorIndex(function: IRFunction, blockId: int): int {
+    var found = 0;
+    var which = -1;
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var candidate = function.blocks[blockCursor].terminator;
+        if candidate.kind == TerminatorKind::Jump && candidate.targetBlockId == blockId { found = found + 1; which = blockCursor; }
+        if candidate.kind == TerminatorKind::Branch && candidate.trueTargetBlockId == blockId { found = found + 1; which = blockCursor; }
+        if candidate.kind == TerminatorKind::Branch && candidate.falseTargetBlockId == blockId { found = found + 1; which = blockCursor; }
+        blockCursor = blockCursor + 1;
+    }
+    if found != 1 { return -1; }
+    return which;
+}
+
+func mappedOperand(args: Vec<int>, params: Vec<IRValue>, id: int): int {
+    var index = 0;
+    loop {
+        if index >= params.len() || index >= args.len() { break; }
+        if params[index].id == id { return args[index]; }
+        index = index + 1;
+    }
+    return id;
+}
+
+func eliminateBoundsInFunction(function: IRFunction): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructions: Vec<Instruction> = [];
+        var predecessorIndex = onlyPredecessorIndex(function, block.id);
+        var predecessor = ir.returnVoid(ir.sourceRef("bounds", 0, 1));
+        // a block's own backedge proves the previous iteration, not this one
+        if predecessorIndex >= 0 && predecessorIndex != blockCursor { predecessor = function.blocks[predecessorIndex].terminator; }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = copyInstruction(block.instructions[instructionIndex]);
+            if predecessor.kind == TerminatorKind::Branch && (instructionValue.kind == InstructionKind::CompareI64 || instructionValue.kind == InstructionKind::CompareBool) && instructionValue.operands.len() == 2 {
+                var proof = findInstruction(function, predecessor.conditionValueId);
+                if proof.resultId == predecessor.conditionValueId && (proof.kind == InstructionKind::CompareI64 || proof.kind == InstructionKind::CompareBool) && proof.operands.len() == 2 {
+                    var onTrue = predecessor.trueTargetBlockId == block.id && predecessor.falseTargetBlockId != block.id;
+                    var onFalse = predecessor.falseTargetBlockId == block.id && predecessor.trueTargetBlockId != block.id;
+                    var args = predecessor.trueArgs;
+                    if onFalse { args = predecessor.falseArgs; }
+                    if onTrue || onFalse {
+                        var left = mappedOperand(args, block.params, instructionValue.operands[0]);
+                        var right = mappedOperand(args, block.params, instructionValue.operands[1]);
+                        var same = proof.operands[0] == left && proof.operands[1] == right && proof.comparison == instructionValue.comparison && proof.kind == instructionValue.kind;
+                        var negated = proof.operands[0] == left && proof.operands[1] == right && negatePredicate(proof.comparison) == instructionValue.comparison && proof.kind == instructionValue.kind;
+                        if same || negated {
+                            var value = false;
+                            if onTrue && same { value = true; }
+                            if onTrue && negated { value = false; }
+                            if onFalse && same { value = false; }
+                            if onFalse && negated { value = true; }
+                            instructionValue = ir.constBool(instructionValue.resultId, value, instructionValue.source);
+                        }
+                    }
+                }
+            }
+            instructions.push(instructionValue);
+            instructionIndex = instructionIndex + 1;
+        }
+        blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) });
+        blockCursor = blockCursor + 1;
+    }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: function.signature, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+pub func eliminateBoundsChecks(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "bounds-check input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(eliminateBoundsInFunction(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "bounds-check output");
+}

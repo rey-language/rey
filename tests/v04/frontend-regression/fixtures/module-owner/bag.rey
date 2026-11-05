@@ -1,0 +1,13 @@
+import token.{Token};
+
+pub struct Bag { pub items: Vec<Token> }
+
+pub func put(token: Token): Bag {
+    var items: Vec<Token> = [];
+    items.push(token);
+    return Bag { items: items };
+}
+
+pub func first(bag: Bag): Token {
+    return bag.items[0];
+}

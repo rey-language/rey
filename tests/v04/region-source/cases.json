@@ -32,5 +32,50 @@
     "expect": "ok",
     "native_only": true,
     "reason": "Nested callee-to-caller container returns complete in 2130881 source-evaluator steps, above the 1000000-step driver cap; native Darwin execution is mandatory."
+  },
+  "container-caller-retain.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Caller-region container return, aliasing, and a three-iteration call loop follow the same container-hook evaluator cost as container-caller-region.rey; native Darwin execution is mandatory."
+  },
+  "host-fileio.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Host file I/O, directory enumeration, process arguments, and exit are native runtime surfaces; the source evaluator intentionally has no host syscall access."
+  },
+  "match-scrutinee-payload.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Payload binding preserves the original enum passed to a helper."
+  },
+  "match-scrutinee-order.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "The enum survives helper arguments before and after the payload."
+  },
+  "match-nested-payload.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Nested payload binding preserves the outer enum for helper calls."
+  },
+  "match-struct-pattern.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Struct-pattern binding preserves the enum scrutinee and fields."
+  },
+  "match-after-statement.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "The enum retains its tag after a payload-binding match statement."
+  },
+  "match-real-compiler-shape.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "A 17-variant expression and managed call aggregate exercise inference lowering."
+  },
+  "match-scrutinee-wide.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "A 17-variant recursive call inference and span lookup preserve the original enum."
   }
 }

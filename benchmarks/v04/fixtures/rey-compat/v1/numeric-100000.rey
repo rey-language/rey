@@ -1,0 +1,12 @@
+func main(): Void {
+    var size = 100000;
+    var state = 1;
+    var checksum = 0;
+    var i = 0;
+    while (i < size) {
+        state = (state * 48271) % 2147483647;
+        checksum += state % 1024;
+        i += 1;
+    }
+    println("checksum=" + checksum.toString() + " processed=" + size.toString());
+}

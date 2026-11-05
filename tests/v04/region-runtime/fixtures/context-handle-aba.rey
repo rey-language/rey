@@ -1,0 +1,25 @@
+import host::{hostExit};
+import layout::{layoutRegistryCreate, layoutRegistryRelease};
+import regions::{regionContextCreate, regionContextDestroy, regionHandleCreate, regionHandleIsActive, regionHandleProgram};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var otherRegistry = layoutRegistryCreate(0);
+    var other = regionContextCreate(otherRegistry);
+    var otherHandle = regionHandleCreate(other);
+    var otherProgramHandle = regionHandleProgram(other);
+    regionContextDestroy(other);
+    layoutRegistryRelease(otherRegistry);
+    var first = regionContextCreate(registry);
+    var stale = regionHandleCreate(first);
+    var firstProgramHandle = regionHandleProgram(first);
+    if __reyRawToInt(stale) == __reyRawToInt(otherHandle) { hostExit(78); }
+    if __reyRawToInt(firstProgramHandle) == __reyRawToInt(otherProgramHandle) { hostExit(78); }
+    regionContextDestroy(first);
+    var second = regionContextCreate(registry);
+    if !__reyRawEqual(first, second) { hostExit(77); }
+    if !regionHandleIsActive(second, stale) { hostExit(1); }
+    hostExit(0);
+    regionContextDestroy(second);
+    layoutRegistryRelease(registry);
+}

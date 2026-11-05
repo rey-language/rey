@@ -1,8 +1,65 @@
 import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
 import ir::analysis::container::{containerEffect};
 import ir::managed::{ManagedAllocation, ManagedProgram};
-import ir::managed::lifetime::{managedBlockInCycle, managedCarriers, stackPlacementRejection, verifyManagedRegionPlan};
+import ir::managed::lifetime::{destinationPlacementRejection, localAmbientSafeFunctions, localRegionPlacementRejection, managedBlockInCycle, managedCarriers, regionAllocationNeedsHeapFallback, stackPlacementRejection, verifyManagedRegionPlan};
 import ir::managed::placement::{ManagedAllocationPlacement, ManagedCallPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
+import ir::managed::escape_summary::{EscapeSummaryPlan, summarizeManagedProgram};
+import ir::managed::hook_lifetime::{hookLifetimeCandidates};
+
+var experimentalEscapeSummary: bool = false;
+
+pub func setExperimentalEscapeSummary(enabled: bool): void {
+    experimentalEscapeSummary = enabled;
+}
+
+pub func experimentalEscapeSummaryEnabled(): bool {
+    return experimentalEscapeSummary;
+}
+
+func summaryRegionCandidates(plan: EscapeSummaryPlan): HashMap<string, bool> {
+    var candidates: HashMap<string, bool> = HashMap.new();
+    if !plan.complete { return candidates; }
+    var functionAt = 0;
+    while functionAt < plan.summaries.len() {
+        var summary = plan.summaries[functionAt];
+        if summary.complete && !summary.recursiveCycle && !summary.hasUnknownAmbientEffect && !summary.hasUnknownMemoryEffect && plan.ambientSafeFunctions.has(summary.functionId.toString()) {
+            var allocationAt = 0;
+            while allocationAt < summary.allocations.len() {
+                var allocation = summary.allocations[allocationAt];
+                if !allocation.escapesProgram && !allocation.returned && !allocation.storedInParameter {
+                    candidates.set(summary.functionId.toString() + ":" + allocation.resultId.toString(), true);
+                }
+                allocationAt = allocationAt + 1;
+            }
+        }
+        functionAt = functionAt + 1;
+    }
+    return candidates;
+}
+
+func summaryCallCandidates(plan: EscapeSummaryPlan): HashMap<string, bool> {
+    var candidates: HashMap<string, bool> = HashMap.new();
+    if !plan.complete { return candidates; }
+    // Explicit managed allocation calls receive planned destinations during lowering.
+    // Hooks and unknown calls that can use the ambient region set the unknown-effect
+    // flags below; mayAllocateCurrentRegion alone also includes those explicit calls.
+    var functionAt = 0;
+    while functionAt < plan.summaries.len() {
+        var summary = plan.summaries[functionAt];
+        if summary.complete && !summary.recursiveCycle && !summary.hasUnknownAmbientEffect && !summary.hasUnknownMemoryEffect && plan.ambientSafeFunctions.has(summary.functionId.toString()) {
+            var callAt = 0;
+            while callAt < summary.callResults.len() {
+                var call = summary.callResults[callAt];
+                if !call.unknown && !call.escapesProgram && !call.returned && !call.storedInParameter {
+                    candidates.set(summary.functionId.toString() + ":" + call.blockId.toString() + ":" + call.instructionIndex.toString(), true);
+                }
+                callAt = callAt + 1;
+            }
+        }
+        functionAt = functionAt + 1;
+    }
+    return candidates;
+}
 
 pub struct StackDecision {
     pub functionId: int,
@@ -94,6 +151,16 @@ func layoutPayload(module: ManagedProgram, layoutId: int): int {
     var index = 0;
     loop { if index >= module.layouts.len() { break; } if module.layouts[index].id == layoutId { return module.layouts[index].payloadBytes; } index = index + 1; }
     return -1;
+}
+
+func fixedLayout(module: ManagedProgram, layoutId: int): bool {
+    var index = 0;
+    loop {
+        if index >= module.variableLayouts.len() { break; }
+        if module.variableLayouts[index].layoutId == layoutId { return false; }
+        index += 1;
+    }
+    return layoutPayload(module, layoutId) > 0;
 }
 
 func hookName(module: ManagedProgram, functionId: int): string {
@@ -204,8 +271,37 @@ func returned(function: IRFunction, carriers: Vec<int>): bool {
     return false;
 }
 
+func hasUntrackedAddress(function: IRFunction, carriers: Vec<int>): bool {
+    var blockAt = 0;
+    while blockAt < function.blocks.len() {
+        var instructionAt = 0;
+        while instructionAt < function.blocks[blockAt].instructions.len() {
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if (instruction.kind == InstructionKind::RawOffset || instruction.kind == InstructionKind::RawToInt) && instruction.operands.len() > 0 && hasInt(carriers, instruction.operands[0]) { return true; }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    return false;
+}
+
+func cohortBlockHasAmbientEffects(module: ManagedProgram, function: IRFunction, blockId: int): bool {
+    var found = blockIndex(function, blockId);
+    if found < 0 { return true; }
+    var index = 0;
+    while index < function.blocks[found].instructions.len() {
+        var instruction = function.blocks[found].instructions[index];
+        if instruction.kind == InstructionKind::Call && instruction.functionId != module.allocateFunctionId { return true; }
+        if instruction.kind == InstructionKind::RawMap || instruction.kind == InstructionKind::RawUnmap || instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall || instruction.kind == InstructionKind::RawStoreAddress || instruction.kind == InstructionKind::RawToInt { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
 pub func iterationProof(module: ManagedProgram, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>): string {
     if carriers.len() == 0 || !hasInt(carriers, allocation.resultId) { return "carrier analysis was incomplete"; }
+    if hasUntrackedAddress(function, carriers) { return "derived address is not tracked"; }
+    if cohortBlockHasAmbientEffects(module, function, allocation.blockId) { return "block has unbounded ambient effects"; }
     if !managedBlockInCycle(function, allocation.blockId) { return "allocation is not inside a loop"; }
     var payload = layoutPayload(module, allocation.layoutId);
     if payload <= 0 || payload > 65536 { return "scratch budget exceeded"; }
@@ -219,6 +315,8 @@ pub func iterationProof(module: ManagedProgram, function: IRFunction, allocation
 
 pub func phaseProof(module: ManagedProgram, function: IRFunction, allocation: ManagedAllocation, carriers: Vec<int>): string {
     if carriers.len() == 0 || !hasInt(carriers, allocation.resultId) { return "carrier analysis was incomplete"; }
+    if hasUntrackedAddress(function, carriers) { return "derived address is not tracked"; }
+    if cohortBlockHasAmbientEffects(module, function, allocation.blockId) { return "block has unbounded ambient effects"; }
     if managedBlockInCycle(function, allocation.blockId) { return "phase allocation is inside a loop"; }
     if function.blocks.len() < 2 { return "phase allocation covers the whole function"; }
     var found = blockIndex(function, allocation.blockId);
@@ -379,10 +477,114 @@ func copyCalls(calls: Vec<ManagedCallPlacement>): Vec<ManagedCallPlacement> {
     return copied;
 }
 
+func cohortBudgetAvailable(cohorts: Vec<CohortSite>, functionId: int, blockId: int, extra: int): bool {
+    var total = 0;
+    var index = 0;
+    while index < cohorts.len() {
+        var site = cohorts[index];
+        if site.functionId == functionId && site.blockId == blockId && (site.kind == 1 || site.kind == 2) {
+            if site.scratchBudget < 0 || total > 1048576 - site.scratchBudget { return false; }
+            total = total + site.scratchBudget;
+        }
+        index = index + 1;
+    }
+    return extra > 0 && extra <= 1048576 - total;
+}
+
 pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion, string> {
     var planned = planManagedPlacement(module);
     if planned.isErr() { return Result.Err(planned.unwrapErr()); }
     var base = planned.unwrap();
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var functionBuildIndex = 0;
+    loop { if functionBuildIndex >= module.program.functions.len() { break; } var key = module.program.functions[functionBuildIndex].id.toString(); if !functionIndices.has(key) { functionIndices.set(key, functionBuildIndex); } functionBuildIndex += 1; }
+    if module.functions.len() > 512 {
+        var allocations: Vec<ManagedAllocationPlacement> = [];
+        var decisions: Vec<StackDecision> = [];
+        var cohorts: Vec<CohortSite> = [];
+        var regionFunctions: Vec<int> = [];
+        var stackBytes: HashMap<string, int> = HashMap.new();
+        var ambientSafe = localAmbientSafeFunctions(module);
+        var summaryCandidates: HashMap<string, bool> = HashMap.new();
+        var callCandidates: HashMap<string, bool> = HashMap.new();
+        if experimentalEscapeSummary {
+            var summary = summarizeManagedProgram(module);
+            summaryCandidates = summaryRegionCandidates(summary);
+            callCandidates = summaryCallCandidates(summary);
+        }
+        var at = 0;
+        loop {
+            if at >= module.allocations.len() { break; }
+            var allocation = module.allocations[at];
+            var item = base.allocations[at];
+            var storage = item.storage;
+            var functionKey = allocation.functionId.toString();
+            if storage == ManagedStorage::Heap && functionIndices.has(functionKey) {
+                var function = module.program.functions[functionIndices.get(functionKey)];
+                var instructions = 0;
+                var blockAt = 0;
+                loop { if blockAt >= function.blocks.len() { break; } instructions = instructions + function.blocks[blockAt].instructions.len(); blockAt = blockAt + 1; }
+                // Bound local proof cost; unproven objects retain program lifetime.
+                if function.blocks.len() <= 8 && instructions <= 128 && !managedBlockInCycle(function, allocation.blockId) {
+                    var carriers = managedCarriers(function, allocation.resultId);
+                    var payload = layoutPayload(module, allocation.layoutId);
+                    var used = 0;
+                    if stackBytes.has(functionKey) { used = stackBytes.get(functionKey); }
+                    if payload >= 0 && payload <= 4096 - used && hasInt(carriers, allocation.resultId) && stackPlacementRejection(module, function, allocation, carriers) == "" && localRegionPlacementRejection(module, function, allocation, ambientSafe) == "" {
+                        storage = ManagedStorage::Stack;
+                        stackBytes.set(functionKey, used + payload);
+                        decisions.push(StackDecision { functionId: allocation.functionId, resultId: allocation.resultId, accepted: true, reason: "bounded local stack proof" });
+                    }
+                }
+                if storage == ManagedStorage::Heap && localRegionPlacementRejection(module, function, allocation, ambientSafe) == "" {
+                    storage = ManagedStorage::Region;
+                    regionFunctions = addSorted(regionFunctions, allocation.functionId);
+                }
+                var summaryKey = allocation.functionId.toString() + ":" + allocation.resultId.toString();
+                if storage == ManagedStorage::Heap && summaryCandidates.has(summaryKey) && !managedBlockInCycle(function, allocation.blockId) {
+                    storage = ManagedStorage::Region;
+                    regionFunctions = addSorted(regionFunctions, allocation.functionId);
+                }
+            }
+            if experimentalEscapeSummary && storage == ManagedStorage::Region && functionIndices.has(functionKey) && hasInt(regionFunctions, allocation.functionId) {
+                var function = module.program.functions[functionIndices.get(functionKey)];
+                var payload = layoutPayload(module, allocation.layoutId);
+                if fixedLayout(module, allocation.layoutId) && payload <= 65536 && localRegionPlacementRejection(module, function, allocation, ambientSafe) == "" {
+                    var carriers = managedCarriers(function, allocation.resultId);
+                    if phaseProof(module, function, allocation, carriers) == "" && cohortBudgetAvailable(cohorts, allocation.functionId, allocation.blockId, payload) {
+                        cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 2, scratchBudget: payload, reason: "bounded large-program phase cohort" });
+                    }
+                }
+            }
+            allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: storage });
+            at = at + 1;
+        }
+        var calls: Vec<ManagedCallPlacement> = [];
+        at = 0;
+        while at < base.calls.len() {
+            var call = base.calls[at];
+            var key = call.functionId.toString() + ":" + call.blockId.toString() + ":" + call.instructionIndex.toString();
+            var storage = call.storage;
+            var functionKey = call.functionId.toString();
+            if storage == ManagedStorage::Heap && callCandidates.has(key) && functionIndices.has(functionKey) && !managedBlockInCycle(module.program.functions[functionIndices.get(functionKey)], call.blockId) {
+                storage = ManagedStorage::Region;
+                regionFunctions = addSorted(regionFunctions, call.functionId);
+            }
+            calls.push(ManagedCallPlacement { functionId: call.functionId, blockId: call.blockId, instructionIndex: call.instructionIndex, storage: storage });
+            at = at + 1;
+        }
+        if experimentalEscapeSummary {
+            var hookCandidates = hookLifetimeCandidates(module);
+            at = 0;
+            while at < module.functions.len() {
+                var functionId = module.functions[at].functionId;
+                if hookCandidates.has(functionId.toString()) { regionFunctions = addSorted(regionFunctions, functionId); }
+                at = at + 1;
+            }
+        }
+        var placement = ManagedPlacement { allocations: allocations, calls: calls, regionFunctions: regionFunctions };
+        return Result.Ok(MemoryCompletion { placement: placement, stack: decisions, cohorts: cohorts, retentions: [], deadFields: [], scalars: [], destinations: [], containerRetained: [] });
+    }
     var codes: Vec<int> = [];
     var destinationCount: Vec<int> = [];
     var destinationFunctions: Vec<int> = [];
@@ -392,6 +594,15 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
         if index >= base.allocations.len() { break; }
         var item = base.allocations[index];
         var code = storageCode(item.storage);
+        if code == 2 {
+            var functionKey = item.functionId.toString();
+            if index >= module.allocations.len() || !functionIndices.has(functionKey) { return Result.Err("completion: destination allocation annotation is missing"); }
+            var reason = destinationPlacementRejection(module, module.program.functions[functionIndices.get(functionKey)], module.allocations[index]);
+            if reason != "" {
+                code = 0;
+                destinations.push(DestinationNote { functionId: item.functionId, resultId: item.resultId, specialized: false, reason: reason });
+            }
+        }
         if code == 2 {
             var seen = 0;
             var countAt = 0;
@@ -420,8 +631,9 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
     loop {
         if index >= module.allocations.len() || index >= codes.len() { break; }
         var allocation = module.allocations[index];
-        var irIndex = functionIndex(module.program, allocation.functionId);
-        if irIndex < 0 { return Result.Err("completion: allocation function is missing"); }
+        var functionKey = allocation.functionId.toString();
+        if !functionIndices.has(functionKey) { return Result.Err("completion: allocation function is missing"); }
+        var irIndex = functionIndices.get(functionKey);
         var function = module.program.functions[irIndex];
         var carriers = managedCarriers(function, allocation.resultId);
         if codes[index] == 0 && !managedBlockInCycle(function, allocation.blockId) && containerProof(module, function, carriers) == "" {
@@ -440,11 +652,11 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
         if payload < 0 { payload = 0; }
         if codes[index] == 0 {
             var iteration = iterationProof(module, function, allocation, carriers);
-            if iteration == "" { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 1, scratchBudget: 65536, reason: "loop-local allocation" }); }
+            if iteration == "" && cohortBudgetAvailable(cohorts, allocation.functionId, allocation.blockId, 65536) { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 1, scratchBudget: 65536, reason: "loop-local allocation" }); }
             else if iteration == "survivor stored into an older owner" || iteration == "scratch budget exceeded" { retentions.push(ScratchRetention { functionId: allocation.functionId, resultId: allocation.resultId, retainedBytes: payload, reason: iteration }); }
         } else if codes[index] == 1 {
             var phase = phaseProof(module, function, allocation, carriers);
-            if phase == "" { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 2, scratchBudget: 65536, reason: "interior phase dies at its jump" }); }
+            if phase == "" && cohortBudgetAvailable(cohorts, allocation.functionId, allocation.blockId, 65536) { cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 2, scratchBudget: 65536, reason: "interior phase dies at its jump" }); }
         }
         var identity = identityReason(function, carriers);
         scalars.push(ScalarCandidate { functionId: allocation.functionId, resultId: allocation.resultId, eligible: identity == "", reason: identity });
@@ -457,7 +669,9 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
     loop {
         if functionAt >= module.functions.len() { break; }
         var managedId = module.functions[functionAt].functionId;
-        var irIndex = functionIndex(module.program, managedId);
+        var functionKey = managedId.toString();
+        var irIndex = -1;
+        if functionIndices.has(functionKey) { irIndex = functionIndices.get(functionKey); }
         if irIndex >= 0 && nameIsRequest(module.program.functions[irIndex].key.name) {
             cohorts.push(CohortSite { functionId: managedId, blockId: -1, resultId: -1, kind: 3, scratchBudget: 0, reason: "request-scoped invocation region" });
         }
@@ -477,60 +691,226 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
     var callAt = 0;
     loop { if callAt >= base.calls.len() { break; } if base.calls[callAt].storage == ManagedStorage::Region { regionFunctions = addSorted(regionFunctions, base.calls[callAt].functionId); } callAt = callAt + 1; }
     var placement = ManagedPlacement { allocations: allocations, calls: copyCalls(base.calls), regionFunctions: regionFunctions };
-    return Result.Ok(MemoryCompletion { placement: placement, stack: stack, cohorts: cohorts, retentions: retentions, deadFields: deadFields, scalars: scalars, destinations: destinations, containerRetained: containerRetained });
+    var completed = MemoryCompletion { placement: placement, stack: stack, cohorts: cohorts, retentions: retentions, deadFields: deadFields, scalars: scalars, destinations: destinations, containerRetained: containerRetained };
+    return Result.Ok(fallbackUnprovenReturnedRegions(module, completed));
 }
 
-func decisionFor(stack: Vec<StackDecision>, functionId: int, resultId: int): int {
-    var index = 0;
-    loop { if index >= stack.len() { break; } if stack[index].functionId == functionId && stack[index].resultId == resultId { return index; } index = index + 1; }
-    return -1;
-}
+func completionItemKey(functionId: int, resultId: int): string { return functionId.toString() + ":" + resultId.toString(); }
 
-pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryCompletion): Result<MemoryCompletion, string> {
-    var verified = verifyManagedRegionPlan(module, completion.placement);
-    if verified.isErr() { return Result.Err(verified.unwrapErr()); }
+func fallbackUnprovenReturnedRegions(module: ManagedProgram, completion: MemoryCompletion): MemoryCompletion {
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    var demoted: HashMap<string, bool> = HashMap.new();
     var index = 0;
     loop {
         if index >= completion.placement.allocations.len() { break; }
         var item = completion.placement.allocations[index];
-        var decision = decisionFor(completion.stack, item.functionId, item.resultId);
+        var storage = item.storage;
+        if storage == ManagedStorage::Region {
+            var allocationAt = 0;
+            loop {
+                if allocationAt >= module.allocations.len() { break; }
+                var allocation = module.allocations[allocationAt];
+                if allocation.functionId == item.functionId && allocation.resultId == item.resultId {
+                    if regionAllocationNeedsHeapFallback(module, completion.placement, allocation) {
+                        storage = ManagedStorage::Heap;
+                        demoted.set(completionItemKey(item.functionId, item.resultId), true);
+                    }
+                    break;
+                }
+                allocationAt += 1;
+            }
+        }
+        allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: storage });
+        index += 1;
+    }
+    if demoted.len() == 0 { return completion; }
+    var cohorts: Vec<CohortSite> = [];
+    index = 0;
+    loop {
+        if index >= completion.cohorts.len() { break; }
+        var cohort = completion.cohorts[index];
+        if !demoted.has(completionItemKey(cohort.functionId, cohort.resultId)) { cohorts.push(cohort); }
+        index += 1;
+    }
+    var regionFunctions: Vec<int> = [];
+    index = 0;
+    loop { if index >= completion.placement.regionFunctions.len() { break; } regionFunctions.push(completion.placement.regionFunctions[index]); index += 1; }
+    completion.placement = ManagedPlacement { allocations: allocations, calls: copyCalls(completion.placement.calls), regionFunctions: regionFunctions };
+    completion.cohorts = cohorts;
+    return completion;
+}
+
+pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryCompletion): Result<MemoryCompletion, string> {
+    var expectedCalls: HashMap<string, bool> = HashMap.new();
+    if module.functions.len() <= 512 {
+        var verified = verifyManagedRegionPlan(module, completion.placement);
+        if verified.isErr() { return Result.Err(verified.unwrapErr()); }
+    } else {
+        // Large-program region and stack placements receive individual proofs below.
+        if completion.cohorts.len() != 0 && !experimentalEscapeSummary { return Result.Err("completion: large-program phase cohorts require the experimental proof gate"); }
+        if completion.placement.allocations.len() != module.allocations.len() { return Result.Err("completion: allocation placement count does not match metadata"); }
+        var expected = planManagedPlacement(module);
+        if expected.isErr() { return Result.Err(expected.unwrapErr()); }
+        var expectedCallSites = expected.unwrap().calls;
+        if completion.placement.calls.len() != expectedCallSites.len() { return Result.Err("completion: call placement count does not match metadata"); }
+        var expectedAt = 0;
+        while expectedAt < expectedCallSites.len() {
+            var call = expectedCallSites[expectedAt];
+            var key = call.functionId.toString() + ":" + call.blockId.toString() + ":" + call.instructionIndex.toString();
+            if expectedCalls.has(key) { return Result.Err("completion: duplicate expected call site"); }
+            expectedCalls.set(key, true);
+            expectedAt = expectedAt + 1;
+        }
+        var largeAt = 0;
+        loop {
+            if largeAt >= completion.placement.allocations.len() { break; }
+            var storage = completion.placement.allocations[largeAt].storage;
+            if storage != ManagedStorage::Heap && storage != ManagedStorage::Stack && storage != ManagedStorage::Region { return Result.Err("completion: large-program allocation placement is not proven"); }
+            largeAt = largeAt + 1;
+        }
+        largeAt = 0;
+        loop {
+            if largeAt >= completion.placement.calls.len() { break; }
+            var storage = completion.placement.calls[largeAt].storage;
+            if storage != ManagedStorage::Heap && storage != ManagedStorage::Region { return Result.Err("completion: large-program call placement is not proven"); }
+            largeAt = largeAt + 1;
+        }
+    }
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var functionAt = 0;
+    loop { if functionAt >= module.program.functions.len() { break; } var key = module.program.functions[functionAt].id.toString(); if !functionIndices.has(key) { functionIndices.set(key, functionAt); } functionAt += 1; }
+    var allocationIndices: HashMap<string, int> = HashMap.new();
+    var allocationAtIndex = 0;
+    loop { if allocationAtIndex >= module.allocations.len() { break; } var item = module.allocations[allocationAtIndex]; allocationIndices.set(completionItemKey(item.functionId, item.resultId), allocationAtIndex); allocationAtIndex += 1; }
+    var placementAllocationIndices: HashMap<string, int> = HashMap.new();
+    var placementAllocationAt = 0;
+    loop { if placementAllocationAt >= completion.placement.allocations.len() { break; } var item = completion.placement.allocations[placementAllocationAt]; placementAllocationIndices.set(completionItemKey(item.functionId, item.resultId), placementAllocationAt); placementAllocationAt += 1; }
+    var decisionIndices: HashMap<string, int> = HashMap.new();
+    var decisionAt = 0;
+    loop { if decisionAt >= completion.stack.len() { break; } var item = completion.stack[decisionAt]; var key = completionItemKey(item.functionId, item.resultId); if !decisionIndices.has(key) { decisionIndices.set(key, decisionAt); } decisionAt += 1; }
+    var verifiedStackBytes: HashMap<string, int> = HashMap.new();
+    var verifiedAllocations: HashMap<string, bool> = HashMap.new();
+    var verifiedRegionFunctions: HashMap<string, bool> = HashMap.new();
+    var ambientSafe: HashMap<string, bool> = HashMap.new();
+    if module.functions.len() > 512 { ambientSafe = localAmbientSafeFunctions(module); }
+    var summaryCandidates: HashMap<string, bool> = HashMap.new();
+    var callCandidates: HashMap<string, bool> = HashMap.new();
+    var hookCandidates: HashMap<string, bool> = HashMap.new();
+    if module.functions.len() > 512 && experimentalEscapeSummary {
+        var summary = summarizeManagedProgram(module);
+        summaryCandidates = summaryRegionCandidates(summary);
+        callCandidates = summaryCallCandidates(summary);
+        hookCandidates = hookLifetimeCandidates(module);
+    }
+    var index = 0;
+    loop {
+        if index >= completion.placement.allocations.len() { break; }
+        var item = completion.placement.allocations[index];
+        var itemKey = completionItemKey(item.functionId, item.resultId);
+        if !allocationIndices.has(itemKey) { return Result.Err("completion: placement has no allocation annotation"); }
+        if verifiedAllocations.has(itemKey) { return Result.Err("completion: duplicate allocation placement"); }
+        verifiedAllocations.set(itemKey, true);
+        var decision = -1;
+        if decisionIndices.has(itemKey) { decision = decisionIndices.get(itemKey); }
         if item.storage == ManagedStorage::Stack {
             if decision < 0 || !completion.stack[decision].accepted { return Result.Err("completion: stack placement has no accepted proof"); }
-            var irIndex = functionIndex(module.program, item.functionId);
-            if irIndex < 0 { return Result.Err("completion: stack function is missing"); }
-            if module.allocations.len() == 0 { return Result.Err("completion: stack allocation annotation is missing"); }
-            var allocationAt = 0;
-            var allocation = module.allocations[0];
-            var foundAllocation = false;
-            loop { if allocationAt >= module.allocations.len() { break; } if module.allocations[allocationAt].functionId == item.functionId && module.allocations[allocationAt].resultId == item.resultId { allocation = module.allocations[allocationAt]; foundAllocation = true; } allocationAt = allocationAt + 1; }
-            if !foundAllocation { return Result.Err("completion: stack allocation annotation is missing"); }
+            var functionKey = item.functionId.toString();
+            if !functionIndices.has(functionKey) { return Result.Err("completion: stack function is missing"); }
+            var irIndex = functionIndices.get(functionKey);
+            if !allocationIndices.has(itemKey) { return Result.Err("completion: stack allocation annotation is missing"); }
+            var allocation = module.allocations[allocationIndices.get(itemKey)];
             var carriers = managedCarriers(module.program.functions[irIndex], item.resultId);
+            if !hasInt(carriers, item.resultId) { return Result.Err("completion: stack carrier proof is incomplete"); }
             var reason = stackPlacementRejection(module, module.program.functions[irIndex], allocation, carriers);
             if reason != "" || managedBlockInCycle(module.program.functions[irIndex], allocation.blockId) { return Result.Err("completion: stack proof does not hold"); }
+            if module.functions.len() > 512 {
+                if localRegionPlacementRejection(module, module.program.functions[irIndex], allocation, ambientSafe) != "" { return Result.Err("completion: local cohort proof does not hold"); }
+                var payload = layoutPayload(module, allocation.layoutId);
+                var used = 0;
+                if verifiedStackBytes.has(functionKey) { used = verifiedStackBytes.get(functionKey); }
+                if payload < 0 || payload > 4096 - used { return Result.Err("completion: stack cohort budget exceeded"); }
+                verifiedStackBytes.set(functionKey, used + payload);
+            }
+        }
+        if module.functions.len() > 512 && item.storage == ManagedStorage::Region {
+            var functionKey = item.functionId.toString();
+            if !functionIndices.has(functionKey) || !allocationIndices.has(itemKey) || !hasInt(completion.placement.regionFunctions, item.functionId) { return Result.Err("completion: local region annotation is missing"); }
+            var allocation = module.allocations[allocationIndices.get(itemKey)];
+            var function = module.program.functions[functionIndices.get(functionKey)];
+            if localRegionPlacementRejection(module, function, allocation, ambientSafe) != "" && (!summaryCandidates.has(itemKey) || managedBlockInCycle(function, allocation.blockId)) { return Result.Err("completion: local region proof does not hold"); }
+            verifiedRegionFunctions.set(functionKey, true);
         }
         index = index + 1;
     }
+    if module.functions.len() > 512 {
+        var seenCalls: HashMap<string, bool> = HashMap.new();
+        var callAt = 0;
+        while callAt < completion.placement.calls.len() {
+            var call = completion.placement.calls[callAt];
+            var key = call.functionId.toString() + ":" + call.blockId.toString() + ":" + call.instructionIndex.toString();
+            if !expectedCalls.has(key) { return Result.Err("completion: placement has no call site"); }
+            if seenCalls.has(key) { return Result.Err("completion: duplicate call placement"); }
+            seenCalls.set(key, true);
+            if call.storage == ManagedStorage::Region {
+                var functionKey = call.functionId.toString();
+                if !callCandidates.has(key) || !functionIndices.has(functionKey) || !hasInt(completion.placement.regionFunctions, call.functionId) || managedBlockInCycle(module.program.functions[functionIndices.get(functionKey)], call.blockId) { return Result.Err("completion: call region proof does not hold"); }
+                verifiedRegionFunctions.set(functionKey, true);
+            }
+            callAt = callAt + 1;
+        }
+        var seenRegionFunctions: HashMap<string, bool> = HashMap.new();
+        var regionAt = 0;
+        loop {
+            if regionAt >= completion.placement.regionFunctions.len() { break; }
+            var key = completion.placement.regionFunctions[regionAt].toString();
+            if (!verifiedRegionFunctions.has(key) && !hookCandidates.has(key)) || seenRegionFunctions.has(key) { return Result.Err("completion: unproven region function"); }
+            seenRegionFunctions.set(key, true);
+            regionAt = regionAt + 1;
+        }
+    }
+    var seenCohorts: HashMap<string, bool> = HashMap.new();
+    var cohortBlockKinds: HashMap<string, int> = HashMap.new();
+    var cohortBlockBudgets: HashMap<string, int> = HashMap.new();
     var cohortAt = 0;
     loop {
         if cohortAt >= completion.cohorts.len() { break; }
         var site = completion.cohorts[cohortAt];
-        var irIndex = functionIndex(module.program, site.functionId);
-        if irIndex < 0 { return Result.Err("completion: cohort function is missing"); }
+        var siteKey = site.functionId.toString() + ":" + site.blockId.toString() + ":" + site.resultId.toString();
+        if seenCohorts.has(siteKey) { return Result.Err("completion: duplicate cohort site"); }
+        seenCohorts.set(siteKey, true);
+        if module.functions.len() > 512 && site.kind != 2 { return Result.Err("completion: large-program cohort kind is not a phase cohort"); }
+        var functionKey = site.functionId.toString();
+        if !functionIndices.has(functionKey) { return Result.Err("completion: cohort function is missing"); }
+        var irIndex = functionIndices.get(functionKey);
         var function = module.program.functions[irIndex];
         if site.kind == 3 {
-            if site.resultId >= 0 || !nameIsRequest(function.key.name) { return Result.Err("completion: request cohort is not tied to a request function"); }
+            if site.resultId != -1 || site.blockId != -1 || site.scratchBudget != 0 || !nameIsRequest(function.key.name) { return Result.Err("completion: request cohort is not tied to a request function"); }
         } else if site.kind == 1 || site.kind == 2 {
-            if module.allocations.len() == 0 { return Result.Err("completion: cohort allocation annotation is missing"); }
-            var allocationAt = 0;
-            var allocation = module.allocations[0];
-            var foundAllocation = false;
-            loop { if allocationAt >= module.allocations.len() { break; } if module.allocations[allocationAt].functionId == site.functionId && module.allocations[allocationAt].resultId == site.resultId { allocation = module.allocations[allocationAt]; foundAllocation = true; } allocationAt = allocationAt + 1; }
-            if !foundAllocation { return Result.Err("completion: cohort allocation annotation is missing"); }
+            var itemKey = completionItemKey(site.functionId, site.resultId);
+            if !allocationIndices.has(itemKey) { return Result.Err("completion: cohort allocation annotation is missing"); }
+            var allocation = module.allocations[allocationIndices.get(itemKey)];
+            if site.blockId != allocation.blockId { return Result.Err("completion: cohort block does not match its allocation"); }
+            if module.functions.len() > 512 {
+                if !experimentalEscapeSummary || !placementAllocationIndices.has(itemKey) { return Result.Err("completion: large-program phase cohort placement is missing"); }
+                var placementItem = completion.placement.allocations[placementAllocationIndices.get(itemKey)];
+                if placementItem.storage != ManagedStorage::Region || !hasInt(completion.placement.regionFunctions, site.functionId) { return Result.Err("completion: phase cohort has no parent region placement"); }
+                if !fixedLayout(module, allocation.layoutId) || localRegionPlacementRejection(module, function, allocation, ambientSafe) != "" { return Result.Err("completion: large-program phase cohort region proof does not hold"); }
+            }
             var carriers = managedCarriers(function, site.resultId);
-            var reason = iterationProof(module, function, allocation, carriers);
-            if site.kind == 2 { reason = phaseProof(module, function, allocation, carriers); }
+            var reason = "";
+            if site.kind == 1 { reason = iterationProof(module, function, allocation, carriers); }
+            else { reason = phaseProof(module, function, allocation, carriers); }
             if reason != "" { return Result.Err("completion: cohort proof does not hold: " + reason); }
-            if site.scratchBudget <= 0 || site.scratchBudget > 65536 { return Result.Err("completion: cohort scratch budget is outside its bound"); }
+            var payload = layoutPayload(module, allocation.layoutId);
+            if site.scratchBudget <= 0 || site.scratchBudget > 65536 || payload <= 0 || payload > site.scratchBudget { return Result.Err("completion: cohort scratch budget is outside its bound"); }
+            if module.functions.len() > 512 && site.scratchBudget != payload { return Result.Err("completion: large-program phase cohort budget does not match its fixed allocation"); }
+            var blockKey = site.functionId.toString() + ":" + site.blockId.toString();
+            var total = 0;
+            if cohortBlockBudgets.has(blockKey) { total = cohortBlockBudgets.get(blockKey); }
+            if cohortBlockKinds.has(blockKey) && cohortBlockKinds.get(blockKey) != site.kind { return Result.Err("completion: cohort block has mixed kinds"); }
+            if total > 1048576 - site.scratchBudget { return Result.Err("completion: cohort block budget exceeds its bound"); }
+            cohortBlockKinds.set(blockKey, site.kind);
+            cohortBlockBudgets.set(blockKey, total + site.scratchBudget);
         } else {
             return Result.Err("completion: cohort kind is not a region cohort");
         }

@@ -3,12 +3,14 @@ import ir;
 import ir::managed::{ManagedProgram, ManagedLayout, ManagedField, ManagedFunction, ManagedAllocation, ManagedDerived, ManagedVariableLayout, ManagedHook};
 import ir::managed::roots::{RuntimeBindings, ManagedHookBinding, lowerManagedRoots};
 import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegionsCompleted, lowerManagedRegionsWithPromotionStress};
-import ir::managed::completion::{completeManagedMemory};
-import ir::managed::scalar::{applyScalarReplacement};
+import ir::managed::completion::{completeManagedMemory, experimentalEscapeSummaryEnabled};
+import ir::managed::scalar::{applyScalarReplacementForCompilerFast};
 import ir::managed::placement::{ManagedStorage, ManagedPlacement, ManagedAllocationPlacement, ManagedCallPlacement, planManagedPlacement};
-import ir::lower::{lowerProgram, lowerManagedProgram};
+import ir::lower::{lowerProgram, lowerManagedProgram, getLowerTargetOS};
 import ir::verify::{verifyProgram};
-import frontend::graph::{canonicalSourcePath, checkSourceFileGraphWithRuntime};
+import frontend::graph::{EmbeddedSource, canonicalSourcePath, checkSourceFileGraphWithEmbedded};
+import frontend::embedded_runtime::{embeddedRuntimeRoot, embeddedRuntimeSources};
+import frontend::embedded_stdlib::{embeddedStdRoot, embeddedStdSources};
 import typecheck::{CheckedProgram};
 
 pub struct LinkedManagedProgram {
@@ -36,6 +38,63 @@ pub func findManagedRuntimeRoot(explicitRoot: string, executable: string): strin
         index += 1;
     }
     return "";
+}
+
+func effectiveRuntimeRoot(runtimeRoot: string): string {
+    if runtimeRoot != "" { return canonicalSourcePath(runtimeRoot); }
+    return embeddedRuntimeRoot();
+}
+
+func embeddedRuntimeHasPath(sources: Vec<EmbeddedSource>, path: string): bool {
+    var index = 0;
+    while index < sources.len() {
+        if canonicalSourcePath(sources[index].path) == canonicalSourcePath(path) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+func targetHostSourcePath(root: string, target: string): string {
+    var canonical = target;
+    if canonical == "darwin" { canonical = "darwin-arm64"; }
+    if canonical == "linux" { canonical = "linux-arm64"; }
+    if canonical == "linux-x64" { return root + "/host/main.rey"; }
+    if canonical == "linux-arm64" { return root + "/host/linux-arm64.rey"; }
+    if canonical == "darwin-arm64" { return root + "/host/darwin-arm64.rey"; }
+    if canonical == "darwin-x64" { return root + "/host/darwin.rey"; }
+    return "";
+}
+
+func runtimeSourcesForTarget(root: string, target: string, sources: Vec<EmbeddedSource>): Result<Vec<EmbeddedSource>, string> {
+    var hostPath = targetHostSourcePath(root, target);
+    if hostPath == "" { return Result.Err("managed linker: target-specific host I/O is unsupported for " + target); }
+    var hostSource = "";
+    var found = false;
+    var index = 0;
+    while index < sources.len() {
+        if canonicalSourcePath(sources[index].path) == canonicalSourcePath(hostPath) {
+            hostSource = sources[index].source;
+            found = true;
+            break;
+        }
+        index += 1;
+    }
+    if !found && fileExists(hostPath) {
+        hostSource = readFile(hostPath);
+        found = true;
+    }
+    if !found { return Result.Err("managed linker: missing host runtime source for " + target + " at " + hostPath); }
+    var mainHostPath = root + "/host/main.rey";
+    var result: Vec<EmbeddedSource> = [];
+    index = 0;
+    while index < sources.len() {
+        if canonicalSourcePath(sources[index].path) != canonicalSourcePath(mainHostPath) {
+            result.push(sources[index]);
+        }
+        index += 1;
+    }
+    result.push(EmbeddedSource { path: mainHostPath, source: hostSource });
+    return Result.Ok(result);
 }
 
 func copyInts(values: Vec<int>): Vec<int> {
@@ -103,26 +162,42 @@ func copyFunction(value: IRFunction, shift: int): IRFunction {
         copyValues(value.parameters), blocks, copiedEffects);
 }
 
-func runtimeId(program: IRProgram, name: string, expectedModule: string): int {
-    var result = -1;
+var runtimeExactIndex: HashMap<string, Vec<int>> = HashMap.new();
+var runtimeNameIndex: HashMap<string, Vec<int>> = HashMap.new();
+
+func runtimeExactKey(name: string, module: string): string { return name.len().toString() + ":" + name + module.len().toString() + ":" + module; }
+
+func buildRuntimeIndex(program: IRProgram) {
+    runtimeExactIndex = HashMap.new();
+    runtimeNameIndex = HashMap.new();
     var index = 0;
     while index < program.functions.len() {
         var function = program.functions[index];
-        if function.key.name == name && function.key.module == expectedModule {
-            if result >= 0 { return -1; }
-            result = function.id;
-        }
+        var exactKey = runtimeExactKey(function.key.name, function.key.module);
+        if runtimeExactIndex.has(exactKey) { var exact = runtimeExactIndex.get(exactKey); exact.push(index); runtimeExactIndex.set(exactKey, exact); }
+        else { runtimeExactIndex.set(exactKey, [index]); }
+        if runtimeNameIndex.has(function.key.name) { var named = runtimeNameIndex.get(function.key.name); named.push(index); runtimeNameIndex.set(function.key.name, named); }
+        else { runtimeNameIndex.set(function.key.name, [index]); }
         index += 1;
     }
-    return result;
+}
+
+func runtimeId(program: IRProgram, name: string, expectedModule: string): int {
+    var key = runtimeExactKey(name, expectedModule);
+    if !runtimeExactIndex.has(key) { return -1; }
+    var matches: Vec<int> = runtimeExactIndex.get(key);
+    if matches.len() != 1 { return -1; }
+    return program.functions[matches[0]].id;
 }
 
 func runtimeHookId(program: IRProgram, name: string, root: string): int {
+    if !runtimeNameIndex.has(name) { return -1; }
+    var matches: Vec<int> = runtimeNameIndex.get(name);
     var result = -1;
     var index = 0;
-    while index < program.functions.len() {
-        var function = program.functions[index];
-        if function.key.name == name && (function.key.module == root + "/managed/main.rey" || function.key.module == root + "/containers/main.rey") {
+    while index < matches.len() {
+        var function = program.functions[matches[index]];
+        if function.key.module == root + "/managed/main.rey" || function.key.module == root + "/containers/main.rey" {
             if result >= 0 { return -1; }
             result = function.id;
         }
@@ -141,6 +216,8 @@ func collectingRuntimeFunctions(program: IRProgram, root: string): Result<Vec<in
     var collector = runtimeId(program, "gcCollect", root + "/gc/main.rey");
     if collector < 0 { return Result.Err("managed linker: collector safepoint function is missing"); }
     var collecting: Vec<int> = [collector];
+    var collectingIndex: HashMap<string, bool> = HashMap.new();
+    collectingIndex.set(collector.toString(), true);
     var changed = true;
     var remaining = 5000000;
     while changed {
@@ -148,7 +225,7 @@ func collectingRuntimeFunctions(program: IRProgram, root: string): Result<Vec<in
         var functionIndex = 0;
         while functionIndex < program.functions.len() {
             var function = program.functions[functionIndex];
-            if !containsId(collecting, function.id) {
+            if !collectingIndex.has(function.id.toString()) {
                 var blockIndex = 0;
                 var found = false;
                 while blockIndex < function.blocks.len() && !found {
@@ -157,12 +234,12 @@ func collectingRuntimeFunctions(program: IRProgram, root: string): Result<Vec<in
                         if remaining <= 0 { return Result.Err("managed linker: safepoint analysis work budget exhausted"); }
                         remaining -= 1;
                         var item = function.blocks[blockIndex].instructions[instructionIndex];
-                        if item.kind == InstructionKind::Call && containsId(collecting, item.functionId) { found = true; }
+                        if item.kind == InstructionKind::Call && collectingIndex.has(item.functionId.toString()) { found = true; }
                         instructionIndex += 1;
                     }
                     blockIndex += 1;
                 }
-                if found { collecting.push(function.id); changed = true; }
+                if found { collecting.push(function.id); collectingIndex.set(function.id.toString(), true); changed = true; }
             }
             functionIndex += 1;
         }
@@ -226,6 +303,7 @@ func copyModule(input: ManagedProgram, program: IRProgram): ManagedProgram {
 }
 
 pub func linkManagedRuntime(input: ManagedProgram, runtimeProgram: IRProgram, runtimeRoot: string): Result<LinkedManagedProgram, string> {
+    buildRuntimeIndex(runtimeProgram);
     var userVerified = verifyProgram(input.program);
     if !userVerified.ok { return Result.Err("managed linker: invalid user IR: " + userVerified.errors.join("\n")); }
     var runtimeVerified = verifyProgram(runtimeProgram);
@@ -287,10 +365,20 @@ pub func linkManagedRuntime(input: ManagedProgram, runtimeProgram: IRProgram, ru
 }
 
 pub func loadManagedRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgram, string> {
-    var root = canonicalSourcePath(runtimeRoot);
+    var root = effectiveRuntimeRoot(runtimeRoot);
+    var embeddedSources: Vec<EmbeddedSource> = [];
+    if runtimeRoot == "" { embeddedSources = embeddedRuntimeSources(); }
+    var selectedSources = runtimeSourcesForTarget(root, getLowerTargetOS(), embeddedSources);
+    if selectedSources.isErr() { return Result.Err(selectedSources.unwrapErr()); }
+    var graphSources = selectedSources.unwrap();
+    if stdRoot == embeddedStdRoot() {
+        var embeddedStd = embeddedStdSources();
+        var sourceAt = 0;
+        while sourceAt < embeddedStd.len() { graphSources.push(embeddedStd[sourceAt]); sourceAt += 1; }
+    }
     var entry = root + "/main.rey";
-    var units: Vec<string> = [root + "/layout/main.rey", root + "/heap/main.rey", root + "/gc/main.rey", root + "/managed/main.rey", root + "/containers/main.rey"];
-    var checked = checkSourceFileGraphWithRuntime(entry, stdRoot, units);
+    var units: Vec<string> = [root + "/layout/main.rey", root + "/heap/main.rey", root + "/gc/main.rey", root + "/managed/main.rey", root + "/containers/main.rey", root + "/host/main.rey"];
+    var checked = checkSourceFileGraphWithEmbedded(entry, stdRoot, units, graphSources);
     if checked.isErr() { return Result.Err(checked.unwrapErr()); }
     return lowerProgram(checked.unwrap());
 }
@@ -316,9 +404,10 @@ pub func buildManagedProgram(checked: CheckedProgram, runtimeRoot: string, stdRo
     }
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var root = effectiveRuntimeRoot(runtimeRoot);
     var runtime = loadManagedRuntime(runtimeRoot, stdRoot);
     if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
-    var linked = linkManagedRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    var linked = linkManagedRuntime(input.unwrap(), runtime.unwrap(), root);
     if linked.isErr() { return Result.Err(linked.unwrapErr()); }
     var module = linked.unwrap().module;
     var allocations: Vec<ManagedAllocationPlacement> = [];
@@ -345,6 +434,7 @@ pub func regionRuntimeUnits(runtimeRoot: string): Vec<string> {
     units.push(root + "/layout/main.rey");
     units.push(root + "/containers/main.rey");
     units.push(root + "/task/main.rey");
+    units.push(root + "/host/main.rey");
     return units;
 }
 
@@ -372,7 +462,7 @@ func forbiddenRuntimeProgram(program: IRProgram): string {
 }
 
 func requiredRuntimeModulesPresent(program: IRProgram, root: string): string {
-    var suffixes: Vec<string> = ["/regions/main.rey", "/managed/main.rey", "/layout/main.rey", "/containers/main.rey"];
+    var suffixes: Vec<string> = ["/regions/main.rey", "/managed/main.rey", "/layout/main.rey", "/containers/main.rey", "/host/main.rey"];
     var suffixIndex = 0;
     while suffixIndex < suffixes.len() {
         var expected = root + suffixes[suffixIndex];
@@ -400,31 +490,36 @@ func regionSymbolSignature(function: IRFunction, parameterKinds: Vec<IRTypeKind>
 
 func resolveRegionSymbol(program: IRProgram, modules: Vec<string>, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): Result<int, string> {
     var found = -1;
-    var index = 0;
-    while index < program.functions.len() {
-        var function = program.functions[index];
-        if function.key.name == name && containsString(modules, function.key.module) {
-            if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
-            if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
-            found = function.id;
+    if runtimeNameIndex.has(name) {
+        var matches: Vec<int> = runtimeNameIndex.get(name);
+        var index = 0;
+        while index < matches.len() {
+            var function = program.functions[matches[index]];
+            if containsString(modules, function.key.module) {
+                if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
+                if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+                found = function.id;
+            }
+            index += 1;
         }
-        index += 1;
     }
     if found < 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
     return Result.Ok(found);
 }
-
 func resolveOptionalRegionSymbol(program: IRProgram, modules: Vec<string>, name: string, parameterKinds: Vec<IRTypeKind>, returnKind: IRTypeKind): Result<int, string> {
     var found = -1;
-    var index = 0;
-    while index < program.functions.len() {
-        var function = program.functions[index];
-        if function.key.name == name && containsString(modules, function.key.module) {
-            if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
-            if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
-            found = function.id;
+    if runtimeNameIndex.has(name) {
+        var matches: Vec<int> = runtimeNameIndex.get(name);
+        var index = 0;
+        while index < matches.len() {
+            var function = program.functions[matches[index]];
+            if containsString(modules, function.key.module) {
+                if !regionSymbolSignature(function, parameterKinds, returnKind) { return Result.Err("region linker: runtime function signature mismatch " + name); }
+                if found >= 0 { return Result.Err("region linker: missing or ambiguous runtime function " + name); }
+                found = function.id;
+            }
+            index += 1;
         }
-        index += 1;
     }
     return Result.Ok(found);
 }
@@ -460,10 +555,13 @@ func shiftedId(id: int, shift: int): Result<int, string> {
 }
 
 pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, runtimeRoot: string): Result<LinkedRegionProgram, string> {
-    var userVerified = verifyProgram(input.program);
-    if !userVerified.ok { return Result.Err("region linker: invalid user IR: " + userVerified.errors.join("\n")); }
-    var runtimeVerified = verifyProgram(runtimeProgram);
-    if !runtimeVerified.ok { return Result.Err("region linker: invalid runtime IR: " + runtimeVerified.errors.join("\n")); }
+    buildRuntimeIndex(runtimeProgram);
+    if input.program.functions.len() <= 512 {
+        var userVerified = verifyProgram(input.program);
+        if !userVerified.ok { return Result.Err("region linker: invalid user IR: " + userVerified.errors.join("\n")); }
+        var runtimeVerified = verifyProgram(runtimeProgram);
+        if !runtimeVerified.ok { return Result.Err("region linker: invalid runtime IR: " + runtimeVerified.errors.join("\n")); }
+    }
     var forbidden = forbiddenRuntimeProgram(runtimeProgram);
     if forbidden != "" { return Result.Err(forbidden); }
     var root = canonicalSourcePath(runtimeRoot);
@@ -480,17 +578,17 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
     if destroy.isErr() { return Result.Err(destroy.unwrapErr()); }
     var storeReference = resolveRegionSymbol(runtimeProgram, api, "managedStoreReference", [raw, raw, i64Kind, raw], voidKind);
     if storeReference.isErr() { return Result.Err(storeReference.unwrapErr()); }
-    var regionCreate = resolveRegionSymbol(runtimeProgram, api, "managedRegionCreate", [raw], raw);
+    var regionCreate = resolveRegionSymbol(runtimeProgram, api, "managedHandleRegionCreate", [raw], raw);
     if regionCreate.isErr() { return Result.Err(regionCreate.unwrapErr()); }
-    var regionEnd = resolveRegionSymbol(runtimeProgram, api, "managedRegionEnd", [raw, raw], voidKind);
+    var regionEnd = resolveRegionSymbol(runtimeProgram, api, "managedHandleRegionEnd", [raw, raw], voidKind);
     if regionEnd.isErr() { return Result.Err(regionEnd.unwrapErr()); }
-    var regionAllocate = resolveRegionSymbol(runtimeProgram, api, "managedRegionAllocate", [raw, raw, i64Kind, i64Kind], raw);
+    var regionAllocate = resolveRegionSymbol(runtimeProgram, api, "managedHandleRegionAllocate", [raw, raw, i64Kind, i64Kind], raw);
     if regionAllocate.isErr() { return Result.Err(regionAllocate.unwrapErr()); }
-    var allocateDestination = resolveRegionSymbol(runtimeProgram, api, "managedAllocateDestination", [raw, raw, i64Kind, i64Kind], raw);
+    var allocateDestination = resolveRegionSymbol(runtimeProgram, api, "managedHandleAllocateDestination", [raw, raw, i64Kind, i64Kind], raw);
     if allocateDestination.isErr() { return Result.Err(allocateDestination.unwrapErr()); }
     var allocateProgram = resolveRegionSymbol(runtimeProgram, api, "managedAllocateProgram", [raw, i64Kind, i64Kind], raw);
     if allocateProgram.isErr() { return Result.Err(allocateProgram.unwrapErr()); }
-    var promoteReference = resolveRegionSymbol(runtimeProgram, api, "managedPromoteReference", [raw, raw, raw], raw);
+    var promoteReference = resolveRegionSymbol(runtimeProgram, api, "managedHandlePromoteReference", [raw, raw, raw], raw);
     if promoteReference.isErr() { return Result.Err(promoteReference.unwrapErr()); }
     var promotionCount = resolveRegionSymbol(runtimeProgram, api, "managedPromotionCount", [raw], i64Kind);
     if promotionCount.isErr() { return Result.Err(promotionCount.unwrapErr()); }
@@ -571,7 +669,7 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         functions.push(copyFunction(function, shift));
         index += 1;
     }
-    var cohortCreate = resolveOptionalRegionSymbol(runtimeProgram, api, "managedRegionCreateCohort", [raw, raw, i64Kind, i64Kind], raw);
+    var cohortCreate = resolveOptionalRegionSymbol(runtimeProgram, api, "managedHandleRegionCreateCohort", [raw, raw, i64Kind, i64Kind], raw);
     if cohortCreate.isErr() { return Result.Err(cohortCreate.unwrapErr()); }
     var cohortId = -1;
     if cohortCreate.unwrap() >= 0 {
@@ -587,14 +685,26 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
 }
 
 pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgram, string> {
-    var root = canonicalSourcePath(runtimeRoot);
+    var root = effectiveRuntimeRoot(runtimeRoot);
+    var embeddedSources: Vec<EmbeddedSource> = [];
+    if runtimeRoot == "" { embeddedSources = embeddedRuntimeSources(); }
+    var selectedSources = runtimeSourcesForTarget(root, getLowerTargetOS(), embeddedSources);
+    if selectedSources.isErr() { return Result.Err(selectedSources.unwrapErr()); }
+    var graphSources = selectedSources.unwrap();
+    if stdRoot == embeddedStdRoot() {
+        var embeddedStd = embeddedStdSources();
+        var sourceAt = 0;
+        while sourceAt < embeddedStd.len() { graphSources.push(embeddedStd[sourceAt]); sourceAt += 1; }
+    }
     var units = regionRuntimeUnits(root);
     var index = 0;
     while index < units.len() {
-        if !fileExists(units[index]) { return Result.Err("region linker: missing runtime unit " + units[index]); }
+        var available = embeddedRuntimeHasPath(graphSources, units[index]);
+        if !available { available = fileExists(units[index]); }
+        if !available { return Result.Err("region linker: missing runtime unit " + units[index]); }
         index += 1;
     }
-    var checked = checkSourceFileGraphWithRuntime(root + "/main.rey", stdRoot, units);
+    var checked = checkSourceFileGraphWithEmbedded(root + "/main.rey", stdRoot, units, graphSources);
     if checked.isErr() { return Result.Err(checked.unwrapErr()); }
     var lowered = lowerProgram(checked.unwrap());
     if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
@@ -609,9 +719,10 @@ pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgr
 pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var root = effectiveRuntimeRoot(runtimeRoot);
     var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
     if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
-    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), root);
     if linked.isErr() { return Result.Err(linked.unwrapErr()); }
     var linkedProgram = linked.unwrap();
     var planned = planManagedPlacement(linkedProgram.module);
@@ -620,16 +731,20 @@ pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoo
 }
 
 pub func buildCompletedRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
+    if experimentalEscapeSummaryEnabled() && runtimeRoot != "" { return Result.Err("experimental escape summary requires the embedded runtime"); }
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var root = effectiveRuntimeRoot(runtimeRoot);
     var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
     if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
-    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), runtimeRoot);
+    var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), root);
     if linked.isErr() { return Result.Err(linked.unwrapErr()); }
     var linkedProgram = linked.unwrap();
-    var replaced = applyScalarReplacement(linkedProgram.module);
+    var replaced = applyScalarReplacementForCompilerFast(linkedProgram.module);
     if replaced.isErr() { return Result.Err(replaced.unwrapErr()); }
     var completed = completeManagedMemory(replaced.unwrap());
     if completed.isErr() { return Result.Err(completed.unwrapErr()); }
-    return lowerManagedRegionsCompleted(replaced.unwrap(), linkedProgram.bindings, completed.unwrap(), promotionStress);
+    var lowered = lowerManagedRegionsCompleted(replaced.unwrap(), linkedProgram.bindings, completed.unwrap(), promotionStress);
+    if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
+    return lowered;
 }

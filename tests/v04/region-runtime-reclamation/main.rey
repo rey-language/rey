@@ -1,0 +1,80 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::{IRProgram, printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
+import native::x64::{X64Code, emitProgram, emitProgramWithReuse};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func knownCase(name: string): bool {
+    return name == "reclaim-three-slabs" || name == "direct-mapping-metrics" || name == "opaque-handle-reuse" || name == "active-context-destroy" || name == "teardown-many-direct-chunks";
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func emitImages(program: IRProgram, name: string, outputDirectory: string, reuseSlots: bool): void {
+    var darwin: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if reuseSlots { darwin = emitArm64WithReuse(program, "darwin"); }
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/darwin-" + name, macho.unwrap(), name + " Darwin");
+    var linux: Result<Arm64Code, string> = emitArm64(program, "linux");
+    if reuseSlots { linux = emitArm64WithReuse(program, "linux"); }
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-" + name, elf.unwrap(), name + " Linux");
+    var x64: Result<X64Code, string> = emitProgram(program, "linux-x64");
+    if reuseSlots { x64 = emitProgramWithReuse(program, "linux-x64"); }
+    if x64.isErr() { eprintln(name + ": Linux x64 emission failed: " + x64.unwrapErr()); exit(1); }
+    var x64Elf = buildElfX64(x64.unwrap());
+    if x64Elf.isErr() { eprintln(name + ": Linux x64 ELF build failed: " + x64Elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-x64-" + name, x64Elf.unwrap(), name + " Linux x64");
+}
+
+func exercise(fixtures: string, sourceDirectory: string, outputDirectory: string, name: string, reuseSlots: bool): void {
+    require(knownCase(name), "unknown fixture name: " + name);
+    var entryPath = sourceDirectory + "/main.rey";
+    var units: Vec<string> = [sourceDirectory + "/layout/main.rey", sourceDirectory + "/regions/main.rey", sourceDirectory + "/managed/main.rey", sourceDirectory + "/containers/main.rey", sourceDirectory + "/host/main.rey", entryPath];
+    writeFile(entryPath, readFile(fixtures + "/" + name + ".rey"));
+    require(checkSourceFileGraph(entryPath, "").isErr(), name + ": ordinary source checking must not authorize raw runtime units");
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
+    if checked.isErr() { eprintln(name + ": " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var steps = "native-only";
+    if name != "reclaim-three-slabs" && name != "active-context-destroy" && name != "teardown-many-direct-chunks" {
+        var evaluated = evaluateProgram(program, 12000000, 64);
+        require(evaluated.ok && evaluated.isVoid, name + ": evaluator failed: " + evaluated.error);
+        steps = evaluated.steps.toString();
+    }
+    writeFile(outputDirectory + "/" + name + ".steps", steps);
+    writeFile(outputDirectory + "/" + name + ".ir", printIR(program));
+    emitImages(program, name, outputDirectory, reuseSlots);
+    println("region-runtime-reclamation-case " + name + " emitted steps=" + steps);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 5 || argv.len() == 6, "expected fixture directory, staged source directory, output directory, case, and optional --reuse-slots");
+    if argv.len() == 6 { require(argv[5] == "--reuse-slots", "optional final argument must be --reuse-slots"); }
+    exercise(argv[1], argv[2], argv[3], argv[4], argv.len() == 6);
+}

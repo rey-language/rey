@@ -22,6 +22,9 @@
     "wrapper shape",
     "promotion stress",
     "region runtime link and remap",
-    "legacy buildManagedProgram regions=true rejection"
+    "legacy buildManagedProgram regions=true rejection",
+    "caller-region container retention",
+    "unknown callee program region",
+    "stack placement of a scalar local"
   ]
 }

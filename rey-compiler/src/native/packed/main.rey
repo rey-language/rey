@@ -1,0 +1,542 @@
+// Managed byte storage packed seven bytes per signed 64-bit lane.
+import native::bytes::{byteString};
+
+// Compiler-internal fields stay public and mutable; writers validate them before output.
+pub struct PackedBuffer {
+    pub lanes: Vec<int>,
+    pub length: int,
+    pub magic: int,
+}
+
+func packedBytesPerLane(): int { return 7; }
+func packedMaxLanes(): int { return 153391689; }
+func packedMaxBytes(): int { return 1073741823; }
+func packedMaxReadBytes(): int { return 65536; }
+func packedMagic(): int { return 1346458188; }
+
+func packedError(message: string): string { return "packed buffer: " + message; }
+func packedLaneIsValid(lane: int): bool { return lane >= 0 && lane < 72057594037927936; }
+
+func packedFactor(slot: int): int {
+    if slot == 0 { return 1; }
+    if slot == 1 { return 256; }
+    if slot == 2 { return 65536; }
+    if slot == 3 { return 16777216; }
+    if slot == 4 { return 4294967296; }
+    if slot == 5 { return 1099511627776; }
+    if slot == 6 { return 281474976710656; }
+    return 0;
+}
+
+func packedLimit(byteCount: int): int {
+    var limit = 1;
+    var index = 0;
+    while index < byteCount {
+        limit = limit * 256;
+        index = index + 1;
+    }
+    return limit;
+}
+
+func packedPackBytes(bytes: string, start: int, count: int): int {
+    var lane = 0;
+    var index = 0;
+    while index < count {
+        lane = lane + int(bytes[start + index]) * packedFactor(index);
+        index = index + 1;
+    }
+    return lane;
+}
+
+func packedLaneByte(lane: int, slot: int): int {
+    return (lane / packedFactor(slot)) % 256;
+}
+
+func packedValid(buffer: PackedBuffer): bool {
+    if buffer.magic != packedMagic() { return false; }
+    var length = buffer.length;
+    if length < 0 || buffer.lanes.len() > packedMaxLanes() { return false; }
+    var capacity = buffer.lanes.len() * packedBytesPerLane();
+    if length > capacity || capacity > packedMaxBytes() { return false; }
+    var usedTailBytes = length % packedBytesPerLane();
+    if usedTailBytes > 0 {
+        var tailLane = buffer.lanes[length / packedBytesPerLane()];
+        if !packedLaneIsValid(tailLane) || tailLane >= packedLimit(usedTailBytes) { return false; }
+    }
+    return true;
+}
+
+pub func packedBufferMaximumLength(): int { return packedMaxBytes(); }
+
+func packedReserve(buffer: PackedBuffer, minimumCapacity: int): bool {
+    if !packedValid(buffer) || minimumCapacity < 0 || minimumCapacity > packedMaxBytes() { return false; }
+    var requiredLanes = (minimumCapacity + packedBytesPerLane() - 1) / packedBytesPerLane();
+    while buffer.lanes.len() < requiredLanes { buffer.lanes.push(0); }
+    return true;
+}
+
+func packedStoreLane(buffer: PackedBuffer, laneIndex: int, lane: int): bool {
+    if laneIndex < 0 || laneIndex > buffer.lanes.len() || laneIndex >= packedMaxLanes() { return false; }
+    if !packedLaneIsValid(lane) { return false; }
+    if laneIndex == buffer.lanes.len() { buffer.lanes.push(lane); }
+    else { buffer.lanes.set(laneIndex, lane); }
+    return true;
+}
+
+func packedAppendRawByte(buffer: PackedBuffer, value: int): bool {
+    if value < 0 || value > 255 || buffer.length >= packedMaxBytes() { return false; }
+    var length = buffer.length;
+    var laneIndex = length / packedBytesPerLane();
+    var slot = length % packedBytesPerLane();
+    var lane = value;
+    if slot > 0 {
+        var currentLane = buffer.lanes[laneIndex];
+        if !packedLaneIsValid(currentLane) { return false; }
+        lane = currentLane + value * packedFactor(slot);
+    }
+    if !packedStoreLane(buffer, laneIndex, lane) { return false; }
+    buffer.length = length + 1;
+    return true;
+}
+
+func packedAppendLane(buffer: PackedBuffer, lane: int, byteCount: int): bool {
+    if byteCount < 1 || byteCount > packedBytesPerLane() { return false; }
+    if lane < 0 || lane >= packedLimit(byteCount) { return false; }
+    var length = buffer.length;
+    if byteCount > packedMaxBytes() - length { return false; }
+    if length % packedBytesPerLane() == 0 {
+        var laneIndex = length / packedBytesPerLane();
+        if !packedStoreLane(buffer, laneIndex, lane) { return false; }
+        buffer.length = length + byteCount;
+        return true;
+    }
+    var remaining = byteCount;
+    var value = lane;
+    while remaining > 0 && length % packedBytesPerLane() != 0 {
+        if !packedAppendRawByte(buffer, value % 256) { return false; }
+        value = value / 256;
+        remaining = remaining - 1;
+        length = length + 1;
+    }
+    while remaining >= packedBytesPerLane() {
+        var laneIndex = buffer.length / packedBytesPerLane();
+        if !packedStoreLane(buffer, laneIndex, value % packedLimit(packedBytesPerLane())) { return false; }
+        buffer.length = buffer.length + packedBytesPerLane();
+        value = value / packedLimit(packedBytesPerLane());
+        remaining = remaining - packedBytesPerLane();
+    }
+    while remaining > 0 {
+        if !packedAppendRawByte(buffer, value % 256) { return false; }
+        value = value / 256;
+        remaining = remaining - 1;
+    }
+    return true;
+}
+
+pub func packedBufferCreate(initialCapacity: int): Result<PackedBuffer, string> {
+    if initialCapacity < 0 || initialCapacity > packedMaxBytes() {
+        return Result.Err(packedError("initial capacity is outside the supported range"));
+    }
+    var buffer = PackedBuffer { lanes: Vec.new(), length: 0, magic: packedMagic() };
+    if !packedReserve(buffer, initialCapacity) { return Result.Err(packedError("cannot reserve initial capacity")); }
+    return Result.Ok(buffer);
+}
+
+pub func packedBufferLength(buffer: PackedBuffer): Result<int, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    return Result.Ok(buffer.length);
+}
+
+pub func packedBufferTryLength(buffer: PackedBuffer): int {
+    if !packedValid(buffer) { return -1; }
+    return buffer.length;
+}
+
+pub func packedBufferCapacity(buffer: PackedBuffer): Result<int, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    return Result.Ok(buffer.lanes.len() * packedBytesPerLane());
+}
+
+pub func packedBufferReserve(buffer: PackedBuffer, minimumCapacity: int): Result<bool, string> {
+    if !packedReserve(buffer, minimumCapacity) {
+        return Result.Err(packedError("requested capacity is outside the supported range"));
+    }
+    return Result.Ok(true);
+}
+
+pub func packedBufferAppendByte(buffer: PackedBuffer, value: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if !packedAppendRawByte(buffer, value) { return Result.Err(packedError("byte value or append range is invalid")); }
+    return Result.Ok(true);
+}
+
+pub func packedBufferTryAppendByte(buffer: PackedBuffer, value: int): bool {
+    if !packedValid(buffer) { return false; }
+    return packedAppendRawByte(buffer, value);
+}
+
+pub func packedBufferTryAppendPackedLane(buffer: PackedBuffer, lane: int, byteCount: int): bool {
+    if !packedValid(buffer) { return false; }
+    return packedAppendLane(buffer, lane, byteCount);
+}
+
+pub func packedBufferTryAppendU32Le(buffer: PackedBuffer, value: int): bool {
+    if value < 0 || value > 4294967295 || !packedValid(buffer) { return false; }
+    return packedAppendLane(buffer, value, 4);
+}
+
+pub func packedBufferTryAppendU64Le(buffer: PackedBuffer, value: int): bool {
+    if value < 0 || !packedValid(buffer) { return false; }
+    if 8 > packedMaxBytes() - buffer.length { return false; }
+    var low = value % packedLimit(packedBytesPerLane());
+    var high = value / packedLimit(packedBytesPerLane());
+    if !packedAppendLane(buffer, low, packedBytesPerLane()) { return false; }
+    return packedAppendRawByte(buffer, high);
+}
+
+pub func packedBufferAppendPackedLane(buffer: PackedBuffer, lane: int, byteCount: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if !packedAppendLane(buffer, lane, byteCount) { return Result.Err(packedError("packed lane value or byte count is invalid")); }
+    return Result.Ok(true);
+}
+
+pub func packedBufferAppendU16Le(buffer: PackedBuffer, value: int): Result<bool, string> {
+    if value < 0 || value > 65535 { return Result.Err(packedError("value must fit uint16")); }
+    return packedBufferAppendPackedLane(buffer, value, 2);
+}
+
+pub func packedBufferAppendU32Le(buffer: PackedBuffer, value: int): Result<bool, string> {
+    if value < 0 || value > 4294967295 { return Result.Err(packedError("value must fit uint32")); }
+    return packedBufferAppendPackedLane(buffer, value, 4);
+}
+
+pub func packedBufferAppendU64Le(buffer: PackedBuffer, value: int): Result<bool, string> {
+    if value < 0 { return Result.Err(packedError("value must be a nonnegative signed 64-bit integer")); }
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if 8 > packedMaxBytes() - buffer.length { return Result.Err(packedError("append exceeds the supported capacity")); }
+    var low = value % packedLimit(packedBytesPerLane());
+    var high = value / packedLimit(packedBytesPerLane());
+    var first = packedBufferAppendPackedLane(buffer, low, packedBytesPerLane());
+    if first.isErr() { return first; }
+    return packedBufferAppendByte(buffer, high);
+}
+
+pub func packedBufferAppendBytes(buffer: PackedBuffer, bytes: string): Result<bool, string> {
+    if !packedBufferTryAppendBytes(buffer, bytes) {
+        if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+        if bytes.len() > packedMaxBytes() - buffer.length { return Result.Err(packedError("append exceeds the supported capacity")); }
+        return Result.Err(packedError("packed byte append failed"));
+    }
+    return Result.Ok(true);
+}
+
+pub func packedBufferTryAppendBytes(buffer: PackedBuffer, bytes: string): bool {
+    if !packedValid(buffer) { return false; }
+    if bytes.len() > packedMaxBytes() - buffer.length { return false; }
+    var offset = 0;
+    while offset < bytes.len() && buffer.length % packedBytesPerLane() != 0 {
+        if !packedAppendRawByte(buffer, int(bytes[offset])) { return false; }
+        offset = offset + 1;
+    }
+    while bytes.len() - offset >= packedBytesPerLane() {
+        var lane = packedPackBytes(bytes, offset, packedBytesPerLane());
+        var laneIndex = buffer.length / packedBytesPerLane();
+        if !packedStoreLane(buffer, laneIndex, lane) { return false; }
+        buffer.length = buffer.length + packedBytesPerLane();
+        offset = offset + packedBytesPerLane();
+    }
+    while offset < bytes.len() {
+        if !packedAppendRawByte(buffer, int(bytes[offset])) { return false; }
+        offset = offset + 1;
+    }
+    return true;
+}
+
+pub func packedBufferAppendZeros(buffer: PackedBuffer, count: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if count < 0 || count > packedMaxBytes() - buffer.length { return Result.Err(packedError("zero fill exceeds the supported capacity")); }
+    var remaining = count;
+    while remaining > 0 && buffer.length % packedBytesPerLane() != 0 {
+        if !packedAppendRawByte(buffer, 0) { return Result.Err(packedError("zero append failed")); }
+        remaining = remaining - 1;
+    }
+    while remaining >= packedBytesPerLane() {
+        var laneIndex = buffer.length / packedBytesPerLane();
+        if !packedStoreLane(buffer, laneIndex, 0) { return Result.Err(packedError("zero append failed")); }
+        buffer.length = buffer.length + packedBytesPerLane();
+        remaining = remaining - packedBytesPerLane();
+    }
+    while remaining > 0 {
+        if !packedAppendRawByte(buffer, 0) { return Result.Err(packedError("zero append failed")); }
+        remaining = remaining - 1;
+    }
+    return Result.Ok(true);
+}
+
+pub func packedBufferSetLength(buffer: PackedBuffer, newLength: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if newLength < 0 || newLength > packedMaxBytes() { return Result.Err(packedError("length is outside the supported range")); }
+    var oldLength = buffer.length;
+    if newLength >= oldLength { return packedBufferAppendZeros(buffer, newLength - oldLength); }
+    var laneCount = (newLength + packedBytesPerLane() - 1) / packedBytesPerLane();
+    var usedInLastLane = newLength % packedBytesPerLane();
+    if usedInLastLane > 0 {
+        var lastLaneIndex = laneCount - 1;
+        var lastLane = buffer.lanes[lastLaneIndex];
+        if !packedLaneIsValid(lastLane) { return Result.Err(packedError("invalid packed lane")); }
+        buffer.lanes.set(lastLaneIndex, lastLane % packedFactor(usedInLastLane));
+    }
+    while buffer.lanes.len() > laneCount { buffer.lanes.pop(); }
+    buffer.length = newLength;
+    return Result.Ok(true);
+}
+
+pub func packedBufferReadWord(buffer: PackedBuffer, laneIndex: int): Result<int, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if laneIndex < 0 { return Result.Err(packedError("lane index is outside the buffer")); }
+    var usedLanes = (buffer.length + packedBytesPerLane() - 1) / packedBytesPerLane();
+    if laneIndex >= usedLanes { return Result.Err(packedError("lane index is outside the buffer")); }
+    var lane = buffer.lanes[laneIndex];
+    if !packedLaneIsValid(lane) { return Result.Err(packedError("invalid packed lane")); }
+    return Result.Ok(lane);
+}
+
+pub func packedBufferWordCount(buffer: PackedBuffer): Result<int, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    return Result.Ok((buffer.length + packedBytesPerLane() - 1) / packedBytesPerLane());
+}
+
+pub func packedBufferWordByteCount(buffer: PackedBuffer, laneIndex: int): Result<int, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if laneIndex < 0 { return Result.Err(packedError("lane index is outside the buffer")); }
+    var usedLanes = (buffer.length + packedBytesPerLane() - 1) / packedBytesPerLane();
+    if laneIndex >= usedLanes { return Result.Err(packedError("lane index is outside the buffer")); }
+    var remaining = buffer.length - laneIndex * packedBytesPerLane();
+    if remaining > packedBytesPerLane() { remaining = packedBytesPerLane(); }
+    return Result.Ok(remaining);
+}
+
+pub func packedBufferReadWords(buffer: PackedBuffer, laneStart: int, laneCount: int): Result<Vec<int>, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    var usedLanes = (buffer.length + packedBytesPerLane() - 1) / packedBytesPerLane();
+    if laneStart < 0 || laneStart > usedLanes { return Result.Err(packedError("lane range is outside the buffer")); }
+    if laneCount < 0 { return Result.Err(packedError("lane range is outside the buffer")); }
+    if laneCount > usedLanes - laneStart { return Result.Err(packedError("lane range is outside the buffer")); }
+    var words: Vec<int> = Vec.new();
+    var index = 0;
+    while index < laneCount {
+        var lane = buffer.lanes[laneStart + index];
+        if !packedLaneIsValid(lane) { return Result.Err(packedError("invalid packed lane")); }
+        words.push(lane);
+        index = index + 1;
+    }
+    return Result.Ok(words);
+}
+
+pub func packedBufferReadBytes(buffer: PackedBuffer, start: int, count: int): Result<string, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    var length = buffer.length;
+    if start < 0 || start > length { return Result.Err(packedError("read range is outside the buffer")); }
+    if count < 0 { return Result.Err(packedError("read range is outside the buffer")); }
+    if count > length - start { return Result.Err(packedError("read range is outside the buffer")); }
+    if count > packedMaxReadBytes() { return Result.Err(packedError("string reads are limited to 65536 bytes; use packed word reads for larger ranges")); }
+    var pieces: Vec<string> = Vec.new();
+    var offset = start;
+    var remaining = count;
+    while remaining > 0 {
+        var laneIndex = offset / packedBytesPerLane();
+        var laneOffset = offset % packedBytesPerLane();
+        var pieceLength = packedBytesPerLane() - laneOffset;
+        if pieceLength > remaining { pieceLength = remaining; }
+        var lane = buffer.lanes[laneIndex];
+        if !packedLaneIsValid(lane) { return Result.Err(packedError("invalid packed lane")); }
+        var piece = "";
+        var index = 0;
+        while index < pieceLength {
+            piece = piece + string(char(packedLaneByte(lane, laneOffset + index)));
+            index = index + 1;
+        }
+        pieces.push(piece);
+        offset = offset + pieceLength;
+        remaining = remaining - pieceLength;
+    }
+    while pieces.len() > 1 {
+        var next: Vec<string> = Vec.new();
+        var pieceIndex = 0;
+        while pieceIndex < pieces.len() {
+            if pieceIndex + 1 < pieces.len() { next.push(pieces[pieceIndex] + pieces[pieceIndex + 1]); }
+            else { next.push(pieces[pieceIndex]); }
+            pieceIndex = pieceIndex + 2;
+        }
+        pieces = next;
+    }
+    if pieces.len() == 0 { return Result.Ok(""); }
+    return Result.Ok(pieces[0]);
+}
+
+pub func packedBufferReadByte(buffer: PackedBuffer, index: int): Result<int, string> {
+    var value = packedBufferTryReadByte(buffer, index);
+    if value < 0 { return Result.Err(packedError("byte index is outside the buffer")); }
+    return Result.Ok(value);
+}
+
+pub func packedBufferTryReadByte(buffer: PackedBuffer, index: int): int {
+    if !packedValid(buffer) || index < 0 || index >= buffer.length { return -1; }
+    var laneIndex = index / packedBytesPerLane();
+    var slot = index % packedBytesPerLane();
+    var lane = buffer.lanes[laneIndex];
+    if !packedLaneIsValid(lane) { return -1; }
+    return packedLaneByte(lane, slot);
+}
+
+pub func packedBufferPatchByte(buffer: PackedBuffer, index: int, value: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if !packedBufferTryPatchByte(buffer, index, value) {
+        if value < 0 || value > 255 { return Result.Err(packedError("byte value must be in 0..255")); }
+        return Result.Err(packedError("patch index is outside the buffer"));
+    }
+    return Result.Ok(true);
+}
+
+pub func packedBufferTryPatchByte(buffer: PackedBuffer, index: int, value: int): bool {
+    if !packedValid(buffer) || index < 0 || index >= buffer.length || value < 0 || value > 255 { return false; }
+    var laneIndex = index / packedBytesPerLane();
+    var slot = index % packedBytesPerLane();
+    var factor = packedFactor(slot);
+    var oldLane = buffer.lanes[laneIndex];
+    if !packedLaneIsValid(oldLane) { return false; }
+    var oldByte = packedLaneByte(oldLane, slot);
+    buffer.lanes.set(laneIndex, oldLane - oldByte * factor + value * factor);
+    return true;
+}
+
+pub func packedBufferPatchU32Le(buffer: PackedBuffer, offset: int, value: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if value < 0 || value > 4294967295 { return Result.Err(packedError("value must fit uint32")); }
+    var length = buffer.length;
+    if offset < 0 || offset > length { return Result.Err(packedError("patch range must contain four bytes")); }
+    if length - offset < 4 { return Result.Err(packedError("patch range must contain four bytes")); }
+    if !packedBufferTryPatchU32Le(buffer, offset, value) { return Result.Err(packedError("uint32 patch failed")); }
+    return Result.Ok(true);
+}
+
+pub func packedBufferTryPatchU32Le(buffer: PackedBuffer, offset: int, value: int): bool {
+    if !packedValid(buffer) || value < 0 || value > 4294967295 { return false; }
+    var length = buffer.length;
+    if offset < 0 || offset > length { return false; }
+    if length - offset < 4 { return false; }
+    var remaining = value;
+    var index = 0;
+    while index < 4 {
+        if !packedBufferTryPatchByte(buffer, offset + index, remaining % 256) { return false; }
+        remaining = remaining / 256;
+        index = index + 1;
+    }
+    return true;
+}
+
+pub func packedBufferPatchU64Le(buffer: PackedBuffer, offset: int, value: int): Result<bool, string> {
+    if !packedValid(buffer) { return Result.Err(packedError("invalid buffer state")); }
+    if value < 0 { return Result.Err(packedError("value must be a nonnegative signed 64-bit integer")); }
+    var length = buffer.length;
+    if offset < 0 || offset > length { return Result.Err(packedError("patch range must contain eight bytes")); }
+    if length - offset < 8 { return Result.Err(packedError("patch range must contain eight bytes")); }
+    if !packedBufferTryPatchU64Le(buffer, offset, value) { return Result.Err(packedError("uint64 patch failed")); }
+    return Result.Ok(true);
+}
+
+pub func packedBufferTryPatchU64Le(buffer: PackedBuffer, offset: int, value: int): bool {
+    if !packedValid(buffer) || value < 0 { return false; }
+    var length = buffer.length;
+    if offset < 0 || offset > length { return false; }
+    if length - offset < 8 { return false; }
+    var remaining = value;
+    var index = 0;
+    while index < 8 {
+        if !packedBufferTryPatchByte(buffer, offset + index, remaining % 256) { return false; }
+        remaining = remaining / 256;
+        index = index + 1;
+    }
+    return true;
+}
+
+pub func packedBufferAppendBuffer(buffer: PackedBuffer, source: PackedBuffer, start: int, count: int): Result<bool, string> {
+    if !packedValid(buffer) || !packedValid(source) { return Result.Err(packedError("invalid buffer state")); }
+    var sourceLength = source.length;
+    if start < 0 || start > sourceLength { return Result.Err(packedError("source range is outside the buffer")); }
+    if count < 0 { return Result.Err(packedError("source range is outside the buffer")); }
+    if count > sourceLength - start { return Result.Err(packedError("source range is outside the buffer")); }
+    if count > packedMaxBytes() - buffer.length { return Result.Err(packedError("append exceeds the supported capacity")); }
+
+    var sourceLaneStart = start / packedBytesPerLane();
+    var sourceEnd = start + count;
+    var sourceLaneEnd = sourceLaneStart;
+    if count > 0 { sourceLaneEnd = (sourceEnd + packedBytesPerLane() - 1) / packedBytesPerLane(); }
+    var sharesLanes = buffer.lanes == source.lanes;
+    var sourceSnapshot: Vec<int> = Vec.new();
+    var laneIndex = sourceLaneStart;
+    while laneIndex < sourceLaneEnd {
+        var lane = source.lanes[laneIndex];
+        if !packedLaneIsValid(lane) { return Result.Err(packedError("invalid source lane")); }
+        if sharesLanes { sourceSnapshot.push(lane); }
+        laneIndex = laneIndex + 1;
+    }
+
+    var copied = 0;
+    while copied < count {
+        var sourceOffset = start + copied;
+        var sourceLaneIndex = sourceOffset / packedBytesPerLane();
+        var sourceLane = source.lanes[sourceLaneIndex];
+        if sharesLanes { sourceLane = sourceSnapshot[sourceLaneIndex - sourceLaneStart]; }
+        var destinationAligned = buffer.length % packedBytesPerLane() == 0;
+        var sourceAligned = sourceOffset % packedBytesPerLane() == 0;
+        if destinationAligned && sourceAligned && count - copied >= packedBytesPerLane() {
+            var destinationLane = buffer.length / packedBytesPerLane();
+            if !packedStoreLane(buffer, destinationLane, sourceLane) { return Result.Err(packedError("packed copy failed")); }
+            buffer.length = buffer.length + packedBytesPerLane();
+            copied = copied + packedBytesPerLane();
+        } else {
+            var byte = packedLaneByte(sourceLane, sourceOffset % packedBytesPerLane());
+            if !packedAppendRawByte(buffer, byte) { return Result.Err(packedError("byte copy failed")); }
+            copied = copied + 1;
+        }
+    }
+    return Result.Ok(true);
+}
+
+// Seed fallback; validate every serialized byte before opening the destination.
+pub func packedBufferWriteSegments(path: string, header: Vec<int>, body: PackedBuffer): bool {
+    if header.len() > 65536 || !packedValid(body) { return false; }
+    var index = 0;
+    while index < header.len() {
+        var value = header[index];
+        if value < 0 || value > 255 { return false; }
+        index = index + 1;
+    }
+
+    var bodyLength = body.length;
+    var usedLanes = (bodyLength + packedBytesPerLane() - 1) / packedBytesPerLane();
+    index = 0;
+    while index < usedLanes {
+        var lane = body.lanes[index];
+        if !packedLaneIsValid(lane) { return false; }
+        if index == usedLanes - 1 && bodyLength % packedBytesPerLane() != 0 {
+            if lane >= packedLimit(bodyLength % packedBytesPerLane()) { return false; }
+        }
+        index = index + 1;
+    }
+
+    var encodedHeader = byteString(header);
+    if encodedHeader.isErr() { return false; }
+    writeFile(path, encodedHeader.unwrap());
+    var offset = 0;
+    while offset < bodyLength {
+        var count = packedMaxReadBytes();
+        if count > bodyLength - offset { count = bodyLength - offset; }
+        var chunk = packedBufferReadBytes(body, offset, count);
+        if chunk.isErr() { return false; }
+        appendFile(path, chunk.unwrap());
+        offset = offset + count;
+    }
+    return true;
+}

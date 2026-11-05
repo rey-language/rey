@@ -1,8 +1,10 @@
 import ir::{IRFunction, IRProgram, IRTypeKind, InstructionKind, TerminatorKind};
+import ir::analysis::container::{ContainerEffect, containerEffect};
 import ir::managed::{ManagedProgram, ManagedFunction, ManagedAllocation, ManagedVariableLayout, ManagedHook};
 import ir::verify::{verifyProgram};
 
-// Heap is the program-region spelling. This planner never selects Stack; completion may.
+// Heap is the program-region spelling. Stack is selected only by completion after
+// stackPlacementRejection proves the object cannot be published or promoted.
 pub enum ManagedStorage { Heap, Region, Destination, Stack }
 
 pub struct ManagedAllocationPlacement {
@@ -59,16 +61,56 @@ func irFunctionIndex(program: IRProgram, functionId: int): int {
     return -1;
 }
 
+func indexedFunction(index: HashMap<string, int>, functionId: int): int {
+    var key = functionId.toString();
+    if !index.has(key) { return -1; }
+    return index.get(key);
+}
+
 func blockIndex(function: IRFunction, blockId: int): int {
     var i = 0;
     loop { if i >= function.blocks.len() { break; } if function.blocks[i].id == blockId { return i; } i = i + 1; }
     return -1;
 }
 
-func valueNode(nodes: Vec<RefNode>, functionId: int, valueId: int): int {
+func valueNodeKey(functionId: int, valueId: int): string {
+    return functionId.toString() + ":" + valueId.toString();
+}
+
+func valueNode(index: HashMap<string, int>, functionId: int, valueId: int): int {
+    var key = valueNodeKey(functionId, valueId);
+    if !index.has(key) { return -1; }
+    return index.get(key);
+}
+
+func derivedKey(functionId: int, valueId: int): string {
+    return functionId.toString() + ":" + valueId.toString();
+}
+
+func placementWorkBudget(module: ManagedProgram): int {
+    var work = module.functions.len() + module.allocations.len() + module.derived.len();
+    var functionIndices: HashMap<string, int> = HashMap.new();
     var i = 0;
-    loop { if i >= nodes.len() { break; } if nodes[i].functionId == functionId && nodes[i].valueId == valueId { return i; } i = i + 1; }
-    return -1;
+    loop { if i >= module.program.functions.len() { break; } functionIndices.set(module.program.functions[i].id.toString(), i); i = i + 1; }
+    var fi = 0;
+    loop {
+        if fi >= module.functions.len() { break; }
+        var key = module.functions[fi].functionId.toString();
+        var functionIndexValue = -1;
+        if functionIndices.has(key) { functionIndexValue = functionIndices.get(key); }
+        if functionIndexValue >= 0 {
+            var function = module.program.functions[functionIndexValue];
+            work = work + function.blocks.len();
+            var bi = 0;
+            loop {
+                if bi >= function.blocks.len() { break; }
+                work = work + function.blocks[bi].instructions.len();
+                bi = bi + 1;
+            }
+        }
+        fi = fi + 1;
+    }
+    return 750000 + work * 16;
 }
 
 func hasInt(values: Vec<int>, value: int): bool {
@@ -84,10 +126,15 @@ func addEscapeMask(existing: int, incoming: int): int {
     return result;
 }
 
-func addLink(links: Vec<ValueLink>, from: int, to: int, escapeForward: int, escapeReverse: int): Vec<ValueLink> {
+func linkKey(from: int, to: int): string {
+    return from.toString() + ":" + to.toString();
+}
+
+func addLink(links: Vec<ValueLink>, index: HashMap<string, int>, from: int, to: int, escapeForward: int, escapeReverse: int): Vec<ValueLink> {
     if from < 0 || to < 0 || from == to { return links; }
-    var i = 0;
-    loop { if i >= links.len() { break; } if links[i].from == from && links[i].to == to { var link = links[i]; link.escapeForward = addEscapeMask(link.escapeForward, escapeForward); link.escapeReverse = addEscapeMask(link.escapeReverse, escapeReverse); links.set(i, link); return links; } i = i + 1; }
+    var key = linkKey(from, to);
+    if index.has(key) { var i = index.get(key); var link = links[i]; link.escapeForward = addEscapeMask(link.escapeForward, escapeForward); link.escapeReverse = addEscapeMask(link.escapeReverse, escapeReverse); links.set(i, link); return links; }
+    index.set(key, links.len());
     links.push(ValueLink { from: from, to: to, escapeForward: escapeForward, escapeReverse: escapeReverse });
     return links;
 }
@@ -124,83 +171,144 @@ func allocationIndex(allocations: Vec<ManagedAllocation>, functionId: int, resul
     return -1;
 }
 
+func freshContainerEffect(): ContainerEffect {
+    return ContainerEffect { known: true, receiverEscapes: false, argumentEscapes: false, argumentEscapesToReceiver: false, freshResult: true };
+}
+
+func localContainerEffect(): ContainerEffect {
+    return ContainerEffect { known: true, receiverEscapes: false, argumentEscapes: false, argumentEscapesToReceiver: false, freshResult: false };
+}
+
+func nameIs(name: string, expected: string): bool { return name == expected; }
+
+// containerEffect does not name sized allocation or the self-host container
+// methods. A fresh result follows its uses; it is not an automatic program escape.
+pub func resolvedContainerEffect(name: string): ContainerEffect {
+    if nameIs(name, "managedVecCreate") || nameIs(name, "managedMapCreate") || nameIs(name, "managedAllocateSized") || nameIs(name, "managedVecJoin") || nameIs(name, "managedMapKeys") || nameIs(name, "managedReadFile") || nameIs(name, "managedListDir") || nameIs(name, "managedArgsCreate") || nameIs(name, "managedStringFromCString") { return freshContainerEffect(); }
+    if nameIs(name, "managedVecContainsI64") || nameIs(name, "managedVecContainsReference") || nameIs(name, "managedVecContainsString") || nameIs(name, "managedStringToInt") || nameIs(name, "managedWriteString") || nameIs(name, "managedFileExists") || nameIs(name, "managedDeleteFile") || nameIs(name, "managedWriteFile") || nameIs(name, "managedAppendFile") || nameIs(name, "managedWriteBytes") || nameIs(name, "managedWritePackedSegments") || nameIs(name, "managedExit") { return localContainerEffect(); }
+    return containerEffect(name);
+}
+
+func hookIsFresh(name: string): bool {
+    var effect = resolvedContainerEffect(name);
+    return effect.known && effect.freshResult;
+}
+
+func provenContainerOwner(freshNodes: Vec<int>, callSites: Vec<CallSite>, escapes: Vec<int>, owner: int): bool {
+    if hasInt(freshNodes, owner) { return true; }
+    var index = 0;
+    loop {
+        if index >= callSites.len() { break; }
+        if callSites[index].resultNode == owner && owner >= 0 && owner < escapes.len() && escapes[owner] < 2 { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
 func validateMetadata(module: ManagedProgram): string {
-    var verification = verifyProgram(module.program);
-    if !verification.ok { return "placement: IR verification failed"; }
-    var budget: Vec<int> = [500000];
+    if module.program.functions.len() <= 512 {
+        var verification = verifyProgram(module.program);
+        if !verification.ok { return "placement: IR verification failed"; }
+    }
+    var budget: Vec<int> = [placementWorkBudget(module)];
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop { if index >= module.program.functions.len() { break; } functionIndices.set(module.program.functions[index].id.toString(), index); index = index + 1; }
+    var managedIndices: HashMap<string, int> = HashMap.new();
+    var referenceValues: HashMap<string, bool> = HashMap.new();
     var fi = 0;
     loop {
         if fi >= module.functions.len() { break; }
         var managed = module.functions[fi];
-        if managedFunctionIndex(module.functions, managed.functionId) != fi { return "placement: duplicate managed function metadata"; }
-        var functionIndexValue = irFunctionIndex(module.program, managed.functionId);
-        if functionIndexValue < 0 { return "placement: managed function does not exist"; }
-        var function = module.program.functions[functionIndexValue];
+        var managedKey = managed.functionId.toString();
+        if managedIndices.has(managedKey) { return "placement: duplicate managed function metadata"; }
+        managedIndices.set(managedKey, fi);
+        if !functionIndices.has(managedKey) { return "placement: managed function does not exist"; }
         var pi = 0;
         loop {
             if pi >= managed.referenceValues.len() { break; }
-            if hasInt(managed.referenceValues, managed.referenceValues[pi]) && pi != 0 {
-                var prior = 0;
-                loop { if prior >= pi { break; } if managed.referenceValues[prior] == managed.referenceValues[pi] { return "placement: duplicate canonical reference metadata"; } prior = prior + 1; }
-            }
+            var key = valueNodeKey(managed.functionId, managed.referenceValues[pi]);
+            if referenceValues.has(key) { return "placement: duplicate canonical reference metadata"; }
+            referenceValues.set(key, true);
             pi = pi + 1;
         }
         fi = fi + 1;
     }
+    var variableIndices: HashMap<string, int> = HashMap.new();
     var vi = 0;
     loop {
         if vi >= module.variableLayouts.len() { break; }
         var variable = module.variableLayouts[vi];
         if variable.layoutId <= 0 || variable.layoutId > module.layouts.len() || (variable.tailKind != 1 && variable.tailKind != 2) { return "placement: invalid variable layout metadata"; }
-        var prior = 0;
-        loop { if prior >= vi { break; } if module.variableLayouts[prior].layoutId == variable.layoutId { return "placement: duplicate variable layout metadata"; } prior = prior + 1; }
+        var key = variable.layoutId.toString();
+        if variableIndices.has(key) { return "placement: duplicate variable layout metadata"; }
+        variableIndices.set(key, vi);
         vi = vi + 1;
     }
+    var hookIndices: HashMap<string, int> = HashMap.new();
     var hi = 0;
     loop {
         if hi >= module.hooks.len() { break; }
         var hook = module.hooks[hi];
-        if hook.functionId < 0 || hook.runtimeName == "" || managedHookIndex(module.hooks, hook.functionId) != hi { return "placement: invalid or duplicate managed hook metadata"; }
-        if hook.functionId == module.allocateFunctionId || hook.functionId == module.storeReferenceFunctionId || hook.functionId == module.collectFunctionId || managedFunctionIndex(module.functions, hook.functionId) >= 0 || irFunctionIndex(module.program, hook.functionId) < 0 { return "placement: managed hook stub ID is missing or overlaps a private hook/user function"; }
+        var key = hook.functionId.toString();
+        if hook.functionId < 0 || hook.runtimeName == "" || hookIndices.has(key) { return "placement: invalid or duplicate managed hook metadata"; }
+        hookIndices.set(key, hi);
+        if hook.functionId == module.allocateFunctionId || hook.functionId == module.storeReferenceFunctionId || hook.functionId == module.collectFunctionId || managedIndices.has(key) || !functionIndices.has(key) { return "placement: managed hook stub ID is missing or overlaps a private hook/user function"; }
         hi = hi + 1;
     }
+    var allocationKeys: HashMap<string, bool> = HashMap.new();
+    var allocationSites: HashMap<string, bool> = HashMap.new();
     fi = 0;
     loop {
-        if fi >= module.allocations.len() { break; }
-        var allocation = module.allocations[fi];
-        if managedFunctionIndex(module.functions, allocation.functionId) < 0 { return "placement: allocation has no managed function metadata"; }
-        if allocationIndex(module.allocations, allocation.functionId, allocation.resultId) != fi { return "placement: duplicate allocation metadata"; }
-        var functionIndexValue = irFunctionIndex(module.program, allocation.functionId);
-        if functionIndexValue < 0 { return "placement: allocation function does not exist"; }
-        var function = module.program.functions[functionIndexValue];
-        var found = false;
+        if fi >= module.functions.len() { break; }
+        var managed = module.functions[fi];
+        var function = module.program.functions[functionIndices.get(managed.functionId.toString())];
         var bi = 0;
         loop {
             if bi >= function.blocks.len() { break; }
             var block = function.blocks[bi];
             var ii = 0;
-            loop { if ii >= block.instructions.len() { break; } var instruction = block.instructions[ii]; if instruction.resultId == allocation.resultId && block.id == allocation.blockId && instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId { found = true; } ii = ii + 1; }
+            loop {
+                if ii >= block.instructions.len() { break; }
+                var instruction = block.instructions[ii];
+                if instruction.kind == InstructionKind::Call && instruction.functionId == module.allocateFunctionId && instruction.resultId >= 0 {
+                    allocationSites.set(managed.functionId.toString() + ":" + instruction.resultId.toString() + ":" + block.id.toString(), true);
+                }
+                ii = ii + 1;
+            }
             bi = bi + 1;
         }
-        if !found { return "placement: allocation metadata does not match an allocation hook"; }
-        var managedIndex = managedFunctionIndex(module.functions, allocation.functionId);
-        if !isReference(module.functions[managedIndex], allocation.resultId) { return "placement: allocation result is missing canonical reference metadata"; }
+        fi = fi + 1;
+    }
+    fi = 0;
+    loop {
+        if fi >= module.allocations.len() { break; }
+        var allocation = module.allocations[fi];
+        var functionKey = allocation.functionId.toString();
+        var key = valueNodeKey(allocation.functionId, allocation.resultId);
+        if !managedIndices.has(functionKey) { return "placement: allocation has no managed function metadata"; }
+        if allocationKeys.has(key) { return "placement: duplicate allocation metadata"; }
+        allocationKeys.set(key, true);
+        if !functionIndices.has(functionKey) { return "placement: allocation function does not exist"; }
+        if !allocationSites.has(functionKey + ":" + allocation.resultId.toString() + ":" + allocation.blockId.toString()) { return "placement: allocation metadata does not match an allocation hook"; }
+        if !referenceValues.has(key) { return "placement: allocation result is missing canonical reference metadata"; }
         if allocation.layoutId <= 0 { return "placement: allocation layout ID must be positive"; }
-        if variableLayoutIndex(module.variableLayouts, allocation.layoutId) >= 0 { return "placement: fixed allocation hook cannot use a variable-tail layout"; }
+        if variableIndices.has(allocation.layoutId.toString()) { return "placement: fixed allocation hook cannot use a variable-tail layout"; }
         if !charge(budget) { return "placement: metadata work budget exhausted"; }
         fi = fi + 1;
     }
     return "";
 }
 
-func addEdgeLinks(program: IRProgram, functions: Vec<ManagedFunction>, nodes: Vec<RefNode>, links: Vec<ValueLink>, budget: Vec<int>): Vec<ValueLink> {
+func addEdgeLinks(program: IRProgram, functions: Vec<ManagedFunction>, nodeIndex: HashMap<string, int>, managedIndex: HashMap<string, int>, irIndex: HashMap<string, int>, largeFunctions: HashMap<string, bool>, links: Vec<ValueLink>, budget: Vec<int>): Vec<ValueLink> {
     var out = links;
+    var linkIndex: HashMap<string, int> = HashMap.new();
     var fi = 0;
     loop {
         if fi >= functions.len() { break; }
         var managed = functions[fi];
-        var realIndex = irFunctionIndex(program, managed.functionId);
-        if realIndex >= 0 {
+        var realIndex = indexedFunction(irIndex, managed.functionId);
+        if realIndex >= 0 && !largeFunctions.has(managed.functionId.toString()) {
             var function = program.functions[realIndex];
             var bi = 0;
             loop {
@@ -213,31 +321,31 @@ func addEdgeLinks(program: IRProgram, functions: Vec<ManagedFunction>, nodes: Ve
                     if targetIndex >= 0 {
                         var target = function.blocks[targetIndex];
                         var ai = 0;
-                        loop { if ai >= target.params.len() || ai >= term.targetArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.targetArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; }
+                        loop { if ai >= target.params.len() || ai >= term.targetArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, linkIndex, valueNode(nodeIndex, managed.functionId, term.targetArgs[ai]), valueNode(nodeIndex, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; }
                     }
                 } else if term.kind == TerminatorKind::Branch {
                     var trueIndex = blockIndex(function, term.trueTargetBlockId);
-                    if trueIndex >= 0 { var target = function.blocks[trueIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.trueArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.trueArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
+                    if trueIndex >= 0 { var target = function.blocks[trueIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.trueArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, linkIndex, valueNode(nodeIndex, managed.functionId, term.trueArgs[ai]), valueNode(nodeIndex, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
                     var falseIndex = blockIndex(function, term.falseTargetBlockId);
-                    if falseIndex >= 0 { var target = function.blocks[falseIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.falseArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, term.falseArgs[ai]), valueNode(nodes, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
+                    if falseIndex >= 0 { var target = function.blocks[falseIndex]; var ai = 0; loop { if ai >= target.params.len() || ai >= term.falseArgs.len() { break; } if target.params[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, linkIndex, valueNode(nodeIndex, managed.functionId, term.falseArgs[ai]), valueNode(nodeIndex, managed.functionId, target.params[ai].id), 3, 3); } ai = ai + 1; } }
                 }
                 var ii = 0;
                 loop {
                     if ii >= block.instructions.len() { break; }
                     var instruction = block.instructions[ii];
                     if instruction.kind == InstructionKind::Call {
-                        var calleeManaged = managedFunctionIndex(functions, instruction.functionId);
-                        var calleeIndex = irFunctionIndex(program, instruction.functionId);
-                        if calleeManaged >= 0 && calleeIndex >= 0 {
+                        var calleeManaged = indexedFunction(managedIndex, instruction.functionId);
+                        var calleeIndex = indexedFunction(irIndex, instruction.functionId);
+                        if calleeManaged >= 0 && calleeIndex >= 0 && !largeFunctions.has(instruction.functionId.toString()) {
                             var callee = program.functions[calleeIndex];
                             var ai = 0;
-                            loop { if ai >= callee.parameters.len() || ai >= instruction.operands.len() { break; } if callee.parameters[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, valueNode(nodes, managed.functionId, instruction.operands[ai]), valueNode(nodes, instruction.functionId, callee.parameters[ai].id), 3, 2); } ai = ai + 1; }
+                            loop { if ai >= callee.parameters.len() || ai >= instruction.operands.len() { break; } if callee.parameters[ai].ty.kind == IRTypeKind::RawAddress { out = addLink(out, linkIndex, valueNode(nodeIndex, managed.functionId, instruction.operands[ai]), valueNode(nodeIndex, instruction.functionId, callee.parameters[ai].id), 3, 2); } ai = ai + 1; }
                             if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
                                 var ci = 0;
                                 loop {
                                     if ci >= callee.blocks.len() { break; }
                                     var cterm = callee.blocks[ci].terminator;
-                                    if cterm.kind == TerminatorKind::Return && cterm.valueId >= 0 { out = addLink(out, valueNode(nodes, instruction.functionId, cterm.valueId), valueNode(nodes, managed.functionId, instruction.resultId), 2, 3); }
+                                    if cterm.kind == TerminatorKind::Return && cterm.valueId >= 0 { out = addLink(out, linkIndex, valueNode(nodeIndex, instruction.functionId, cterm.valueId), valueNode(nodeIndex, managed.functionId, instruction.resultId), 2, 3); }
                                     ci = ci + 1;
                                 }
                             }
@@ -320,16 +428,77 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
     var metadataError = validateMetadata(module);
     if metadataError != "" { return Result.Err(metadataError); }
     var program = module.program;
-    var budget: Vec<int> = [750000];
+    var budget: Vec<int> = [placementWorkBudget(module)];
+    var irIndex: HashMap<string, int> = HashMap.new();
+    var functionAt = 0;
+    loop { if functionAt >= program.functions.len() { break; } irIndex.set(program.functions[functionAt].id.toString(), functionAt); functionAt = functionAt + 1; }
+    var managedIndex: HashMap<string, int> = HashMap.new();
+    var hookIndices: HashMap<string, int> = HashMap.new();
+    functionAt = 0;
+    loop { if functionAt >= module.hooks.len() { break; } var key = module.hooks[functionAt].functionId.toString(); if !hookIndices.has(key) { hookIndices.set(key, functionAt); } functionAt += 1; }
+    functionAt = 0;
+    loop { if functionAt >= module.functions.len() { break; } managedIndex.set(module.functions[functionAt].functionId.toString(), functionAt); functionAt = functionAt + 1; }
+    if module.functions.len() > 512 {
+        var heapAllocations: Vec<ManagedAllocationPlacement> = [];
+        var ai = 0;
+        loop {
+            if ai >= module.allocations.len() { break; }
+            var allocation = module.allocations[ai];
+            heapAllocations.push(ManagedAllocationPlacement { functionId: allocation.functionId, resultId: allocation.resultId, storage: ManagedStorage::Heap });
+            ai = ai + 1;
+        }
+        var heapCalls: Vec<ManagedCallPlacement> = [];
+        functionAt = 0;
+        loop {
+            if functionAt >= module.functions.len() { break; }
+            var managed = module.functions[functionAt];
+            var realIndex = indexedFunction(irIndex, managed.functionId);
+            if realIndex >= 0 {
+                var function = program.functions[realIndex];
+                var bi = 0;
+                loop {
+                    if bi >= function.blocks.len() { break; }
+                    var block = function.blocks[bi];
+                    var ii = 0;
+                    loop {
+                        if ii >= block.instructions.len() { break; }
+                        var instruction = block.instructions[ii];
+                        if instruction.kind == InstructionKind::Call && managedIndex.has(instruction.functionId.toString()) && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                            heapCalls.push(ManagedCallPlacement { functionId: managed.functionId, blockId: block.id, instructionIndex: ii, storage: ManagedStorage::Heap });
+                        }
+                        ii = ii + 1;
+                    }
+                    bi = bi + 1;
+                }
+            }
+            functionAt = functionAt + 1;
+        }
+        return Result.Ok(ManagedPlacement { allocations: heapAllocations, calls: heapCalls, regionFunctions: [] });
+    }
+    var largeFunctions: HashMap<string, bool> = HashMap.new();
+    functionAt = 0;
+    loop {
+        if functionAt >= module.functions.len() { break; }
+        var functionId = module.functions[functionAt].functionId;
+        var realIndex = indexedFunction(irIndex, functionId);
+        if realIndex >= 0 {
+            var function = program.functions[realIndex];
+            var instructionCount = 0;
+            var blockAt = 0;
+            loop { if blockAt >= function.blocks.len() { break; } instructionCount = instructionCount + function.blocks[blockAt].instructions.len(); blockAt = blockAt + 1; }
+            if instructionCount > 192 || module.functions.len() > 512 { largeFunctions.set(functionId.toString(), true); }
+        }
+        functionAt = functionAt + 1;
+    }
     var nodes: Vec<RefNode> = [];
     var fi = 0;
     loop {
         if fi >= module.functions.len() { break; }
         var managed = module.functions[fi];
         if !charge(budget) { return Result.Err("placement: reference census work budget exhausted"); }
-        var irIndex = irFunctionIndex(program, managed.functionId);
-        if irIndex >= 0 {
-            var function = program.functions[irIndex];
+        var realIndex = indexedFunction(irIndex, managed.functionId);
+        if realIndex >= 0 {
+            var function = program.functions[realIndex];
             var pi = 0;
             loop { if pi >= function.parameters.len() { break; } if isReference(managed, function.parameters[pi].id) { nodes.push(RefNode { functionId: managed.functionId, valueId: function.parameters[pi].id }); } pi = pi + 1; }
             var bi = 0;
@@ -341,28 +510,81 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
     var nodeEscapes: Vec<int> = [];
     var ni = 0;
     loop { if ni >= nodes.len() { break; } sources.push([]); nodeEscapes.push(0); ni = ni + 1; }
+    var nodeIndex: HashMap<string, int> = HashMap.new();
+    ni = 0;
+    loop {
+        if ni >= nodes.len() { break; }
+        var key = valueNodeKey(nodes[ni].functionId, nodes[ni].valueId);
+        if !nodeIndex.has(key) { nodeIndex.set(key, ni); }
+        ni = ni + 1;
+    }
+    var conservativeNodes: Vec<int> = [];
+    ni = 0;
+    loop {
+        if ni >= nodes.len() { break; }
+        if largeFunctions.has(nodes[ni].functionId.toString()) { conservativeNodes.push(ni); }
+        ni = ni + 1;
+    }
     var ai = 0;
     loop {
         if ai >= module.allocations.len() { break; }
         var allocation = module.allocations[ai];
-        var node = valueNode(nodes, allocation.functionId, allocation.resultId);
+        var node = valueNode(nodeIndex, allocation.functionId, allocation.resultId);
         if node < 0 { return Result.Err("placement: allocation result has no canonical reference node"); }
         addSource(sources, node, ai, budget);
         ai = ai + 1;
     }
     var links: Vec<ValueLink> = [];
-    links = addEdgeLinks(program, module.functions, nodes, links, budget);
+    links = addEdgeLinks(program, module.functions, nodeIndex, managedIndex, irIndex, largeFunctions, links, budget);
     if budget[0] < 0 { return Result.Err("placement: alias analysis work budget exhausted"); }
     var stores: Vec<StoreLink> = [];
-    var unsafeNodes: Vec<int> = [];
+    var unsafeNodes: Vec<int> = conservativeNodes;
+    var freshNodes: Vec<int> = [];
     var callSites: Vec<CallSite> = [];
     fi = 0;
     loop {
         if fi >= module.functions.len() { break; }
         var managed = module.functions[fi];
-        var irIndex = irFunctionIndex(program, managed.functionId);
-        if irIndex >= 0 {
-            var function = program.functions[irIndex];
+        var realIndex = indexedFunction(irIndex, managed.functionId);
+        if realIndex >= 0 {
+            var function = program.functions[realIndex];
+            var bi = 0;
+            loop {
+                if bi >= function.blocks.len() { break; }
+                var block = function.blocks[bi];
+                var ii = 0;
+                loop {
+                    if ii >= block.instructions.len() { break; }
+                    if !charge(budget) { return Result.Err("placement: call census work budget exhausted"); }
+                    var instruction = block.instructions[ii];
+                    if instruction.kind == InstructionKind::Call && indexedFunction(managedIndex, instruction.functionId) >= 0 && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                        callSites.push(CallSite { functionId: managed.functionId, blockId: block.id, instructionIndex: ii, resultNode: valueNode(nodeIndex, managed.functionId, instruction.resultId) });
+                    }
+                    ii = ii + 1;
+                }
+                bi = bi + 1;
+            }
+        }
+        fi = fi + 1;
+    }
+    var derivedOwners: HashMap<string, int> = HashMap.new();
+    var numericAddressFunctions: HashMap<string, bool> = HashMap.new();
+    var derivedAt = 0;
+    loop {
+        if derivedAt >= module.derived.len() { break; }
+        if !charge(budget) { return Result.Err("placement: derived-owner index work budget exhausted"); }
+        var derived = module.derived[derivedAt];
+        var key = derivedKey(derived.functionId, derived.valueId);
+        if !derivedOwners.has(key) { derivedOwners.set(key, derived.ownerId); }
+        derivedAt = derivedAt + 1;
+    }
+    fi = 0;
+    loop {
+        if fi >= module.functions.len() { break; }
+        var managed = module.functions[fi];
+        var realIndex = indexedFunction(irIndex, managed.functionId);
+        if realIndex >= 0 && !largeFunctions.has(managed.functionId.toString()) {
+            var function = program.functions[realIndex];
             var bi = 0;
             loop {
                 if bi >= function.blocks.len() { break; }
@@ -372,49 +594,62 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
                     if ii >= block.instructions.len() { break; }
                     if !charge(budget) { return Result.Err("placement: flow analysis work budget exhausted"); }
                     var instruction = block.instructions[ii];
+                    if instruction.kind == InstructionKind::RawToInt { numericAddressFunctions.set(managed.functionId.toString(), true); }
                     var managedHook = -1;
-                    if instruction.kind == InstructionKind::Call { managedHook = managedHookIndex(module.hooks, instruction.functionId); }
+                    if instruction.kind == InstructionKind::Call { managedHook = indexedFunction(hookIndices, instruction.functionId); }
                     if instruction.kind == InstructionKind::Call && instruction.functionId == module.storeReferenceFunctionId && instruction.operands.len() == 3 {
-                        var owner = valueNode(nodes, managed.functionId, instruction.operands[0]);
-                        var child = valueNode(nodes, managed.functionId, instruction.operands[2]);
+                        var owner = valueNode(nodeIndex, managed.functionId, instruction.operands[0]);
+                        var child = valueNode(nodeIndex, managed.functionId, instruction.operands[2]);
                         if owner >= 0 && child >= 0 { stores.push(StoreLink { child: child, owner: owner }); }
                     } else if managedHook >= 0 {
-                        var oi = 0;
-                        loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodes, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
-                        if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodes, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
+                        var hook = module.hooks[managedHook];
+                        var effect = resolvedContainerEffect(hook.runtimeName);
+                        var precise = effect.known && !effect.receiverEscapes;
+                        if !precise {
+                            var oi = 0;
+                            loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodeIndex, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
+                            if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodeIndex, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
+                        } else {
+                            var receiverNode = -1;
+                            if instruction.operands.len() > 0 { receiverNode = valueNode(nodeIndex, managed.functionId, instruction.operands[0]); }
+                            var oi = 0;
+                            loop {
+                                if oi >= instruction.operands.len() { break; }
+                                var operandNode = valueNode(nodeIndex, managed.functionId, instruction.operands[oi]);
+                                if operandNode >= 0 && oi != 0 && effect.argumentEscapes { unsafeNodes.push(operandNode); }
+                                if operandNode >= 0 && oi != 0 && effect.argumentEscapesToReceiver && receiverNode >= 0 { stores.push(StoreLink { child: operandNode, owner: receiverNode }); }
+                                oi = oi + 1;
+                            }
+                            if effect.argumentEscapes && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                                var loaded = valueNode(nodeIndex, managed.functionId, instruction.resultId);
+                                if loaded >= 0 { unsafeNodes.push(loaded); }
+                            }
+                            if hookIsFresh(hook.runtimeName) && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                                var created = valueNode(nodeIndex, managed.functionId, instruction.resultId);
+                                if created >= 0 && !hasInt(freshNodes, created) { freshNodes.push(created); }
+                            }
+                        }
                     } else if instruction.kind == InstructionKind::Call {
-                        var calleeManaged = managedFunctionIndex(module.functions, instruction.functionId);
+                        var calleeManaged = indexedFunction(managedIndex, instruction.functionId);
+                        if calleeManaged >= 0 && largeFunctions.has(instruction.functionId.toString()) { calleeManaged = -1; }
                         if calleeManaged < 0 && instruction.functionId != module.allocateFunctionId && instruction.functionId != module.collectFunctionId {
                             var oi = 0;
-                            loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodes, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
-                            if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodes, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
-                        } else if calleeManaged >= 0 && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
-                            callSites.push(CallSite { functionId: managed.functionId, blockId: block.id, instructionIndex: ii, resultNode: valueNode(nodes, managed.functionId, instruction.resultId) });
+                            loop { if oi >= instruction.operands.len() { break; } var operandNode = valueNode(nodeIndex, managed.functionId, instruction.operands[oi]); if operandNode >= 0 { unsafeNodes.push(operandNode); } oi = oi + 1; }
+                            if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { var resultNode = valueNode(nodeIndex, managed.functionId, instruction.resultId); if resultNode >= 0 { unsafeNodes.push(resultNode); } }
                         }
                     } else if instruction.kind == InstructionKind::RawStoreAddress && instruction.operands.len() == 2 {
-                        var storedNode = valueNode(nodes, managed.functionId, instruction.operands[1]);
+                        var storedNode = valueNode(nodeIndex, managed.functionId, instruction.operands[1]);
                         if storedNode >= 0 { unsafeNodes.push(storedNode); }
                     } else if instruction.kind == InstructionKind::RawLoadAddress && instruction.resultId >= 0 {
                         if !isReference(managed, instruction.resultId) { return Result.Err("placement: reference field load result is missing canonical reference metadata"); }
-                        var loadedNode = valueNode(nodes, managed.functionId, instruction.resultId);
+                        var loadedNode = valueNode(nodeIndex, managed.functionId, instruction.resultId);
                         if loadedNode < 0 { return Result.Err("placement: reference field load result has no canonical reference node"); }
                         unsafeNodes.push(loadedNode);
-                        var derivedFound = false;
-                        var derivedOwnerId = -1;
-                        var derivedIndex = 0;
-                        loop {
-                            if derivedIndex >= module.derived.len() { break; }
-                            if !charge(budget) { return Result.Err("placement: derived-owner lookup work budget exhausted"); }
-                            var derived = module.derived[derivedIndex];
-                            if derived.functionId == managed.functionId && instruction.operands.len() > 0 && derived.valueId == instruction.operands[0] {
-                                derivedFound = true;
-                                derivedOwnerId = derived.ownerId;
-                                break;
-                            }
-                            derivedIndex = derivedIndex + 1;
-                        }
-                        if !derivedFound { return Result.Err("placement: reference field load has no derived-owner metadata"); }
-                        var ownerNode = valueNode(nodes, managed.functionId, derivedOwnerId);
+                        if instruction.operands.len() == 0 { return Result.Err("placement: reference field load has no derived-owner metadata"); }
+                        var key = derivedKey(managed.functionId, instruction.operands[0]);
+                        if !derivedOwners.has(key) { return Result.Err("placement: reference field load has no derived-owner metadata"); }
+                        var derivedOwnerId = derivedOwners.get(key);
+                        var ownerNode = valueNode(nodeIndex, managed.functionId, derivedOwnerId);
                         if ownerNode < 0 { return Result.Err("placement: reference field load owner has no canonical reference node"); }
                         // The loaded object may escape independently of its container. Taint the
                         // exact owner so stored-child propagation keeps that referent off regions.
@@ -424,13 +659,21 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
                 }
                 var term = block.terminator;
                 if term.kind == TerminatorKind::Return && term.valueId >= 0 {
-                    var returned = valueNode(nodes, managed.functionId, term.valueId);
+                    var returned = valueNode(nodeIndex, managed.functionId, term.valueId);
                     if returned >= 0 { unsafeNodes.push(-(returned + 2)); }
                 }
                 bi = bi + 1;
             }
         }
         fi = fi + 1;
+    }
+    var numericNodeAt = 0;
+    if numericAddressFunctions.len() > 0 {
+        while numericNodeAt < nodes.len() {
+            if !charge(budget) { return Result.Err("placement: address provenance work budget exhausted"); }
+            if numericAddressFunctions.has(nodes[numericNodeAt].functionId.toString()) { unsafeNodes.push(numericNodeAt); }
+            numericNodeAt = numericNodeAt + 1;
+        }
     }
     if budget[0] < 0 { return Result.Err("placement: flow analysis work budget exhausted"); }
     var changed = true;
@@ -480,7 +723,7 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
                         var allocationIndexValue = resultSources[sourceIndex];
                         var allocation = module.allocations[allocationIndexValue];
                         if allocation.functionId == site.functionId {
-                            var allocationNode = valueNode(nodes, allocation.functionId, allocation.resultId);
+                            var allocationNode = valueNode(nodeIndex, allocation.functionId, allocation.resultId);
                             if addEscape(nodeEscapes, allocationNode, resultEscape) { changed = true; }
                         }
                         sourceIndex = sourceIndex + 1;
@@ -495,7 +738,9 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
             var relation = stores[st];
             var owners = sources[relation.owner];
             var ownerEscape = nodeEscapes[relation.owner];
-            if owners.len() == 0 { ownerEscape = 2; }
+            // A parameter or unknown owner has no local allocation. A fresh container,
+            // or a call result retained by this caller, keeps that caller's lifetime.
+            if owners.len() == 0 && !provenContainerOwner(freshNodes, callSites, nodeEscapes, relation.owner) { ownerEscape = 2; }
             if ownerEscape > 0 {
                 if addEscape(nodeEscapes, relation.child, ownerEscape) { changed = true; }
             }
@@ -512,11 +757,12 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
         var allocation = module.allocations[ai];
         // 0 keeps the Heap spelling and means the program region, including cyclic and unproven escapes.
         var selected = 0;
-        var cyclic = true;
-        var irIndex = irFunctionIndex(program, allocation.functionId);
-        if irIndex >= 0 { cyclic = siteInCycle(program.functions[irIndex], allocation.blockId, budget); }
+        var largeFunction = largeFunctions.has(allocation.functionId.toString());
+        var cyclic = largeFunction;
+        var realIndex = indexedFunction(irIndex, allocation.functionId);
+        if realIndex >= 0 && !largeFunction { cyclic = siteInCycle(program.functions[realIndex], allocation.blockId, budget); }
         if !cyclic {
-            var allocationNode = valueNode(nodes, allocation.functionId, allocation.resultId);
+            var allocationNode = valueNode(nodeIndex, allocation.functionId, allocation.resultId);
             if allocationNode < 0 { return Result.Err("placement: allocation reference node disappeared during escape analysis"); }
             if nodeEscapes[allocationNode] == 1 { selected = 2; }
             else if nodeEscapes[allocationNode] == 0 { selected = 1; }
@@ -539,8 +785,6 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
             var site = callSites[ci];
             if site.resultNode >= 0 {
                 var heapResult = nodeEscapes[site.resultNode] >= 2;
-                var callerIndex = irFunctionIndex(program, site.functionId);
-                if !heapResult && callerIndex >= 0 && siteInCycle(program.functions[callerIndex], site.blockId, budget) { heapResult = true; }
                 var resultSources = sources[site.resultNode];
                 var si = 0;
                 loop { if si >= resultSources.len() { break; } if storageByAllocation[resultSources[si]] == 0 { heapResult = true; } si = si + 1; }
@@ -573,14 +817,14 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
             var ownerHeap = nodeHeap[relation.owner];
             var oi = 0;
             loop { if oi >= owners.len() { break; } if storageByAllocation[owners[oi]] == 0 { ownerHeap = true; } oi = oi + 1; }
-            if owners.len() == 0 { ownerHeap = true; }
+            if owners.len() == 0 && !provenContainerOwner(freshNodes, callSites, nodeEscapes, relation.owner) { ownerHeap = true; }
             if ownerHeap {
                 var childIndex = 0;
                 loop {
                     if childIndex >= children.len() { break; }
                     var childAllocation = children[childIndex];
                     if storageByAllocation[childAllocation] != 0 { storageByAllocation.set(childAllocation, 0); changed = true; }
-                    var childNode = valueNode(nodes, module.allocations[childAllocation].functionId, module.allocations[childAllocation].resultId);
+                    var childNode = valueNode(nodeIndex, module.allocations[childAllocation].functionId, module.allocations[childAllocation].resultId);
                     if childNode >= 0 && !nodeHeap[childNode] { nodeHeap.set(childNode, true); changed = true; }
                     childIndex = childIndex + 1;
                 }
@@ -596,7 +840,7 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
     loop {
         if ai >= module.allocations.len() { break; }
         var allocation = module.allocations[ai];
-        // Heap reaches the program region. This revision does not publish stack objects.
+        // Heap reaches the program region. Completion may later select Stack when promotion is impossible.
         var storage = ManagedStorage::Heap;
         if storageByAllocation[ai] == 1 { storage = ManagedStorage::Region; }
         else if storageByAllocation[ai] == 2 { storage = ManagedStorage::Destination; }
@@ -619,10 +863,14 @@ pub func planManagedPlacement(module: ManagedProgram): Result<ManagedPlacement, 
                 if storageByAllocation[resultSources[sourceIndex]] == 0 { level = 2; }
                 sourceIndex = sourceIndex + 1;
             }
-            var callerIndex = irFunctionIndex(program, site.functionId);
+            var callerIndex = indexedFunction(irIndex, site.functionId);
             var cyclic = true;
             if callerIndex >= 0 { cyclic = siteInCycle(program.functions[callerIndex], site.blockId, budget); }
-            if !cyclic { if level == 0 { storage = ManagedStorage::Region; } else if level == 1 { storage = ManagedStorage::Destination; } }
+            // A loop does not by itself make the result immortal. Level 0 stays in the
+            // caller region; lowering narrows a block-local result to an iteration cohort.
+            if level == 0 { storage = ManagedStorage::Region; }
+            else if level == 1 && !cyclic { storage = ManagedStorage::Destination; }
+            else if level == 1 && cyclic { storage = ManagedStorage::Region; }
         }
         calls.push(ManagedCallPlacement { functionId: site.functionId, blockId: site.blockId, instructionIndex: site.instructionIndex, storage: storage });
         callUseIndex = callUseIndex + 1;

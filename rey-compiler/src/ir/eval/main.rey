@@ -543,6 +543,17 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
                 var failureCode = readValue(frame, instruction.operands[0]);
                 if !failureCode.found { return failAt("raw.fail references an unavailable SSA value", instruction.source, currentSteps); }
                 return failAt("trusted runtime failure code " + failureCode.value.toString(), instruction.source, currentSteps);
+            } else if instruction.kind == InstructionKind::RawFromInt || instruction.kind == InstructionKind::RawToInt {
+                if instruction.operands.len() != 1 { return failAt("raw integer conversion has malformed operands", instruction.source, currentSteps); }
+                var converted = readValue(frame, instruction.operands[0]);
+                if !converted.found { return failAt("raw integer conversion references an unavailable SSA value", instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, converted.value);
+            } else if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+                return failAt("raw syscall is unavailable in the evaluator", instruction.source, currentSteps);
+            } else if instruction.kind == InstructionKind::RawArgCount {
+                writeValue(frame, instruction.resultId, 1);
+            } else if instruction.kind == InstructionKind::RawArg {
+                return failAt("host arguments are unavailable in the evaluator", instruction.source, currentSteps);
             } else if instruction.kind == InstructionKind::Call {
                 var callArguments: Vec<int> = [];
                 var argumentIndex = 0;

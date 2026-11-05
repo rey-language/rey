@@ -20,6 +20,8 @@ func main(): void {
     var youngerGroup = __reyRawLoadAddress(__reyRawOffset(inner, 40));
     var youngerData = __reyRawLoadAddress(__reyRawOffset(__reyRawLoadAddress(__reyRawOffset(youngerGroup, 32)), 16));
     var youngerRecord = __reyRawOffset(youngerData, 8);
+    var requestedBeforeStore = managedRegionRequestedBytes(context);
+    check(requestedBeforeStore > 0);
     managedStoreReference(context, older, 0, younger);
     check(__reyRawEqual(alias, younger));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(older, 16)), younger));
@@ -35,10 +37,11 @@ func main(): void {
     check(managedLiveObjects(context) == 2);
     check(managedLivePayloadBytes(context) == 16);
     check(managedRequestedObjectBytes(context) == 64);
-    check(managedRegionRequestedBytes(context) == 8192);
+    check(managedRegionRequestedBytes(context) == requestedBeforeStore);
     managedStoreReference(context, older, 0, younger);
     check(managedPromotionCount(context) == 1);
     check(managedDependencyCount(context) == 1);
+    check(managedRegionRequestedBytes(context) == requestedBeforeStore);
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(older, 16)), younger));
     managedDestroy(context);
     layoutRegistryRelease(registry);

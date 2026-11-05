@@ -38,8 +38,16 @@ def main():
         )
         if built.returncode != 0:
             return built.returncode
-        ran = subprocess.run([str(binary), str(store)], cwd=ROOT)
-        return ran.returncode
+        ran = subprocess.run([str(binary), str(store)], cwd=ROOT, capture_output=True, text=True)
+        if ran.stdout:
+            sys.stdout.write(ran.stdout)
+        if ran.stderr:
+            sys.stderr.write(ran.stderr)
+        if ran.returncode != 0:
+            return ran.returncode
+        if "v0.4 incremental cache fixtures passed" not in ran.stdout:
+            return fail("fixture did not report success")
+        return 0
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 

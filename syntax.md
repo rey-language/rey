@@ -1,772 +1,1423 @@
-# Rey Language Comprehensive Syntax & API Reference
+# Rey language syntax and API reference
 
-**Specification Target:** Rey Language v0.3.0  
-**Compiler:** `rey` (self-hosted native compiler via LLVM) & `rey-v0` (reference implementation)  
-**Standard Character Encoding:** UTF-8  
+> **Repository snapshot:** 2026-10-22; current **rey-compiler** frontend and **std/src** in this checkout.
+> This page describes what the checked-in compiler parses and typechecks, and separately inventories
+> the checked-in standard-library exports. It does not imply that every checked declaration works in
+> every code-generation backend.
+>
+> The older [SPEC.md](SPEC.md) is the v0.3.0 language contract and explicitly records that implementation may
+> differ. The compiler behavior below was checked against the [lexer](rey-compiler/src/lexer/main.rey),
+> [parser](rey-compiler/src/parser/main.rey), and [typechecker](rey-compiler/src/typecheck/main.rey). The v0.4 managed-IR pipeline is experimental and narrower than the established
+> frontend/backend path.
 
----
+## Contents
 
-## Table of Contents
+1. [A small program](#a-small-program)
+2. [Lexical rules](#lexical-rules)
+3. [Types and values](#types-and-values)
+4. [Declarations and visibility](#declarations-and-visibility)
+5. [Statements and control flow](#statements-and-control-flow)
+6. [Expressions and operators](#expressions-and-operators)
+7. [Patterns and matching](#patterns-and-matching)
+8. [Modules and imports](#modules-and-imports)
+9. [Global built-ins](#global-built-ins)
+10. [Built-in methods and constructors](#built-in-methods-and-constructors)
+11. [Standard-library exports](#standard-library-exports)
+12. [Compiler-only names and implementation gaps](#compiler-only-names-and-implementation-gaps)
+13. [Memory-management surface](#memory-management-surface)
+14. [Compact grammar](#compact-grammar)
 
-1. [Lexical Structure](#1-lexical-structure)
-   - [Statements and Semicolons](#11-statements-and-semicolons)
-   - [Comments](#12-comments)
-   - [Identifiers and Naming Conventions](#13-identifiers-and-naming-conventions)
-   - [Keywords](#14-keywords)
-   - [Literals and Escapes](#15-literals-and-escapes)
-2. [Types and Type System](#2-types-and-type-system)
-   - [Primitive Types](#21-primitive-types)
-   - [Compound & Structural Types](#22-compound--structural-types)
-   - [Nullable Types](#23-nullable-types)
-   - [Union Types](#24-union-types)
-   - [Type Narrowing & `instanceof`](#25-type-narrowing--instanceof)
-3. [Variables, Constants & Scope](#3-variables-constants--scope)
-   - [Declarations](#31-declarations)
-   - [Assignments & Compound Operators](#32-assignments--compound-operators)
-   - [Increment and Decrement](#33-increment-and-decrement)
-4. [Operators & Expressions](#4-operators--expressions)
-   - [Precedence & Associativity Table](#41-precedence--associativity-table)
-   - [Arithmetic & Overflow Semantics](#42-arithmetic--overflow-semantics)
-   - [Comparison & Equality](#43-comparison--equality)
-   - [Logical Operators](#44-logical-operators)
-5. [Control Flow](#5-control-flow)
-   - [Conditionals: `if`, `else if`, `else`](#51-conditionals-if-else-if-else)
-   - [Loops: `while`, `loop`, `for ... in`](#52-loops-while-loop-for--in)
-   - [Control Transfer: `break`, `continue`, `return`](#53-control-transfer-break-continue-return)
-   - [Pattern Matching: `match`](#54-pattern-matching-match)
-6. [Functions & Lambdas](#6-functions--lambdas)
-   - [Function Declarations](#61-function-declarations)
-   - [Default Parameters & Variadics](#62-default-parameters--variadics)
-   - [Lambdas & Closures](#63-lambdas--closures)
-7. [Nominal Data Types: Structs & Enums](#7-nominal-data-types-structs--enums)
-   - [Structs & Methods](#71-structs--methods)
-   - [Enums & Algebraic Data Types](#72-enums--algebraic-data-types)
-8. [Modules, Imports & Visibility](#8-modules-imports--visibility)
-   - [Import Syntax](#81-import-syntax)
-   - [Module Resolution Order & Priority](#82-module-resolution-order--priority)
-   - [Visibility: `pub` vs Private](#83-visibility-pub-vs-private)
-   - [Execution Lifecycle & Entry Point](#84-execution-lifecycle--entry-point)
-9. [Collections](#9-collections)
-   - [`Vec<T>`](#91-vect)
-   - [`HashMap<string, V>`](#92-hashmapstring-v)
-   - [`Option<T>`](#93-optiont)
-   - [`Result<T, E>`](#94-resultt-e)
-   - [`LinkedList`, `Stack`, `Queue`](#95-linkedlist-stack-queue)
-10. [Complete Standard & Built-in Function Catalog](#10-complete-standard--built-in-function-catalog)
-    - [Scalar Conversions](#101-scalar-conversions)
-    - [Numeric & Math Builtins](#102-numeric--math-builtins)
-    - [Bitwise & Wrapping Arithmetic](#103-bitwise--wrapping-arithmetic)
-    - [Standard I/O & Diagnostics](#104-standard-io--diagnostics)
-    - [File System Operations](#105-file-system-operations)
-    - [Process, Environment & System Execution](#106-process-environment--system-execution)
-11. [Methods Quick Reference](#11-methods-quick-reference)
-    - [String Methods](#111-string-methods)
-    - [Vec Methods](#112-vec-methods)
-    - [HashMap Methods](#113-hashmap-methods)
-    - [Option & Result Methods](#114-option--result-methods)
+## A small program
 
----
+~~~rey
+import std::string;
 
-## 1. Lexical Structure
-
-### 1.1 Statements and Semicolons
-Semicolons (`;`) are **mandatory statement terminators** for all declarations, assignments, returns, break/continue statements, and expression statements. Block-closing braces (`}`) do not require a trailing semicolon.
-
-```rey
-var count: int = 10;
-count += 5;
-println("Count: " + count.toString());
-```
-
-### 1.2 Comments
-Rey supports single-line and non-nesting multi-line block comments:
-
-```rey
-// Single-line comment extending to the end of the line
-
-/* Multi-line block comment
-   spanning multiple lines */
-```
-
-### 1.3 Identifiers and Naming Conventions
-- Identifiers start with an ASCII/Unicode letter or underscore (`_`), followed by letters, digits, or underscores.
-- Names are strictly case-sensitive.
-- **Conventions:**
-  - `camelCase` for variable names, field names, and function names.
-  - `PascalCase` for struct types, enum types, and namespaces.
-  - `SCREAMING_SNAKE_CASE` or `camelCase` for constants.
-
-### 1.4 Keywords
-The following tokens are reserved keywords in Rey v0.3:
-
-```text
-var       const     func      struct    enum      match
-import    pub       return    if        else      while
-loop      for       in        break     continue  instanceof
-true      false     null      self      export
-```
-*(Note: `export` is reserved exclusively to emit a compile-time migration diagnostic pointing users to `pub`.)*
-
-### 1.5 Literals and Escapes
-
-#### Integers and Floats
-- **Decimal Integers:** `0`, `42`, `-100`, `1_000_000` (underscores are allowed between digits for readability).
-- **Hexadecimal Integers:** `0x1A3F`, `0xFF`
-- **Binary Integers:** `0b1010_0110`, `0b0`
-- **Floats (64-bit IEEE-754 binary64):** `3.14159`, `0.0`, `-0.5`, `1.0e-5`
-
-#### Strings and Characters
-- **Character Literals (`char`):** Exactly one raw byte enclosed in single quotes: `'a'`, `'Z'`, `'\n'`, `'\t'`, `'\''`, `'\x41'`.
-- **String Literals (`string`):** Enclosed in double quotes (`"..."`). UTF-8 encoded byte strings.
-- **Escape Sequences:**
-  - `\n` (newline, ASCII 10)
-  - `\t` (tab, ASCII 9)
-  - `\r` (carriage return, ASCII 13)
-  - `\\` (backslash)
-  - `\"` (double quote)
-  - `\'` (single quote)
-  - `\0` (NUL byte)
-  - `\xNN` (raw byte with two hexadecimal digits, e.g. `\x1B`)
-- **String Interpolation:**
-  Unescaped single braces `{expr}` inside strings interpolate expressions at runtime. Doubled braces `{{` or `}}` produce literal brace characters.
-  ```rey
-  var name = "Rey";
-  var version = 3;
-  println("Welcome to {name} v0.{version}!"); // "Welcome to Rey v0.3!"
-  println("Use {{x}} for syntax templates."); // "Use {x} for syntax templates."
-  ```
-- **Triple-Quoted Strings:**
-  Enclosed by `"""..."""`. Preserves source newlines and whitespace verbatim without decoding backslash escapes. Interpolation with `{expr}` remains active.
-
----
-
-## 2. Types and Type System
-
-### 2.1 Primitive Types
-Primitive type keywords must be written in lowercase. Capitalized spellings (e.g. `String`, `Int`) produce a compile-time error.
-
-| Type | Description | Size / Representation |
-|---|---|---|
-| `int` | 64-bit signed two's-complement integer | 8 bytes (`i64`) |
-| `float` | 64-bit IEEE-754 double precision float | 8 bytes (`double`) |
-| `bool` | Boolean value (`true` or `false`) | 1 byte (`i1` / `u8`) |
-| `char` | Exactly one 8-bit byte | 1 byte (`u8`, unsigned 0..255) |
-| `string` | Immutable UTF-8 / raw byte string | Heap object pointer (`i8*`) |
-| `void` | Absence of value (function return type only) | 0 bytes |
-| `any` | Dynamic escape-hatch type | Tagged dynamic value box |
-
-### 2.2 Compound & Structural Types
-
-| Kind | Syntax Example | Notes |
-|---|---|---|
-| **Tuples** | `(int, string, bool)` | Fixed-size immutable heterogeneous product type. Element access via `.0`, `.1`. |
-| **Vectors** | `Vec<T>` or `[T]` | Dynamic growable array of homogeneous elements. |
-| **HashMaps** | `HashMap<string, V>` | Key-value associative hash table (keys are always `string`). |
-| **Options** | `Option<T>` | Null-safe optional container (`Option::Some(v)` or `Option::None`). |
-| **Results** | `Result<T, E>` | Error-handling union (`Result::Ok(v)` or `Result::Err(e)`). |
-| **Functions** | `(int, string) -> bool` | Callable function signature. |
-
-### 2.3 Nullable Types
-Append `?` to any type to indicate it may hold `null`:
-```rey
-var age: int? = null;
-var title: string? = "Engineer";
-
-if title != null {
-    // title is safely narrowed to string inside this block
-    println(title.toUpper());
+func greeting(name: string): string {
+    return "Hello, {name}!";
 }
-```
 
-### 2.4 Union Types
-Use the pipe operator `|` to declare heterogeneous union types:
-```rey
-var id: int | string = 101;
-id = "REY-101"; // Valid
-```
+func main(): void {
+    println(greeting("Rey"));
+}
+~~~
 
-### 2.5 Type Narrowing & `instanceof`
-The `instanceof` operator tests nominal structs, enums, and built-in dynamic values at runtime. Inside conditional branches, `instanceof` automatically narrows the variable:
-```rey
-func inspect(val: int | string | Vec<int>): void {
-    if val instanceof int {
-        println("Integer: " + val.toString());
-    } else if val instanceof string {
-        println("String: " + val);
-    } else if val instanceof Vec {
-        println("Vector length: " + val.len().toString());
+Top-level statements are allowed. **main** is optional; if an entry module declares it, the checker
+requires no parameters and a **void** return type. **pub** makes supported declarations importable
+from another module.
+
+## Lexical rules
+
+### Identifiers and keywords
+
+Identifiers are ASCII: a letter or underscore followed by letters, digits, or underscores. Names
+are case-sensitive. The current keyword set is:
+
+~~~text
+var const func struct enum import export pub return if else while loop for in
+break continue match instanceof true false null self
+~~~
+
+**export** is recognized only to produce the migration error “export is removed; use pub”. Use **pub**.
+Primitive type names are lowercase identifiers: **int**, **float**, **bool**, **string**, **char**,
+**void**, and **any**. **String**, **Int**, and other capitalized spellings are not aliases.
+
+### Whitespace and comments
+
+Spaces, tabs, CR, and LF separate tokens. Line comments start with **//**. Block comments use
+**/* ... */**, end at the first ***/**, and do not nest. An unterminated block comment is an error.
+
+### Number literals
+
+- Decimal integers: **0**, **42**, **1_000**.
+- Decimal floats: **1.**, **1.25**, **1_000.25**.
+- Hexadecimal integers: **0x2a** or **0X2A**.
+- Binary integers: **0b101010** or **0B101010**.
+- **_** may separate valid digits, but may not lead, trail, or repeat.
+- A leading minus is the unary **-** operator, not part of the literal.
+- Scientific notation such as **1e5** and **1.0e-5** is not accepted.
+
+Integers are checked as signed 64-bit values. The source language has no unsigned integer literal
+suffixes.
+
+### Strings, interpolation, and characters
+
+Ordinary strings use double quotes. Supported escapes are newline (**&bsol;n**), tab (**&bsol;t**),
+CR (**&bsol;r**), backslash (**&bsol;&bsol;**), double quote (**&bsol;"**), apostrophe (**&bsol;'**),
+NUL (**&bsol;0**), and **&bsol;xNN** (two hexadecimal digits). Unknown or incomplete escapes are errors.
+
+**{expression}** interpolates one expression. Braces inside the expression are balanced by the lexer.
+In string text, **{{** and **}}** produce literal braces. A lone unmatched **}** is an error.
+
+Triple-quoted strings use three double quotes. Backslash escapes are not decoded in their body, but
+interpolation still works. One LF or CRLF immediately after the opening delimiter is omitted.
+
+A character literal uses single quotes and contains exactly one decoded byte, for example **'A'**,
+**'&bsol;n'**, or **'&bsol;x41'**. Empty, multi-byte, multi-character, and raw-line-break literals are
+invalid. Strings preserve source UTF-8 bytes; indexing a string is byte-oriented, not Unicode
+grapheme-aware.
+
+### Punctuation and operators
+
+The lexer recognizes:
+
+~~~text
+( ) { } [ ] , . .. ... ; : :: ? | -> =>
+= == != < <= > >= + ++ += - -- -= * *= / /= % %=
+! && ||
+~~~
+
+A lone **&** is invalid. **|** separates types in a union; there are no bitwise operators.
+
+## Types and values
+
+### Primitive and nominal types
+
+- **int**, **float**, **bool**, **string**, **char**, **void**, **any**
+- User-declared **struct** and **enum** types
+- **void** is only valid as a return type.
+- **any** weakens static checking; it is not a generic type parameter.
+
+### Built-in applied types
+
+- **Vec<T>** and **[T]** describe the same vector type.
+- **HashMap<string, V>** is a string-keyed map. Map key types other than **string** are rejected.
+- **Option<T>** has **Some** and **None** variants.
+- **Result<T, E>** has **Ok** and **Err** variants.
+- Bare **Vec**, **HashMap**, **Option**, and **Result** use **any** for omitted element/value types; a
+  bare map still has string keys.
+
+The parser can form applied type syntax such as **Name<T>**, but the checker only supports its built-in
+applied types. User-defined generic declarations, generic functions, constraints, inference, and
+monomorphization are not part of this frontend.
+
+### Tuples, functions, nullable types, and unions
+
+Tuple types use **(T, U)** or **(T,)**; the one-element trailing comma is required. Tuple fields are
+accessed by numeric members such as **pair.0**.
+
+Function types use **(T1, T2) -> R**, including **() -> R**.
+
+**T?** is nullable shorthand for **T | null**. Union types use **T | U | ...**. **null** is not a
+standalone declared type. The checker narrows locals in supported **instanceof** and null comparisons.
+
+### Type inference and conversions
+
+- Annotated variables, fields, parameters, and returns are checked against their declared types.
+- An unannotated local takes the initializer's type; reassignment does not change that type.
+- Unannotated function parameters default to **any**.
+- An omitted function return type is inferred from returned expressions; a function with no value return
+  is **void**. Mixing value-returning and void paths is rejected.
+- Numeric conversions are explicit; the built-ins **int**, **float**, **string**, and **char** perform
+  conversions subject to the checker/backend limits described below.
+
+## Declarations and visibility
+
+### Variables and constants
+
+Both forms require an initializer:
+
+~~~rey
+var count: int = 0;
+const title = "Rey";
+~~~
+
+**var** may be reassigned. **const** may not. A constant binding does not deep-freeze a referenced
+vector, map, or struct.
+
+### Functions, parameters, and lambdas
+
+~~~rey
+pub func greet(name: string, punctuation: string = "!"): string {
+    return "Hello, {name}{punctuation}";
+}
+
+func firstOr(values: Vec<string>, fallback: string): string {
+    if values.len() == 0 { return fallback; }
+    return values[0];
+}
+
+const add = (left: int, right: int) => left + right;
+~~~
+
+Function declarations have the form **[pub] func name(parameters) [: returnType] { ...}**. Parameter
+types are optional for named functions; omitted types are **any**. A default may be written as
+**name = expression** or **name: Type = expression**. Defaults must be trailing and compatible with
+the parameter type.
+
+A variadic parameter is written **name: ...Type**, and must be the last parameter. Inside the function
+it has type **Vec<Type>**. At most one variadic parameter is allowed. This is not written
+**...name: Type**.
+
+Lambdas use an expression body and require a type on each parameter. Block-bodied lambdas are not
+parsed. A lambda may capture immutable **const** bindings; capturing a mutable **var** is rejected.
+
+Top-level functions, structs, and enums may be public with **pub**. Nested function/type/import
+declarations are rejected by the current typechecker, even where the parser can build an AST node.
+
+### Structs and methods
+
+~~~rey
+pub struct Person {
+    pub name: string,
+    age: int,
+
+    pub func birthday(): void {
+        age = age + 1;
     }
 }
-```
+~~~
 
----
+Fields are **name: Type** with an optional **pub**; methods use **func** and may also be **pub**. A
+method does not declare an explicit **self** parameter; its body has access to the instance and its
+fields. Private fields and methods are restricted to the owning struct's methods. A struct literal
+names its fields:
 
-## 3. Variables, Constants & Scope
+~~~rey
+var person = Person { name: "Ada", age: 36 };
+~~~
 
-### 3.1 Declarations
-- `var`: Declares a mutable variable.
-- `const`: Declares an immutable variable (cannot be reassigned after initialization).
+Each field must be supplied once. The special **Type.create(...)** form is accepted only when the
+module provides the supported public **create** factory for its sole struct.
 
-```rey
-var counter: int = 0;
-counter = counter + 1; // Valid
+### Enums
 
-const MAX_USERS: int = 1024;
-// MAX_USERS = 2048; // Compile Error: cannot reassign const
-```
-
-*Type annotations are optional when the initializer can be inferred:*
-```rey
-var score = 100;       // Inferred as int
-var message = "Hello"; // Inferred as string
-```
-
-### 3.2 Assignments & Compound Operators
-Rey supports standard assignment and compound in-place arithmetic:
-```rey
-var x = 10;
-x += 5;  // x = 15
-x -= 3;  // x = 12
-x *= 2;  // x = 24
-x /= 4;  // x = 6
-x %= 4;  // x = 2
-```
-
-### 3.3 Increment and Decrement
-Prefix and postfix `++` and `--` are valid on mutable integer lvalues:
-```rey
-var n = 5;
-n++;   // Postfix: increments n to 6
-++n;   // Prefix: increments n to 7
-n--;   // Postfix: decrements n to 6
---n;   // Prefix: decrements n to 5
-```
-
----
-
-## 4. Operators & Expressions
-
-### 4.1 Precedence & Associativity Table
-From highest (tightest binding) to lowest:
-
-| Level | Operators / Syntactic Forms | Associativity |
-|:---:|---|---|
-| **1** | Calls `()`, Indexing `[]`, Member Access `.`, Path `::`, Postfix `++`, `--` | Left-to-right |
-| **2** | Unary `!`, Unary `-`, Prefix `++`, `--` | Right-to-left |
-| **3** | Multiplicative: `*`, `/`, `%` | Left-to-right |
-| **4** | Additive: `+`, `-` | Left-to-right |
-| **5** | Relational: `<`, `<=`, `>`, `>=` | Left-to-right |
-| **6** | Type Introspection: `instanceof` | Left-to-right |
-| **7** | Equality: `==`, `!=` | Left-to-right |
-| **8** | Logical AND: `&&` | Left-to-right |
-| **9** | Logical OR: `\|\|` | Left-to-right |
-| **10** | Assignment: `=`, `+=`, `-=`, `*=`, `/=`, `%=` | Right-to-left |
-
-### 4.2 Arithmetic & Overflow Semantics
-- **Checked Arithmetic:** Standard operations (`+`, `-`, `*`, `/`, `%`) perform strict runtime overflow checking. Overflowing $2^{63}-1$ or $-2^{63}$ terminates execution with an error diagnostic.
-- **Division by Zero:** Division or modulo by zero terminates execution with a runtime panic.
-- **Wrapping Arithmetic:** When explicit two's-complement modular wrapping is desired (e.g. hashing, cryptographic primitives, RNG), use the explicit builtins: `wrapAdd(a, b)`, `wrapSub(a, b)`, `wrapMul(a, b)`.
-
-### 4.3 Comparison & Equality
-- **Primitive Value Equality:** `int`, `float`, `bool`, `char` compare strictly by numerical/boolean value.
-- **String Value Equality:** Strings compare byte-for-byte (`"rey" == "rey"` evaluates to `true`).
-- **Tuple & Enum Equality:** Tuples and algebraic enums compare structurally across their members/payloads.
-- **Reference Equality:** Heap collections (`Vec`, `HashMap`) and `struct` instances compare by reference identity (pointer address).
-
-### 4.4 Logical Operators
-Short-circuit evaluation is guaranteed for `&&` and `||`:
-```rey
-if ptr != null && ptr.isValid() {
-    // ptr.isValid() is only called if ptr is not null
+~~~rey
+pub enum Message {
+    Empty,
+    Count(int),
+    Named(label: string, value: int),
 }
-```
+~~~
 
----
+Variants may be unit variants, positional-payload variants, or named-payload variants. A single enum
+cannot mix positional and named payload styles. Constructors use **Enum::Variant** or
+**Enum::Variant(arguments)**. A bare **Variant(...)** constructor is accepted when its name is
+unambiguous in the module.
 
-## 5. Control Flow
+**Option::Some(value)**, **Option::None**, **Result::Ok(value)**, and **Result::Err(error)** are
+built-in constructors. Dot forms such as **Option.Some(value)** are also rewritten to these
+constructors.
 
-### 5.1 Conditionals: `if`, `else if`, `else`
-Parentheses around conditions are optional. Condition must evaluate to `bool`.
-```rey
-if score >= 90 {
-    println("Grade: A");
-} else if score >= 80 {
-    println("Grade: B");
+## Statements and control flow
+
+Simple statements end in semicolons. Blocks and control-flow declarations do not need a trailing
+semicolon.
+
+~~~rey
+if ready {
+    println("go");
+} else if waiting {
+    println("wait");
 } else {
-    println("Grade: C");
+    println("stop");
 }
-```
 
-### 5.2 Loops: `while`, `loop`, `for ... in`
-
-#### `while` Loop
-Repeats as long as the condition evaluates to `true`:
-```rey
-var i = 0;
-while i < 5 {
-    println(i.toString());
-    i += 1;
+while index < limit {
+    index = index + 1;
 }
-```
 
-#### Infinite `loop`
-Repeats indefinitely until an explicit `break;` statement:
-```rey
-var n = 0;
 loop {
-    if n >= 10 {
-        break;
-    }
-    n += 1;
-}
-```
-
-#### `for ... in` Loop
-Iterates through `Vec` elements, arrays, or numeric ranges:
-```rey
-// Iterating over a collection
-for name in ["Alice", "Bob", "Charlie"] {
-    println("Hello, " + name);
+    if done { break; }
 }
 
-// Iterating over a range (start-inclusive, end-exclusive)
-for idx in range(0, 5) {
-    println("Index: " + idx.toString()); // 0, 1, 2, 3, 4
+for item in items {
+    println(item);
 }
-```
+~~~
 
-### 5.3 Control Transfer: `break`, `continue`, `return`
-```rey
-func findFirstEven(nums: Vec<int>): int {
-    var found = -1;
-    for n in nums {
-        if n % 2 != 0 {
-            continue; // Skip odd numbers
-        }
-        found = n;
-        break;    // Stop on first match
-    }
-    return found;
+Supported statements include variable and constant declarations, expression statements, blocks,
+**if**/**else**, **while**, **loop**, **for**, **match**, **return**, **break**, and **continue**.
+**for** also accepts **for (item in items) { ... }**. Conditions must be **bool**. **break** and
+**continue** take no labels. The **for** binding is immutable.
+
+**return;** and **return expression;** both require a semicolon. **match** is a statement in this
+parser; there is no supported match expression.
+
+## Expressions and operators
+
+### Expression forms
+
+Expressions include literals, names, calls, field access, tuple numeric access, indexing, array/vector
+literals, dictionary literals, tuple literals, struct literals, lambdas, interpolation, enum/Option/
+Result constructors, and assignment.
+
+- **[a, b]** constructs a vector.
+- **{ "key": value, bareName: value }** constructs a dictionary. Keys are string literals or bare
+  identifier key names.
+- **(a, b)** constructs a tuple; **(a,)** is the one-element tuple. **()** as a value is unsupported.
+- **value.field**, **pair.0**, and **values[index]** access members/elements.
+- String indexing is typed as **char**.
+- Calls do not support named arguments.
+
+### Precedence, tightest to loosest
+
+| Level | Operators/forms | Associativity |
+| --- | --- | --- |
+| Postfix | calls, **::Variant**, struct literals, **.field** / **.0**, **[index]**, postfix **++** / **--** | left to right |
+| Prefix | **!**, unary **-**, prefix **++** / **--** | right to left |
+| Multiplicative | *****, **/**, **%** | left to right |
+| Additive | **+**, **-** | left to right |
+| Comparison | **<**, **<=**, **>**, **>=**, **instanceof** | left to right, same level |
+| Equality | **==**, **!=** | left to right |
+| Logical AND | **&&** | left to right, short-circuit |
+| Logical OR | **||** | left to right, short-circuit |
+| Assignment | **=**, **+=**, **-=**, ***=**, **/=**, **%=** | right to left |
+
+There are no bitwise operators, exponentiation operator, ternary operator, optional chaining, or
+**switch**. String concatenation with **+** requires strings; use interpolation or **string(value)** for
+conversion. Integer arithmetic uses checked operations in the current IR lowering. A zero integer
+divisor is an error. Structs, vectors, and maps use reference identity for equality; tuples and enum
+payloads compare structurally.
+
+**instanceof** is parsed at the comparison level. Its right operand is a bare type identifier, not an
+applied type expression. The checker supports the primitive names and selected built-in/container/
+struct types; enums are not valid **instanceof** targets.
+
+## Patterns and matching
+
+A match is written as a statement:
+
+~~~rey
+match result {
+    Result::Ok(value) => { println(value); },
+    Result::Err(message) => println(message);
 }
-```
+~~~
 
-### 5.4 Pattern Matching: `match`
-The `match` statement tests expressions against pattern arms. Pattern matching is **exhaustive**:
-- Matches enum variants (with or without payloads)
-- Matches integer ranges `a..b`
-- Matches scalar literals (`0`, `true`, `"test"`)
-- Matches wildcard `_` fallback
+Supported patterns include **_**, literal patterns, bindings, enum variants (qualified or
+unqualified), variant payload patterns, struct field patterns, and inclusive integer ranges such as
+**1..5**. Range endpoints must be integer literals. Bare variants must be unambiguous.
 
-```rey
-enum Status {
-    Idle,
-    Processing(int),
-    Failed(string)
-}
+The checker validates coverage for enum variants, **Option**, **Result**, booleans, and nullable
+values. Otherwise include **_** or a binding to cover unmatched values. Or-patterns are not
+implemented. Match arms have no guard syntax. An arm body is a block or an expression followed by
+**;**.
 
-func logStatus(s: Status): void {
-    match s {
-        Status::Idle => {
-            println("System is idle.");
-        },
-        Status::Processing(progress) => {
-            println("Progress: " + progress.toString() + "%");
-        },
-        Status::Failed(err) => {
-            println("Error encountered: " + err);
-        },
-        _ => {
-            println("Unknown state");
-        }
-    }
-}
-```
+## Modules and imports
 
----
+Every import ends with **;**:
 
-## 6. Functions & Lambdas
+~~~rey
+import std::string;
+import app::config::{load, Config};
+import helpers.parse;
+import helpers.{trim, split};
+import "relative/path/file.rey";
+~~~
 
-### 6.1 Function Declarations
-Functions are declared using `func`. Return type annotations use `: Type`. If omitted, return type is inferred or `void`.
+- **import a::b::c;** binds the final module namespace.
+- **import a::b::{name, ...};** selects public names from a module; if the module file is absent, the
+  group can resolve child modules.
+- Dotted imports select symbols from a **.rey** file.
+- A string-path import binds the imported file under its file-stem name.
 
-```rey
-func add(a: int, b: int): int {
-    return a + b;
-}
+**std::...** uses the caller's configured standard-library root. Module lookup checks **main.rey** and
+single-file modules under that root and its **src** directory. A plain module path searches the
+importer's directory, its **src**, the project root, and project **src**; a nested **parent::child**
+path also checks the child **.rey** file. Dotted and string imports resolve **.rey** files only.
 
-pub func greet(name: string): void {
-    println("Hello, " + name + "!");
-}
-```
+Imports are loaded depth-first; a circular import is an error. Only public declarations cross a module
+boundary. Top-level module initialization follows the loaded dependency order.
 
-### 6.2 Default Parameters & Variadics
-Rey supports trailing default values and final variadic parameters:
+## Global built-ins
 
-```rey
-// Default parameter values
-func connect(host: string, port: int = 8080, secure: bool = true): void {
-    // ...
-}
+These names are registered by the current [typechecker](rey-compiler/src/typecheck/main.rey) in ordinary
+source. They are not imported from **std**.
 
-// Variadic parameters (collected as Vec<T>)
-func sum(first: int, ...rest: int): int {
-    var total = first;
-    for val in rest {
-        total += val;
-    }
-    return total;
-}
-```
+| Name/signature | Result and notes |
+| --- | --- |
+| **print(...values: any): void** | Writes values to standard output. |
+| **println(...values: any): void** | Writes values and a newline. |
+| **eprint(...values: any): void** | Writes values to standard error. |
+| **eprintln(...values: any): void** | Writes values and a newline to standard error. |
+| **assert(condition: bool, message: any): void** | Fails when condition is false. |
+| **readFile(path: string): string** | Reads a file. |
+| **writeFile(path: string, content: string): void** | Replaces or creates a file. |
+| **appendFile(path: string, content: string): void** | Appends text to a file. |
+| **fileExists(path: string): bool** | Checks whether the path exists; the native implementation uses stat success. |
+| **deleteFile(path: string): void** | Removes a file path. |
+| **mkdir(path: string): void** | Creates a directory. |
+| **listDir(path: string): Vec<string>** | Lists names; backend behavior differs on errors. |
+| **getEnv(name: string): Option<string>** | Environment lookup; backend support is incomplete. |
+| **exec(command: string): Result<string, string>** | Runs a shell command in the LLVM backend. |
+| **args(): Vec<string>** | Returns process arguments. |
+| **exit(code: int): void** | Terminates the process. |
+| **int(value: any): int** | Checker permits the integer/char/any family; backend conversions differ. |
+| **float(value: any): float** | Numeric conversion; backend support differs. |
+| **string(value: any): string** | String conversion; backend support differs. |
+| **char(value: int): char** | Checker also accepts char/any through its permissive builtin signature. |
+| **range(start: int, end: int): Vec<int>** | Registered by the checker; code generation is incomplete. |
+| **input([prompt: string]): string** | Checker permits zero or one string argument; backend emission is incomplete. |
+| **abs(value: number): number** | Returns the same numeric kind. |
+| **min(a: number, b: number): number** | Numeric values must satisfy checker/backend compatibility rules. |
+| **max(a: number, b: number): number** | Numeric values must satisfy checker/backend compatibility rules. |
+| **floor(value: number): int** | Numeric conversion. |
+| **ceil(value: number): int** | Numeric conversion. |
+| **round(value: number): int** | Numeric conversion. |
+| **sqrt(value: number): float** | LLVM backend includes domain checks. |
+| **pow(base: number, exponent: number): float** | Returns a float. |
+| **log(value: number): float** | LLVM backend includes domain checks. |
+| **sin(value: number): float** | Numeric function. |
+| **cos(value: number): float** | Numeric function. |
+| **tan(value: number): float** | Numeric function. |
+| **random(): float** | Registered by the checker; LLVM emission is incomplete. |
 
-### 6.3 Lambdas & Closures
-Lambdas use the arrow syntax `(args) => expression`.
-- **Capture Semantics:**
-  - **Scalars** (`int`, `float`, `bool`, `char`, `string`) are captured by **immutable value snapshot** at creation time.
-  - **Aggregates** (`Vec`, `HashMap`, `struct`) capture their reference identity, sharing mutable heap state with the outer scope.
+**number** above is documentation shorthand for **int | float**, not a declared Rey type. The
+typechecker initially registers permissive **any** signatures for several conversion/math built-ins and
+then applies additional call checks. The table describes the checked call shape, not a promise that
+every backend implements it.
 
-```rey
-var multiplier = 3;
-var triple = (x: int) => x * multiplier;
-println(triple(10).toString()); // 30
+## Built-in methods and constructors
 
-var list = [1, 2, 3, 4, 5];
-var doubled = list.map((n: int) => n * 2);
-```
+The compiler [typechecker](rey-compiler/src/typecheck/main.rey) provides the following method signatures.
+**T**, **V**, and **E** stand for the receiver's checked types.
 
----
+### Any value and structs
 
-## 7. Nominal Data Types: Structs & Enums
+- **value.toString(): string** is accepted for all receiver types.
+- A struct may define its own methods. A struct without a visible **toString** gets the synthesized
+  zero-argument **toString(): string** signature.
+- For an **any** receiver, the checker accepts any method name and arguments and returns **any**. This
+  is a dynamic type-checking escape hatch, not a defined method catalog.
 
-### 7.1 Structs & Methods
-Struct fields are private by default; use `pub` to expose fields or methods externally.
+### string
 
-```rey
-struct Vector2D {
-    pub x: float,
-    pub y: float,
+~~~text
+len(): int
+toString(): string
+toUpper(): string
+toLower(): string
+trim(): string
+contains(needle: string): bool
+startsWith(prefix: string): bool
+endsWith(suffix: string): bool
+indexOf(needle: string): int
+slice(start: int, end: int): string
+replace(old: string, new: string): string
+repeat(count: int): string
+split(separator: string): Vec<string>
+toInt(): int
+toFloat(): float
+hash(): int
+padLeft(width: int, fill: string): string
+padRight(width: int, fill: string): string
+~~~
 
-    pub func length(): float {
-        return sqrt(x * x + y * y);
-    }
+### int and float
 
-    pub func scale(factor: float): void {
-        x *= factor;
-        y *= factor;
-    }
-}
+~~~text
+toInt(): int
+toFloat(): float
+~~~
 
-// Construction
-var v = Vector2D { x: 3.0, y: 4.0 };
-println("Magnitude: " + v.length().toString()); // 5.0
-v.scale(2.0);
-println("New X: " + v.x.toString());           // 6.0
-```
+### Vec<T>
 
-### 7.2 Enums & Algebraic Data Types
-Enums can declare pure unit variants or variants with typed payload parameters:
+~~~text
+new(): Vec<any>                 // Vec.new() constructor
+len(): int
+push(value: T): void
+get(index: int): T
+set(index: int, value: T): void
+pop(): T
+contains(value: T): bool
+indexOf(value: T): int
+slice(start: int, end: int): Vec<T>
+reverse(): void
+sort(): void
+join(separator: string): string // accepted only for Vec<string>
+map((T) -> U): Vec<U>
+filter((T) -> bool): Vec<T>
+reduce((U, T) -> U, initial: U): U
+~~~
 
-```rey
-enum WebEvent {
-    PageLoad,
-    KeyPress(char),
-    Click(int, int),
-    Paste(text: string)
-}
+### HashMap<string, V>
 
-var ev = WebEvent::Click(100, 250);
-```
+~~~text
+new(): HashMap<string, any>    // HashMap.new() constructor
+len(): int
+get(key: string): V
+set(key: string, value: V): void
+has(key: string): bool
+delete(key: string): void
+keys(): Vec<string>
+values(): Vec<V>
+entries(): Vec<any>
+~~~
 
----
+The runtime's **entries()** element shape is not accurately expressed by the checker signature.
 
-## 8. Modules, Imports & Visibility
+### Option<T> and Result<T, E>
 
-### 8.1 Import Syntax
-Modules can be imported via directory namespaces, braced symbol groups, or relative file paths:
+~~~text
+Option::Some(value: T)
+Option::None
+isSome(): bool
+isNone(): bool
+unwrap(): T
+unwrapOr(fallback: T): T
 
-```rey
-// Import an entire module file or folder namespace
-import std::math;
-var s = math.sin(1.57);
+Result::Ok(value: T)
+Result::Err(error: E)
+isOk(): bool
+isErr(): bool
+unwrap(): T
+unwrapErr(): E
+unwrapOr(fallback: T): T
+~~~
 
-// Import specific symbols from a module
-import std::math::{sin, cos, PI};
+Option/Result constructors also accept dot spelling (**Option.Some(value)** and equivalent forms).
+**unwrap** behavior on an error/none value is runtime-specific. **unwrapStr** and **unwrapOrStr** are
+not accepted by the current typechecker.
 
-// Import via relative file path
-import "helpers/parser.rey";
-var p = parser.create();
-```
+### Collection method behavior
 
-### 8.2 Module Resolution Order & Priority
-When an import `parent::child` or `child` is encountered, the compiler resolves paths in the following priority order:
-1. Importer directory: `child/main.rey` (Folder priority) then `child.rey` (Flat file).
-2. Importer `src/`: `src/child/main.rey` then `src/child.rey`.
-3. Project root: `<root>/child/main.rey` then `<root>/child.rey`.
-4. Project-root `src/`: `<root>/src/child/main.rey` then `<root>/src/child.rey`.
-5. Standard library directory: `$HOME/.reyc/std/src/`.
-6. External packages: `$HOME/.reyc/packages/`.
+- The checker types **reverse()** as **void**; code generation currently has behavior that can
+  allocate and return a reversed value, so do not treat it as a portable in-place contract.
+- The checker accepts **Vec.set** and indexed assignment on supported source paths; individual
+  backend support varies.
+- The checker does not provide Vec **insert**, **remove**, or **clear**, nor HashMap **clear**.
+- **entries()** is typed **Vec<any>** even though one runtime constructs nested vectors.
 
-### 8.3 Visibility: `pub` vs Private
-- Declarations without `pub` are strictly private to their defining module.
-- `pub func`, `pub struct`, and `pub enum` are importable across module boundaries.
-- Struct fields marked `pub` can be read and mutated by importing modules. Private fields are accessible only to the struct's own internal methods.
+## Standard-library exports
 
-### 8.4 Execution Lifecycle & Entry Point
-1. **Module Static Initialization:** All top-level variable initializers and statements run once per module in depth-first post-order topological dependency order.
-2. **Entry Point:** Once imported modules are initialized, the compiler invokes `func main(): void` in the root entry file.
+This catalog is generated from public **pub func**, **pub struct**, and **pub enum** declarations in
+[std/src](std/src) in this checkout. It inventories source declarations (including importable public
+exports), not proof that each function typechecks or runs in every backend. Private helper functions
+are excluded because they are not exported API.
 
----
+**Snapshot count:** 312 public function declarations and 10 public struct declarations across 28
+top-level modules and 4 directly addressable **math** submodules.
 
-## 9. Collections
+The compiler's standard-library loader resolves one module file per import. A submodule such as
+**std::math::basic** is importable by its own path; it is not automatically re-exported from
+**std::math**.
+### Public types
 
-### 9.1 `Vec<T>`
-Dynamic array container storing elements contiguously.
-```rey
-var nums = Vec.new();
-nums.push(10);
-nums.push(20);
-nums.push(30);
+#### std::image types
 
-var last = nums.pop();       // 30
-var first = nums[0];         // 10
-var totalLen = nums.len();   // 2
 
-nums[1] = 99;                // In-place index assignment
-```
+Source: [std/src/image/main.rey](std/src/image/main.rey)
 
-### 9.2 `HashMap<string, V>`
-Fast associative key-value map keyed by strings.
-```rey
-var userAges = HashMap.new();
-userAges.set("Alice", 28);
-userAges.set("Bob", 34);
 
-if userAges.has("Alice") {
-    var age = userAges.get("Alice");
-    println("Alice is " + age.toString());
-}
+~~~text
+struct Image { width: int, height: int, pixels: Vec<int> }
+~~~
 
-userAges.delete("Bob");
-```
 
-### 9.3 `Option<T>`
-Type-safe container representing a value that may or may not be present:
-```rey
-var present: Option<int> = Option::Some(42);
-var empty: Option<int> = Option::None;
+#### std::linalg types
 
-if present.isSome() {
-    println("Value: " + present.unwrap().toString());
-}
 
-var fallback = empty.unwrapOr(100); // Evaluates to 100
-```
+Source: [std/src/linalg/main.rey](std/src/linalg/main.rey)
 
-### 9.4 `Result<T, E>`
-Type-safe container for operations that can return either success or failure:
-```rey
-func parsePort(s: string): Result<int, string> {
-    if s == "80" { return Result::Ok(80); }
-    return Result::Err("Invalid port number");
-}
 
-var res = parsePort("80");
-if res.isOk() {
-    println("Port: " + res.unwrap().toString());
-} else {
-    println("Error: " + res.unwrapErr());
-}
-```
+~~~text
+struct Vec2 { x: float, y: float }
+struct Vec3 { x: float, y: float, z: float }
+~~~
 
-### 9.5 `LinkedList`, `Stack`, `Queue`
-High-level standard data structures provided by the runtime:
-```rey
-// Stack: LIFO container
-var st = Stack.new();
-st.push("first");
-st.push("second");
-var top = st.pop(); // "second"
 
-// Queue: FIFO container
-var q = Queue.new();
-q.enqueue(1);
-q.enqueue(2);
-var item = q.dequeue(); // 1
+#### std::mem types
 
-// LinkedList: Doubly-linked list
-var list = LinkedList.new();
-list.push(10);
-list.unshift(5);
-```
 
----
+Source: [std/src/mem/main.rey](std/src/mem/main.rey)
 
-## 10. Complete Standard & Built-in Function Catalog
 
-### 10.1 Scalar Conversions
-| Built-in Function | Parameter Type | Return Type | Description |
-|---|---|---|---|
-| `int(c)` | `char` | `int` | Converts a 1-byte char to its 0..255 unsigned integer code. |
-| `char(i)` | `int` | `char` | Converts an integer in range `0..255` to its single-byte character. Exits 1 if out of range. |
-| `float(x)` | `int \| float` | `float` | Converts an integer or float to 64-bit binary64 float. |
-| `string(x)` | `scalar` | `string` | Converts any scalar primitive directly to its string representation. |
+~~~text
+struct Span { buffer: Vec<any>, offset: int, length: int }
+~~~
 
-### 10.2 Numeric & Math Builtins
-| Built-in Function | Parameter Type(s) | Return Type | Description |
-|---|---|---|---|
-| `abs(x)` | `int` or `float` | Same as `x` | Returns absolute value. Panics on `INT64_MIN`. |
-| `min(a, b)` | Numbers | Number | Returns the smaller of two numbers. |
-| `max(a, b)` | Numbers | Number | Returns the larger of two numbers. |
-| `pow(base, exp)` | `(int, int)` or `(float, float)` | Number | Computes base raised to power exponent. |
-| `sqrt(x)` | `float` | `float` | Square root. Exits 1 if `x < 0.0`. |
-| `exp(x)` | `float` | `float` | Exponential function ($e^x$). |
-| `log(x)` | `float` | `float` | Natural logarithm ($\ln x$). Exits 1 if `x <= 0.0`. |
-| `sin(x)` | `float` | `float` | Sine in radians. |
-| `cos(x)` | `float` | `float` | Cosine in radians. |
-| `tan(x)` | `float` | `float` | Tangent in radians. |
-| `floor(x)` | `float` | `int` | Greatest integer $\le x$ (rounds towards $-\infty$). |
-| `ceil(x)` | `float` | `int` | Least integer $\ge x$ (rounds towards $+\infty$). |
-| `round(x)` | `float` | `int` | Rounds to the nearest integer. |
-| `random()` | `void` | `float` | Generates a pseudo-random float in range `[0.0, 1.0)`. |
 
-### 10.3 Bitwise & Wrapping Arithmetic
-| Built-in Function | Parameter Types | Return Type | Description |
-|---|---|---|---|
-| `wrapAdd(a, b)` | `(int, int)` | `int` | 64-bit integer addition with two's-complement modular wrapping. |
-| `wrapSub(a, b)` | `(int, int)` | `int` | 64-bit integer subtraction with two's-complement modular wrapping. |
-| `wrapMul(a, b)` | `(int, int)` | `int` | 64-bit integer multiplication with two's-complement modular wrapping. |
-| `bitAnd(a, b)` | `(int, int)` | `int` | Bitwise AND (`a & b`). |
-| `bitOr(a, b)` | `(int, int)` | `int` | Bitwise OR (`a \| b`). |
-| `bitXor(a, b)` | `(int, int)` | `int` | Bitwise XOR (`a ^ b`). |
-| `bitNot(a)` | `int` | `int` | Bitwise bitwise inversion (`~a`). |
-| `bitShl(a, n)` | `(int, int)` | `int` | Bitwise shift left (`a << n`). |
-| `bitShr(a, n)` | `(int, int)` | `int` | Arithmetic shift right (`a >> n`). |
+#### std::net types
 
-### 10.4 Standard I/O & Diagnostics
-| Built-in Function | Signature | Description |
-|---|---|---|
-| `print(...values)` | `(...any): void` | Prints values space-separated to standard output without trailing newline. |
-| `println(...values)` | `(...any): void` | Prints values space-separated to standard output followed by a newline. |
-| `eprint(...values)` | `(...any): void` | Prints values space-separated to standard error without trailing newline. |
-| `eprintln(...values)` | `(...any): void` | Prints values space-separated to standard error followed by a newline. |
-| `input(prompt?)` | `(string?): string` | Prompts user and reads a line of text from standard input. |
-| `assert(cond, msg)` | `(bool, string): void` | Asserts condition is true. Panics with `msg` if false. |
-| `typeof(val)` | `(any): string` | Returns the runtime type name of the given value. |
 
-### 10.5 File System Operations
-| Built-in Function | Signature | Description |
-|---|---|---|
-| `readFile(path)` | `(string): string` | Reads entire file contents into a string. Exits 1 on missing file. |
-| `writeFile(path, data)`| `(string, string): void` | Writes string contents to file (creates or truncates). |
-| `appendFile(path, data)`| `(string, string): void` | Appends string contents to an existing or new file. |
-| `fileExists(path)` | `(string): bool` | Returns `true` if file exists on disk, `false` otherwise. |
-| `deleteFile(path)` | `(string): void` | Deletes a file from the file system. |
-| `copyFile(src, dst)` | `(string, string): void` | Copies file from `src` to `dst`. |
-| `moveFile(src, dst)` | `(string, string): void` | Moves or renames file from `src` to `dst`. |
-| `isFile(path)` | `(string): bool` | Returns `true` if path is a regular file. |
-| `isDir(path)` | `(string): bool` | Returns `true` if path is a directory. |
-| `mkdir(path)` | `(string): void` | Creates a single directory. |
-| `mkdirAll(path)` | `(string): void` | Recursively creates directories along the path. |
-| `removeDir(path)` | `(string): void` | Removes an empty directory. |
-| `removeDirAll(path)` | `(string): void` | Recursively removes a directory and all its contents. |
-| `listDir(path)` | `(string): Vec<string>`| Returns list of filenames within directory. |
-| `listDirPaths(path)` | `(string): Vec<string>`| Returns list of full paths within directory. |
-| `pathJoin(a, b)` | `(string, string): string` | Joins two filesystem path segments. |
-| `basename(path)` | `(string): string` | Returns filename portion of a path. |
-| `dirname(path)` | `(string): string` | Returns directory portion of a path. |
-| `extname(path)` | `(string): string` | Returns file extension (including `.`). |
+Source: [std/src/net/main.rey](std/src/net/main.rey)
 
-### 10.6 Process, Environment & System Execution
-| Built-in Function | Signature | Description |
-|---|---|---|
-| `args()` | `(): Vec<string>` | Returns list of command-line arguments passed to the program. |
-| `getEnv(name)` | `(string): Option<string>` | Reads an environment variable. |
-| `setEnv(name, val)` | `(string, string): void` | Sets an environment variable in current process. |
-| `unsetEnv(name)` | `(string): void` | Unsets an environment variable. |
-| `envAll()` | `(): HashMap<string, string>` | Returns all environment variables as a key-value map. |
-| `cwd()` | `(): string` | Returns current working directory. |
-| `chdir(path)` | `(string): Result<string, string>`| Changes current working directory. |
-| `tempDir()` | `(): string` | Returns system temporary directory path. |
-| `exec(cmd)` | `(string): Result<string, string>` | Executes shell command via `/bin/sh -c` and returns stdout. |
-| `execDetailed(cmd)` | `(string): ExecResult` | Executes shell command and returns struct with stdout, stderr, and exit code. |
-| `which(bin)` | `(string): Option<string>` | Resolves full path to executable binary using system PATH. |
-| `sleepMs(ms)` | `(int): void` | Suspends thread execution for specified milliseconds. |
-| `exit(code)` | `(int): void` | Terminates process immediately with specified status code. |
 
----
+~~~text
+struct SocketAddr { host: string, port: int }
+~~~
 
-## 11. Methods Quick Reference
 
-### 11.1 String Methods
-| Method | Returns | Description |
-|---|---|---|
-| `s.len()` | `int` | Returns number of bytes in string. |
-| `s[i]` | `string` | Returns 1-character string at index `i`. |
-| `s.slice(start, end)` | `string` | Returns half-open substring `[start, end)`. |
-| `s.indexOf(sub)` | `int` | Returns first byte index of `sub`, or `-1` if absent. |
-| `s.lastIndexOf(sub)` | `int` | Returns last byte index of `sub`, or `-1` if absent. |
-| `s.contains(needle)` | `bool` | Returns `true` if `needle` is found in string. |
-| `s.startsWith(prefix)` | `bool` | Returns `true` if string begins with `prefix`. |
-| `s.endsWith(suffix)` | `bool` | Returns `true` if string ends with `suffix`. |
-| `s.toUpper()` | `string` | Converts ASCII characters to uppercase. |
-| `s.toLower()` | `string` | Converts ASCII characters to lowercase. |
-| `s.trim()` | `string` | Strips leading and trailing ASCII whitespace. |
-| `s.trimStart()` | `string` | Strips leading ASCII whitespace. |
-| `s.trimEnd()` | `string` | Strips trailing ASCII whitespace. |
-| `s.padLeft(w, pad)` | `string` | Pads left side to width `w` using first byte of `pad`. |
-| `s.padRight(w, pad)` | `string` | Pads right side to width `w` using first byte of `pad`. |
-| `s.replace(from, to)` | `string` | Replaces occurrences of `from` with `to`. |
-| `s.repeat(n)` | `string` | Returns string repeated `n` times. |
-| `s.split(delim)` | `Vec<string>` | Splits string by delimiter (`""` splits into individual characters). |
-| `s.toInt()` | `int` | Parses ASCII decimal string to integer. Exits 1 if invalid. |
-| `s.toFloat()` | `float` | Parses ASCII decimal string to float. Exits 1 if invalid. |
-| `s.hash()` | `int` | Returns numeric value of first byte. |
-| `s.toString()` | `string` | Identity conversion. |
+#### std::sql types
 
-### 11.2 Vec Methods
-| Method | Returns | Description |
-|---|---|---|
-| `v.push(item)` | `void` | Appends item to end of vector. |
-| `v.pop()` | `T` | Removes and returns last item. Exits 1 if empty. |
-| `v.len()` | `int` | Returns number of elements in vector. |
-| `v.get(i)` | `T` | Returns item at index `i` (checked bounds). |
-| `v.set(i, val)` | `void` | Overwrites item at index `i` (checked bounds). |
-| `v.contains(item)` | `bool` | Returns `true` if vector contains item. |
-| `v.indexOf(item)` | `int` | Returns index of item, or `-1` if absent. |
-| `v.insert(i, item)` | `void` | Inserts item at index `i`. |
-| `v.remove(i)` | `T` | Removes and returns item at index `i`. |
-| `v.clear()` | `void` | Removes all elements from vector. |
-| `v.reverse()` | `void` | In-place reverses the order of elements. |
-| `v.sort()` | `void` | In-place stable sort (homogeneous ints, floats, strings, bools). |
-| `v.slice(start, end)`| `Vec<T>` | Returns a new sub-vector from `start` to `end`. |
-| `v.join(sep)` | `string` | Joins string vector elements separated by `sep`. |
-| `v.map(fn)` | `Vec<U>` | Transforms elements via mapping function `(T) -> U`. |
-| `v.filter(fn)` | `Vec<T>` | Filters elements satisfying predicate `(T) -> bool`. |
-| `v.reduce(fn, init)` | `U` | Folds elements using accumulator `(U, T) -> U`. |
 
-### 11.3 HashMap Methods
-| Method | Returns | Description |
-|---|---|---|
-| `m.set(key, val)` | `void` | Inserts or updates key-value pair. |
-| `m.get(key)` | `V` | Retrieves value for key (panics if key absent). |
-| `m.has(key)` | `bool` | Returns `true` if key exists in map. |
-| `m.delete(key)` | `void` | Removes key and its associated value from map. |
-| `m.keys()` | `Vec<string>` | Returns vector of all keys in map. |
-| `m.values()` | `Vec<V>` | Returns vector of all values in map. |
-| `m.entries()` | `Vec<Vec<any>>` | Returns vector of `[key, value]` pairs. |
-| `m.len()` | `int` | Returns number of entries in map. |
-| `m.clear()` | `void` | Removes all entries from map. |
+Source: [std/src/sql/main.rey](std/src/sql/main.rey)
 
-### 11.4 Option & Result Methods
-| Method | Receiver | Returns | Description |
-|---|---|---|---|
-| `.isSome()` | `Option<T>` | `bool` | `true` if value is `Option::Some`. |
-| `.isNone()` | `Option<T>` | `bool` | `true` if value is `Option::None`. |
-| `.unwrap()` | `Option<T>` | `T` | Returns payload. Panics if `None`. |
-| `.unwrapOr(def)` | `Option<T>` | `T` | Returns payload if `Some`, otherwise `def`. |
-| `.isOk()` | `Result<T, E>` | `bool` | `true` if value is `Result::Ok`. |
-| `.isErr()` | `Result<T, E>` | `bool` | `true` if value is `Result::Err`. |
-| `.unwrap()` | `Result<T, E>` | `T` | Returns Ok payload. Panics if `Err`. |
-| `.unwrapErr()` | `Result<T, E>` | `E` | Returns Err payload. Panics if `Ok`. |
-| `.unwrapOr(def)` | `Result<T, E>` | `T` | Returns Ok payload if `Ok`, otherwise `def`. |
-| `.unwrapStr()` | `Result<string, E>` | `string` | Unwraps string Ok payload directly. |
-| `.unwrapOrStr(def)` | `Result<string, E>` | `string` | Returns string Ok payload or string default. |
+
+~~~text
+struct Connection { path: string, driver: string }
+struct QueryResult { columns: Vec<string>, rows: Vec<Vec<string>>, changes: int, ok: bool, error: string }
+~~~
+
+
+#### std::sync types
+
+
+Source: [std/src/sync/main.rey](std/src/sync/main.rey)
+
+
+~~~text
+struct AtomicInt { val: int }
+struct Mutex { locked: bool }
+struct Channel { queue: Vec<any> }
+~~~
+
+
+### Public functions by module
+
+
+#### std::binary
+
+
+Source: [std/src/binary/main.rey](std/src/binary/main.rey)
+
+
+~~~rey
+pub func packU16Le(val: int): Vec<int>
+pub func unpackU16Le(bytes: Vec<int>, offset: int): int
+pub func packU32Le(val: int): Vec<int>
+pub func unpackU32Le(bytes: Vec<int>, offset: int): int
+pub func packU16Be(val: int): Vec<int>
+pub func unpackU16Be(bytes: Vec<int>, offset: int): int
+pub func packU32Be(val: int): Vec<int>
+pub func unpackU32Be(bytes: Vec<int>, offset: int): int
+pub func toHex(bytes: Vec<int>): string
+pub func fromHex(hex: string): Vec<int>
+~~~
+
+
+#### std::cli
+
+
+Source: [std/src/cli/main.rey](std/src/cli/main.rey)
+
+
+~~~rey
+pub func parseArgs(args: Vec<string>): any
+pub func hasFlag(parsed: any, flagName: string): bool
+pub func getOption(parsed: any, optName: string, defaultValue: string): string
+pub func getPositionals(parsed: any): Vec<string>
+pub func renderHelp(appName: string, desc: string, flags: Vec<Vec<string>>): string
+~~~
+
+
+#### std::collections
+
+
+Source: [std/src/collections/main.rey](std/src/collections/main.rey)
+
+
+~~~rey
+pub func range(start: int, end: int, step: int = 1): Vec<int>
+pub func zip(a: Vec<any>, b: Vec<any>): Vec<Vec<any>>
+pub func flatten(nested: Vec<Vec<any>>): Vec<any>
+pub func unique(arr: Vec<any>): Vec<any>
+pub func groupBy(arr: Vec<any>, keyFn: (any) -> any): HashMap<string, any>
+pub func chunk(arr: Vec<any>, size: int): Vec<Vec<any>>
+pub func partition(arr: Vec<any>, predicate: (any) -> bool): Vec<Vec<any>>
+pub func find(arr: Vec<any>, predicate: (any) -> bool): any
+pub func findIndex(arr: Vec<any>, predicate: (any) -> bool): int
+pub func every(arr: Vec<any>, predicate: (any) -> bool): bool
+pub func some(arr: Vec<any>, predicate: (any) -> bool): bool
+pub func count(arr: Vec<any>, predicate: (any) -> bool): int
+pub func maxBy(arr: Vec<any>, keyFn: (any) -> any): any
+pub func minBy(arr: Vec<any>, keyFn: (any) -> any): any
+pub func sum(arr: Vec<any>): any
+pub func sumBy(arr: Vec<any>, fn: (any) -> any): any
+pub func frequency(arr: Vec<any>): HashMap<string, int>
+pub func take(arr: Vec<any>, n: int): Vec<any>
+pub func drop(arr: Vec<any>, n: int): Vec<any>
+pub func concat(a: Vec<any>, b: Vec<any>): Vec<any>
+pub func compact(arr: Vec<any>): Vec<any>
+pub func map(arr: Vec<any>, fn: (any) -> any): Vec<any>
+pub func filter(arr: Vec<any>, predicate: (any) -> bool): Vec<any>
+pub func reduce(arr: Vec<any>, fn: (any, any) -> any, initial: any): any
+pub func reverse(arr: Vec<any>): Vec<any>
+pub func contains(arr: Vec<any>, item: any): bool
+~~~
+
+
+#### std::compress
+
+
+Source: [std/src/compress/main.rey](std/src/compress/main.rey)
+
+
+~~~rey
+pub func rleCompress(data: string): string
+pub func rleDecompress(compressed: string): string
+pub func gzip(inputPath: string, outputPath: string): bool
+pub func gunzip(inputPath: string, outputPath: string): bool
+pub func tarCreate(archivePath: string, files: Vec<string>): bool
+pub func tarExtract(archivePath: string, destDir: string): bool
+~~~
+
+
+#### std::core
+
+
+Source: [std/src/core/main.rey](std/src/core/main.rey)
+
+
+~~~rey
+pub func panic(msg: string): void
+pub func todo(msg: string): void
+pub func unreachable(msg: string): void
+pub func unwrapOr(opt: any, defaultValue: any): any
+pub func isSome(opt: any): bool
+pub func isNone(opt: any): bool
+pub func isOk(res: any): bool
+pub func isErr(res: any): bool
+~~~
+
+
+#### std::crypto
+
+
+Source: [std/src/crypto/main.rey](std/src/crypto/main.rey)
+
+
+~~~rey
+pub func fnv1a(data: string): int
+pub func djb2(data: string): int
+pub func md5(data: string): string
+pub func sha256(data: string): string
+pub func randomBytes(n: int): Vec<int>
+pub func toHex(bytes: Vec<int>): string
+~~~
+
+
+#### std::csv
+
+
+Source: [std/src/csv/main.rey](std/src/csv/main.rey)
+
+
+~~~rey
+pub func parse(text: string): Vec<Vec<string>>
+pub func parseWithDelimiter(text: string, delim: string): Vec<Vec<string>>
+pub func stringify(rows: Vec<Vec<string>>): string
+pub func stringifyWithDelimiter(rows: Vec<Vec<string>>, delim: string): string
+~~~
+
+
+#### std::env
+
+
+Source: [std/src/env/main.rey](std/src/env/main.rey)
+
+
+~~~rey
+pub func get(key: string): any
+pub func getOr(key: string, defaultVal: string): string
+pub func set(key: string, value: string): void
+pub func remove(key: string): void
+pub func has(key: string): bool
+pub func all(): any
+~~~
+
+
+#### std::fmt
+
+
+Source: [std/src/fmt/main.rey](std/src/fmt/main.rey)
+
+
+~~~rey
+pub func format(template: string, args: Vec<any>): string
+pub func padLeft(s: string, width: int, pad: string): string
+pub func padRight(s: string, width: int, pad: string): string
+pub func toHex(val: int): string
+pub func toBin(val: int): string
+pub func toOct(val: int): string
+~~~
+
+
+#### std::fs
+
+
+Source: [std/src/fs/main.rey](std/src/fs/main.rey)
+
+
+~~~rey
+pub func read(path: string): string
+pub func write(path: string, content: string): void
+pub func append(path: string, content: string): void
+pub func exists(path: string): bool
+pub func remove(path: string): void
+pub func mkdir(path: string): void
+pub func mkdirAll(path: string): void
+pub func removeDir(path: string): void
+pub func removeDirAll(path: string): void
+pub func isFile(path: string): bool
+pub func isDir(path: string): bool
+pub func list(path: string): Vec<string>
+pub func listPaths(path: string): Vec<string>
+pub func join(a: string, b: string): string
+pub func basename(path: string): string
+pub func dirname(path: string): string
+pub func extname(path: string): string
+pub func copy(src: string, dst: string): void
+pub func move(src: string, dst: string): void
+pub func touch(path: string): void
+pub func readLines(path: string): Vec<string>
+pub func writeLines(path: string, lines: Vec<string>): void
+pub func ensureDir(path: string): void
+pub func cleanPath(path: string): string
+~~~
+
+
+#### std::http
+
+
+Source: [std/src/http/main.rey](std/src/http/main.rey)
+
+
+~~~rey
+pub func request( method: string, url: string, headers: HashMap<string, string>, body: string ): any
+pub func get(url: string): any
+pub func post(url: string, body: string): any
+pub func put(url: string, body: string): any
+pub func del(url: string): any
+~~~
+
+
+#### std::image
+
+
+Source: [std/src/image/main.rey](std/src/image/main.rey)
+
+
+~~~rey
+pub func createImage(width: int, height: int): Image
+pub func setPixel(img: Image, x: int, y: int, r: int, g: int, b: int): void
+pub func getPixel(img: Image, x: int, y: int): Vec<int>
+pub func toPpm(img: Image): string
+pub func writePpm(img: Image, path: string): bool
+~~~
+
+
+#### std::io
+
+
+Source: [std/src/io/main.rey](std/src/io/main.rey)
+
+
+~~~rey
+pub func printRed(msg: string): void
+pub func printGreen(msg: string): void
+pub func printYellow(msg: string): void
+pub func printBlue(msg: string): void
+pub func printMagenta(msg: string): void
+pub func printCyan(msg: string): void
+pub func printBold(msg: string): void
+pub func clear(): void
+pub func printTable(headers: Vec<string>, rows: Vec<Vec<string>>): void
+pub func progressBar(current: int, total: int, width: int): string
+pub func printBox(title: string, content: string): void
+~~~
+
+
+#### std::json
+
+
+Source: [std/src/json/main.rey](std/src/json/main.rey)
+
+
+~~~rey
+pub func escapeString(s: string): string
+pub func stringifyString(s: string): string
+pub func stringifyInt(n: int): string
+pub func stringifyFloat(f: float): string
+pub func stringifyBool(b: bool): string
+pub func stringifyArray(items: Vec<string>): string
+pub func stringifyObject(entries: Vec<Vec<string>>): string
+~~~
+
+
+#### std::linalg
+
+
+Source: [std/src/linalg/main.rey](std/src/linalg/main.rey)
+
+
+~~~rey
+pub func vec2(x: float, y: float): Vec2
+pub func vec2Add(a: Vec2, b: Vec2): Vec2
+pub func vec2Sub(a: Vec2, b: Vec2): Vec2
+pub func vec2Scale(v: Vec2, s: float): Vec2
+pub func vec2Dot(a: Vec2, b: Vec2): float
+pub func vec2Length(v: Vec2): float
+pub func vec2Distance(a: Vec2, b: Vec2): float
+pub func vec2Normalize(v: Vec2): Vec2
+pub func vec3(x: float, y: float, z: float): Vec3
+pub func vec3Add(a: Vec3, b: Vec3): Vec3
+pub func vec3Sub(a: Vec3, b: Vec3): Vec3
+pub func vec3Scale(v: Vec3, s: float): Vec3
+pub func vec3Dot(a: Vec3, b: Vec3): float
+pub func vec3Cross(a: Vec3, b: Vec3): Vec3
+pub func vec3Length(v: Vec3): float
+pub func vec3Normalize(v: Vec3): Vec3
+~~~
+
+
+#### std::log
+
+
+Source: [std/src/log/main.rey](std/src/log/main.rey)
+
+
+~~~rey
+pub func levelTrace(): int
+pub func levelDebug(): int
+pub func levelInfo(): int
+pub func levelWarn(): int
+pub func levelError(): int
+pub func setLogLevel(level: int): void
+pub func getLogLevel(): int
+pub func trace(msg: string): void
+pub func debug(msg: string): void
+pub func info(msg: string): void
+pub func warn(msg: string): void
+pub func error(msg: string): void
+pub func formatLog(level: string, msg: string): string
+~~~
+
+
+#### std::math
+
+
+Source: [std/src/math/main.rey](std/src/math/main.rey)
+
+
+~~~rey
+pub func pi(): float
+pub func e(): float
+pub func tau(): float
+pub func clamp(value, minVal, maxVal)
+pub func sign(n)
+pub func floor(n)
+pub func ceil(n)
+pub func round(n)
+pub func toRadians(deg: float): float
+pub func toDegrees(rad: float): float
+pub func sin(x: float): float
+pub func cos(x: float): float
+pub func tan(x: float): float
+pub func sum(nums: ...int): int
+pub func mean(nums: ...int): int
+pub func max(a, b)
+pub func min(a, b)
+pub func abs(n)
+pub func sqrt(x: float): float
+pub func pow(base, exp)
+pub func log(x: float): float
+pub func random(): float
+pub func lerp(a: float, b: float, t: float): float
+pub func hypot(a: float, b: float): float
+pub func median(nums: Vec<int>): float
+pub func variance(nums: Vec<int>): float
+pub func stdDev(nums: Vec<int>): float
+pub func gcd(a: int, b: int): int
+pub func lcm(a: int, b: int): int
+pub func factorial(n: int): int
+pub func degToRad(deg: float): float
+pub func radToDeg(rad: float): float
+pub func trunc(x: float): int
+pub func fract(x: float): float
+~~~
+
+
+#### std::math::basic
+
+
+Source: [std/src/math/basic.rey](std/src/math/basic.rey)
+
+
+~~~rey
+pub func clamp(value, min, max)
+pub func sign(n)
+pub func floor(n)
+pub func ceil(n)
+pub func round(n)
+~~~
+
+
+#### std::math::extra
+
+
+Source: [std/src/math/extra.rey](std/src/math/extra.rey)
+
+
+~~~rey
+pub func sqrt(x)
+pub func pow(base, exp)
+pub func log(x)
+pub func random()
+~~~
+
+
+#### std::math::stats
+
+
+Source: [std/src/math/stats.rey](std/src/math/stats.rey)
+
+
+~~~rey
+pub func sum(nums: ...int)
+pub func mean(nums: ...int)
+pub func max(a, b)
+pub func min(a, b)
+pub func abs(n)
+~~~
+
+
+#### std::math::trig
+
+
+Source: [std/src/math/trig.rey](std/src/math/trig.rey)
+
+
+~~~rey
+pub func sin(x)
+pub func cos(x)
+pub func tan(x)
+pub func toRadians(deg)
+pub func toDegrees(rad)
+~~~
+
+
+#### std::mem
+
+
+Source: [std/src/mem/main.rey](std/src/mem/main.rey)
+
+
+~~~rey
+pub func sizeOfInt(): int
+pub func sizeOfFloat(): int
+pub func sizeOfBool(): int
+pub func sizeOfChar(): int
+pub func makeSpan(buffer: Vec<any>, offset: int, length: int): Span
+pub func spanGet(s: Span, index: int): any
+pub func spanSlice(s: Span, start: int, end: int): Span
+pub func copy(dest: Vec<any>, destOffset: int, src: Vec<any>, srcOffset: int, count: int): void
+~~~
+
+
+#### std::net
+
+
+Source: [std/src/net/main.rey](std/src/net/main.rey)
+
+
+~~~rey
+pub func socketAddr(host: string, port: int): SocketAddr
+pub func formatAddr(addr: SocketAddr): string
+pub func isLoopback(addr: SocketAddr): bool
+pub func parseIpv4(host: string): Vec<int>
+pub func isIpv4(host: string): bool
+pub func pingHost(host: string): bool
+~~~
+
+
+#### std::os
+
+
+Source: [std/src/os/main.rey](std/src/os/main.rey)
+
+
+~~~rey
+pub func name(): string
+pub func arch(): string
+pub func eol(): string
+pub func hostname(): string
+pub func homedir(): string
+pub func tempDir(): string
+~~~
+
+
+#### std::process
+
+
+Source: [std/src/process/main.rey](std/src/process/main.rey)
+
+
+~~~rey
+pub func args(): Vec<string>
+pub func exit(code: int): void
+pub func env(key: string): Option<string>
+pub func setEnv(key: string, value: string): void
+pub func unsetEnv(key: string): void
+pub func envAll(): HashMap<string, string>
+pub func cwd(): string
+pub func chdir(path: string): void
+pub func tempDir(): string
+pub func sleepMs(ms: int): void
+pub func which(name: string): Option<string>
+pub func run(cmd: string): Result<string, string>
+pub func runDetailed(cmd: string): any
+pub func isWindows(): bool
+pub func isMac(): bool
+pub func isLinux(): bool
+~~~
+
+
+#### std::regex
+
+
+Source: [std/src/regex/main.rey](std/src/regex/main.rey)
+
+
+~~~rey
+pub func isMatch(pattern: string, text: string): bool
+pub func find(pattern: string, text: string): any
+pub func replace(pattern: string, text: string, repl: string): string
+~~~
+
+
+#### std::sql
+
+
+Source: [std/src/sql/main.rey](std/src/sql/main.rey)
+
+
+~~~rey
+pub func connect(path: string): Connection
+pub func execute(conn: Connection, sql: string): QueryResult
+pub func query(conn: Connection, sql: string): QueryResult
+pub func escapeString(val: string): string
+pub func close(conn: Connection): void
+~~~
+
+
+#### std::string
+
+
+Source: [std/src/string/main.rey](std/src/string/main.rey)
+
+
+~~~rey
+pub func trimStart(s: string): string
+pub func trimEnd(s: string): string
+pub func trim(s: string): string
+pub func startsWith(s: string, prefix: string): bool
+pub func endsWith(s: string, suffix: string): bool
+pub func indexOf(s: string, sub: string): int
+pub func lastIndexOf(s: string, sub: string, fromIndex: int = -1): int
+pub func contains(s: string, sub: string): bool
+pub func replace(s: string, from: string, to: string): string
+pub func replaceAll(s: string, from: string, to: string): string
+pub func slice(s: string, start: int, end: int): string
+pub func substring(s: string, start: int, end: int): string
+pub func padLeft(s: string, width: int, fill: string = " "): string
+pub func padRight(s: string, width: int, fill: string = " "): string
+pub func repeat(s: string, n: int): string
+pub func split(s: string, sep: string): Vec<string>
+pub func join(parts: Vec<string>, sep: string): string
+pub func toLowerCase(s: string): string
+pub func toUpperCase(s: string): string
+pub func capitalize(s: string): string
+pub func reverse(s: string): string
+pub func lines(s: string): Vec<string>
+pub func words(s: string): Vec<string>
+pub func truncate(s: string, maxLength: int, suffix: string = "..."): string
+pub func count(s: string, sub: string): int
+pub func isNumeric(s: string): bool
+pub func isAlpha(s: string): bool
+pub func isAlphanumeric(s: string): bool
+pub func parseInt(s: string): any
+pub func parseFloat(s: string): any
+pub func slugify(s: string): string
+~~~
+
+
+#### std::sync
+
+
+Source: [std/src/sync/main.rey](std/src/sync/main.rey)
+
+
+~~~rey
+pub func atomicInt(initial: int): AtomicInt
+pub func atomicGet(a: AtomicInt): int
+pub func atomicSet(a: AtomicInt, v: int): void
+pub func atomicAdd(a: AtomicInt, delta: int): int
+pub func atomicSub(a: AtomicInt, delta: int): int
+pub func mutex(): Mutex
+pub func lock(m: Mutex): bool
+pub func unlock(m: Mutex): void
+pub func channel(): Channel
+pub func send(ch: Channel, val: any): void
+pub func recv(ch: Channel): any
+~~~
+
+
+#### std::test
+
+
+Source: [std/src/test/main.rey](std/src/test/main.rey)
+
+
+~~~rey
+pub func assertEq(actual, expected, msg: string): void
+pub func assertNotEq(actual, expected, msg: string): void
+pub func assertTrue(condition: bool, msg: string): void
+pub func assertFalse(condition: bool, msg: string): void
+pub func assertApprox(actual: float, expected: float, epsilon: float, msg: string): void
+pub func pass(msg: string): void
+pub func fail(msg: string): void
+~~~
+
+
+#### std::time
+
+
+Source: [std/src/time/main.rey](std/src/time/main.rey)
+
+
+~~~rey
+pub func sleep(ms: int): void
+pub func formatDurationMs(ms: int): string
+pub func formatDurationSeconds(sec: float): string
+~~~
+
+
+#### std::toml
+
+
+Source: [std/src/toml/main.rey](std/src/toml/main.rey)
+
+
+~~~rey
+pub func parse(text: string): HashMap<string, any>
+pub func getString(table: HashMap<string, any>, key: string, defaultVal: string): string
+pub func getInt(table: HashMap<string, any>, key: string, defaultVal: int): int
+pub func getBool(table: HashMap<string, any>, key: string, defaultVal: bool): bool
+pub func stringify(table: HashMap<string, any>): string
+~~~
+
+
+## Compiler-only names and implementation gaps
+
+The checked-in source has two distinct compilation paths:
+
+- The established **rey-compiler/main.rey** path typechecks source and emits LLVM/C-runtime output.
+- **rey-compiler/ir/lower/main.rey** lowers a narrower experimental managed-IR subset.
+
+A typechecker accepting a call does not mean both paths can emit it. Important current gaps include:
+
+- **input**, **range**, and **random** are registered by the checker but have no LLVM call emission.
+  **getEnv** is typed as **Option<string>** but has no LLVM call emission; the existing C helper returns
+  a string, not an Option.
+- The managed-IR path does not lower many global I/O, process, and numeric built-ins that the frontend
+  recognizes.
+- Output built-ins differ between backends in accepted renderable values and separators; the checker
+  does not treat every possible **any** value as printable.
+- Conversion support differs: LLVM and managed lowering do not accept the same values for **int**,
+  **float**, **string**, or **char**. LLVM represents **char** as a one-byte string at the runtime
+  boundary, while managed lowering uses an integer representation. String indexing is typed as **char**,
+  but backend representations and out-of-range behavior differ.
+- **HashMap.entries()** has a checker/runtime shape mismatch. **Vec.reverse()** has checker/codegen
+  behavior differences, so its return and mutation behavior are not a portable guarantee.
+- Standard-library declarations are ordinary source, not injected built-ins. Several source modules
+  call helper names such as **nativeArgs**, **nativeSetEnv**, **nativeExecDetailed**, **nativeMkdirAll**,
+  **nativeSqrt**, **nativeRandom**, or **nativeSleepMs**. These names are not registered in ordinary
+  user compilation, so some exported declarations cannot currently be compiled as written.
+- Some std modules rely on host programs or OS behavior. Their presence in the public catalog is a
+  source/API inventory, not a portability guarantee.
+
+The following names from the older **syntax.md** are not registered as ordinary compiler built-ins:
+**typeof**, **exp**, **wrapAdd**, **wrapSub**, **wrapMul**, **bitAnd**, **bitOr**, **bitXor**, **bitNot**,
+**bitShl**, **bitShr**, **copyFile**, **moveFile**, **isFile**, **isDir**, **mkdirAll**, **removeDir**,
+**removeDirAll**, **listDirPaths**, **pathJoin**, **basename**, **dirname**, **extname**, **setEnv**,
+**unsetEnv**, **envAll**, **cwd**, **chdir**, **tempDir**, **execDetailed**, **which**, and **sleepMs**.
+Some are public functions under **std::fs**, **std::process**, **std::env**, **std::os**, or **std::time**;
+the standard-library catalog records their real module path. They are not globals.
+
+There are no **LinkedList**, **Stack**, or **Queue** built-in types in this compiler frontend. Runtime C
+symbols and conditional raw-runtime intrinsics are compiler internals, not source-level APIs. The
+private raw intrinsic names include **__reyRawNull**, **__reyRawMap**, **__reyRawUnmap**,
+**__reyRawOffset**, **__reyRawLoadI64**, **__reyRawStoreI64**, **__reyRawLoadByte**,
+**__reyRawStoreByte**, **__reyRawEqual**, **__reyRawLoadAddress**, **__reyRawStoreAddress**,
+**__reyRawFail**, **__reyRawFromInt**, **__reyRawToInt**, **__reyRawSyscall**, **__reyRawArgCount**,
+and **__reyRawArg**. They are conditionally registered for compiler-authorized runtime units and are
+not available to ordinary application code.
+
+## Memory-management surface
+
+Ordinary Rey source has no pointer type or syntax for manual pointer arithmetic, **malloc/free**,
+ownership or borrowing annotations, explicit region scopes, or promotion statements. There is no
+user-facing collector-control API. Programs express values and references; placement and lifetime
+management belong to compiler/runtime implementation.
+
+The v0.4 design target for this branch is automatic compiler-inferred regions with escape promotion,
+without a trailing tracing collector. Region inference and promotion do not introduce source keywords.
+The managed-IR implementation is experimental, so this syntax reference does not claim that the full
+memory model or every backend is complete.
+
+## Compact grammar
+
+This is a compact grammar for the current parser surface. It omits the lexical bodies of string and
+character tokens, which are specified above. The parser can construct some forms that the typechecker
+then rejects; the semantic restrictions in this reference still apply.
+
+~~~ebnf
+program          = { topLevelItem }, EOF ;
+topLevelItem     = declaration | statement ;
+declaration      = functionDecl | structDecl | enumDecl ;
+visibility       = [ "pub" ] ;
+
+functionDecl     = visibility, "func", IDENT, "(", [ parameterList ], ")",
+                   [ ":", type ], block ;
+parameterList    = parameter, { ",", parameter }, [ "," ] ;
+parameter        = IDENT, [ ":", [ "..." ], type ], [ "=", expression ] ;
+
+structDecl       = visibility, "struct", IDENT, "{", { structMember }, "}" ;
+structMember     = [ "pub" ], ( fieldDecl | methodDecl ) ;
+fieldDecl        = IDENT, ":", type, [ "," ] ;
+methodDecl       = "func", IDENT, "(", [ parameterList ], ")", [ ":", type ], block, [ "," ] ;
+
+enumDecl         = visibility, "enum", IDENT, "{", [ enumVariant, { ",", enumVariant }, [ "," ] ], "}" ;
+enumVariant      = IDENT, [ "(", [ payloadList ], ")" ] ;
+payloadList      = namedPayloadList | typeList ;
+namedPayloadList = namedPayload, { ",", namedPayload }, [ "," ] ;
+namedPayload     = IDENT, ":", type ;
+
+statement        = variableDecl | importDecl | block | ifStmt | whileStmt | loopStmt
+                 | forStmt | matchStmt | returnStmt | breakStmt | continueStmt | expression, ";" ;
+variableDecl     = ( "var" | "const" ), IDENT, [ ":", type ], "=", expression, ";" ;
+block            = "{", { statement | declaration }, "}" ;
+ifStmt           = "if", expression, block, [ "else", ( ifStmt | block ) ] ;
+whileStmt        = "while", expression, block ;
+loopStmt         = "loop", block ;
+forStmt          = "for", ( IDENT, "in", expression | "(", IDENT, "in", expression, ")" ), block ;
+returnStmt       = "return", [ expression ], ";" ;
+breakStmt        = "break", ";" ;
+continueStmt     = "continue", ";" ;
+
+matchStmt        = "match", expression, "{", [ matchArm, { ",", matchArm }, [ "," ] ], "}" ;
+matchArm         = pattern, "=>", ( block | expression, ";" ) ;
+pattern          = "_" | literalPattern | integerRange | enumPattern | structPattern | IDENT ;
+integerRange     = [ "-" ], integerLiteral, "..", [ "-" ], integerLiteral ;
+enumPattern      = [ IDENT, "::" ], IDENT, [ "(", [ patternList ], ")" ] ;
+patternList      = pattern, { ",", pattern }, [ "," ] ;
+structPattern    = IDENT, "{", [ patternField, { ",", patternField }, [ "," ] ], "}" ;
+patternField     = IDENT, ":", pattern ;
+
+importDecl       = "import", ( moduleImport | dottedImport | stringImport ), ";" ;
+moduleImport     = modulePath, [ "::", "{", nameList, "}" ] ;
+modulePath       = IDENT, { "::", IDENT } ;
+dottedImport     = IDENT, ".", ( IDENT | "{", nameList, "}" ) ;
+stringImport     = STRING ;
+nameList         = IDENT, { ",", IDENT }, [ "," ] ;
+
+type             = nullableType, { "|", nullableType } ;
+nullableType     = typeAtom, [ "?" ] ;
+typeAtom         = primitiveType | namedType | appliedType | tupleType | functionType ;
+primitiveType    = "int" | "float" | "bool" | "string" | "char" | "void" | "any" ;
+namedType        = IDENT ;
+appliedType      = IDENT, "<", typeList, ">" ;
+typeList         = type, { ",", type } ;
+tupleType        = "(", type, ",", [ typeList ], ")" ;
+functionType     = "(", [ typeList ], ")", "->", type ;
+
+expression       = assignment ;
+assignment       = logicalOr, [ assignOp, assignment ] ;
+assignOp         = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
+logicalOr        = logicalAnd, { "||", logicalAnd } ;
+logicalAnd       = equality, { "&&", equality } ;
+equality         = comparison, { ( "==" | "!=" ), comparison } ;
+comparison       = additive, { ( "<" | "<=" | ">" | ">=" | "instanceof" ), additive } ;
+additive         = multiplicative, { ( "+" | "-" ), multiplicative } ;
+multiplicative   = unary, { ( "*" | "/" | "%" ), unary } ;
+unary            = ( "!" | "-" | "++" | "--" ), unary | postfix ;
+postfix          = primary, { callSuffix | memberSuffix | indexSuffix | updateSuffix } ;
+callSuffix       = "(", [ argumentList ], ")" ;
+memberSuffix     = "." , ( IDENT | integerLiteral ) | "::", IDENT ;
+indexSuffix      = "[", expression, "]" ;
+updateSuffix     = "++" | "--" ;
+argumentList     = expression, { ",", expression }, [ "," ] ;
+
+primary          = literal | IDENT | lambda | tupleOrGroup | vectorLiteral | dictLiteral | structLiteral ;
+lambda           = "(", [ lambdaParameters ], ")", "=>", expression ;
+lambdaParameters = typedParameter, { ",", typedParameter }, [ "," ] ;
+typedParameter   = IDENT, ":", type ;
+tupleOrGroup     = "(", expression, ")" | "(", expression, ",", [ expressionList ], ")" ;
+expressionList   = expression, { ",", expression }, [ "," ] ;
+vectorLiteral    = "[", [ expressionList ], "]" ;
+dictLiteral      = "{", [ dictEntry, { ",", dictEntry }, [ "," ] ], "}" ;
+dictEntry        = ( IDENT | STRING ), ":", expression ;
+structLiteral    = IDENT, "{", [ structEntry, { ",", structEntry }, [ "," ] ], "}" ;
+structEntry      = IDENT, ":", expression ;
+
+literal          = integerLiteral | floatLiteral | STRING | CHAR | "true" | "false" | "null" ;
+literalPattern   = literal ;
+integerLiteral   = decimalInteger | hexInteger | binaryInteger ;
+decimalInteger   = decimalDigits ;
+hexInteger       = ("0x" | "0X"), hexDigits ;
+binaryInteger    = ("0b" | "0B"), binaryDigits ;
+floatLiteral     = decimalDigits, ".", [ decimalDigits ] ;
+decimalDigits    = digit, { digit | "_", digit } ;
+hexDigits        = hexDigit, { hexDigit | "_", hexDigit } ;
+binaryDigits     = binaryDigit, { binaryDigit | "_", binaryDigit } ;
+digit            = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+binaryDigit      = "0" | "1" ;
+hexDigit         = digit | "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F" ;
+IDENT            = identifierStart, { identifierContinue } ;
+identifierStart  = ASCII_LETTER | "_" ;
+identifierContinue = ASCII_LETTER | DIGIT | "_" ;
+~~~
+
+Grammar notes:
+
+- A function parameter's **...** appears after its colon, as in **rest: ...int**. The checker requires it
+  to be final and unique.
+- Enum payloads are positional types or all-named **name: type** entries inside parentheses; enum
+  variants do not use struct-literal braces.
+- **instanceof** shares comparison precedence, but the checker requires its right side to be a bare
+  supported type identifier.
+- The grammar does not encode context rules such as only top-level public declarations, enum
+  exhaustiveness, lvalue checks, import visibility, or the restrictions on generic types.
+- Or-patterns, match guards, block-bodied lambdas, match expressions, empty tuple values, and numeric
+  exponent notation are not supported.

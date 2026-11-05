@@ -99,6 +99,39 @@ func makeProgram(mode: int): IRProgram {
     return ir.irProgram(entryId, functions);
 }
 
+func irreducibleProgram(validUse: bool): IRProgram {
+    var entryInstructions: Vec<Instruction> = [];
+    entryInstructions.push(ir.constI64(0, 7, source(1, 2)));
+    entryInstructions.push(ir.constBool(1, true, source(2, 3)));
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.branch(1, 1, [], 2, [], source(3, 4)));
+    var firstInstructions: Vec<Instruction> = [];
+    firstInstructions.push(ir.constI64(2, 9, source(4, 5)));
+    var first = ir.basicBlock(1, [], firstInstructions, ir.jump(2, [], source(5, 6)));
+    var usedValue = 0;
+    if !validUse { usedValue = 2; }
+    var second = ir.basicBlock(2, [], [], ir.branch(1, 1, [], 3, [usedValue], source(6, 7)));
+    var exit = ir.basicBlock(3, [ir.irValue(3, ir.irI64())], [], ir.returnVoid(source(7, 8)));
+    var function = ir.irFunction(0, ir.functionKey("irreducible", "", "main"), ir.functionSignature([], ir.irVoid()), [], [entry, first, second, exit], ir.unknownEffects());
+    return ir.irProgram(0, [function]);
+}
+
+func unreachableProgram(): IRProgram {
+    var entry = ir.basicBlock(0, [], [], ir.returnVoid(source(1, 2)));
+    var dead = ir.basicBlock(1, [], [], ir.returnVoid(source(2, 3)));
+    var function = ir.irFunction(0, ir.functionKey("unreachable", "", "main"), ir.functionSignature([], ir.irVoid()), [], [entry, dead], ir.unknownEffects());
+    return ir.irProgram(0, [function]);
+}
+
+func hasDiagnostic(errors: Vec<string>, text: string): bool {
+    var index = 0;
+    loop {
+        if index >= errors.len() { break; }
+        if errors[index].contains(text) { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
 func main(): void {
     var valid = verifyProgram(makeProgram(0));
     assert(valid.ok, "diamond with block parameters and a call must verify with unknown effects");
@@ -112,5 +145,15 @@ func main(): void {
         assert(result.errors.len() > 0, "rejected fixture must include a deterministic diagnostic");
         mode = mode + 1;
     }
+
+    var validIrreducible = verifyProgram(irreducibleProgram(true));
+    assert(validIrreducible.ok, "entry value in an irreducible join must dominate");
+    var invalidIrreducible = verifyProgram(irreducibleProgram(false));
+    assert(!invalidIrreducible.ok, "branch value used across an irreducible entry must be rejected");
+    assert(hasDiagnostic(invalidIrreducible.errors, "does not dominate"), "irreducible rejection must name dominance");
+
+    var unreachable = verifyProgram(unreachableProgram());
+    assert(!unreachable.ok, "unreachable block must be rejected");
+    assert(hasDiagnostic(unreachable.errors, "unreachable block"), "unreachable rejection must name the block");
     print("ir verifier: all fixtures passed");
 }

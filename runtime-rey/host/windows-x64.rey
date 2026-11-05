@@ -1,0 +1,201 @@
+// Selector values are private to the windows-x64 RawHostSyscall emitter.
+func hostRawInt(value: int): __rey_raw_address {
+    return __reyRawFromInt(value);
+}
+
+func hostWideArgv(argumentCount: __rey_raw_address): __rey_raw_address {
+    var commandLine = __reyRawHostSyscall(7115, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    if __reyRawEqual(commandLine, __reyRawNull()) { return __reyRawNull(); }
+    return __reyRawHostSyscall(7116, commandLine, argumentCount, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+}
+
+func hostFreeWideArgv(arguments: __rey_raw_address): bool {
+    var result = __reyRawHostSyscall(7117, arguments, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    return __reyRawEqual(result, __reyRawNull());
+}
+
+pub func hostArgCount(): int {
+    var argumentCount = __reyRawMap(8);
+    var arguments = hostWideArgv(argumentCount);
+    if __reyRawEqual(arguments, __reyRawNull()) {
+        __reyRawUnmap(argumentCount, 8);
+        __reyRawFail(2310);
+        return -1;
+    }
+    var count = __reyRawLoadI64(argumentCount);
+    var released = hostFreeWideArgv(arguments);
+    __reyRawUnmap(argumentCount, 8);
+    if count < 0 || !released { __reyRawFail(2310); return -1; }
+    return count;
+}
+
+pub func hostArg(index: int): __rey_raw_address {
+    var argumentCount = __reyRawMap(8);
+    var arguments = hostWideArgv(argumentCount);
+    if __reyRawEqual(arguments, __reyRawNull()) {
+        __reyRawUnmap(argumentCount, 8);
+        __reyRawFail(2310);
+        return __reyRawNull();
+    }
+    var count = __reyRawLoadI64(argumentCount);
+    if index < 0 || index >= count {
+        hostFreeWideArgv(arguments);
+        __reyRawUnmap(argumentCount, 8);
+        __reyRawFail(2311);
+        return __reyRawNull();
+    }
+    var wideArgument = __reyRawLoadAddress(__reyRawOffset(arguments, index * 8));
+    var needed = __reyRawToInt(__reyRawHostSyscall(7118, hostRawInt(65001), hostRawInt(128), wideArgument, hostRawInt(-1), __reyRawNull(), hostRawInt(0)));
+    if needed <= 0 {
+        hostFreeWideArgv(arguments);
+        __reyRawUnmap(argumentCount, 8);
+        __reyRawFail(2312);
+        return __reyRawNull();
+    }
+    var utf8Argument = __reyRawMap(needed);
+    var written = __reyRawToInt(__reyRawHostSyscall(7118, hostRawInt(65001), hostRawInt(128), wideArgument, hostRawInt(-1), utf8Argument, hostRawInt(needed)));
+    var released = hostFreeWideArgv(arguments);
+    __reyRawUnmap(argumentCount, 8);
+    if written != needed || !released {
+        hostArgRelease(utf8Argument);
+        __reyRawFail(2312);
+        return __reyRawNull();
+    }
+    return utf8Argument;
+}
+
+pub func hostArgRelease(argument: __rey_raw_address): void {
+    if !__reyRawEqual(argument, __reyRawNull()) {
+        var released = __reyRawToInt(__reyRawHostSyscall(7120, argument, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+        if released == 0 { __reyRawFail(2313); }
+    }
+    return;
+}
+
+func hostStandardHandle(fd: int): __rey_raw_address {
+    if fd == 0 { return __reyRawHostSyscall(7105, hostRawInt(-10), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()); }
+    if fd == 1 { return __reyRawHostSyscall(7105, hostRawInt(-11), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()); }
+    if fd == 2 { return __reyRawHostSyscall(7105, hostRawInt(-12), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()); }
+    return hostRawInt(fd);
+}
+
+pub func hostWrite(fd: int, base: __rey_raw_address, length: int): int {
+    if length < 0 || length > 4294967295 { return -1; }
+    var handle = hostStandardHandle(fd);
+    return __reyRawToInt(__reyRawHostSyscall(7103, handle, base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostRead(fd: int, base: __rey_raw_address, length: int): int {
+    if length < 0 || length > 4294967295 { return -1; }
+    var handle = hostStandardHandle(fd);
+    return __reyRawToInt(__reyRawHostSyscall(7102, handle, base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostOpen(path: __rey_raw_address, flags: int, mode: int): int {
+    if flags != 0 && flags != 577 && flags != 1089 { return -1; }
+    var desiredAccess = 2147483648;
+    var creationDisposition = 3;
+    if flags == 577 {
+        desiredAccess = 1073741824;
+        creationDisposition = 2;
+    } else if flags == 1089 {
+        desiredAccess = 1073741824;
+        creationDisposition = 4;
+    }
+    var fileFlags = 33554560;
+    var fd = __reyRawToInt(__reyRawHostSyscall(7101, path, hostRawInt(desiredAccess), hostRawInt(7), __reyRawNull(), hostRawInt(creationDisposition), hostRawInt(fileFlags)));
+    if fd >= 0 && flags == 1089 && hostLseek(fd, 0, 2) < 0 {
+        hostClose(fd);
+        return -1;
+    }
+    return fd;
+}
+
+pub func hostClose(fd: int): int {
+    if fd == 0 || fd == 1 || fd == 2 { return 0; }
+    return __reyRawToInt(__reyRawHostSyscall(7104, hostRawInt(fd), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostLseek(fd: int, offset: int, whence: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(7107, hostRawInt(fd), hostRawInt(offset), __reyRawNull(), hostRawInt(whence), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostUnlink(path: __rey_raw_address): int {
+    return __reyRawToInt(__reyRawHostSyscall(7108, path, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostAccess(path: __rey_raw_address, mode: int): int {
+    var attributes = __reyRawToInt(__reyRawHostSyscall(7109, path, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+    if attributes < 0 || attributes == 4294967295 { return -1; }
+    return 0;
+}
+
+func hostWriteDirRecord(buffer: __rey_raw_address, data: __rey_raw_address): int {
+    var name = __reyRawOffset(data, 44);
+    var nameLength = 0;
+    while nameLength < 260 && __reyRawLoadByte(__reyRawOffset(name, nameLength)) != 0 {
+        nameLength += 1;
+    }
+    if nameLength >= 260 { return -1; }
+    var recordLength = ((20 + nameLength + 1 + 7) / 8) * 8;
+    var index = 0;
+    while index < recordLength {
+        __reyRawStoreByte(__reyRawOffset(buffer, index), 0);
+        index += 1;
+    }
+    index = 0;
+    while index < nameLength {
+        __reyRawStoreByte(__reyRawOffset(buffer, 19 + index), __reyRawLoadByte(__reyRawOffset(name, index)));
+        index += 1;
+    }
+    __reyRawStoreByte(__reyRawOffset(buffer, 16), recordLength % 256);
+    __reyRawStoreByte(__reyRawOffset(buffer, 17), recordLength / 256);
+    return recordLength;
+}
+
+pub func hostGetdirentries(fd: int, buffer: __rey_raw_address, count: int, basep: __rey_raw_address): int {
+    if count < 8192 { return -1; }
+    var data = __reyRawOffset(buffer, 4096);
+    var searchHandle = __reyRawLoadI64(basep);
+    if searchHandle == 0 {
+        var pathLength = __reyRawToInt(__reyRawHostSyscall(7110, hostRawInt(fd), buffer, hostRawInt(4096), hostRawInt(0), __reyRawNull(), __reyRawNull()));
+        if pathLength < 1 || pathLength > 4092 { return -1; }
+        var last = __reyRawLoadByte(__reyRawOffset(buffer, pathLength - 1));
+        var suffix = pathLength;
+        if last != 47 && last != 92 {
+            __reyRawStoreByte(__reyRawOffset(buffer, suffix), 92);
+            suffix += 1;
+        }
+        __reyRawStoreByte(__reyRawOffset(buffer, suffix), 42);
+        __reyRawStoreByte(__reyRawOffset(buffer, suffix + 1), 0);
+        searchHandle = __reyRawToInt(__reyRawHostSyscall(7111, buffer, data, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+        if searchHandle == -1 {
+            var firstError = __reyRawToInt(__reyRawHostSyscall(7114, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+            if firstError == 2 { return 0; }
+            return -1;
+        }
+        __reyRawStoreI64(basep, searchHandle);
+    } else {
+        var advanced = __reyRawToInt(__reyRawHostSyscall(7112, hostRawInt(searchHandle), data, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+        if advanced == 0 {
+            var nextError = __reyRawToInt(__reyRawHostSyscall(7114, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+            __reyRawHostSyscall(7113, hostRawInt(searchHandle), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+            __reyRawStoreI64(basep, 0);
+            if nextError == 18 { return 0; }
+            return -1;
+        }
+    }
+    var recordLength = hostWriteDirRecord(buffer, data);
+    if recordLength < 0 {
+        __reyRawHostSyscall(7113, hostRawInt(searchHandle), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+        __reyRawStoreI64(basep, 0);
+        return -1;
+    }
+    return recordLength;
+}
+
+pub func hostExit(code: int): void {
+    __reyRawHostSyscall(7106, hostRawInt(code), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    __reyRawFail(2301);
+    return;
+}

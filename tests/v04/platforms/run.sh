@@ -22,3 +22,4 @@ fi
 "$ENGINE" build "$STAGE/src/main.rey" -o "$STAGE/platform-fixture" --runtime-dir "$RUNTIME"
 "$STAGE/platform-fixture"
 python3 "$ROOT/scripts/v04-platform-check.py"
+python3 "$ROOT/tests/v04/platforms/native_run.py"

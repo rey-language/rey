@@ -493,6 +493,155 @@ def main() -> int:
                                    expected_status=expected, observed_statuses=found.get(name),
                                    execution_mode=mode_text)
 
+    streaming_perf = {"schema": "rey-v04-opt-streaming-perf-v1", "measured": False,
+                      "reason": "optimizer driver did not reach the timing harness"}
+    if driver_ready:
+        opt_source, opt_exe = stage_driver("opt-driver", ROOT / "tests/v04/opt-pipeline/main.rey")
+        opt_build, _, _ = run("opt-driver-seed-build",
+                              [str(SEED), "build", str(opt_source), "-o", str(opt_exe),
+                               "--runtime-dir", str(RUNTIME)], env=seed_env, timeout=180)
+        opt_build["artifact_exists"] = opt_exe.is_file()
+        opt_build["artifact_sha256"] = digest(opt_exe) if opt_exe.is_file() else None
+        if not opt_exe.is_file():
+            opt_build["passed"] = False
+        opt_ready = opt_build["passed"] and opt_exe.is_file()
+        pass_names = ["fold", "propagate", "copy", "dead", "range", "inline", "specialize",
+                      "loops", "bounds", "loads", "zero", "fuse", "all"]
+        behavior_fixtures = [
+            ("loop", ROOT / "tests/v04/opt-pipeline/loop.rey", 0),
+            ("trap", ROOT / "tests/v04/opt-pipeline/trap.rey", 1),
+            ("inline", ROOT / "tests/v04/opt-pipeline/inline.rey", 0),
+            ("csv-sample", ROOT / "tests/v04/streaming/sample.rey", 0),
+            ("csv-small", ROOT / "tests/v04/streaming/sum-small.rey", 0),
+        ]
+        if opt_ready:
+            selftest, selftest_out, _ = run("opt-selftest", [str(opt_exe), "selftest"], timeout=60)
+            selftest_text = selftest_out.decode(errors="replace")
+            add_record(records, "opt-selftest-cases",
+                       selftest["passed"] and "opt-selftest FAIL" not in selftest_text
+                       and "opt-selftest PASS complete" in selftest_text,
+                       pass_lines=selftest_text.count("opt-selftest PASS "))
+            sample_csv = ROOT / "tests/v04/streaming/sample.csv"
+            kept_sum = 0
+            csv_rows = []
+            csv_ok = True
+            try:
+                lines = sample_csv.read_text().splitlines()
+                csv_ok = lines[0] == "index,value,keep"
+                for line in lines[1:]:
+                    index_text, value_text, keep_text = line.split(",")
+                    row_index, row_value, row_keep = int(index_text), int(value_text), int(keep_text)
+                    csv_rows.append((row_index, row_value, row_keep))
+                    csv_ok = csv_ok and row_value == row_index and row_keep == (0 if row_index % 2 else 1)
+                    if row_keep == 1:
+                        kept_sum += row_value
+            except (OSError, ValueError):
+                csv_ok = False
+            add_record(records, "csv-sample-oracle",
+                       csv_ok and kept_sum == 6 and len(csv_rows) == 5,
+                       kept_sum=kept_sum, rows=len(csv_rows),
+                       schema="index,value,keep with value=index and keep set on even indexes")
+            for name, file, expected in behavior_fixtures:
+                baseline = run(f"opt-{name}-off", [str(opt_exe), "eval", str(file), "--passes", "off"],
+                               expected=expected, timeout=60)
+                for pass_name in pass_names:
+                    after = run(f"opt-{name}-{pass_name}",
+                                [str(opt_exe), "eval", str(file), "--passes", pass_name],
+                                expected=expected, timeout=60)
+                    compare_processes(f"opt-{name}-{pass_name}-same-result", baseline, after)
+            inline_off = run("opt-inline-dump-off",
+                             [str(opt_exe), "dump", str(ROOT / "tests/v04/opt-pipeline/inline.rey"), "--passes", "off"])
+            inline_on = run("opt-inline-dump-on",
+                            [str(opt_exe), "dump", str(ROOT / "tests/v04/opt-pipeline/inline.rey"), "--passes", "inline"])
+            inline_off_text = inline_off[1].decode(errors="replace")
+            inline_on_text = inline_on[1].decode(errors="replace")
+            add_record(records, "inline-removes-helper-call",
+                       inline_off[0]["passed"] and inline_on[0]["passed"]
+                       and "addOne" in inline_off_text and "addOne" not in inline_on_text
+                       and inline_off_text.count("call %") > inline_on_text.count("call %"),
+                       off_calls=inline_off_text.count("call %"), on_calls=inline_on_text.count("call %"))
+            stream_off = run("opt-stream-dump-off",
+                             [str(opt_exe), "dump", str(ROOT / "tests/v04/streaming/sum-small.rey"), "--passes", "off"])
+            stream_on = run("opt-stream-dump-fuse",
+                            [str(opt_exe), "dump", str(ROOT / "tests/v04/streaming/sum-small.rey"), "--passes", "fuse"])
+            stream_off_text = stream_off[1].decode(errors="replace")
+            stream_on_text = stream_on[1].decode(errors="replace")
+            add_record(records, "fuse-inlines-csv-helpers",
+                       stream_off[0]["passed"] and stream_on[0]["passed"]
+                       and "parseCsvField" in stream_off_text and "parseCsvField" not in stream_on_text
+                       and "keepCsvRow" not in stream_on_text and "addCsvTotal" not in stream_on_text
+                       and stream_on_text.count("raw.map") == 0,
+                       off_calls=stream_off_text.count("call %"), on_calls=stream_on_text.count("call %"))
+            host_ok = platform.system() == "Darwin" and platform.machine().lower() in ("arm64", "aarch64")
+            perf_passes = "fuse,inline,propagate,copy,dead,bounds,loops"
+            if host_ok:
+                images = {}
+                dumps = {}
+                for mode, passes in (("off", "off"), ("fused", perf_passes)):
+                    artifact = output / "images" / "darwin-arm64" / ("stream-" + mode)
+                    artifact.parent.mkdir(parents=True, exist_ok=True)
+                    command = [str(opt_exe), "native", str(ROOT / "tests/v04/streaming/sum.rey"),
+                               "-o", str(artifact), "--target", "darwin-arm64", "--passes", passes]
+                    if args.reuse_slots:
+                        command.append("--reuse-slots")
+                    emitted, _, _ = run(f"stream-{mode}-emit", command, env=no_tools_env, timeout=120)
+                    image_ok = emitted["passed"] and artifact.is_file() and artifact.read_bytes()[:4] == bytes.fromhex("cffaedfe")
+                    add_record(records, f"stream-{mode}-image", image_ok,
+                               image_bytes=artifact.stat().st_size if artifact.is_file() else None,
+                               compiler_seconds=emitted.get("elapsed_seconds"))
+                    if image_ok:
+                        artifact.chmod(0o755)
+                        run(f"stream-{mode}-codesign", ["/usr/bin/codesign", "--verify", "--strict", str(artifact)])
+                        samples = []
+                        for sample_index in range(5):
+                            executed, stdout, _ = run(f"stream-{mode}-run-{sample_index}", [str(artifact)],
+                                                      expected=0, stdout_empty=True, timeout=30)
+                            samples.append(executed.get("elapsed_seconds"))
+                            if not executed["passed"]:
+                                break
+                        dumped = run(f"stream-{mode}-dump",
+                                     [str(opt_exe), "dump", str(ROOT / "tests/v04/streaming/sum.rey"), "--passes", passes],
+                                     timeout=60)
+                        dump_text = dumped[1].decode(errors="replace")
+                        images[mode] = {"elapsed_seconds": samples,
+                                        "median_seconds": sorted(samples)[len(samples) // 2] if samples else None,
+                                        "image_bytes": artifact.stat().st_size,
+                                        "compiler_seconds": emitted.get("elapsed_seconds"),
+                                        "calls": dump_text.count("call %"),
+                                        "raw_maps": dump_text.count("raw.map"),
+                                        "runs_recorded": len(samples)}
+                        dumps[mode] = dump_text
+                if "off" in images and "fused" in images and images["off"]["median_seconds"] and images["fused"]["median_seconds"]:
+                    ratio = images["fused"]["median_seconds"] / images["off"]["median_seconds"]
+                    streaming_perf = {
+                        "schema": "rey-v04-opt-streaming-perf-v1", "measured": True,
+                        "host": f"{platform.system()} {platform.machine()}",
+                        "workload": "sumFilteredCsv even-index aggregation",
+                        "row_count": 2000000, "iterations": 5,
+                        "reuse_slots": args.reuse_slots,
+                        "off": images["off"], "fused": images["fused"],
+                        "median_ratio_fused_over_off": ratio,
+                        "allocation_note": "both images are scalar loops; raw.map count is the IR allocation proxy and is not an RSS measurement",
+                        "copy_note": "no intermediate row buffer is present in this scalar pipeline; payload copying was not instrumented inside the process",
+                        "claim": "ratio is the measured median wall time of the fused passes divided by the passes-off median on this host; it is not a release speedup claim",
+                    }
+                else:
+                    streaming_perf = {"schema": "rey-v04-opt-streaming-perf-v1", "measured": False,
+                                      "reason": "one or both native streaming runs did not record a median",
+                                      "partial": images}
+            else:
+                streaming_perf = {"schema": "rey-v04-opt-streaming-perf-v1", "measured": False,
+                                  "reason": f"native darwin arm64 timing requires Darwin arm64, host is {platform.system()} {platform.machine()}"}
+                add_record(records, "stream-native-timing-host", False, host=streaming_perf["reason"])
+        else:
+            add_record(records, "opt-driver-ready", False, reason="optimizer driver failed to build")
+
+    perf_path = output / "perf.json"
+    perf_path.write_text(json.dumps(streaming_perf, indent=2) + "\n")
+    add_record(records, "stream-perf-json-written",
+               perf_path.is_file() and '"schema": "rey-v04-opt-streaming-perf-v1"' in perf_path.read_text(),
+               path=str(perf_path.relative_to(ROOT)), measured=streaming_perf.get("measured"))
+
     emitted_source_builds = [record for record in records
                              if record.get("kind") == "process"
                              and record.get("label", "").endswith("-emit")]
@@ -532,7 +681,8 @@ def main() -> int:
         "linux_execution_note": "linux-x64 runs in a Linux aarch64 VM are labeled user-mode emulation",
         "records": records, "process_record_count": len(process_records),
         "passed": all(record.get("passed", False) for record in records),
-        "limitation": "scalar folding integration correctness only; this is not a performance or full v0.4 claim",
+        "streaming_perf": str((output / "perf.json").relative_to(ROOT)),
+        "limitation": "folding plus opt-in M6 passes; streaming perf.json is measured wall time only and is not a release speedup claim",
     }
     result_path = output / "result.json"
     result_path.write_text(json.dumps(report, indent=2) + "\n")

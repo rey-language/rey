@@ -168,6 +168,9 @@ def main():
         gate_text = (output / "region-runtime-gate.stdout").read_text()
         record("region-runtime-cases", gate_text.count("region-runtime-case ") >= 16)
 
+    # Prove that completion selected stack placement and loop cohorts rather
+    # than merely carrying the machinery. The fixture has one non-cyclic
+    # scalar Temp (stack cohort) and one loop-local Temp (iteration cohort).
     drivers = {}
     for kind, entry in (("ir", "ir-main.rey"), ("native", "native-main.rey")):
         compiler = output / (kind + "-compiler")
@@ -185,6 +188,45 @@ def main():
 
     images = output / "images"
     images.mkdir()
+
+    # Prove that completion selected stack placement and loop cohorts rather
+    # than merely carrying the machinery. The fixture has one non-cyclic
+    # scalar Temp (stack cohort) and one loop-local Temp (iteration cohort).
+    placement_source = fixtures_root / "region-source" / "container-region-local.rey"
+    placement, placement_stdout, _ = run(
+        "memory-placement-dump",
+        [str(drivers["ir"]), "dump", str(placement_source), "--managed",
+         "--runtime-root", str(runtime_root)], env=native_env, timeout=300)
+    placement_text = placement_stdout.decode(errors="replace")
+
+    def function_text(name):
+        start = placement_text.find("::" + name + " (")
+        if start < 0:
+            return ""
+        start = placement_text.rfind("func ", 0, start)
+        end = placement_text.find("\nfunc ", start + 1)
+        return placement_text[start:end if end >= 0 else len(placement_text)]
+
+    def symbol_id(name):
+        match = re.search(r"func %f(\d+) [^\n]*::" + re.escape(name) + r" \(", placement_text)
+        return "%f" + match.group(1) if match else ""
+
+    cohort_id = symbol_id("managedRegionCreateCohort")
+    allocate_id = symbol_id("managedRegionAllocate")
+    end_id = symbol_id("managedRegionEnd")
+    local_text = function_text("localContainer")
+    loop_text = function_text("loopLocal")
+    record("memory-placement-evidence",
+           placement["passed"]
+           and cohort_id != "" and allocate_id != "" and end_id != ""
+           and ("call " + cohort_id + "(") in local_text
+           and ("call " + allocate_id + "(") in local_text
+           and ("call " + end_id + "(") in local_text
+           and "const.i64 4096" in local_text
+           and ("call " + cohort_id + "(") in loop_text
+           and "const.i64 65536" in loop_text
+           and ("call " + end_id + "(") in loop_text)
+
     for case_index, (relative, specification) in enumerate(cases.items()):
         if not isinstance(specification, dict) or specification.get("expect") not in EXPECTATIONS:
             raise ValueError("invalid manifest case " + relative)
@@ -218,6 +260,7 @@ def main():
                    fixture=relative)
             continue
         expected_status = int(expectation == "runtime-error")
+
         for mode in args.modes:
             flags = MODES[mode]
             mode_label = label + "-" + mode

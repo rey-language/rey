@@ -1,0 +1,15 @@
+func sum(values: ...int): int {
+    var total = 0;
+    var i = 0;
+    while i < values.len() {
+        total = total + values[i];
+        i = i + 1;
+    }
+    return total;
+}
+
+func main(): void {
+    if sum(1, 2, 3) != 6 {
+        var failure = 9223372036854775807 + 1;
+    }
+}

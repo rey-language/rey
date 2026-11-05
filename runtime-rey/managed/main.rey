@@ -1,4 +1,4 @@
-import regions::{regionAllocateCurrent, regionAllocateFixed, regionAllocateSized, regionContextCreate, regionContextDestroy, regionCreate, regionCreateChild, regionCreateCohort, regionCurrent, regionDependencyCount, regionEnd, regionGroupCount, regionKind, regionLiveObjects, regionLivePayloadBytes, regionObjectCount, regionProgram, regionPromote, regionPromotionCount, regionRequestedBytes, regionRequestedObjectBytes, regionScratchUsed, regionStoreReference, regionUsedBytes};
+import regions::{regionAllocateCurrent, regionAllocateFixed, regionAllocateSized, regionCachedBlockBytes, regionContextCreate, regionContextDestroy, regionCreate, regionCreateChild, regionCreateCohort, regionCurrent, regionDependencyCount, regionEnd, regionGroupCount, regionHandleAllocateDestination, regionHandleAllocateFixed, regionHandleCreate, regionHandleCreateChild, regionHandleCreateCohort, regionHandleCurrent, regionHandleEnd, regionHandleKind, regionHandleProgram, regionHandlePromote, regionHandleScratchUsed, regionKind, regionLiveObjects, regionLivePayloadBytes, regionMappedDirectBlockCount, regionMappedDirectRequestedBytes, regionMappedSlabBytes, regionObjectCount, regionProgram, regionPromote, regionPromotionCount, regionRequestedBytes, regionRequestedObjectBytes, regionScratchUsed, regionStoreReference, regionUsedBytes};
 
 pub func managedCreate(registry: __rey_raw_address): __rey_raw_address {
     return regionContextCreate(registry);
@@ -92,6 +92,22 @@ pub func managedRegionUsedBytes(context: __rey_raw_address): int {
     return regionUsedBytes(context);
 }
 
+pub func managedMappedSlabBytes(context: __rey_raw_address): int {
+    return regionMappedSlabBytes(context);
+}
+
+pub func managedMappedDirectRequestedBytes(context: __rey_raw_address): int {
+    return regionMappedDirectRequestedBytes(context);
+}
+
+pub func managedMappedDirectBlockCount(context: __rey_raw_address): int {
+    return regionMappedDirectBlockCount(context);
+}
+
+pub func managedCachedBlockBytes(context: __rey_raw_address): int {
+    return regionCachedBlockBytes(context);
+}
+
 pub func managedRegionObjectCount(context: __rey_raw_address): int {
     return regionObjectCount(context);
 }
@@ -106,6 +122,52 @@ pub func managedRegionKind(context: __rey_raw_address, region: __rey_raw_address
 
 pub func managedRegionScratchUsed(context: __rey_raw_address, region: __rey_raw_address): int {
     return regionScratchUsed(context, region);
+}
+
+// Generation-aware opaque handles are used by compiler-generated region IR.
+// The pointer-returning managedRegion* functions remain for trusted fixtures.
+pub func managedHandleProgramRegion(context: __rey_raw_address): __rey_raw_address {
+    return regionHandleProgram(context);
+}
+
+pub func managedHandleCurrentRegion(context: __rey_raw_address): __rey_raw_address {
+    return regionHandleCurrent(context);
+}
+
+pub func managedHandleRegionCreate(context: __rey_raw_address): __rey_raw_address {
+    return regionHandleCreate(context);
+}
+
+pub func managedHandleRegionCreateChild(context: __rey_raw_address, parent: __rey_raw_address): __rey_raw_address {
+    return regionHandleCreateChild(context, parent);
+}
+
+pub func managedHandleRegionCreateCohort(context: __rey_raw_address, parent: __rey_raw_address, kind: int, budget: int): __rey_raw_address {
+    return regionHandleCreateCohort(context, parent, kind, budget);
+}
+
+pub func managedHandleRegionEnd(context: __rey_raw_address, region: __rey_raw_address): void {
+    regionHandleEnd(context, region);
+}
+
+pub func managedHandleRegionAllocate(context: __rey_raw_address, region: __rey_raw_address, layoutId: int, groupId: int): __rey_raw_address {
+    return regionHandleAllocateFixed(context, region, layoutId, groupId);
+}
+
+pub func managedHandleAllocateDestination(context: __rey_raw_address, destination: __rey_raw_address, layoutId: int, groupId: int): __rey_raw_address {
+    return regionHandleAllocateDestination(context, destination, layoutId, groupId);
+}
+
+pub func managedHandlePromoteReference(context: __rey_raw_address, object: __rey_raw_address, target: __rey_raw_address): __rey_raw_address {
+    return regionHandlePromote(context, object, target);
+}
+
+pub func managedHandleRegionKind(context: __rey_raw_address, region: __rey_raw_address): int {
+    return regionHandleKind(context, region);
+}
+
+pub func managedHandleRegionScratchUsed(context: __rey_raw_address, region: __rey_raw_address): int {
+    return regionHandleScratchUsed(context, region);
 }
 
 pub func managedRootPush(context: __rey_raw_address): int {

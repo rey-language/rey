@@ -1,0 +1,51 @@
+import frontend::graph::{checkSourceFileGraphWithRuntime};
+import ir::lower::{lowerProgram, setLowerTargetOS};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import native::x64::{X64Code, emitProgram};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": exact image write failed");
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 4, "expected fixture, staged source directory, and output directory");
+    var fixturePath = argv[1];
+    var sourceDirectory = argv[2];
+    var outputDirectory = argv[3];
+    var entryPath = sourceDirectory + "/main.rey";
+    writeFile(entryPath, readFile(fixturePath));
+    var units: Vec<string> = [
+        sourceDirectory + "/layout/main.rey",
+        sourceDirectory + "/regions/main.rey",
+        sourceDirectory + "/managed/main.rey",
+        sourceDirectory + "/containers/main.rey",
+        sourceDirectory + "/host/main.rey",
+        entryPath
+    ];
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
+    setLowerTargetOS("linux-x64");
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var emitted: Result<X64Code, string> = emitProgram(program, "linux-x64");
+    if emitted.isErr() { eprintln(emitted.unwrapErr()); exit(1); }
+    var image = buildElfX64(emitted.unwrap());
+    if image.isErr() { eprintln(image.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/packed-segment-fixture", image.unwrap(), "packed segment fixture");
+    println("packed-segment-runtime fixture emitted");
+}

@@ -21,6 +21,8 @@ func main(): void {
     var aliasA = objectA;
     var aliasB = objectB;
     var aliasC = objectC;
+    var requestedBeforePromotion = managedRegionRequestedBytes(context);
+    check(requestedBeforePromotion > 0);
     managedStoreReference(context, objectB, 0, objectA);
     managedStoreReference(context, objectC, 0, objectB);
     check(managedPromotionCount(context) == 0);
@@ -37,13 +39,14 @@ func main(): void {
     check(__reyRawLoadI64(__reyRawOffset(regionB, 56)) == 0);
     check(__reyRawLoadI64(__reyRawOffset(regionC, 56)) == 0);
     check(managedRegionObjectCount(context) == 3);
-    check(managedRegionRequestedBytes(context) == 12288);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectB, 16)), objectA));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectC, 16)), objectB));
     var again = managedPromoteReference(context, objectC, regionA);
     check(__reyRawEqual(again, objectC));
     check(managedPromotionCount(context) == 2);
     check(managedDependencyCount(context) == 3);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
     managedDestroy(context);
     layoutRegistryRelease(registry);
 }

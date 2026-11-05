@@ -1,0 +1,216 @@
+import native::packed::{
+    PackedBuffer,
+    packedBufferAppendBuffer,
+    packedBufferAppendByte,
+    packedBufferAppendBytes,
+    packedBufferAppendPackedLane,
+    packedBufferAppendU32Le,
+    packedBufferAppendU64Le,
+    packedBufferAppendZeros,
+    packedBufferCapacity,
+    packedBufferCreate,
+    packedBufferLength,
+    packedBufferPatchU32Le,
+    packedBufferPatchU64Le,
+    packedBufferMaximumLength,
+    packedBufferReadByte,
+    packedBufferReadBytes,
+    packedBufferReadWord,
+    packedBufferReadWords,
+    packedBufferWordByteCount,
+    packedBufferWordCount,
+    packedBufferReserve,
+    packedBufferSetLength,
+    packedBufferTryAppendByte,
+    packedBufferTryAppendBytes,
+    packedBufferTryAppendU32Le,
+    packedBufferTryLength,
+    packedBufferTryPatchByte,
+    packedBufferTryPatchU32Le,
+    packedBufferTryReadByte,
+    packedBufferWriteSegments,
+};
+
+func require(ok: bool, label: string): void {
+    if !ok { eprintln("FAIL " + label); exit(1); }
+}
+
+func repeated(text: string, count: int): string {
+    if count <= 0 { return ""; }
+    var targetLength = text.len() * count;
+    var output = text;
+    while output.len() < targetLength { output = output + output; }
+    return output.slice(0, targetLength);
+}
+
+func checkAllBytes(): void {
+    var made = packedBufferCreate(0);
+    require(made.isOk(), "zero-capacity buffer creation");
+    var bytes = made.unwrap();
+    var expected = "";
+    var value = 0;
+    while value < 256 {
+        require(packedBufferTryAppendByte(bytes, value), "append byte " + value.toString());
+        expected = expected + string(char(value));
+        value = value + 1;
+    }
+    var read = packedBufferReadBytes(bytes, 0, 256);
+    require(read.isOk() && read.unwrap() == expected, "all byte values round trip exactly");
+    require(packedBufferWordCount(bytes).unwrap() == 37, "word count includes the partial final lane");
+    require(packedBufferWordByteCount(bytes, 36).unwrap() == 4, "word byte count describes the partial final lane");
+    require(packedBufferTryReadByte(bytes, 255) == 255, "read byte 255 as unsigned");
+    require(packedBufferTryLength(bytes) == 256, "fast logical length accessor avoids Result construction");
+    var invalidLength = packedBufferCreate(0).unwrap();
+    invalidLength.magic = 0;
+    require(packedBufferTryLength(invalidLength) == -1, "fast logical length accessor rejects invalid buffer state");
+    var truncatedTail = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(truncatedTail, "\x11\x22\x33"), "tail mutation test payload");
+    truncatedTail.length = 2;
+    require(packedBufferLength(truncatedTail).isErr(), "reject direct length truncation that leaves nonzero unused tail bits");
+    require(packedBufferTryLength(truncatedTail) == -1, "fast length accessor rejects nonzero tail bits");
+    require(packedBufferReadByte(bytes, 255).unwrap() == 255, "checked read wrapper preserves byte");
+    require(packedBufferReadByte(bytes, 256).isErr(), "reject read at logical end");
+}
+
+func checkGrowthBulkAndPatches(): void {
+    var made = packedBufferCreate(1);
+    require(made.isOk(), "small buffer creation");
+    var bytes = made.unwrap();
+    var payload = repeated("\x00\x80\xff", 3000);
+    require(packedBufferAppendBytes(bytes, payload).isOk(), "bulk append crosses chunks");
+    require(packedBufferLength(bytes).unwrap() == payload.len(), "length after bulk append");
+    require(packedBufferCapacity(bytes).unwrap() >= payload.len(), "capacity grows to fit bytes");
+    require(packedBufferCapacity(bytes).unwrap() % 7 == 0, "capacity is lane bounded");
+    require(packedBufferReadWord(bytes, 0).unwrap() == 280925237641216, "packed word exposes seven binary bytes");
+    var packedWords = packedBufferReadWords(bytes, 0, 2);
+    require(packedWords.isOk() && packedWords.unwrap().len() == 2, "bulk word read returns packed lanes");
+    var boundary = packedBufferReadBytes(bytes, 5, 9);
+    require(boundary.isOk() && boundary.unwrap() == payload.slice(5, 14), "bulk read across packed lane boundary");
+    require(packedBufferTryPatchByte(bytes, 6, 255), "patch byte at lane boundary without a Result");
+    require(packedBufferReadByte(bytes, 6).unwrap() == 255, "patched high byte reads unsigned");
+    require(packedBufferPatchU32Le(bytes, 5, 4286611200).isOk(), "patch uint32 across packed lane boundary");
+    var patch = packedBufferReadBytes(bytes, 5, 4);
+    require(patch.isOk() && patch.unwrap() == "\x00\x7f\x80\xff", "uint32 patch is little endian");
+    require(packedBufferPatchU32Le(bytes, payload.len() - 3, 1).isErr(), "reject patch beyond logical end");
+    require(packedBufferReadBytes(bytes, payload.len(), 1).isErr(), "reject read beyond logical end");
+    require(!packedBufferTryAppendByte(bytes, 256), "fast append rejects non-byte values");
+    require(packedBufferAppendByte(bytes, 256).isErr(), "checked append reports non-byte values");
+
+    var endianBytes = packedBufferCreate(0).unwrap();
+    require(packedBufferAppendU32Le(endianBytes, 4286611200).isOk(), "append packed uint32");
+    require(packedBufferReadBytes(endianBytes, 0, 4).unwrap() == "\x00\x7f\x80\xff", "uint32 append is little endian");
+    require(packedBufferAppendU64Le(endianBytes, 9223372036854775807).isOk(), "append packed uint64");
+    require(packedBufferReadBytes(endianBytes, 4, 8).unwrap() == "\xff\xff\xff\xff\xff\xff\xff\x7f", "uint64 append preserves the signed range");
+    require(packedBufferPatchU64Le(endianBytes, 4, 1).isOk(), "patch packed uint64");
+    require(packedBufferReadBytes(endianBytes, 4, 8).unwrap() == "\x01\x00\x00\x00\x00\x00\x00\x00", "uint64 patch is little endian");
+
+    var fastWords = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendU32Le(fastWords, 4286611200), "fast uint32 append avoids Result construction");
+    require(packedBufferTryPatchU32Le(fastWords, 0, 1), "fast uint32 patch avoids Result construction");
+    require(packedBufferReadBytes(fastWords, 0, 4).unwrap() == "\x01\x00\x00\x00", "fast uint32 patch writes bytes");
+    require(packedBufferTryAppendBytes(bytes, "\x00\x80\xff"), "fast bulk append succeeds");
+
+    var fullLane = packedBufferCreate(0).unwrap();
+    require(packedBufferAppendPackedLane(fullLane, 72057594037927935, 7).isOk(), "append maximum seven-byte lane");
+    require(packedBufferReadWord(fullLane, 0).unwrap() == 72057594037927935, "maximum lane remains nonnegative");
+    require(packedBufferReadBytes(fullLane, 0, 7).unwrap() == "\xff\xff\xff\xff\xff\xff\xff", "maximum lane retains all 255 bytes");
+}
+
+func checkCopyResetAndLimits(): void {
+    var first = packedBufferCreate(0).unwrap();
+    var second = packedBufferCreate(0).unwrap();
+    require(packedBufferAppendBytes(first, "prefix\x00\xffsuffix").isOk(), "source buffer payload");
+    require(packedBufferAppendBuffer(second, first, 6, 2).isOk(), "bulk copy between buffers");
+    require(packedBufferReadBytes(second, 0, 2).unwrap() == "\x00\xff", "buffer copy preserves binary bytes");
+    require(packedBufferAppendBuffer(first, first, 0, 6).isOk(), "self-copy remains overlap safe");
+    require(packedBufferReadBytes(first, 14, 6).unwrap() == "prefix", "self-copy is overlap safe");
+
+    var sharedSource = packedBufferCreate(0).unwrap();
+    var sharedBytes = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e";
+    require(packedBufferTryAppendBytes(sharedSource, sharedBytes), "shared wrapper source payload");
+    var sharedDestination = PackedBuffer { lanes: sharedSource.lanes, length: 7, magic: sharedSource.magic };
+    require(packedBufferAppendBuffer(sharedDestination, sharedSource, 0, 14).isOk(), "append through distinct wrappers that share lanes");
+    require(packedBufferReadBytes(sharedDestination, 0, 21).unwrap() == sharedBytes.slice(0, 7) + sharedBytes, "shared wrapper append snapshots overlapping source bytes");
+
+    var unchangedDestination = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(unchangedDestination, "prefix"), "late-invalid source destination prefix");
+    var badLaterLane = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(badLaterLane, sharedBytes), "late-invalid source payload");
+    badLaterLane.lanes.set(1, 72057594037927936);
+    require(packedBufferAppendBuffer(unchangedDestination, badLaterLane, 0, 14).isErr(), "reject invalid later source lane");
+    require(packedBufferLength(unchangedDestination).unwrap() == 6 && packedBufferReadBytes(unchangedDestination, 0, 6).unwrap() == "prefix", "invalid source lane leaves destination unchanged");
+    require(packedBufferAppendBuffer(unchangedDestination, badLaterLane, 1, 0).isOk(), "empty source range remains a no-op");
+    require(packedBufferSetLength(first, 3).isOk(), "truncate logical length");
+    require(packedBufferSetLength(first, 8).isOk(), "extend with zero fill");
+    require(packedBufferReadBytes(first, 3, 5).unwrap() == "\x00\x00\x00\x00\x00", "re-extension does not reveal stale bytes");
+    require(packedBufferAppendZeros(second, 3).isOk(), "append packed zero range");
+    require(packedBufferReadBytes(second, 2, 3).unwrap() == "\x00\x00\x00", "zero range contains exact zero bytes");
+    require(packedBufferReserve(second, 4097).isOk(), "explicit reserve");
+    require(packedBufferCapacity(second).unwrap() >= 4097, "reserve updates capacity");
+    require(packedBufferCapacity(second).unwrap() % 7 == 0, "reserved capacity rounds to packed lanes");
+    require(packedBufferReserve(second, -1).isErr(), "reject negative reserve");
+    require(packedBufferMaximumLength() == 153391689 * 7, "maximum byte bound matches the lane-count bound");
+    require(packedBufferCreate(packedBufferMaximumLength() + 1).isErr(), "reject capacity one byte above maximum");
+    require(packedBufferReserve(second, packedBufferMaximumLength() + 1).isErr(), "reject reserve one byte above maximum");
+
+    var partial = packedBufferCreate(2).unwrap();
+    require(packedBufferCapacity(partial).unwrap() == 7, "initial capacity rounds to one packed lane");
+    require(packedBufferTryAppendBytes(partial, "\x11\x22\x33\x44\x55"), "fill part of a lane");
+    require(packedBufferReserve(partial, 9).isOk(), "reserve through a second lane");
+    require(packedBufferSetLength(partial, 2).isOk(), "truncate inside a lane");
+    require(packedBufferSetLength(partial, 9).isOk(), "extend across the lane boundary");
+    require(packedBufferReadBytes(partial, 0, 9).unwrap() == "\x11\x22\x00\x00\x00\x00\x00\x00\x00", "truncate and extend zero unused bytes in both lanes");
+}
+
+func checkSegmentWriter(path: string): void {
+    var pattern = "\x00\x80\xff\x11\x22";
+    var payload = repeated(pattern, 40001).slice(0, 200003);
+    var body = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(body, payload), "large writer body append");
+    var header: Vec<int> = [0, 128, 255, 65];
+    require(packedBufferWriteSegments(path, header, body), "write header and packed body");
+    require(readFile(path) == "\x00\x80\xffA" + payload, "large segmented write preserves NUL and high bytes");
+
+    var smallBody = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(smallBody, "\x00\xff"), "small writer body append");
+    var smallHeader: Vec<int> = [255];
+    require(packedBufferWriteSegments(path + ".small", smallHeader, smallBody), "write small segmented file");
+    require(readFile(path + ".small") == "\xff\x00\xff", "small segmented write is exact");
+
+    var invalidPath = path + ".invalid-header";
+    writeFile(invalidPath, "preserve existing file");
+    var invalidHeader: Vec<int> = [0, 256];
+    require(!packedBufferWriteSegments(invalidPath, invalidHeader, smallBody), "reject invalid header before writing");
+    require(readFile(invalidPath) == "preserve existing file", "invalid input leaves existing path untouched");
+
+    var invalidLanePath = path + ".invalid-lane";
+    writeFile(invalidLanePath, "preserve invalid lane");
+    var invalidLaneBody = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(invalidLaneBody, "\x00\xff"), "invalid lane test payload");
+    invalidLaneBody.lanes.set(0, 72057594037927936);
+    require(!packedBufferWriteSegments(invalidLanePath, smallHeader, invalidLaneBody), "reject invalid packed lane before writing");
+    require(readFile(invalidLanePath) == "preserve invalid lane", "invalid packed lane leaves existing path untouched");
+
+    var invalidTailPath = path + ".invalid-tail";
+    writeFile(invalidTailPath, "preserve invalid tail");
+    var invalidTailBody = packedBufferCreate(0).unwrap();
+    require(packedBufferTryAppendBytes(invalidTailBody, "\x00\xff"), "invalid tail test payload");
+    invalidTailBody.lanes.set(0, 65536);
+    require(!packedBufferWriteSegments(invalidTailPath, smallHeader, invalidTailBody), "reject nonzero unused tail bytes before writing");
+    require(readFile(invalidTailPath) == "preserve invalid tail", "invalid partial lane leaves existing path untouched");
+
+    var invalidStatePath = path + ".invalid-state";
+    writeFile(invalidStatePath, "preserve invalid state");
+    var invalidStateBody = packedBufferCreate(0).unwrap();
+    invalidStateBody.magic = 0;
+    require(!packedBufferWriteSegments(invalidStatePath, smallHeader, invalidStateBody), "reject invalid packed buffer state before writing");
+    require(readFile(invalidStatePath) == "preserve invalid state", "invalid packed buffer state leaves existing path untouched");
+}
+
+func main(): void {
+    checkAllBytes();
+    checkGrowthBulkAndPatches();
+    checkCopyResetAndLimits();
+    checkSegmentWriter("packed-buffer.bin");
+    println("packed buffer regression cases passed");
+}

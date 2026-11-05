@@ -1,0 +1,9 @@
+func add(left: int, right: int): int {
+    return left + right;
+}
+
+func main(): void {
+    if add(20, 22) != 42 {
+        var failure = 9223372036854775807 + 1;
+    }
+}

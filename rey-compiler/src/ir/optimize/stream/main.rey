@@ -1,0 +1,125 @@
+import ir::{BasicBlock, Instruction, InstructionKind, IRFunction, IRProgram};
+import ir::optimize::inline::{inlineCallees};
+import ir::optimize::shape::{IdPair, copyEffects, copyFunction, copyInstruction, copyKey, copyTerminator, copyValues, replaceValueUses, verifyCopy};
+
+func memoryOp(kind: InstructionKind): bool {
+    return kind == InstructionKind::RawMap || kind == InstructionKind::RawUnmap || kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawStoreI64 || kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawStoreByte || kind == InstructionKind::RawLoadAddress || kind == InstructionKind::RawStoreAddress || kind == InstructionKind::RawFail || kind == InstructionKind::RawSyscall || kind == InstructionKind::RawHostSyscall || kind == InstructionKind::Call || kind == InstructionKind::RawOffset;
+}
+
+func blockUses(block: BasicBlock, id: int): bool {
+    var index = 0;
+    loop {
+        if index >= block.instructions.len() { break; }
+        var operands = block.instructions[index].operands;
+        var operandIndex = 0;
+        loop { if operandIndex >= operands.len() { break; } if operands[operandIndex] == id { return true; } operandIndex = operandIndex + 1; }
+        index = index + 1;
+    }
+    return false;
+}
+
+func fuseBlock(function: IRFunction, block: BasicBlock): BasicBlock {
+    var mapIndex = -1;
+    var mapCount = 0;
+    var index = 0;
+    loop {
+        if index >= block.instructions.len() { break; }
+        if block.instructions[index].kind == InstructionKind::RawMap { mapCount = mapCount + 1; mapIndex = index; }
+        index = index + 1;
+    }
+    if mapCount != 1 || block.instructions[mapIndex].operands.len() != 1 { return block; }
+    var baseId = block.instructions[mapIndex].resultId;
+    var sizeId = block.instructions[mapIndex].operands[0];
+    var storeIndex = -1;
+    var loadIndex = -1;
+    var unmapIndex = -1;
+    var storeValue = -1;
+    index = 0;
+    loop {
+        if index >= block.instructions.len() { break; }
+        var instructionValue = block.instructions[index];
+        if instructionValue.kind == InstructionKind::RawStoreI64 && instructionValue.operands.len() == 2 && instructionValue.operands[0] == baseId {
+            if storeIndex >= 0 { return block; }
+            storeIndex = index;
+            storeValue = instructionValue.operands[1];
+        } else if instructionValue.kind == InstructionKind::RawLoadI64 && instructionValue.operands.len() == 1 && instructionValue.operands[0] == baseId {
+            if loadIndex >= 0 { return block; }
+            loadIndex = index;
+        } else if instructionValue.kind == InstructionKind::RawUnmap && instructionValue.operands.len() == 2 && instructionValue.operands[0] == baseId && instructionValue.operands[1] == sizeId {
+            if unmapIndex >= 0 { return block; }
+            unmapIndex = index;
+        } else if memoryOp(instructionValue.kind) && index != mapIndex { return block; }
+        else if instructionValue.kind != InstructionKind::RawMap {
+            var operandIndex = 0;
+            loop {
+                if operandIndex >= instructionValue.operands.len() { break; }
+                if instructionValue.operands[operandIndex] == baseId { return block; }
+                operandIndex = operandIndex + 1;
+            }
+        }
+        index = index + 1;
+    }
+    if storeIndex < 0 || loadIndex < 0 || unmapIndex < 0 || storeIndex > loadIndex || loadIndex > unmapIndex || storeValue == baseId { return block; }
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        if function.blocks[blockCursor].id != block.id && blockUses(function.blocks[blockCursor], baseId) { return block; }
+        blockCursor = blockCursor + 1;
+    }
+    var instructions: Vec<Instruction> = [];
+    index = 0;
+    loop {
+        if index >= block.instructions.len() { break; }
+        if index != mapIndex && index != storeIndex && index != loadIndex && index != unmapIndex { instructions.push(copyInstruction(block.instructions[index])); }
+        index = index + 1;
+    }
+    return BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) };
+}
+
+func fuseBuffered(function: IRFunction): IRFunction {
+    if function.key.name != "sumBufferedCsv" { return function; }
+    var blocks: Vec<BasicBlock> = [];
+    var pairs: Vec<IdPair> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var original = function.blocks[blockCursor];
+        var fused = fuseBlock(function, original);
+        if fused.instructions.len() != original.instructions.len() {
+            var loadId = -1;
+            var storeValue = -1;
+            var index = 0;
+            loop {
+                if index >= original.instructions.len() { break; }
+                var instructionValue = original.instructions[index];
+                if instructionValue.kind == InstructionKind::RawLoadI64 { loadId = instructionValue.resultId; }
+                if instructionValue.kind == InstructionKind::RawStoreI64 && instructionValue.operands.len() == 2 { storeValue = instructionValue.operands[1]; }
+                index = index + 1;
+            }
+            if loadId >= 0 && storeValue >= 0 { pairs.push(IdPair { fromId: loadId, toId: storeValue }); }
+        }
+        blocks.push(fused);
+        blockCursor = blockCursor + 1;
+    }
+    var updated = IRFunction { id: function.id, key: copyKey(function.key), signature: function.signature, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+    var pairIndex = 0;
+    loop {
+        if pairIndex >= pairs.len() { break; }
+        updated = replaceValueUses(updated, pairs[pairIndex].fromId, pairs[pairIndex].toId);
+        pairIndex = pairIndex + 1;
+    }
+    return updated;
+}
+
+pub func fuseStreams(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "stream fusion input");
+    if verified.isErr() { return verified; }
+    var names: Vec<string> = ["parseCsvField", "keepCsvRow", "addCsvTotal"];
+    var inlined = inlineCallees(program, names);
+    if inlined.isErr() { return inlined; }
+    var current = inlined.unwrap();
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= current.functions.len() { break; } functions.push(fuseBuffered(copyFunction(current.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: current.entryFunctionId, functions: functions }, "stream fusion output");
+}

@@ -1,4 +1,4 @@
-import native::x64::{X64Code};
+import native::x64::{X64Code, X64FunctionOffset};
 import native::bytes::{appendU32Be, appendU32Le, appendU64Le, sha256};
 
 func zeros(bytes: Vec<int>, count: int) {
@@ -14,7 +14,35 @@ func u16(bytes: Vec<int>, value: int) {
 func u32(bytes: Vec<int>, value: int): bool { return appendU32Le(bytes, value).isOk(); }
 func u64(bytes: Vec<int>, value: int): bool { return appendU64Le(bytes, value).isOk(); }
 
-pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
+func functionIdUseDense(maximumId: int, count: int): bool {
+    return maximumId >= 0 && maximumId <= 1048575 && maximumId / 8 < count;
+}
+
+func hasDuplicateFunctionIds(functions: Vec<X64FunctionOffset>, maximumId: int): bool {
+    var i = 0;
+    if functionIdUseDense(maximumId, functions.len()) {
+        var seen: Vec<int> = [];
+        while i <= maximumId { seen.push(0); i += 1; }
+        i = 0;
+        while i < functions.len() {
+            var id = functions[i].functionId;
+            if seen[id] != 0 { return true; }
+            seen.set(id, 1);
+            i += 1;
+        }
+        return false;
+    }
+    var seenSparse: HashMap<string, bool> = HashMap.new();
+    while i < functions.len() {
+        var key = functions[i].functionId.toString();
+        if seenSparse.has(key) { return true; }
+        seenSparse.set(key, true);
+        i += 1;
+    }
+    return false;
+}
+
+func buildElfX64Header(code: X64Code): Result<Vec<int>, string> {
     if code.bytes.len() == 0 { return Result.Err("x64 ELF: instruction stream is empty"); }
     if code.entryOffset < 0 || code.entryOffset >= code.bytes.len() {
         return Result.Err("x64 ELF: entry offset is outside instruction stream");
@@ -24,30 +52,34 @@ pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
         if code.bytes[i] < 0 || code.bytes[i] > 255 { return Result.Err("x64 ELF: invalid code byte"); }
         i += 1;
     }
-    i = 0;
-    while i < code.functions.len() {
-        var function = code.functions[i];
-        if function.functionId < 0 || function.offset < 0 || function.offset >= code.bytes.len() {
+    return buildElfX64HeaderForLength(code.bytes.len(), code.entryOffset, code.functions);
+}
+
+pub func buildElfX64HeaderForLength(codeLength: int, entryOffset: int, functions: Vec<X64FunctionOffset>): Result<Vec<int>, string> {
+    if codeLength <= 0 { return Result.Err("x64 ELF: instruction stream is empty"); }
+    if entryOffset < 0 || entryOffset >= codeLength { return Result.Err("x64 ELF: entry offset is outside instruction stream"); }
+    var i = 0;
+    var maximumId = -1;
+    while i < functions.len() {
+        var function = functions[i];
+        if function.functionId < 0 || function.offset < 0 || function.offset >= codeLength {
             return Result.Err("x64 ELF: invalid function metadata");
         }
-        var previous = 0;
-        while previous < i {
-            if code.functions[previous].functionId == function.functionId { return Result.Err("x64 ELF: duplicate function id"); }
-            previous += 1;
-        }
+        if function.functionId > maximumId { maximumId = function.functionId; }
         i += 1;
     }
+    if hasDuplicateFunctionIds(functions, maximumId) { return Result.Err("x64 ELF: duplicate function id"); }
     var codeOffset = 4096;
     var base = 4194304;
-    if code.bytes.len() > 9223372036854775807 - base - codeOffset {
+    if codeLength > 9223372036854775807 - base - codeOffset {
         return Result.Err("x64 ELF: image size overflow");
     }
-    var size = codeOffset + code.bytes.len();
+    var size = codeOffset + codeLength;
     var image: Vec<int> = [127, 69, 76, 70, 2, 1, 1];
     zeros(image, 9);
     u16(image, 2);
     u16(image, 62);
-    if !u32(image, 1) || !u64(image, base + codeOffset + code.entryOffset)
+    if !u32(image, 1) || !u64(image, base + codeOffset + entryOffset)
         || !u64(image, 64) || !u64(image, 0) || !u32(image, 0) {
         return Result.Err("x64 ELF: header encoding failed");
     }
@@ -70,9 +102,34 @@ pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
     }
     if image.len() != 176 { return Result.Err("x64 ELF: header size mismatch"); }
     zeros(image, codeOffset - image.len());
-    i = 0;
+    return Result.Ok(image);
+}
+
+pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
+    var header = buildElfX64Header(code);
+    if header.isErr() { return Result.Err(header.unwrapErr()); }
+    var image = header.unwrap();
+    var i = 0;
     while i < code.bytes.len() { image.push(code.bytes[i]); i += 1; }
     return Result.Ok(image);
+}
+
+// Consumes the instruction buffer; callers must not reuse its code bytes.
+pub func buildElfX64Owned(code: X64Code): Result<Vec<int>, string> {
+    var header = buildElfX64Header(code);
+    if header.isErr() { return Result.Err(header.unwrapErr()); }
+    var prefix = header.unwrap();
+    var codeLength = code.bytes.len();
+    var i = 0;
+    while i < prefix.len() { code.bytes.push(0); i += 1; }
+    i = codeLength;
+    while i > 0 {
+        i -= 1;
+        code.bytes.set(i + prefix.len(), code.bytes[i]);
+    }
+    i = 0;
+    while i < prefix.len() { code.bytes.set(i, prefix[i]); i += 1; }
+    return Result.Ok(code.bytes);
 }
 
 func alignPage(value: int): int {

@@ -1,4 +1,4 @@
-import ir::{EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, Instruction, InstructionKind, TerminatorKind, effectSummary, irFunction, irProgram, withFunction};
+import ir::{EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, Instruction, InstructionKind, TerminatorKind, effectSummary, irFunction, irProgram};
 
 func functionIndex(program: IRProgram, functionId: int): int {
     var i = 0;
@@ -62,6 +62,18 @@ func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
     }
     if instruction.kind == InstructionKind::RawFail {
         return instruction.resultId == -1 && instruction.operands.len() == 1;
+    }
+    if instruction.kind == InstructionKind::RawFromInt || instruction.kind == InstructionKind::RawToInt {
+        return instruction.resultId >= 0 && instruction.operands.len() == 1;
+    }
+    if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+        return instruction.resultId >= 0 && instruction.operands.len() == 7;
+    }
+    if instruction.kind == InstructionKind::RawArgCount {
+        return instruction.resultId >= 0 && instruction.operands.len() == 0;
+    }
+    if instruction.kind == InstructionKind::RawArg {
+        return instruction.resultId >= 0 && instruction.operands.len() == 1;
     }
     if instruction.kind == InstructionKind::Call {
         var targetIndex = functionIndex(program, instruction.functionId);
@@ -136,6 +148,8 @@ func derivedEffects(function: IRFunction, program: IRProgram): EffectSummary {
                 effects = effectSummary(factJoin(effects.readsMemory, Fact::Yes), effects.writesMemory, effects.allocates, effects.mayBlock, effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
             } else if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte || instruction.kind == InstructionKind::RawStoreAddress {
                 effects = effectSummary(effects.readsMemory, factJoin(effects.writesMemory, Fact::Yes), effects.allocates, effects.mayBlock, effects.synchronizes, effects.unresolvedCallees, effects.argumentEscapes, effects.resultEscape);
+            } else if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+                effects = markUnknown(effects);
             }
             instructionIndex = instructionIndex + 1;
         }
@@ -157,18 +171,17 @@ func equalEffects(left: EffectSummary, right: EffectSummary): bool {
 }
 
 func rebuildWithEffects(program: IRProgram, useDerived: bool): IRProgram {
-    var rebuilt = irProgram(program.entryFunctionId, []);
+    var functions: Vec<IRFunction> = [];
     var i = 0;
     loop {
         if i >= program.functions.len() { break; }
         var function = program.functions[i];
         var effects = baseEffects(function, program);
         if useDerived { effects = derivedEffects(function, program); }
-        var copied = irFunction(function.id, function.key, function.signature, function.parameters, function.blocks, effects);
-        rebuilt = withFunction(rebuilt, copied);
+        functions.push(irFunction(function.id, function.key, function.signature, function.parameters, function.blocks, effects));
         i = i + 1;
     }
-    return rebuilt;
+    return irProgram(program.entryFunctionId, functions);
 }
 
 pub func inferEffects(program: IRProgram): IRProgram {

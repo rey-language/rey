@@ -81,6 +81,21 @@ struct FieldLookup {
     pub moduleId: string,
 }
 
+struct FieldLookupTable {
+    pub byField: HashMap<string, FieldLookup>,
+}
+
+struct StructFieldCache {
+    pub byStruct: HashMap<string, FieldLookupTable>,
+}
+
+struct ModuleTypeView {
+    pub structOwners: HashMap<string, string>,
+    pub structSources: HashMap<string, string>,
+    pub enumOwners: HashMap<string, string>,
+    pub enumSources: HashMap<string, string>,
+}
+
 pub struct SourceUnit {
     pub sourcePath: string,
     pub moduleId: string,
@@ -180,7 +195,6 @@ pub struct CheckedBindingInfo {
     pub sourcePath: string,
     pub moduleId: string,
     pub nodeId: int,
-    pub declaration: any,
     pub declarationKey: string,
     pub name: string,
     pub ty: Type,
@@ -268,10 +282,60 @@ struct TypecheckContext {
     pub expressionIndex: HashMap<string, Vec<int>>,
     pub bindingIndex: HashMap<string, Vec<int>>,
     pub fieldInitializerIndex: HashMap<string, Vec<int>>,
+    pub fieldLookups: HashMap<string, StructFieldCache>,
+    pub moduleViews: HashMap<string, ModuleTypeView>,
+    pub recordDepth: int,
+    pub lastRecordDepth: int,
+    pub lastRecordIndex: int,
 }
 
+var kindAny: string = "Any";
+var kindVoid: string = "Void";
+var kindBool: string = "Bool";
+var kindInt: string = "Int";
+var kindFloat: string = "Float";
+var kindString: string = "String";
+var kindChar: string = "Char";
+var kindNull: string = "Null";
+var kindArray: string = "Array";
+var kindDict: string = "Dict";
+var kindTuple: string = "Tuple";
+var kindStruct: string = "Struct";
+var kindEnum: string = "Enum";
+var kindFunction: string = "Function";
+var kindOption: string = "Option";
+var kindResult: string = "Result";
+var kindNullable: string = "Nullable";
+var kindUnion: string = "Union";
+var kindUnknown: string = "Unknown";
+var kindRawAddress: string = "RawAddress";
+
+var sharedTypeParams: Vec<Type> = [];
+var sharedInt: Type = Type { kind: "Int", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedBool: Type = Type { kind: "Bool", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedFloat: Type = Type { kind: "Float", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedString: Type = Type { kind: "String", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedChar: Type = Type { kind: "Char", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedVoid: Type = Type { kind: "Void", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedNull: Type = Type { kind: "Null", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedAny: Type = Type { kind: "Any", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedUnknown: Type = Type { kind: "Unknown", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+var sharedRawAddress: Type = Type { kind: "RawAddress", name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: sharedTypeParams, ret: null };
+
 func makeType(kind: string): Type {
-    return Type { kind: kind, name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: [], ret: null };
+    if kind == kindInt { return sharedInt; }
+    if kind == kindBool { return sharedBool; }
+    if kind == kindFloat { return sharedFloat; }
+    if kind == kindString { return sharedString; }
+    if kind == kindChar { return sharedChar; }
+    if kind == kindVoid { return sharedVoid; }
+    if kind == kindNull { return sharedNull; }
+    if kind == kindAny { return sharedAny; }
+    if kind == kindUnknown { return sharedUnknown; }
+    if kind == kindRawAddress { return sharedRawAddress; }
+    var params: Vec<Type> = sharedTypeParams;
+    if kind == kindTuple || kind == kindFunction { params = []; }
+    return Type { kind: kind, name: "", sourcePath: "", moduleId: "", inner: null, key: null, value: null, params: params, ret: null };
 }
 
 func namedType(kind: string, name: string): Type {
@@ -283,46 +347,46 @@ func namedTypeOwned(kind: string, name: string, sourcePath: string, moduleId: st
 }
 
 func arrayType(inner: Type): Type {
-    var ty = makeType("Array");
+    var ty = makeType(kindArray);
     ty.inner = inner;
     return ty;
 }
 
 func dictType(value: Type): Type {
-    var ty = makeType("Dict");
-    ty.key = makeType("String");
+    var ty = makeType(kindDict);
+    ty.key = makeType(kindString);
     ty.value = value;
     return ty;
 }
 
 func optionType(inner: Type): Type {
-    var ty = makeType("Option");
+    var ty = makeType(kindOption);
     ty.inner = inner;
     return ty;
 }
 
 func resultType(ok: Type, err: Type): Type {
-    var ty = makeType("Result");
+    var ty = makeType(kindResult);
     ty.inner = ok;
     ty.key = err;
     return ty;
 }
 
 func nullableType(inner: Type): Type {
-    var ty = makeType("Nullable");
+    var ty = makeType(kindNullable);
     ty.inner = inner;
     return ty;
 }
 
 func functionType(params: Vec<Type>, ret: Type): Type {
-    var ty = makeType("Function");
+    var ty = makeType(kindFunction);
     ty.params = params;
     ty.ret = ret;
     return ty;
 }
 
 func emptySignature(): FunctionSig {
-    return FunctionSig { params: [], required: 0, variadic: false, variadicType: makeType("Unknown"), ret: makeType("Unknown"), inferReturn: false, owner: "", sourcePath: "", moduleId: "", llvmName: "", isPub: false, declarationIndex: -1 };
+    return FunctionSig { params: [], required: 0, variadic: false, variadicType: makeType(kindUnknown), ret: makeType(kindUnknown), inferReturn: false, owner: "", sourcePath: "", moduleId: "", llvmName: "", isPub: false, declarationIndex: -1 };
 }
 
 func newEnv(parent: TypeEnv?, lambdaBoundary: bool): TypeEnv {
@@ -347,7 +411,7 @@ func newContext(): TypecheckContext {
         errors: [],
         suppressErrors: false,
         inFunction: false,
-        currentReturn: makeType("Unknown"),
+        currentReturn: makeType(kindUnknown),
         returnTypes: [],
         loopDepth: 0,
         sourcePath: "",
@@ -367,6 +431,11 @@ func newContext(): TypecheckContext {
         expressionIndex: HashMap.new(),
         bindingIndex: HashMap.new(),
         fieldInitializerIndex: HashMap.new(),
+        fieldLookups: HashMap.new(),
+        moduleViews: HashMap.new(),
+        recordDepth: 0,
+        lastRecordDepth: -1,
+        lastRecordIndex: -1,
     };
 }
 
@@ -377,8 +446,8 @@ func addError(ctx: TypecheckContext, message: string, span: int) {
 }
 
 func typeName(ty: Type): string {
-    if ty.kind == "Struct" || ty.kind == "Enum" { return ty.name; }
-    if ty.kind == "Array" {
+    if ty.kind == kindStruct || ty.kind == kindEnum { return ty.name; }
+    if ty.kind == kindArray {
         var inner = ty.inner;
         if inner != null {
             var innerType: Type = inner;
@@ -386,7 +455,7 @@ func typeName(ty: Type): string {
         }
         return "Vec<any>";
     }
-    if ty.kind == "Dict" {
+    if ty.kind == kindDict {
         var value = ty.value;
         if value != null {
             var valueType: Type = value;
@@ -394,7 +463,7 @@ func typeName(ty: Type): string {
         }
         return "HashMap<string,any>";
     }
-    if ty.kind == "Option" {
+    if ty.kind == kindOption {
         var optionInner = ty.inner;
         if optionInner != null {
             var optionTypeValue: Type = optionInner;
@@ -402,16 +471,16 @@ func typeName(ty: Type): string {
         }
         return "Option<any>";
     }
-    if ty.kind == "Result" { return "Result"; }
-    if ty.kind == "Tuple" { return "tuple"; }
-    if ty.kind == "Nullable" {
+    if ty.kind == kindResult { return "Result"; }
+    if ty.kind == kindTuple { return "tuple"; }
+    if ty.kind == kindNullable {
         var nullableInner = ty.inner;
         if nullableInner != null {
             var nullableTypeValue: Type = nullableInner;
             return typeName(nullableTypeValue) + "?";
         }
     }
-    if ty.kind == "Union" {
+    if ty.kind == kindUnion {
         var text = "";
         var i = 0;
         loop {
@@ -422,43 +491,43 @@ func typeName(ty: Type): string {
         }
         return text;
     }
-    if ty.kind == "Function" { return "function"; }
-    if ty.kind == "Int" { return "int"; }
-    if ty.kind == "RawAddress" { return "__rey_raw_address"; }
-    if ty.kind == "Float" { return "float"; }
-    if ty.kind == "Bool" { return "bool"; }
-    if ty.kind == "String" { return "string"; }
-    if ty.kind == "Void" { return "void"; }
-    if ty.kind == "Char" { return "char"; }
-    if ty.kind == "Any" { return "any"; }
-    if ty.kind == "Null" { return "null"; }
+    if ty.kind == kindFunction { return "function"; }
+    if ty.kind == kindInt { return "int"; }
+    if ty.kind == kindRawAddress { return "__rey_raw_address"; }
+    if ty.kind == kindFloat { return "float"; }
+    if ty.kind == kindBool { return "bool"; }
+    if ty.kind == kindString { return "string"; }
+    if ty.kind == kindVoid { return "void"; }
+    if ty.kind == kindChar { return "char"; }
+    if ty.kind == kindAny { return "any"; }
+    if ty.kind == kindNull { return "null"; }
     return "unknown";
 }
 
 func diagnosticTypeName(ty: Type): string {
-    if ty.kind == "Int" { return "Int"; }
-    if ty.kind == "RawAddress" { return "__rey_raw_address"; }
-    if ty.kind == "Float" { return "Float"; }
-    if ty.kind == "Bool" { return "Bool"; }
-    if ty.kind == "String" { return "String"; }
-    if ty.kind == "Void" { return "Void"; }
-    if ty.kind == "Char" { return "Char"; }
-    if ty.kind == "Any" { return "Any"; }
-    if ty.kind == "Null" { return "Null"; }
+    if ty.kind == kindInt { return "Int"; }
+    if ty.kind == kindRawAddress { return "__rey_raw_address"; }
+    if ty.kind == kindFloat { return "Float"; }
+    if ty.kind == kindBool { return "Bool"; }
+    if ty.kind == kindString { return "String"; }
+    if ty.kind == kindVoid { return "Void"; }
+    if ty.kind == kindChar { return "Char"; }
+    if ty.kind == kindAny { return "Any"; }
+    if ty.kind == kindNull { return "Null"; }
     return typeName(ty);
 }
 
 func arithmeticOperandLabel(ty: Type): string {
-    if ty.kind == "Null" { return "Null"; }
+    if ty.kind == kindNull { return "Null"; }
     return typeName(ty);
 }
 
 func typeEqual(a: Type, b: Type): bool {
     if a.kind != b.kind { return false; }
-    if a.kind == "Struct" || a.kind == "Enum" {
+    if a.kind == kindStruct || a.kind == kindEnum {
         return a.name == b.name && a.moduleId == b.moduleId && a.sourcePath == b.sourcePath;
     }
-    if a.kind == "Array" || a.kind == "Nullable" || a.kind == "Option" {
+    if a.kind == kindArray || a.kind == kindNullable || a.kind == kindOption {
         var aInner = a.inner;
         var bInner = b.inner;
         if aInner != null {
@@ -471,7 +540,7 @@ func typeEqual(a: Type, b: Type): bool {
         }
         return bInner == null;
     }
-    if a.kind == "Result" {
+    if a.kind == kindResult {
         var aOk = a.inner;
         var bOk = b.inner;
         var aErr = a.key;
@@ -492,7 +561,7 @@ func typeEqual(a: Type, b: Type): bool {
         }
         return bOk == null && aErr == null && bErr == null;
     }
-    if a.kind == "Dict" {
+    if a.kind == kindDict {
         var aValue = a.value;
         var bValue = b.value;
         if aValue != null {
@@ -505,7 +574,7 @@ func typeEqual(a: Type, b: Type): bool {
         }
         return bValue == null;
     }
-    if a.kind == "Tuple" || a.kind == "Function" || a.kind == "Union" {
+    if a.kind == kindTuple || a.kind == kindFunction || a.kind == kindUnion {
         if a.params.len() != b.params.len() { return false; }
         var i = 0;
         loop {
@@ -513,7 +582,7 @@ func typeEqual(a: Type, b: Type): bool {
             if !typeEqual(a.params[i], b.params[i]) { return false; }
             i = i + 1;
         }
-        if a.kind == "Function" {
+        if a.kind == kindFunction {
             var aReturn = a.ret;
             var bReturn = b.ret;
             if aReturn != null {
@@ -532,11 +601,11 @@ func typeEqual(a: Type, b: Type): bool {
 }
 
 func isUnknown(ty: Type): bool {
-    return ty.kind == "Unknown";
+    return ty.kind == kindUnknown;
 }
 
 func typeContainsRawAddress(ty: Type): bool {
-    if ty.kind == "RawAddress" { return true; }
+    if ty.kind == kindRawAddress { return true; }
     var inner = ty.inner;
     if inner != null {
         var innerType: Type = inner;
@@ -571,13 +640,13 @@ func rejectRawAggregate(ctx: TypecheckContext, ty: Type, span: int, label: strin
 }
 
 func isNumeric(ty: Type): bool {
-    return ty.kind == "Int" || ty.kind == "Float";
+    return ty.kind == kindInt || ty.kind == kindFloat;
 }
 
 func isRenderable(ty: Type): bool {
-    if ty.kind == "Any" { return true; }
-    if ty.kind == "Int" || ty.kind == "Float" || ty.kind == "Bool" || ty.kind == "String" || ty.kind == "Char" || ty.kind == "Null" { return true; }
-    if ty.kind == "Nullable" {
+    if ty.kind == kindAny { return true; }
+    if ty.kind == kindInt || ty.kind == kindFloat || ty.kind == kindBool || ty.kind == kindString || ty.kind == kindChar || ty.kind == kindNull { return true; }
+    if ty.kind == kindNullable {
         var inner = ty.inner;
         if inner != null {
             var innerType: Type = inner;
@@ -585,7 +654,7 @@ func isRenderable(ty: Type): bool {
         }
         return false;
     }
-    if ty.kind == "Union" {
+    if ty.kind == kindUnion {
         var i = 0;
         loop {
             if i >= ty.params.len() { break; }
@@ -599,18 +668,18 @@ func isRenderable(ty: Type): bool {
 
 func canAssign(target: Type, source: Type): bool {
     if typeContainsRawAddress(target) || typeContainsRawAddress(source) { return typeEqual(target, source); }
-    if target.kind == "Any" || source.kind == "Any" { return true; }
-    if target.kind == "Unknown" || source.kind == "Unknown" { return false; }
+    if target.kind == kindAny || source.kind == kindAny { return true; }
+    if target.kind == kindUnknown || source.kind == kindUnknown { return false; }
     if typeEqual(target, source) { return true; }
-    if target.kind == "Nullable" {
-        if source.kind == "Null" { return true; }
+    if target.kind == kindNullable {
+        if source.kind == kindNull { return true; }
         var nullableInner = target.inner;
         if nullableInner != null {
             var nullableTypeValue: Type = nullableInner;
             return canAssign(nullableTypeValue, source);
         }
     }
-    if target.kind == "Option" && source.kind == "Option" {
+    if target.kind == kindOption && source.kind == kindOption {
         var targetInner = target.inner;
         var sourceInner = source.inner;
         if targetInner != null {
@@ -622,7 +691,7 @@ func canAssign(target: Type, source: Type): bool {
         }
         return true;
     }
-    if target.kind == "Result" && source.kind == "Result" {
+    if target.kind == kindResult && source.kind == kindResult {
         var targetOk = target.inner;
         var sourceOk = source.inner;
         var targetErr = target.key;
@@ -642,7 +711,7 @@ func canAssign(target: Type, source: Type): bool {
         }
         return true;
     }
-    if target.kind == "Array" && source.kind == "Array" {
+    if target.kind == kindArray && source.kind == kindArray {
         var targetElement = target.inner;
         var sourceElement = source.inner;
         if targetElement != null {
@@ -654,7 +723,7 @@ func canAssign(target: Type, source: Type): bool {
         }
         return true;
     }
-    if target.kind == "Dict" && source.kind == "Dict" {
+    if target.kind == kindDict && source.kind == kindDict {
         var targetValue = target.value;
         var sourceValue = source.value;
         if targetValue != null {
@@ -666,7 +735,7 @@ func canAssign(target: Type, source: Type): bool {
         }
         return true;
     }
-    if target.kind == "Union" {
+    if target.kind == kindUnion {
         var i = 0;
         loop {
             if i >= target.params.len() { break; }
@@ -675,7 +744,7 @@ func canAssign(target: Type, source: Type): bool {
         }
         return false;
     }
-    if source.kind == "Union" {
+    if source.kind == kindUnion {
         var j = 0;
         loop {
             if j >= source.params.len() { break; }
@@ -693,11 +762,11 @@ func joinTypes(ctx: TypecheckContext, a: Type, b: Type, span: int): Type {
     if typeEqual(a, b) { return a; }
     if typeContainsRawAddress(a) || typeContainsRawAddress(b) {
         addError(ctx, "raw address cannot be joined with another type", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
-    if a.kind == "Any" || b.kind == "Any" { return makeType("Any"); }
+    if a.kind == kindAny || b.kind == kindAny { return makeType(kindAny); }
     var items: Vec<Type> = [];
-    if a.kind == "Union" {
+    if a.kind == kindUnion {
         var i = 0;
         loop {
             if i >= a.params.len() { break; }
@@ -705,7 +774,7 @@ func joinTypes(ctx: TypecheckContext, a: Type, b: Type, span: int): Type {
             i = i + 1;
         }
     } else { items.push(a); }
-    if b.kind == "Union" {
+    if b.kind == kindUnion {
         var j = 0;
         loop {
             if j >= b.params.len() { break; }
@@ -729,45 +798,45 @@ func joinTypes(ctx: TypecheckContext, a: Type, b: Type, span: int): Type {
         }
         if !found2 { items.push(b); }
     }
-    var result = makeType("Union");
+    var result = makeType(kindUnion);
     result.params = items;
     return result;
 }
 
 func resolveNamedType(ctx: TypecheckContext, name: string, span: int, allowVoid: bool): Type {
-    if name == "int" { return makeType("Int"); }
+    if name == "int" { return makeType(kindInt); }
     if name == "__rey_raw_address" {
-        if ctx.rawAuthorized { return makeType("RawAddress"); }
+        if ctx.rawAuthorized { return makeType(kindRawAddress); }
         addError(ctx, "reserved type '__rey_raw_address' is only available in an authorized runtime unit", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
-    if name == "float" { return makeType("Float"); }
-    if name == "bool" { return makeType("Bool"); }
-    if name == "string" { return makeType("String"); }
-    if name == "char" { return makeType("Char"); }
-    if name == "any" { return makeType("Any"); }
+    if name == "float" { return makeType(kindFloat); }
+    if name == "bool" { return makeType(kindBool); }
+    if name == "string" { return makeType(kindString); }
+    if name == "char" { return makeType(kindChar); }
+    if name == "any" { return makeType(kindAny); }
     if name == "void" {
-        if !allowVoid { addError(ctx, "void is only valid as a function return type", span); return makeType("Unknown"); }
-        return makeType("Void");
+        if !allowVoid { addError(ctx, "void is only valid as a function return type", span); return makeType(kindUnknown); }
+        return makeType(kindVoid);
     }
-    if name == "Vec" { return arrayType(makeType("Any")); }
-    if name == "HashMap" { return dictType(makeType("Any")); }
-    if name == "Option" { return optionType(makeType("Any")); }
-    if name == "Result" { return resultType(makeType("Any"), makeType("Any")); }
-    if name == "String" || name == "Int" || name == "Float" || name == "Bool" || name == "Void" || name == "Char" || name == "Any" {
+    if name == "Vec" { return arrayType(makeType(kindAny)); }
+    if name == "HashMap" { return dictType(makeType(kindAny)); }
+    if name == kindOption { return optionType(makeType(kindAny)); }
+    if name == kindResult { return resultType(makeType(kindAny), makeType(kindAny)); }
+    if name == kindString || name == kindInt || name == kindFloat || name == kindBool || name == kindVoid || name == kindChar || name == kindAny {
         var lower = "string";
-        if name == "Int" { lower = "int"; }
-        else if name == "Float" { lower = "float"; }
-        else if name == "Bool" { lower = "bool"; }
-        else if name == "Void" { lower = "void"; }
-        else if name == "Char" { lower = "char"; }
-        else if name == "Any" { lower = "any"; }
+        if name == kindInt { lower = "int"; }
+        else if name == kindFloat { lower = "float"; }
+        else if name == kindBool { lower = "bool"; }
+        else if name == kindVoid { lower = "void"; }
+        else if name == kindChar { lower = "char"; }
+        else if name == kindAny { lower = "any"; }
         addError(ctx, "capitalized primitive type '" + name + "'; use '" + lower + "' (lowercase)", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     if name == "null" {
         addError(ctx, "null is a value, not a standalone type; use a nullable or union type", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     if ctx.structs.has(name) {
         var owner = ctx.structOwners.get(name);
@@ -780,7 +849,7 @@ func resolveNamedType(ctx: TypecheckContext, name: string, span: int, allowVoid:
         return namedTypeOwned("Enum", name, enumSource, enumOwner);
     }
     addError(ctx, "unknown type '" + name + "'", span);
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Type {
@@ -791,22 +860,22 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
             if innerExpr != null {
                 var innerTypeExpr: TypeExpr = innerExpr;
                 var inner = resolveTypeExpr(ctx, innerTypeExpr, false);
-                if inner.kind == "Void" || inner.kind == "Null" { addError(ctx, "invalid nullable inner type", expr.span.start); return makeType("Unknown"); }
+                if inner.kind == kindVoid || inner.kind == kindNull { addError(ctx, "invalid nullable inner type", expr.span.start); return makeType(kindUnknown); }
                 rejectRawAggregate(ctx, inner, expr.span.start, "nullable types");
                 return nullableType(inner);
             }
             addError(ctx, "nullable type is missing its inner type", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         TypeExprKind::Union => {
-            var union = makeType("Union");
+            var union = makeType(kindUnion);
             var members: Vec<Type> = [];
             var sawRaw = false;
             var i = 0;
             loop {
                 if i >= expr.members.len() { break; }
-                var member = makeType("Unknown");
-                if isNullNamedTypeExpr(expr.members[i]) { member = makeType("Null"); }
+                var member = makeType(kindUnknown);
+                if isNullNamedTypeExpr(expr.members[i]) { member = makeType(kindNull); }
                 else { member = resolveTypeExpr(ctx, expr.members[i], false); }
                 if typeContainsRawAddress(member) { sawRaw = true; }
                 if !isUnknown(member) {
@@ -820,12 +889,12 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
                 union.params = members;
                 return union;
             }
-            if union.kind == "Union" && union.params.len() == 0 { return makeType("Unknown"); }
-            if union.kind == "Union" && union.params.len() == 1 { return union.params[0]; }
+            if union.kind == kindUnion && union.params.len() == 0 { return makeType(kindUnknown); }
+            if union.kind == kindUnion && union.params.len() == 1 { return union.params[0]; }
             return union;
         },
         TypeExprKind::Tuple => {
-            var tuple = makeType("Tuple");
+            var tuple = makeType(kindTuple);
             var i2 = 0;
             loop {
                 if i2 >= expr.members.len() { break; }
@@ -837,7 +906,7 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
             return tuple;
         },
         TypeExprKind::Function => {
-            var fn = makeType("Function");
+            var fn = makeType(kindFunction);
             var p = 0;
             loop {
                 if p >= expr.params.len() { break; }
@@ -848,35 +917,35 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
             if resultExpr != null {
                 var resultTypeExpr: TypeExpr = resultExpr;
                 fn.ret = resolveTypeExpr(ctx, resultTypeExpr, true);
-            } else { fn.ret = makeType("Void"); }
+            } else { fn.ret = makeType(kindVoid); }
             rejectRawAggregate(ctx, fn, expr.span.start, "function types");
             return fn;
         },
         TypeExprKind::Applied => {
             if expr.name == "Vec" {
-                if expr.members.len() > 1 { addError(ctx, "Vec accepts at most one type argument", expr.span.start); return makeType("Unknown"); }
-                if expr.members.len() == 0 { return arrayType(makeType("Any")); }
+                if expr.members.len() > 1 { addError(ctx, "Vec accepts at most one type argument", expr.span.start); return makeType(kindUnknown); }
+                if expr.members.len() == 0 { return arrayType(makeType(kindAny)); }
                 var elementType = resolveTypeExpr(ctx, expr.members[0], false);
                 rejectRawAggregate(ctx, elementType, expr.span.start, "vector types");
                 return arrayType(elementType);
             }
             if expr.name == "HashMap" {
-                if expr.members.len() != 2 { addError(ctx, "HashMap requires key and value type arguments", expr.span.start); return makeType("Unknown"); }
+                if expr.members.len() != 2 { addError(ctx, "HashMap requires key and value type arguments", expr.span.start); return makeType(kindUnknown); }
                 var keyType = resolveTypeExpr(ctx, expr.members[0], false);
-                if keyType.kind != "String" && keyType.kind != "Any" { addError(ctx, "HashMap keys must be string", expr.span.start); }
+                if keyType.kind != kindString && keyType.kind != kindAny { addError(ctx, "HashMap keys must be string", expr.span.start); }
                 var valueType = resolveTypeExpr(ctx, expr.members[1], false);
                 rejectRawAggregate(ctx, keyType, expr.span.start, "dictionary types");
                 rejectRawAggregate(ctx, valueType, expr.span.start, "dictionary types");
                 return dictType(valueType);
             }
-            if expr.name == "Option" {
-                if expr.members.len() != 1 { addError(ctx, "Option requires one type argument", expr.span.start); return makeType("Unknown"); }
+            if expr.name == kindOption {
+                if expr.members.len() != 1 { addError(ctx, "Option requires one type argument", expr.span.start); return makeType(kindUnknown); }
                 var optionValue = resolveTypeExpr(ctx, expr.members[0], false);
                 rejectRawAggregate(ctx, optionValue, expr.span.start, "option types");
                 return optionType(optionValue);
             }
-            if expr.name == "Result" {
-                if expr.members.len() != 2 { addError(ctx, "Result requires two type arguments", expr.span.start); return makeType("Unknown"); }
+            if expr.name == kindResult {
+                if expr.members.len() != 2 { addError(ctx, "Result requires two type arguments", expr.span.start); return makeType(kindUnknown); }
                 var resultOk = resolveTypeExpr(ctx, expr.members[0], false);
                 var resultErr = resolveTypeExpr(ctx, expr.members[1], false);
                 rejectRawAggregate(ctx, resultOk, expr.span.start, "result types");
@@ -884,14 +953,14 @@ func resolveTypeExpr(ctx: TypecheckContext, expr: TypeExpr, allowVoid: bool): Ty
                 return resultType(resultOk, resultErr);
             }
             addError(ctx, "unsupported applied type '" + expr.name + "'", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         TypeExprKind::Error => {
             addError(ctx, "unsupported type expression", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
     }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func isNullNamedTypeExpr(expr: TypeExpr): bool {
@@ -909,7 +978,7 @@ func isNullNamedTypeExpr(expr: TypeExpr): bool {
 
 func resolveTypeTag(ctx: TypecheckContext, expr: TypeExpr?, tag: string, span: int, allowVoid: bool): Type {
     if expr != null { return resolveTypeExpr(ctx, expr, allowVoid); }
-    if tag == "" { return makeType("Unknown"); }
+    if tag == "" { return makeType(kindUnknown); }
     if tag.endsWith("?") {
         var innerTag = tag.slice(0, tag.len() - 1);
         var inner = resolveNamedType(ctx, innerTag, span, false);
@@ -936,7 +1005,7 @@ func lookupEnv(env: TypeEnv, name: string): LookupResult {
         if env.lambdaBoundary && result.found { result.crossedLambda = true; }
         return result;
     }
-    return LookupResult { found: false, symbol: Symbol { name: "", ty: makeType("Unknown"), isConst: false }, crossedLambda: false };
+    return LookupResult { found: false, symbol: Symbol { name: "", ty: makeType(kindUnknown), isConst: false }, crossedLambda: false };
 }
 
 func defineSymbol(ctx: TypecheckContext, env: TypeEnv, name: string, ty: Type, isConst: bool, span: int) {
@@ -991,15 +1060,15 @@ func isBuiltinSignature(sig: FunctionSig): bool {
 
 func addBuiltin(ctx: TypecheckContext, name: string, sig: FunctionSig) {
     ctx.functions.set(name, sig);
-    ctx.symbols.push(resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType("Unknown")));
+    ctx.symbols.push(resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType(kindUnknown)));
 }
 
 func registerBuiltins(ctx: TypecheckContext) {
-    var str = makeType("String");
-    var int = makeType("Int");
-    var bool = makeType("Bool");
-    var void = makeType("Void");
-    var any = makeType("Any");
+    var str = makeType(kindString);
+    var int = makeType(kindInt);
+    var bool = makeType(kindBool);
+    var void = makeType(kindVoid);
+    var any = makeType(kindAny);
     var twoStrings = [str, str];
     var oneString = [str];
     var twoInts = [int, int];
@@ -1020,9 +1089,9 @@ func registerBuiltins(ctx: TypecheckContext) {
     addBuiltin(ctx, "args", makeSignature([], 0, false, any, arrayType(str)));
     addBuiltin(ctx, "exit", makeSignature([int], 1, false, any, void));
     addBuiltin(ctx, "int", makeSignature([any], 1, false, any, int));
-    addBuiltin(ctx, "float", makeSignature([any], 1, false, any, makeType("Float")));
+    addBuiltin(ctx, "float", makeSignature([any], 1, false, any, makeType(kindFloat)));
     addBuiltin(ctx, "string", makeSignature([any], 1, false, any, str));
-    addBuiltin(ctx, "char", makeSignature([int], 1, false, any, makeType("Char")));
+    addBuiltin(ctx, "char", makeSignature([int], 1, false, any, makeType(kindChar)));
     addBuiltin(ctx, "range", makeSignature(twoInts, 2, false, any, arrayType(int)));
     addBuiltin(ctx, "input", makeSignature([str], 0, false, any, str));
     addBuiltin(ctx, "abs", makeSignature([any], 1, false, any, any));
@@ -1031,13 +1100,13 @@ func registerBuiltins(ctx: TypecheckContext) {
     addBuiltin(ctx, "floor", makeSignature([any], 1, false, any, int));
     addBuiltin(ctx, "ceil", makeSignature([any], 1, false, any, int));
     addBuiltin(ctx, "round", makeSignature([any], 1, false, any, int));
-    addBuiltin(ctx, "sqrt", makeSignature([any], 1, false, any, makeType("Float")));
-    addBuiltin(ctx, "pow", makeSignature([any, any], 2, false, any, makeType("Float")));
-    addBuiltin(ctx, "log", makeSignature([any], 1, false, any, makeType("Float")));
-    addBuiltin(ctx, "sin", makeSignature([any], 1, false, any, makeType("Float")));
-    addBuiltin(ctx, "cos", makeSignature([any], 1, false, any, makeType("Float")));
-    addBuiltin(ctx, "tan", makeSignature([any], 1, false, any, makeType("Float")));
-    addBuiltin(ctx, "random", makeSignature([], 0, false, any, makeType("Float")));
+    addBuiltin(ctx, "sqrt", makeSignature([any], 1, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "pow", makeSignature([any, any], 2, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "log", makeSignature([any], 1, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "sin", makeSignature([any], 1, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "cos", makeSignature([any], 1, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "tan", makeSignature([any], 1, false, any, makeType(kindFloat)));
+    addBuiltin(ctx, "random", makeSignature([], 0, false, any, makeType(kindFloat)));
     if ctx.rawAuthorized { registerRawBuiltins(ctx); }
 }
 
@@ -1045,26 +1114,34 @@ func isRawIntrinsicName(name: string): bool {
     return name == "__reyRawNull" || name == "__reyRawMap" || name == "__reyRawUnmap" ||
         name == "__reyRawOffset" || name == "__reyRawLoadI64" || name == "__reyRawStoreI64" ||
         name == "__reyRawLoadByte" || name == "__reyRawStoreByte" || name == "__reyRawEqual" ||
-        name == "__reyRawLoadAddress" || name == "__reyRawStoreAddress" || name == "__reyRawFail";
+        name == "__reyRawLoadAddress" || name == "__reyRawStoreAddress" || name == "__reyRawFail" ||
+        name == "__reyRawFromInt" || name == "__reyRawToInt" || name == "__reyRawSyscall" || name == "__reyRawHostSyscall" ||
+        name == "__reyRawArgCount" || name == "__reyRawArg";
 }
 
 func registerRawBuiltins(ctx: TypecheckContext) {
-    var raw = makeType("RawAddress");
-    var int = makeType("Int");
-    var bool = makeType("Bool");
-    var void = makeType("Void");
-    addBuiltin(ctx, "__reyRawNull", makeSignature([], 0, false, makeType("Unknown"), raw));
-    addBuiltin(ctx, "__reyRawMap", makeSignature([int], 1, false, makeType("Unknown"), raw));
-    addBuiltin(ctx, "__reyRawUnmap", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
-    addBuiltin(ctx, "__reyRawOffset", makeSignature([raw, int], 2, false, makeType("Unknown"), raw));
-    addBuiltin(ctx, "__reyRawLoadI64", makeSignature([raw], 1, false, makeType("Unknown"), int));
-    addBuiltin(ctx, "__reyRawStoreI64", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
-    addBuiltin(ctx, "__reyRawLoadByte", makeSignature([raw], 1, false, makeType("Unknown"), int));
-    addBuiltin(ctx, "__reyRawStoreByte", makeSignature([raw, int], 2, false, makeType("Unknown"), void));
-    addBuiltin(ctx, "__reyRawEqual", makeSignature([raw, raw], 2, false, makeType("Unknown"), bool));
-    addBuiltin(ctx, "__reyRawLoadAddress", makeSignature([raw], 1, false, makeType("Unknown"), raw));
-    addBuiltin(ctx, "__reyRawStoreAddress", makeSignature([raw, raw], 2, false, makeType("Unknown"), void));
-    addBuiltin(ctx, "__reyRawFail", makeSignature([int], 1, false, makeType("Unknown"), void));
+    var raw = makeType(kindRawAddress);
+    var int = makeType(kindInt);
+    var bool = makeType(kindBool);
+    var void = makeType(kindVoid);
+    addBuiltin(ctx, "__reyRawNull", makeSignature([], 0, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawMap", makeSignature([int], 1, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawUnmap", makeSignature([raw, int], 2, false, makeType(kindUnknown), void));
+    addBuiltin(ctx, "__reyRawOffset", makeSignature([raw, int], 2, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawLoadI64", makeSignature([raw], 1, false, makeType(kindUnknown), int));
+    addBuiltin(ctx, "__reyRawStoreI64", makeSignature([raw, int], 2, false, makeType(kindUnknown), void));
+    addBuiltin(ctx, "__reyRawLoadByte", makeSignature([raw], 1, false, makeType(kindUnknown), int));
+    addBuiltin(ctx, "__reyRawStoreByte", makeSignature([raw, int], 2, false, makeType(kindUnknown), void));
+    addBuiltin(ctx, "__reyRawEqual", makeSignature([raw, raw], 2, false, makeType(kindUnknown), bool));
+    addBuiltin(ctx, "__reyRawLoadAddress", makeSignature([raw], 1, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawStoreAddress", makeSignature([raw, raw], 2, false, makeType(kindUnknown), void));
+    addBuiltin(ctx, "__reyRawFail", makeSignature([int], 1, false, makeType(kindUnknown), void));
+    addBuiltin(ctx, "__reyRawFromInt", makeSignature([int], 1, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawToInt", makeSignature([raw], 1, false, makeType(kindUnknown), int));
+    addBuiltin(ctx, "__reyRawSyscall", makeSignature([int, raw, raw, raw, raw, raw, raw], 7, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawHostSyscall", makeSignature([int, raw, raw, raw, raw, raw, raw], 7, false, makeType(kindUnknown), raw));
+    addBuiltin(ctx, "__reyRawArgCount", makeSignature([], 0, false, makeType(kindUnknown), int));
+    addBuiltin(ctx, "__reyRawArg", makeSignature([int], 1, false, makeType(kindUnknown), raw));
 }
 
 func llvmSymbolNameAt(moduleIndex: int, sourceName: string, owner: string): string {
@@ -1083,12 +1160,12 @@ func signatureForDecl(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, 
     var required = 0;
     var sawDefault = false;
     var variadic = false;
-    var variadicType = makeType("Unknown");
+    var variadicType = makeType(kindUnknown);
     var i = 0;
     loop {
         if i >= decl.params.len() { break; }
         var param: FuncParam = decl.params[i];
-        var paramType = makeType("Any");
+        var paramType = makeType(kindAny);
         if param.typeExpr != null || param.typeTag != "" {
             paramType = resolveTypeTag(ctx, param.typeExpr, param.typeTag, decl.span.start, false);
         }
@@ -1107,7 +1184,7 @@ func signatureForDecl(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, 
         }
         i = i + 1;
     }
-    var ret = makeType("Unknown");
+    var ret = makeType(kindUnknown);
     var inferRet = decl.returnType == "" && decl.returnTypeExpr == null;
     if !inferRet { ret = resolveTypeTag(ctx, decl.returnTypeExpr, decl.returnType, decl.span.start, true); }
     var llvmName = llvmSymbolName(ctx, decl.name, owner);
@@ -1135,7 +1212,7 @@ func registerFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, 
     var llvmName = signature.llvmName;
     var variadicIndex = -1;
     if signature.variadic { variadicIndex = signature.params.len() - 1; }
-    var receiverType = makeType("Unknown");
+    var receiverType = makeType(kindUnknown);
     var receiverPassing = "None";
     if owner != "" { receiverType = resolveNamedType(ctx, owner, decl.span.start, false); receiverPassing = "HiddenFirstArg"; }
     ctx.symbols.push(ResolvedSymbol {
@@ -1169,7 +1246,7 @@ func collectDeclarations(ctx: TypecheckContext, program: Program) {
                     ctx.structOwners.set(decl.name, ctx.moduleId);
                     ctx.structSources.set(decl.name, ctx.sourcePath);
                     ctx.structIndices.set(decl.name, i);
-                    ctx.symbols.push(ResolvedSymbol { sourcePath: ctx.sourcePath, moduleId: ctx.moduleId, sourceName: decl.name, llvmName: llvmSymbolName(ctx, decl.name, ""), kind: "Struct", intrinsicId: "", isPub: decl.isPub, signature: resolveNamedType(ctx, decl.name, decl.span.start, false), callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: i, receiverType: makeType("Unknown"), receiverPassing: "None" });
+                    ctx.symbols.push(ResolvedSymbol { sourcePath: ctx.sourcePath, moduleId: ctx.moduleId, sourceName: decl.name, llvmName: llvmSymbolName(ctx, decl.name, ""), kind: "Struct", intrinsicId: "", isPub: decl.isPub, signature: resolveNamedType(ctx, decl.name, decl.span.start, false), callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: i, receiverType: makeType(kindUnknown), receiverPassing: "None" });
                 }
             },
             Stmt::EnumDecl(declE) => {
@@ -1181,7 +1258,7 @@ func collectDeclarations(ctx: TypecheckContext, program: Program) {
                     ctx.enumOwners.set(declE.name, ctx.moduleId);
                     ctx.enumSources.set(declE.name, ctx.sourcePath);
                     ctx.enumIndices.set(declE.name, i);
-                    ctx.symbols.push(ResolvedSymbol { sourcePath: ctx.sourcePath, moduleId: ctx.moduleId, sourceName: declE.name, llvmName: llvmSymbolName(ctx, declE.name, ""), kind: "Enum", intrinsicId: "", isPub: declE.isPub, signature: resolveNamedType(ctx, declE.name, declE.span.start, false), callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: i, receiverType: makeType("Unknown"), receiverPassing: "None" });
+                    ctx.symbols.push(ResolvedSymbol { sourcePath: ctx.sourcePath, moduleId: ctx.moduleId, sourceName: declE.name, llvmName: llvmSymbolName(ctx, declE.name, ""), kind: "Enum", intrinsicId: "", isPub: declE.isPub, signature: resolveNamedType(ctx, declE.name, declE.span.start, false), callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: i, receiverType: makeType(kindUnknown), receiverPassing: "None" });
                     bindEnumValue(ctx, declE.name, declE.span.start);
                 }
             },
@@ -1210,18 +1287,18 @@ func collectDeclarations(ctx: TypecheckContext, program: Program) {
 }
 
 func summarySignature(symbol: ResolvedSymbol): FunctionSig {
-    var ret = makeType("Unknown");
+    var ret = makeType(kindUnknown);
     var signatureReturn = symbol.signature.ret;
     if signatureReturn != null {
         var resolvedReturn: Type = signatureReturn;
         ret = resolvedReturn;
     }
     var variadic = symbol.callShape.variadicIndex >= 0;
-    var variadicType = makeType("Unknown");
+    var variadicType = makeType(kindUnknown);
     if variadic && symbol.callShape.variadicIndex < symbol.signature.params.len() {
         var lastParam = symbol.signature.params[symbol.callShape.variadicIndex];
         var lastInner = lastParam.inner;
-        if lastParam.kind == "Array" {
+        if lastParam.kind == kindArray {
             if lastInner != null {
                 var resolvedInner: Type = lastInner;
                 variadicType = resolvedInner;
@@ -1284,7 +1361,7 @@ func buildModuleSummary(unit: SourceUnit, checked: CheckedProgram, moduleIndex: 
     loop {
         if i >= checked.symbols.len() { break; }
         var symbol: ResolvedSymbol = checked.symbols[i];
-        if symbol.kind == "Function" && symbol.sourcePath == unit.sourcePath && symbol.moduleId == unit.moduleId {
+        if symbol.kind == kindFunction && symbol.sourcePath == unit.sourcePath && symbol.moduleId == unit.moduleId {
             summary.functions.set(symbol.sourceName, summarySignature(symbol));
         }
         i = i + 1;
@@ -1292,28 +1369,35 @@ func buildModuleSummary(unit: SourceUnit, checked: CheckedProgram, moduleIndex: 
     return summary;
 }
 
-func importTypeBinding(ctx: TypecheckContext, name: string, sourceModule: string, sourcePath: string, isStruct: bool, declarationIndex: int, decl, span: int) {
+func importTypeNameAvailable(ctx: TypecheckContext, name: string, sourceModule: string, span: int): bool {
     if ctx.namespaces.has(name) {
         addError(ctx, "imported type collides with namespace '" + name + "'", span);
-        return;
+        return false;
     }
     if ctx.functions.has(name) || ctx.structs.has(name) || ctx.enums.has(name) {
-        if ctx.importedOwners.has("type:" + name) && ctx.importedOwners.get("type:" + name) == sourceModule { return; }
+        if ctx.importedOwners.has("type:" + name) && ctx.importedOwners.get("type:" + name) == sourceModule { return false; }
         addError(ctx, "Duplicate import: imported name collision for '" + name + "'", span);
-        return;
+        return false;
     }
-    if isStruct {
-        ctx.structs.set(name, decl);
-        ctx.structOwners.set(name, sourceModule);
-        ctx.structSources.set(name, sourcePath);
-        ctx.structIndices.set(name, declarationIndex);
-    } else {
-        ctx.enums.set(name, decl);
-        ctx.enumOwners.set(name, sourceModule);
-        ctx.enumSources.set(name, sourcePath);
-        ctx.enumIndices.set(name, declarationIndex);
-        bindEnumValue(ctx, name, span);
-    }
+    return true;
+}
+
+func importStructBinding(ctx: TypecheckContext, name: string, sourceModule: string, sourcePath: string, declarationIndex: int, decl: StructDeclStmt, span: int) {
+    if !importTypeNameAvailable(ctx, name, sourceModule, span) { return; }
+    ctx.structs.set(name, decl);
+    ctx.structOwners.set(name, sourceModule);
+    ctx.structSources.set(name, sourcePath);
+    ctx.structIndices.set(name, declarationIndex);
+    ctx.importedOwners.set("type:" + name, sourceModule);
+}
+
+func importEnumBinding(ctx: TypecheckContext, name: string, sourceModule: string, sourcePath: string, declarationIndex: int, decl: EnumDeclStmt, span: int) {
+    if !importTypeNameAvailable(ctx, name, sourceModule, span) { return; }
+    ctx.enums.set(name, decl);
+    ctx.enumOwners.set(name, sourceModule);
+    ctx.enumSources.set(name, sourcePath);
+    ctx.enumIndices.set(name, declarationIndex);
+    bindEnumValue(ctx, name, span);
     ctx.importedOwners.set("type:" + name, sourceModule);
 }
 
@@ -1346,8 +1430,8 @@ func importFunctionBinding(ctx: TypecheckContext, name: string, sig: FunctionSig
 }
 
 func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
-    if ty.kind == "RawAddress" { return ctx.rawAuthorized; }
-    if ty.kind == "Struct" {
+    if ty.kind == kindRawAddress { return ctx.rawAuthorized; }
+    if ty.kind == kindStruct {
         if ty.moduleId == "" || ty.moduleId == ctx.moduleId { return true; }
         if !ctx.moduleSummaries.has(ty.moduleId) { return false; }
         var summary: ModuleSummary = ctx.moduleSummaries.get(ty.moduleId);
@@ -1355,7 +1439,7 @@ func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
         var decl: StructDeclStmt = summary.structs.get(ty.name);
         return decl.isPub;
     }
-    if ty.kind == "Enum" {
+    if ty.kind == kindEnum {
         if ty.moduleId == "" || ty.moduleId == ctx.moduleId { return true; }
         if !ctx.moduleSummaries.has(ty.moduleId) { return false; }
         var summaryE: ModuleSummary = ctx.moduleSummaries.get(ty.moduleId);
@@ -1363,7 +1447,7 @@ func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
         var declE: EnumDeclStmt = summaryE.enums.get(ty.name);
         return declE.isPub;
     }
-    if ty.kind == "Array" || ty.kind == "Nullable" || ty.kind == "Option" {
+    if ty.kind == kindArray || ty.kind == kindNullable || ty.kind == kindOption {
         var inner = ty.inner;
         if inner != null {
             var innerType: Type = inner;
@@ -1371,7 +1455,7 @@ func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
         }
         return true;
     }
-    if ty.kind == "Dict" {
+    if ty.kind == kindDict {
         var value = ty.value;
         if value != null {
             var valueType: Type = value;
@@ -1379,7 +1463,7 @@ func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
         }
         return true;
     }
-    if ty.kind == "Result" {
+    if ty.kind == kindResult {
         var okType = ty.inner;
         if okType != null {
             var okValue: Type = okType;
@@ -1392,14 +1476,14 @@ func typeVisibleToCaller(ctx: TypecheckContext, ty: Type): bool {
         }
         return true;
     }
-    if ty.kind == "Tuple" || ty.kind == "Union" || ty.kind == "Function" {
+    if ty.kind == kindTuple || ty.kind == kindUnion || ty.kind == kindFunction {
         var i = 0;
         loop {
             if i >= ty.params.len() { break; }
             if !typeVisibleToCaller(ctx, ty.params[i]) { return false; }
             i = i + 1;
         }
-        if ty.kind == "Function" {
+        if ty.kind == kindFunction {
             var functionReturn = ty.ret;
             if functionReturn != null {
                 var functionReturnType: Type = functionReturn;
@@ -1481,7 +1565,7 @@ func installImports(ctx: TypecheckContext, unit: SourceUnit, graph: SourceGraph)
                 if !importedStruct.isPub { addError(ctx, "cannot import private struct '" + importedName + "' from " + summary.sourcePath, edge.span.start); }
                 else {
                     var structIndex = summary.structIndices.get(importedName);
-                    importTypeBinding(ctx, importedName, summary.moduleId, summary.sourcePath, true, structIndex, importedStruct, edge.span.start);
+                    importStructBinding(ctx, importedName, summary.moduleId, summary.sourcePath, structIndex, importedStruct, edge.span.start);
                     installImportedMethods(ctx, summary, importedName, edge.span.start);
                 }
             }
@@ -1489,7 +1573,7 @@ func installImports(ctx: TypecheckContext, unit: SourceUnit, graph: SourceGraph)
                 var importedEnum: EnumDeclStmt = summary.enums.get(importedName);
                 found = true;
                 if !importedEnum.isPub { addError(ctx, "cannot import private enum '" + importedName + "' from " + summary.sourcePath, edge.span.start); }
-                else { importTypeBinding(ctx, importedName, summary.moduleId, summary.sourcePath, false, summary.enumIndices.get(importedName), importedEnum, edge.span.start); }
+                else { importEnumBinding(ctx, importedName, summary.moduleId, summary.sourcePath, summary.enumIndices.get(importedName), importedEnum, edge.span.start); }
             }
             if !found { addError(ctx, "module " + summary.sourcePath + " has no public declaration '" + importedName + "'; '" + importedName + "' not found in file", edge.span.start); }
             itemIndex = itemIndex + 1;
@@ -1566,7 +1650,7 @@ func defineGlobalPlaceholders(ctx: TypecheckContext, program: Program) {
             if declaredNameCollides(ctx, decl.name) { addError(ctx, "duplicate declaration of '" + decl.name + "'", decl.span.start); }
             if ctx.globals.symbols.has(decl.name) { addError(ctx, "duplicate declaration of '" + decl.name + "'", decl.span.start); }
             else {
-                ctx.globals.symbols.set(decl.name, Symbol { name: decl.name, ty: makeType("Unknown"), isConst: false });
+                ctx.globals.symbols.set(decl.name, Symbol { name: decl.name, ty: makeType(kindUnknown), isConst: false });
                 ctx.globalDeclSpans.set(decl.name, decl.span.start);
             }
         },
@@ -1575,7 +1659,7 @@ func defineGlobalPlaceholders(ctx: TypecheckContext, program: Program) {
             if declaredNameCollides(ctx, declC.name) { addError(ctx, "duplicate declaration of '" + declC.name + "'", declC.span.start); }
             if ctx.globals.symbols.has(declC.name) { addError(ctx, "duplicate declaration of '" + declC.name + "'", declC.span.start); }
             else {
-                ctx.globals.symbols.set(declC.name, Symbol { name: declC.name, ty: makeType("Unknown"), isConst: true });
+                ctx.globals.symbols.set(declC.name, Symbol { name: declC.name, ty: makeType(kindUnknown), isConst: true });
                 ctx.globalDeclSpans.set(declC.name, declC.span.start);
             }
         },
@@ -1658,13 +1742,10 @@ func bindingTooEarly(ctx: TypecheckContext, env: TypeEnv, name: string, span: in
 func lookupIdentifier(ctx: TypecheckContext, env: TypeEnv, name: string, span: int): Type {
     if bindingTooEarly(ctx, env, name, span) {
         addError(ctx, "undefined variable '" + name + "'", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var found = lookupEnv(env, name);
     if found.found {
-        if found.crossedLambda && !found.symbol.isConst {
-            addError(ctx, "lambda cannot capture mutable binding '" + name + "'", span);
-        }
         if found.crossedLambda && typeContainsRawAddress(found.symbol.ty) {
             addError(ctx, "raw addresses cannot be captured by closures", span);
         }
@@ -1675,17 +1756,17 @@ func lookupIdentifier(ctx: TypecheckContext, env: TypeEnv, name: string, span: i
         return functionType(sig.params, sig.ret);
     }
     addError(ctx, "unknown identifier '" + name + "'", span);
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func functionFromType(ty: Type): FunctionSig {
-    var ret = makeType("Unknown");
+    var ret = makeType(kindUnknown);
     var functionReturn = ty.ret;
     if functionReturn != null {
         var functionReturnType: Type = functionReturn;
         ret = functionReturnType;
     }
-    return makeSignature(ty.params, ty.params.len(), false, makeType("Unknown"), ret);
+    return makeSignature(ty.params, ty.params.len(), false, makeType(kindUnknown), ret);
 }
 
 func checkCallArguments(ctx: TypecheckContext, sig: FunctionSig, args: Vec<Expr>, env: TypeEnv, span: int): Type {
@@ -1701,7 +1782,7 @@ func checkCallArguments(ctx: TypecheckContext, sig: FunctionSig, args: Vec<Expr>
     loop {
         if i >= args.len() { break; }
         var actual = inferExpr(ctx, env, args[i]);
-        var expected = makeType("Unknown");
+        var expected = makeType(kindUnknown);
         if sig.variadic && i >= maxArgs { expected = sig.variadicType; }
         else if i < sig.params.len() { expected = sig.params[i]; }
         if !isUnknown(expected) && !canAssign(expected, actual) {
@@ -1725,7 +1806,7 @@ func storedStructFieldType(ctx: TypecheckContext, moduleId: string, structName: 
     loop {
         if layoutIndex >= summary.nominalLayouts.len() { break; }
         var layout: CheckedNominalLayout = summary.nominalLayouts[layoutIndex];
-        if layout.kind == "Struct" && layout.name == structName && layout.moduleId == moduleId {
+        if layout.kind == kindStruct && layout.name == structName && layout.moduleId == moduleId {
             var fieldPos = 0;
             loop {
                 if fieldPos >= layout.fields.len() { break; }
@@ -1747,7 +1828,7 @@ func storedEnumPayloadType(ctx: TypecheckContext, enumName: string, variantIndex
     loop {
         if layoutIndex >= summary.nominalLayouts.len() { break; }
         var layout: CheckedNominalLayout = summary.nominalLayouts[layoutIndex];
-        if layout.kind == "Enum" && layout.name == enumName && layout.moduleId == owner {
+        if layout.kind == kindEnum && layout.name == enumName && layout.moduleId == owner {
             var variantPos = 0;
             loop {
                 if variantPos >= layout.variants.len() { break; }
@@ -1778,7 +1859,7 @@ func resolveFieldTypeFromModule(ctx: TypecheckContext, moduleId: string, field: 
     }
     if !ctx.moduleSummaries.has(moduleId) {
         addError(ctx, "field type owner module is unavailable: " + moduleId, fallbackSpan);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var summary: ModuleSummary = ctx.moduleSummaries.get(moduleId);
     var oldStructs = ctx.structs;
@@ -1793,30 +1874,13 @@ func resolveFieldTypeFromModule(ctx: TypecheckContext, moduleId: string, field: 
     var oldModule = ctx.moduleId;
     ctx.structs = summary.structs;
     ctx.enums = summary.enums;
-    ctx.structOwners = HashMap.new();
-    ctx.structSources = HashMap.new();
+    var view = moduleTypeView(ctx, summary);
+    ctx.structOwners = view.structOwners;
+    ctx.structSources = view.structSources;
     ctx.structIndices = summary.structIndices;
-    ctx.enumOwners = HashMap.new();
-    ctx.enumSources = HashMap.new();
+    ctx.enumOwners = view.enumOwners;
+    ctx.enumSources = view.enumSources;
     ctx.enumIndices = summary.enumIndices;
-    var i = 0;
-    var structKeys = summary.structs.keys();
-    loop {
-        if i >= structKeys.len() { break; }
-        var name = structKeys.get(i);
-        ctx.structOwners.set(name, summary.moduleId);
-        ctx.structSources.set(name, summary.sourcePath);
-        i = i + 1;
-    }
-    i = 0;
-    var enumKeys = summary.enums.keys();
-    loop {
-        if i >= enumKeys.len() { break; }
-        var enumName = enumKeys.get(i);
-        ctx.enumOwners.set(enumName, summary.moduleId);
-        ctx.enumSources.set(enumName, summary.sourcePath);
-        i = i + 1;
-    }
     ctx.sourcePath = summary.sourcePath;
     ctx.moduleId = summary.moduleId;
     var result = resolveTypeTag(ctx, field.typeExpr, field.typeTag, fallbackSpan, false);
@@ -1833,32 +1897,103 @@ func resolveFieldTypeFromModule(ctx: TypecheckContext, moduleId: string, field: 
     return result;
 }
 
+func moduleTypeView(ctx: TypecheckContext, summary: ModuleSummary): ModuleTypeView {
+    if ctx.moduleViews.has(summary.moduleId) { return ctx.moduleViews.get(summary.moduleId); }
+    var structOwners: HashMap<string, string> = HashMap.new();
+    var structSources: HashMap<string, string> = HashMap.new();
+    var enumOwners: HashMap<string, string> = HashMap.new();
+    var enumSources: HashMap<string, string> = HashMap.new();
+    var i = 0;
+    var structKeys = summary.structs.keys();
+    loop {
+        if i >= structKeys.len() { break; }
+        var name = structKeys.get(i);
+        structOwners.set(name, summary.moduleId);
+        structSources.set(name, summary.sourcePath);
+        i = i + 1;
+    }
+    i = 0;
+    var enumKeys = summary.enums.keys();
+    loop {
+        if i >= enumKeys.len() { break; }
+        var enumName = enumKeys.get(i);
+        enumOwners.set(enumName, summary.moduleId);
+        enumSources.set(enumName, summary.sourcePath);
+        i = i + 1;
+    }
+    var view = ModuleTypeView { structOwners: structOwners, structSources: structSources, enumOwners: enumOwners, enumSources: enumSources };
+    ctx.moduleViews.set(summary.moduleId, view);
+    return view;
+}
+
+func fieldCacheKey(ctx: TypecheckContext, moduleId: string): string {
+    if moduleId != "" { return moduleId; }
+    if ctx.moduleId != "" { return ctx.moduleId; }
+    return "*";
+}
+
+func recallFieldLookup(ctx: TypecheckContext, moduleId: string, structName: string, fieldName: string): FieldLookup? {
+    var cacheKey = fieldCacheKey(ctx, moduleId);
+    if !ctx.fieldLookups.has(cacheKey) { return null; }
+    var cache: StructFieldCache = ctx.fieldLookups.get(cacheKey);
+    if !cache.byStruct.has(structName) { return null; }
+    var table: FieldLookupTable = cache.byStruct.get(structName);
+    if !table.byField.has(fieldName) { return null; }
+    return table.byField.get(fieldName);
+}
+
+func rememberFieldLookup(ctx: TypecheckContext, moduleId: string, structName: string, fieldName: string, lookup: FieldLookup) {
+    var cacheKey = fieldCacheKey(ctx, moduleId);
+    if !ctx.fieldLookups.has(cacheKey) {
+        ctx.fieldLookups.set(cacheKey, StructFieldCache { byStruct: HashMap.new() });
+    }
+    var cache: StructFieldCache = ctx.fieldLookups.get(cacheKey);
+    if !cache.byStruct.has(structName) {
+        cache.byStruct.set(structName, FieldLookupTable { byField: HashMap.new() });
+    }
+    var table: FieldLookupTable = cache.byStruct.get(structName);
+    table.byField.set(fieldName, lookup);
+    cache.byStruct.set(structName, table);
+    ctx.fieldLookups.set(cacheKey, cache);
+}
+
 func findStructFieldInModule(ctx: TypecheckContext, structName: string, moduleId: string, fieldName: string): FieldLookup {
+    var cached = recallFieldLookup(ctx, moduleId, structName, fieldName);
+    if cached != null {
+        var hit: FieldLookup = cached;
+        return hit;
+    }
+    var lookup = findStructFieldUncached(ctx, structName, moduleId, fieldName);
+    if lookup.found && !isUnknown(lookup.ty) { rememberFieldLookup(ctx, moduleId, structName, fieldName, lookup); }
+    return lookup;
+}
+
+func findStructFieldUncached(ctx: TypecheckContext, structName: string, moduleId: string, fieldName: string): FieldLookup {
     var decl: StructDeclStmt = StructDeclStmt { name: "", fields: [], methods: [], isPub: false, span: ctx.program.span };
     var structIndex = -1;
     var structSource = "";
     var structModule = moduleId;
     if moduleId == "" || moduleId == ctx.moduleId {
-        if !ctx.structs.has(structName) { return FieldLookup { found: false, ty: makeType("Unknown"), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: "", moduleId: "" }; }
+        if !ctx.structs.has(structName) { return FieldLookup { found: false, ty: makeType(kindUnknown), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: "", moduleId: "" }; }
         decl = ctx.structs.get(structName);
         if ctx.structIndices.has(structName) { structIndex = ctx.structIndices.get(structName); }
         if ctx.structSources.has(structName) { structSource = ctx.structSources.get(structName); }
         if ctx.structOwners.has(structName) { structModule = ctx.structOwners.get(structName); }
     } else if ctx.moduleSummaries.has(moduleId) {
         var summary: ModuleSummary = ctx.moduleSummaries.get(moduleId);
-        if !summary.structs.has(structName) { return FieldLookup { found: false, ty: makeType("Unknown"), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: summary.sourcePath, moduleId: moduleId }; }
+        if !summary.structs.has(structName) { return FieldLookup { found: false, ty: makeType(kindUnknown), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: summary.sourcePath, moduleId: moduleId }; }
         decl = summary.structs.get(structName);
         if summary.structIndices.has(structName) { structIndex = summary.structIndices.get(structName); }
         structSource = summary.sourcePath;
     } else {
-        return FieldLookup { found: false, ty: makeType("Unknown"), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: "", moduleId: moduleId };
+        return FieldLookup { found: false, ty: makeType(kindUnknown), isPub: false, fieldIndex: -1, structIndex: -1, sourcePath: "", moduleId: moduleId };
     }
     var i = 0;
     loop {
         if i >= decl.fields.len() { break; }
         var field = decl.fields[i];
         if field.name == fieldName {
-            var ty = makeType("Unknown");
+            var ty = makeType(kindUnknown);
             var haveStored = false;
             if structModule != "" && structModule != ctx.moduleId {
                 var storedField = storedStructFieldType(ctx, structModule, structName, i);
@@ -1873,11 +2008,11 @@ func findStructFieldInModule(ctx: TypecheckContext, structName: string, moduleId
         }
         i = i + 1;
     }
-    return FieldLookup { found: false, ty: makeType("Unknown"), isPub: false, fieldIndex: -1, structIndex: structIndex, sourcePath: structSource, moduleId: structModule };
+    return FieldLookup { found: false, ty: makeType(kindUnknown), isPub: false, fieldIndex: -1, structIndex: structIndex, sourcePath: structSource, moduleId: structModule };
 }
 
 func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span: int): FunctionSig {
-    if receiver.kind == "Struct" {
+    if receiver.kind == kindStruct {
         var key = receiver.name + "." + method;
         if ctx.functions.has(key) {
             var localMethod: FunctionSig = ctx.functions.get(key);
@@ -1892,18 +2027,18 @@ func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span
                 return emptySignature();
             }
         }
-        if method == "toString" { return makeSignature([], 0, false, makeType("Any"), makeType("String")); }
+        if method == "toString" { return makeSignature([], 0, false, makeType(kindAny), makeType(kindString)); }
         addError(ctx, "unknown method '" + method + "' on " + receiver.name, span);
         return emptySignature();
     }
-    var int = makeType("Int");
-    var str = makeType("String");
-    var bool = makeType("Bool");
-    var void = makeType("Void");
-    var any = makeType("Any");
+    var int = makeType(kindInt);
+    var str = makeType(kindString);
+    var bool = makeType(kindBool);
+    var void = makeType(kindVoid);
+    var any = makeType(kindAny);
     if method == "toString" { return makeSignature([], 0, false, any, str); }
-    if receiver.kind == "Any" { return makeSignature([], 0, true, any, any); }
-    if receiver.kind == "String" {
+    if receiver.kind == kindAny { return makeSignature([], 0, true, any, any); }
+    if receiver.kind == kindString {
         if method == "len" { return makeSignature([], 0, false, any, int); }
         if method == "toString" || method == "toUpper" || method == "toLower" || method == "trim" { return makeSignature([], 0, false, any, str); }
         if method == "contains" || method == "startsWith" || method == "endsWith" { return makeSignature([str], 1, false, any, bool); }
@@ -1913,16 +2048,16 @@ func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span
         if method == "repeat" { return makeSignature([int], 1, false, any, str); }
         if method == "split" { return makeSignature([str], 1, false, any, arrayType(str)); }
         if method == "toInt" { return makeSignature([], 0, false, any, int); }
-        if method == "toFloat" { return makeSignature([], 0, false, any, makeType("Float")); }
+        if method == "toFloat" { return makeSignature([], 0, false, any, makeType(kindFloat)); }
         if method == "hash" { return makeSignature([], 0, false, any, int); }
         if method == "padLeft" || method == "padRight" { return makeSignature([int, str], 2, false, any, str); }
     }
-    if receiver.kind == "Int" || receiver.kind == "Float" {
+    if receiver.kind == kindInt || receiver.kind == kindFloat {
         if method == "toInt" { return makeSignature([], 0, false, any, int); }
-        if method == "toFloat" { return makeSignature([], 0, false, any, makeType("Float")); }
+        if method == "toFloat" { return makeSignature([], 0, false, any, makeType(kindFloat)); }
     }
-    if receiver.kind == "Array" {
-        var inner = makeType("Any");
+    if receiver.kind == kindArray {
+        var inner = makeType(kindAny);
         var maybeInner = receiver.inner;
         if maybeInner != null {
             var resolvedInner: Type = maybeInner;
@@ -1937,10 +2072,10 @@ func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span
         if method == "indexOf" { return makeSignature([inner], 1, false, any, int); }
         if method == "slice" { return makeSignature([int, int], 2, false, any, receiver); }
         if method == "reverse" || method == "sort" { return makeSignature([], 0, false, any, void); }
-        if method == "join" && inner.kind == "String" { return makeSignature([str], 1, false, any, str); }
+        if method == "join" && inner.kind == kindString { return makeSignature([str], 1, false, any, str); }
     }
-    if receiver.kind == "Dict" {
-        var valueType = makeType("Any");
+    if receiver.kind == kindDict {
+        var valueType = makeType(kindAny);
         var maybeValue = receiver.value;
         if maybeValue != null {
             var resolvedValue: Type = maybeValue;
@@ -1953,10 +2088,10 @@ func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span
         if method == "delete" { return makeSignature([str], 1, false, any, void); }
         if method == "keys" { return makeSignature([], 0, false, any, arrayType(str)); }
         if method == "values" { return makeSignature([], 0, false, any, arrayType(valueType)); }
-        if method == "entries" { return makeSignature([], 0, false, any, arrayType(makeType("Any"))); }
+        if method == "entries" { return makeSignature([], 0, false, any, arrayType(makeType(kindAny))); }
     }
-    if receiver.kind == "Option" {
-        var innerOption = makeType("Any");
+    if receiver.kind == kindOption {
+        var innerOption = makeType(kindAny);
         var maybeOptionInner = receiver.inner;
         if maybeOptionInner != null {
             var resolvedOptionInner: Type = maybeOptionInner;
@@ -1966,9 +2101,9 @@ func methodSignature(ctx: TypecheckContext, receiver: Type, method: string, span
         if method == "unwrap" { return makeSignature([], 0, false, any, innerOption); }
         if method == "unwrapOr" { return makeSignature([innerOption], 1, false, any, innerOption); }
     }
-    if receiver.kind == "Result" {
-        var innerResult = makeType("Any");
-        var errorResult = makeType("Any");
+    if receiver.kind == kindResult {
+        var innerResult = makeType(kindAny);
+        var errorResult = makeType(kindAny);
         var maybeResultInner = receiver.inner;
         if maybeResultInner != null {
             var resolvedResultInner: Type = maybeResultInner;
@@ -2169,7 +2304,7 @@ func literalPatternPayload(pattern: Pattern): LiteralPattern? {
 }
 
 func checkedStaticCreate(ctx: TypecheckContext, env: TypeEnv, targetType: Type, args: Vec<Expr>, span: int, callExpr: Expr): Type {
-    if targetType.kind != "Struct" { return makeType("Unknown"); }
+    if targetType.kind != kindStruct { return makeType(kindUnknown); }
     var createFound = false;
     var createSig = emptySignature();
     if ctx.functions.has("create") {
@@ -2184,14 +2319,14 @@ func checkedStaticCreate(ctx: TypecheckContext, env: TypeEnv, targetType: Type, 
         addError(ctx, "no qualifying pub func create for static call '" + targetType.name + ".create'", span);
         var ignored = 0;
         loop { if ignored >= args.len() { break; } inferExpr(ctx, env, args[ignored]); ignored = ignored + 1; }
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var sig = createSig;
-    if sig.owner != "" || !sig.isPub || sig.moduleId != targetType.moduleId || sig.ret.kind != "Struct" || sig.ret.name != targetType.name || sig.ret.moduleId != targetType.moduleId {
+    if sig.owner != "" || !sig.isPub || sig.moduleId != targetType.moduleId || sig.ret.kind != kindStruct || sig.ret.name != targetType.name || sig.ret.moduleId != targetType.moduleId {
         addError(ctx, "no qualifying pub func create for static call '" + targetType.name + ".create'", span);
         var ignored2 = 0;
         loop { if ignored2 >= args.len() { break; } inferExpr(ctx, env, args[ignored2]); ignored2 = ignored2 + 1; }
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var result = checkCallArguments(ctx, sig, args, env, span);
     var symbol = resolvedCallSymbol(ctx, "create", sig, "StaticCreate", "", targetType);
@@ -2200,7 +2335,7 @@ func checkedStaticCreate(ctx: TypecheckContext, env: TypeEnv, targetType: Type, 
 }
 
 func vecElementType(receiver: Type): Type {
-    var inner = makeType("Any");
+    var inner = makeType(kindAny);
     var maybeInner = receiver.inner;
     if maybeInner != null {
         var resolvedInner: Type = maybeInner;
@@ -2215,7 +2350,7 @@ func functionResultType(ty: Type): Type {
         var resolvedReturn: Type = maybeReturn;
         return resolvedReturn;
     }
-    return makeType("Void");
+    return makeType(kindVoid);
 }
 
 func mutuallyAssignable(left: Type, right: Type): bool {
@@ -2223,7 +2358,7 @@ func mutuallyAssignable(left: Type, right: Type): bool {
 }
 
 func recordBuiltinMethod(ctx: TypecheckContext, callExpr: Expr, result: Type, name: string, receiver: Type) {
-    var sig = makeSignature([], 0, false, makeType("Any"), result);
+    var sig = makeSignature([], 0, false, makeType(kindAny), result);
     var symbol = resolvedCallSymbol(ctx, "Vec." + name, sig, "Builtin", "Vec." + name, receiver);
     recordExprInfo(ctx, callExpr, result, symbol, receiver, -1, -1, -1, -1);
 }
@@ -2233,24 +2368,24 @@ func inferVecHigherOrder(ctx: TypecheckContext, env: TypeEnv, receiver: Type, na
     if name == "map" || name == "filter" {
         if args.len() != 1 {
             addError(ctx, "Vec." + name + "() expects 1 argument", span);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         var callback = inferExpr(ctx, env, args[0]);
-        if callback.kind == "Any" {
+        if callback.kind == kindAny {
             var anyResult = arrayType(inner);
-            if name == "map" { anyResult = arrayType(makeType("Any")); }
+            if name == "map" { anyResult = arrayType(makeType(kindAny)); }
             recordBuiltinMethod(ctx, callExpr, anyResult, name, receiver);
             return anyResult;
         }
-        if callback.kind != "Function" || callback.params.len() != 1 || !mutuallyAssignable(callback.params[0], inner) {
+        if callback.kind != kindFunction || callback.params.len() != 1 || !mutuallyAssignable(callback.params[0], inner) {
             addError(ctx, "Vec." + name + "() requires a function accepting " + typeName(inner), span);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         var callbackReturn = functionResultType(callback);
         if name == "filter" {
-            if callbackReturn.kind != "Bool" && callbackReturn.kind != "Any" {
+            if callbackReturn.kind != kindBool && callbackReturn.kind != kindAny {
                 addError(ctx, "Vec.filter() requires a function returning bool", span);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             var filtered = arrayType(inner);
             recordBuiltinMethod(ctx, callExpr, filtered, name, receiver);
@@ -2264,24 +2399,24 @@ func inferVecHigherOrder(ctx: TypecheckContext, env: TypeEnv, receiver: Type, na
         addError(ctx, "Vec.reduce() expects 2 arguments", span);
         var skipped = 0;
         loop { if skipped >= args.len() { break; } inferExpr(ctx, env, args[skipped]); skipped = skipped + 1; }
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var reduceCallback = inferExpr(ctx, env, args[0]);
     var initial = inferExpr(ctx, env, args[1]);
-    if reduceCallback.kind == "Any" {
+    if reduceCallback.kind == kindAny {
         recordBuiltinMethod(ctx, callExpr, initial, name, receiver);
         return initial;
     }
-    if reduceCallback.kind != "Function" || reduceCallback.params.len() != 2 {
+    if reduceCallback.kind != kindFunction || reduceCallback.params.len() != 2 {
         addError(ctx, "Vec.reduce() callback must accept the accumulator and element", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var accumulator = reduceCallback.params[0];
     var element = reduceCallback.params[1];
     var reduced = functionResultType(reduceCallback);
     if !mutuallyAssignable(accumulator, initial) || !mutuallyAssignable(element, inner) || !canAssign(initial, reduced) {
         addError(ctx, "Vec.reduce() callback must accept the accumulator and element and return the accumulator", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     recordBuiltinMethod(ctx, callExpr, initial, name, receiver);
     return initial;
@@ -2295,49 +2430,49 @@ func inferMethodCall(ctx: TypecheckContext, env: TypeEnv, access: FieldAccessExp
         var isNamespace = ctx.namespaces.has(staticName);
         if !shadowed && isNamespace {
             var moduleId: string = ctx.namespaces.get(staticName);
-            if !ctx.moduleSummaries.has(moduleId) { addError(ctx, "import namespace is unavailable: " + staticName, span); return makeType("Unknown"); }
+            if !ctx.moduleSummaries.has(moduleId) { addError(ctx, "import namespace is unavailable: " + staticName, span); return makeType(kindUnknown); }
             var summary: ModuleSummary = ctx.moduleSummaries.get(moduleId);
             if !summary.functions.has(access.name) {
                 addError(ctx, "module namespace '" + staticName + "' has no exported function '" + access.name + "'", span);
                 var skipped = 0;
                 loop { if skipped >= args.len() { break; } inferExpr(ctx, env, args[skipped]); skipped = skipped + 1; }
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             var importedSig: FunctionSig = summary.functions.get(access.name);
             if importedSig.owner != "" {
                 addError(ctx, "module namespace '" + staticName + "' has no top-level function '" + access.name + "'", span);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             if !importedSig.isPub {
                 addError(ctx, "cannot access private function '" + access.name + "' through module '" + staticName + "'", span);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             if !signatureTypesVisible(ctx, importedSig) {
                 addError(ctx, "public function '" + access.name + "' exposes a private type", span);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             var importedResult = checkCallArguments(ctx, importedSig, args, env, span);
-            var importedSymbol = resolvedCallSymbol(ctx, access.name, importedSig, "Function", "", makeType("Unknown"));
-            recordExprInfo(ctx, callExpr, importedResult, importedSymbol, makeType("Unknown"), -1, -1, -1, -1);
+            var importedSymbol = resolvedCallSymbol(ctx, access.name, importedSig, "Function", "", makeType(kindUnknown));
+            recordExprInfo(ctx, callExpr, importedResult, importedSymbol, makeType(kindUnknown), -1, -1, -1, -1);
             return importedResult;
         }
         if !shadowed && !isNamespace && staticName == "Vec" && access.name == "new" {
             if args.len() != 0 { addError(ctx, "Vec.new expects 0 arguments", span); }
-            var resultVec = arrayType(makeType("Any"));
-            var vecSig = makeSignature([], 0, false, makeType("Any"), resultVec);
-            var vecSymbol = resolvedCallSymbol(ctx, "Vec.new", vecSig, "Builtin", "Vec.new", makeType("Unknown"));
-            recordExprInfo(ctx, callExpr, resultVec, vecSymbol, makeType("Unknown"), -1, -1, -1, -1);
+            var resultVec = arrayType(makeType(kindAny));
+            var vecSig = makeSignature([], 0, false, makeType(kindAny), resultVec);
+            var vecSymbol = resolvedCallSymbol(ctx, "Vec.new", vecSig, "Builtin", "Vec.new", makeType(kindUnknown));
+            recordExprInfo(ctx, callExpr, resultVec, vecSymbol, makeType(kindUnknown), -1, -1, -1, -1);
             return resultVec;
         }
         if !shadowed && !isNamespace && staticName == "HashMap" && access.name == "new" {
             if args.len() != 0 { addError(ctx, "HashMap.new expects 0 arguments", span); }
-            var resultMap = dictType(makeType("Any"));
-            var mapSig = makeSignature([], 0, false, makeType("Any"), resultMap);
-            var mapSymbol = resolvedCallSymbol(ctx, "HashMap.new", mapSig, "Builtin", "HashMap.new", makeType("Unknown"));
-            recordExprInfo(ctx, callExpr, resultMap, mapSymbol, makeType("Unknown"), -1, -1, -1, -1);
+            var resultMap = dictType(makeType(kindAny));
+            var mapSig = makeSignature([], 0, false, makeType(kindAny), resultMap);
+            var mapSymbol = resolvedCallSymbol(ctx, "HashMap.new", mapSig, "Builtin", "HashMap.new", makeType(kindUnknown));
+            recordExprInfo(ctx, callExpr, resultMap, mapSymbol, makeType(kindUnknown), -1, -1, -1, -1);
             return resultMap;
         }
-        if !shadowed && !isNamespace && ((staticName == "Option" && (access.name == "None" || access.name == "Some")) || (staticName == "Result" && (access.name == "Ok" || access.name == "Err"))) {
+        if !shadowed && !isNamespace && ((staticName == kindOption && (access.name == "None" || access.name == "Some")) || (staticName == kindResult && (access.name == "Ok" || access.name == "Err"))) {
             var variantExpr = EnumVariantExpr { enumName: staticName, variant: access.name, args: args, span: access.span };
             return inferEnumVariant(ctx, env, variantExpr, callExpr);
         }
@@ -2348,25 +2483,25 @@ func inferMethodCall(ctx: TypecheckContext, env: TypeEnv, access: FieldAccessExp
     var staticAccess = fieldAccessPayload(access.object);
     if staticAccess != null && access.name == "create" {
         var targetType = inferExpr(ctx, env, access.object);
-        if targetType.kind == "Struct" { return checkedStaticCreate(ctx, env, targetType, args, span, callExpr); }
+        if targetType.kind == kindStruct { return checkedStaticCreate(ctx, env, targetType, args, span, callExpr); }
     }
     var receiver = inferExpr(ctx, env, access.object);
-    if receiver.kind == "Array" && (access.name == "map" || access.name == "filter" || access.name == "reduce") {
+    if receiver.kind == kindArray && (access.name == "map" || access.name == "filter" || access.name == "reduce") {
         return inferVecHigherOrder(ctx, env, receiver, access.name, args, span, callExpr);
     }
     var sig = methodSignature(ctx, receiver, access.name, span);
-    if receiver.kind == "Struct" && receiver.moduleId != "" && receiver.moduleId != ctx.moduleId && !signatureTypesVisible(ctx, sig) {
+    if receiver.kind == kindStruct && receiver.moduleId != "" && receiver.moduleId != ctx.moduleId && !signatureTypesVisible(ctx, sig) {
         addError(ctx, "public method '" + access.name + "' exposes a private type", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var result = checkCallArguments(ctx, sig, args, env, span);
     var kind = "Builtin";
     var intrinsic = "";
     var receiverName = typeName(receiver);
-    if receiver.kind == "Array" { receiverName = "Vec"; }
-    if receiver.kind == "Dict" { receiverName = "HashMap"; }
+    if receiver.kind == kindArray { receiverName = "Vec"; }
+    if receiver.kind == kindDict { receiverName = "HashMap"; }
     var symbolName = receiverName + "." + access.name;
-    if receiver.kind == "Struct" && sig.owner != "" {
+    if receiver.kind == kindStruct && sig.owner != "" {
         kind = "Method";
         symbolName = receiver.name + "." + access.name;
     } else {
@@ -2416,25 +2551,25 @@ func uniqueEnumVariant(ctx: TypecheckContext, variantName: string): string {
 func conversionResult(ctx: TypecheckContext, name: string, source: Type, span: int): Type {
     if typeContainsRawAddress(source) {
         addError(ctx, name + "() cannot convert a raw address", span);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var allowed = false;
-    var result = makeType("Unknown");
+    var result = makeType(kindUnknown);
     if name == "int" {
-        result = makeType("Int");
-        allowed = source.kind == "Int" || source.kind == "Char" || source.kind == "Any";
+        result = makeType(kindInt);
+        allowed = source.kind == kindInt || source.kind == kindChar || source.kind == kindAny;
     } else if name == "char" {
-        result = makeType("Char");
-        allowed = source.kind == "Int" || source.kind == "Char" || source.kind == "Any";
+        result = makeType(kindChar);
+        allowed = source.kind == kindInt || source.kind == kindChar || source.kind == kindAny;
     } else if name == "float" {
-        result = makeType("Float");
-        allowed = source.kind == "Int" || source.kind == "Float" || source.kind == "Any";
+        result = makeType(kindFloat);
+        allowed = source.kind == kindInt || source.kind == kindFloat || source.kind == kindAny;
     } else if name == "string" {
-        result = makeType("String");
+        result = makeType(kindString);
         allowed = true;
     }
     if isUnknown(source) { return result; }
-    if !allowed { addError(ctx, name + "() is not supported on " + typeName(source), span); return makeType("Unknown"); }
+    if !allowed { addError(ctx, name + "() is not supported on " + typeName(source), span); return makeType(kindUnknown); }
     return result;
 }
 
@@ -2444,15 +2579,15 @@ func inferCall(ctx: TypecheckContext, env: TypeEnv, expr: CallExpr, original: Ex
         var name = calleeIdentifier.name;
         var local = lookupEnv(env, name);
         if local.found {
-            if local.symbol.ty.kind == "Function" {
+            if local.symbol.ty.kind == kindFunction {
                 var localSig = functionFromType(local.symbol.ty);
                 var localResult = checkCallArguments(ctx, localSig, expr.args, env, expr.span.start);
-                var localSymbol = resolvedCallSymbol(ctx, name, localSig, "Local", "", makeType("Unknown"));
-                recordExprInfo(ctx, original, localResult, localSymbol, makeType("Unknown"), -1, -1, -1, -1);
+                var localSymbol = resolvedCallSymbol(ctx, name, localSig, "Local", "", makeType(kindUnknown));
+                recordExprInfo(ctx, original, localResult, localSymbol, makeType(kindUnknown), -1, -1, -1, -1);
                 return localResult;
             }
             addError(ctx, "value '" + name + "' is not callable", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         if ctx.functions.has(name) {
             var sig: FunctionSig = ctx.functions.get(name);
@@ -2466,47 +2601,51 @@ func inferCall(ctx: TypecheckContext, env: TypeEnv, expr: CallExpr, original: Ex
                     }
                     printIndex = printIndex + 1;
                 }
-                var printSig = makeSignature([], 0, true, makeType("Any"), makeType("Void"));
-                var printSymbol = resolvedCallSymbol(ctx, name, printSig, "Builtin", name, makeType("Unknown"));
-                recordExprInfo(ctx, original, makeType("Void"), printSymbol, makeType("Unknown"), -1, -1, -1, -1);
-                return makeType("Void");
+                var printSig = makeSignature([], 0, true, makeType(kindAny), makeType(kindVoid));
+                var printSymbol = resolvedCallSymbol(ctx, name, printSig, "Builtin", name, makeType(kindUnknown));
+                recordExprInfo(ctx, original, makeType(kindVoid), printSymbol, makeType(kindUnknown), -1, -1, -1, -1);
+                return makeType(kindVoid);
             }
             if name == "abs" || name == "min" || name == "max" || name == "floor" || name == "ceil" || name == "round" || name == "sqrt" || name == "pow" || name == "log" || name == "sin" || name == "cos" || name == "tan" {
-                var numericArgs = [];
+                var firstArgType = makeType(kindUnknown);
+                var secondArgType = makeType(kindUnknown);
+                var numericCount = 0;
                 var ai = 0;
                 loop {
                     if ai >= expr.args.len() { break; }
                     var argType = inferExpr(ctx, env, expr.args[ai]);
-                    if !isNumeric(argType) && argType.kind != "Any" && !isUnknown(argType) { addError(ctx, "numeric builtin '" + name + "' requires numbers", expr.span.start); }
-                    numericArgs.push(argType);
+                    if !isNumeric(argType) && argType.kind != kindAny && !isUnknown(argType) { addError(ctx, "numeric builtin '" + name + "' requires numbers", expr.span.start); }
+                    if numericCount == 0 { firstArgType = argType; }
+                    else if numericCount == 1 { secondArgType = argType; }
+                    numericCount = numericCount + 1;
                     ai = ai + 1;
                 }
-                if ((name == "abs" || name == "floor" || name == "ceil" || name == "round" || name == "sqrt" || name == "log" || name == "sin" || name == "cos" || name == "tan") && numericArgs.len() != 1) { addError(ctx, name + " expects 1 argument", expr.span.start); }
-                if ((name == "min" || name == "max" || name == "pow") && numericArgs.len() != 2) { addError(ctx, name + " expects 2 arguments", expr.span.start); }
-                var numericResult = makeType("Unknown");
-                if name == "abs" && numericArgs.len() > 0 { numericResult = numericArgs[0]; }
-                if ((name == "min" || name == "max") && numericArgs.len() > 1) { numericResult = joinTypes(ctx, numericArgs[0], numericArgs[1], expr.span.start); }
-                if name == "floor" || name == "ceil" || name == "round" { numericResult = makeType("Int"); }
-                if name == "sqrt" || name == "pow" || name == "log" || name == "sin" || name == "cos" || name == "tan" { numericResult = makeType("Float"); }
-                var numericSymbol = resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType("Unknown"));
-                recordExprInfo(ctx, original, numericResult, numericSymbol, makeType("Unknown"), -1, -1, -1, -1);
+                if ((name == "abs" || name == "floor" || name == "ceil" || name == "round" || name == "sqrt" || name == "log" || name == "sin" || name == "cos" || name == "tan") && numericCount != 1) { addError(ctx, name + " expects 1 argument", expr.span.start); }
+                if ((name == "min" || name == "max" || name == "pow") && numericCount != 2) { addError(ctx, name + " expects 2 arguments", expr.span.start); }
+                var numericResult = makeType(kindUnknown);
+                if name == "abs" && numericCount > 0 { numericResult = firstArgType; }
+                if ((name == "min" || name == "max") && numericCount > 1) { numericResult = joinTypes(ctx, firstArgType, secondArgType, expr.span.start); }
+                if name == "floor" || name == "ceil" || name == "round" { numericResult = makeType(kindInt); }
+                if name == "sqrt" || name == "pow" || name == "log" || name == "sin" || name == "cos" || name == "tan" { numericResult = makeType(kindFloat); }
+                var numericSymbol = resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType(kindUnknown));
+                recordExprInfo(ctx, original, numericResult, numericSymbol, makeType(kindUnknown), -1, -1, -1, -1);
                 return numericResult;
             }
             if name == "int" || name == "char" || name == "float" || name == "string" {
                 if expr.args.len() != 1 { addError(ctx, name + " expects 1 argument", expr.span.start); }
-                var source = makeType("Unknown");
+                var source = makeType(kindUnknown);
                 if expr.args.len() > 0 { source = inferExpr(ctx, env, expr.args[0]); }
                 var converted = conversionResult(ctx, name, source, expr.span.start);
-                var convertSymbol = resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType("Unknown"));
-                recordExprInfo(ctx, original, converted, convertSymbol, makeType("Unknown"), -1, -1, -1, -1);
+                var convertSymbol = resolvedCallSymbol(ctx, name, sig, "Builtin", name, makeType(kindUnknown));
+                recordExprInfo(ctx, original, converted, convertSymbol, makeType(kindUnknown), -1, -1, -1, -1);
                 return converted;
             }
             var callResult = checkCallArguments(ctx, sig, expr.args, env, expr.span.start);
             var symbolKind = "Function";
             var intrinsicId = "";
             if sig.sourcePath == "" { symbolKind = "Builtin"; intrinsicId = name; }
-            var callSymbol = resolvedCallSymbol(ctx, name, sig, symbolKind, intrinsicId, makeType("Unknown"));
-            recordExprInfo(ctx, original, callResult, callSymbol, makeType("Unknown"), -1, -1, -1, -1);
+            var callSymbol = resolvedCallSymbol(ctx, name, sig, symbolKind, intrinsicId, makeType(kindUnknown));
+            recordExprInfo(ctx, original, callResult, callSymbol, makeType(kindUnknown), -1, -1, -1, -1);
             return callResult;
         }
         var variantOwner = uniqueEnumVariant(ctx, name);
@@ -2538,22 +2677,44 @@ func inferCall(ctx: TypecheckContext, env: TypeEnv, expr: CallExpr, original: Ex
         }
         var i = 0;
         loop { if i >= expr.args.len() { break; } inferExpr(ctx, env, expr.args[i]); i = i + 1; }
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var calleeAccess = fieldAccessPayload(expr.callee);
     if calleeAccess != null {
         return inferMethodCall(ctx, env, calleeAccess, expr.args, expr.span.start, original);
     }
     var calleeType = inferExpr(ctx, env, expr.callee);
-    if calleeType.kind == "Function" {
+    if calleeType.kind == kindFunction {
         var dynamicSig = functionFromType(calleeType);
         var dynamicResult = checkCallArguments(ctx, dynamicSig, expr.args, env, expr.span.start);
-        var dynamicSymbol = resolvedCallSymbol(ctx, "<function>", dynamicSig, "Local", "", makeType("Unknown"));
-        recordExprInfo(ctx, original, dynamicResult, dynamicSymbol, makeType("Unknown"), -1, -1, -1, -1);
+        var dynamicSymbol = resolvedCallSymbol(ctx, "<function>", dynamicSig, "Local", "", makeType(kindUnknown));
+        recordExprInfo(ctx, original, dynamicResult, dynamicSymbol, makeType(kindUnknown), -1, -1, -1, -1);
         return dynamicResult;
     }
     if !isUnknown(calleeType) { addError(ctx, "expression of type " + typeName(calleeType) + " is not callable", expr.span.start); }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
+}
+
+func isContextualAggregatePlaceholder(ty: Type): bool {
+    if ty.kind == kindArray {
+        var maybeInner = ty.inner;
+        if maybeInner != null {
+            var inner: Type = maybeInner;
+            if inner.kind == kindAny || inner.kind == kindUnknown { return true; }
+            return false;
+        }
+        return true;
+    }
+    if ty.kind == kindDict {
+        var maybeValue = ty.value;
+        if maybeValue != null {
+            var value: Type = maybeValue;
+            if value.kind == kindAny || value.kind == kindUnknown { return true; }
+            return false;
+        }
+        return true;
+    }
+    return false;
 }
 
 func inferStructLiteral(ctx: TypecheckContext, env: TypeEnv, expr: StructLiteralExpr, original: Expr): Type {
@@ -2561,7 +2722,7 @@ func inferStructLiteral(ctx: TypecheckContext, env: TypeEnv, expr: StructLiteral
         addError(ctx, "unknown struct '" + expr.name + "'", expr.span.start);
         var i0 = 0;
         loop { if i0 >= expr.fields.len() { break; } inferExpr(ctx, env, expr.fields[i0].value); i0 = i0 + 1; }
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var decl: StructDeclStmt = ctx.structs.get(expr.name);
     var seen: HashMap<string, bool> = HashMap.new();
@@ -2578,7 +2739,9 @@ func inferStructLiteral(ctx: TypecheckContext, env: TypeEnv, expr: StructLiteral
             if field.moduleId != "" && field.moduleId != ctx.moduleId && !field.isPub { addError(ctx, "cannot initialize private field '" + initField.name + "' on " + expr.name, initField.span.start); }
             if field.moduleId != "" && field.moduleId != ctx.moduleId && !typeVisibleToCaller(ctx, field.ty) { addError(ctx, "public field '" + initField.name + "' exposes a private type", initField.span.start); }
             expectType(ctx, field.ty, actual, "field '" + initField.name + "' type mismatch", initField.span.start);
-            recordFieldInitializer(ctx, original, expr, initField, field.fieldIndex, actual);
+            var recorded = actual;
+            if isContextualAggregatePlaceholder(actual) && field.ty.kind == actual.kind { recorded = field.ty; }
+            recordFieldInitializer(ctx, original, expr, initField, field.fieldIndex, recorded);
         }
         i = i + 1;
     }
@@ -2615,46 +2778,46 @@ func enumVariantSymbol(ctx: TypecheckContext, enumName: string, variantName: str
 }
 
 func inferEnumVariant(ctx: TypecheckContext, env: TypeEnv, expr: EnumVariantExpr, original: Expr): Type {
-    if expr.enumName == "Option" {
+    if expr.enumName == kindOption {
         if expr.variant == "None" {
             if expr.args.len() != 0 { addError(ctx, "Option::None expects 0 arguments", expr.span.start); }
-            var optionNone = optionType(makeType("Any"));
+            var optionNone = optionType(makeType(kindAny));
             var noneSymbol = enumVariantSymbol(ctx, "Option", "None", [], optionNone, true, -1, 1);
-            recordExprInfo(ctx, original, optionNone, noneSymbol, makeType("Unknown"), -1, -1, -1, 1);
+            recordExprInfo(ctx, original, optionNone, noneSymbol, makeType(kindUnknown), -1, -1, -1, 1);
             return optionNone;
         }
         if expr.variant == "Some" {
             if expr.args.len() != 1 { addError(ctx, "Option::Some expects 1 argument", expr.span.start); }
-            var someType = makeType("Any");
+            var someType = makeType(kindAny);
             if expr.args.len() > 0 { someType = inferExpr(ctx, env, expr.args[0]); }
             var optionSome = optionType(someType);
             var someSymbol = enumVariantSymbol(ctx, "Option", "Some", [someType], optionSome, true, -1, 0);
-            recordExprInfo(ctx, original, optionSome, someSymbol, makeType("Unknown"), -1, -1, -1, 0);
+            recordExprInfo(ctx, original, optionSome, someSymbol, makeType(kindUnknown), -1, -1, -1, 0);
             return optionSome;
         }
         addError(ctx, "unknown Option variant '" + expr.variant + "'", expr.span.start);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
-    if expr.enumName == "Result" {
+    if expr.enumName == kindResult {
         if expr.variant == "Ok" || expr.variant == "Err" {
             if expr.args.len() != 1 { addError(ctx, "Result::" + expr.variant + " expects 1 argument", expr.span.start); }
-            var payload = makeType("Any");
+            var payload = makeType(kindAny);
             if expr.args.len() > 0 { payload = inferExpr(ctx, env, expr.args[0]); }
-            var result = makeType("Unknown");
+            var result = makeType(kindUnknown);
             var payloadTypes = [payload];
             var resultVariantIndex = 0;
-            if expr.variant == "Ok" { result = resultType(payload, makeType("Any")); }
-            else { result = resultType(makeType("Any"), payload); resultVariantIndex = 1; }
+            if expr.variant == "Ok" { result = resultType(payload, makeType(kindAny)); }
+            else { result = resultType(makeType(kindAny), payload); resultVariantIndex = 1; }
             var resultSymbol = enumVariantSymbol(ctx, "Result", expr.variant, payloadTypes, result, true, -1, resultVariantIndex);
-            recordExprInfo(ctx, original, result, resultSymbol, makeType("Unknown"), -1, -1, -1, resultVariantIndex);
+            recordExprInfo(ctx, original, result, resultSymbol, makeType(kindUnknown), -1, -1, -1, resultVariantIndex);
             return result;
         }
         addError(ctx, "unknown Result variant '" + expr.variant + "'", expr.span.start);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     if !ctx.enums.has(expr.enumName) {
         addError(ctx, "unknown enum '" + expr.enumName + "'", expr.span.start);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
     var decl: EnumDeclStmt = ctx.enums.get(expr.enumName);
     var found = false;
@@ -2685,7 +2848,7 @@ func inferEnumVariant(ctx: TypecheckContext, env: TypeEnv, expr: EnumVariantExpr
             var enumSymbol = enumVariantSymbol(ctx, expr.enumName, expr.variant, payloadTypes, resultType, decl.isPub, enumIndex, i);
             if ctx.enumSources.has(expr.enumName) { enumSymbol.sourcePath = ctx.enumSources.get(expr.enumName); }
             if ctx.enumOwners.has(expr.enumName) { enumSymbol.moduleId = ctx.enumOwners.get(expr.enumName); }
-            recordExprInfo(ctx, original, resultType, enumSymbol, makeType("Unknown"), enumIndex, -1, enumIndex, i);
+            recordExprInfo(ctx, original, resultType, enumSymbol, makeType(kindUnknown), enumIndex, -1, enumIndex, i);
         }
         i = i + 1;
     }
@@ -2696,31 +2859,31 @@ func inferEnumVariant(ctx: TypecheckContext, env: TypeEnv, expr: EnumVariantExpr
 func inferIndex(ctx: TypecheckContext, env: TypeEnv, expr: IndexExpr): Type {
     var target = inferExpr(ctx, env, expr.target);
     var index = inferExpr(ctx, env, expr.index);
-    if target.kind == "Array" {
-        expectType(ctx, makeType("Int"), index, "Vec index must be int", expr.span.start);
+    if target.kind == kindArray {
+        expectType(ctx, makeType(kindInt), index, "Vec index must be int", expr.span.start);
         var inner = target.inner;
         if inner != null {
             var elementType: Type = inner;
             return elementType;
         }
-        return makeType("Any");
+        return makeType(kindAny);
     }
-    if target.kind == "Dict" {
-        expectType(ctx, makeType("String"), index, "HashMap key must be string", expr.span.start);
+    if target.kind == kindDict {
+        expectType(ctx, makeType(kindString), index, "HashMap key must be string", expr.span.start);
         var value = target.value;
         if value != null {
             var valueType: Type = value;
             return valueType;
         }
-        return makeType("Any");
+        return makeType(kindAny);
     }
-    if target.kind == "String" {
-        expectType(ctx, makeType("Int"), index, "string index must be int", expr.span.start);
-        return makeType("Char");
+    if target.kind == kindString {
+        expectType(ctx, makeType(kindInt), index, "string index must be int", expr.span.start);
+        return makeType(kindChar);
     }
-    if target.kind == "Any" { return makeType("Any"); }
+    if target.kind == kindAny { return makeType(kindAny); }
     if !isUnknown(target) { addError(ctx, "value of type " + typeName(target) + " cannot be indexed", expr.span.start); }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func inferFieldAccess(ctx: TypecheckContext, env: TypeEnv, expr: FieldAccessExpr, original: Expr): Type {
@@ -2731,48 +2894,48 @@ func inferFieldAccess(ctx: TypecheckContext, env: TypeEnv, expr: FieldAccessExpr
             var moduleId: string = ctx.namespaces.get(namespaceIdent.name);
             if !ctx.moduleSummaries.has(moduleId) {
                 addError(ctx, "import namespace is unavailable: " + namespaceIdent.name, expr.span.start);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             var summary: ModuleSummary = ctx.moduleSummaries.get(moduleId);
             if summary.structs.has(expr.name) {
                 var decl: StructDeclStmt = summary.structs.get(expr.name);
-                if !decl.isPub { addError(ctx, "cannot access private struct '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType("Unknown"); }
+                if !decl.isPub { addError(ctx, "cannot access private struct '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType(kindUnknown); }
                 var structIndex: int = summary.structIndices.get(expr.name);
                 var typeInfo = namedTypeOwned("Struct", expr.name, summary.sourcePath, summary.moduleId);
-                var typeSymbol = ResolvedSymbol { sourcePath: summary.sourcePath, moduleId: summary.moduleId, sourceName: expr.name, llvmName: llvmSymbolNameAt(summary.moduleIndex, expr.name, ""), kind: "Struct", intrinsicId: "", isPub: true, signature: typeInfo, callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: structIndex, receiverType: makeType("Unknown"), receiverPassing: "None" };
-                recordExprInfo(ctx, original, typeInfo, typeSymbol, makeType("Unknown"), structIndex, -1, -1, -1);
+                var typeSymbol = ResolvedSymbol { sourcePath: summary.sourcePath, moduleId: summary.moduleId, sourceName: expr.name, llvmName: llvmSymbolNameAt(summary.moduleIndex, expr.name, ""), kind: "Struct", intrinsicId: "", isPub: true, signature: typeInfo, callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: structIndex, receiverType: makeType(kindUnknown), receiverPassing: "None" };
+                recordExprInfo(ctx, original, typeInfo, typeSymbol, makeType(kindUnknown), structIndex, -1, -1, -1);
                 return typeInfo;
             }
             if summary.enums.has(expr.name) {
                 var enumDecl: EnumDeclStmt = summary.enums.get(expr.name);
-                if !enumDecl.isPub { addError(ctx, "cannot access private enum '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType("Unknown"); }
+                if !enumDecl.isPub { addError(ctx, "cannot access private enum '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType(kindUnknown); }
                 var enumIndex: int = summary.enumIndices.get(expr.name);
                 var enumType = namedTypeOwned("Enum", expr.name, summary.sourcePath, summary.moduleId);
-                var enumSymbol = ResolvedSymbol { sourcePath: summary.sourcePath, moduleId: summary.moduleId, sourceName: expr.name, llvmName: llvmSymbolNameAt(summary.moduleIndex, expr.name, ""), kind: "Enum", intrinsicId: "", isPub: true, signature: enumType, callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: enumIndex, receiverType: makeType("Unknown"), receiverPassing: "None" };
-                recordExprInfo(ctx, original, enumType, enumSymbol, makeType("Unknown"), -1, -1, enumIndex, -1);
+                var enumSymbol = ResolvedSymbol { sourcePath: summary.sourcePath, moduleId: summary.moduleId, sourceName: expr.name, llvmName: llvmSymbolNameAt(summary.moduleIndex, expr.name, ""), kind: "Enum", intrinsicId: "", isPub: true, signature: enumType, callShape: CallShape { requiredCount: 0, fixedCount: 0, variadicIndex: -1 }, declarationIndex: enumIndex, receiverType: makeType(kindUnknown), receiverPassing: "None" };
+                recordExprInfo(ctx, original, enumType, enumSymbol, makeType(kindUnknown), -1, -1, enumIndex, -1);
                 return enumType;
             }
             if summary.functions.has(expr.name) {
                 var sig: FunctionSig = summary.functions.get(expr.name);
-                if sig.owner != "" { addError(ctx, "module namespace member is not a top-level function: " + expr.name, expr.span.start); return makeType("Unknown"); }
-                if !sig.isPub { addError(ctx, "cannot access private function '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType("Unknown"); }
+                if sig.owner != "" { addError(ctx, "module namespace member is not a top-level function: " + expr.name, expr.span.start); return makeType(kindUnknown); }
+                if !sig.isPub { addError(ctx, "cannot access private function '" + expr.name + "' through module '" + namespaceIdent.name + "'", expr.span.start); return makeType(kindUnknown); }
                 return functionType(sig.params, sig.ret);
             }
             addError(ctx, "module namespace '" + namespaceIdent.name + "' has no public member '" + expr.name + "'", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
     }
     var receiver = inferExpr(ctx, env, expr.object);
-    if receiver.kind == "Struct" {
+    if receiver.kind == kindStruct {
         var field = findStructFieldInModule(ctx, receiver.name, receiver.moduleId, expr.name);
         if field.found {
             if !field.isPub && !canAccessPrivateField(ctx, receiver.name, field.moduleId) {
                 addError(ctx, "cannot access private field '" + expr.name + "' on " + receiver.name, expr.span.start);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             if field.moduleId != "" && field.moduleId != ctx.moduleId && !typeVisibleToCaller(ctx, field.ty) {
                 addError(ctx, "public field '" + expr.name + "' exposes a private type", expr.span.start);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             var fieldSymbol = ResolvedSymbol {
                 sourcePath: field.sourcePath,
@@ -2792,20 +2955,20 @@ func inferFieldAccess(ctx: TypecheckContext, env: TypeEnv, expr: FieldAccessExpr
             return field.ty;
         }
         addError(ctx, "unknown field '" + expr.name + "' on " + receiver.name, expr.span.start);
-        return makeType("Unknown");
+        return makeType(kindUnknown);
     }
-    if receiver.kind == "Enum" {
+    if receiver.kind == kindEnum {
         var variantIndex = enumVariantIndex(ctx, receiver.name, expr.name);
         if variantIndex < 0 {
             addError(ctx, "enum '" + receiver.name + "' has no variant '" + expr.name + "'", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         var variantDecl = findVariantDecl(ctx, receiver.name, expr.name);
         if variantDecl != null {
             var variant: EnumVariantDecl = variantDecl;
             if variant.payloadTypes.len() > 0 {
                 addError(ctx, "enum variant '" + receiver.name + "::" + expr.name + "' requires payload arguments", expr.span.start);
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
         }
         var enumIndex = -1;
@@ -2819,23 +2982,23 @@ func inferFieldAccess(ctx: TypecheckContext, env: TypeEnv, expr: FieldAccessExpr
         recordExprInfo(ctx, original, receiver, enumSymbol, receiver, -1, -1, enumIndex, variantIndex);
         return receiver;
     }
-    if receiver.kind == "Tuple" {
+    if receiver.kind == kindTuple {
         var tupleIndex = tupleMemberIndex(expr.name);
         if tupleIndex < 0 {
             addError(ctx, "unknown field '" + expr.name + "' on tuple", expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         if tupleIndex >= receiver.params.len() {
             addError(ctx, "tuple index " + tupleIndex.toString() + " out of bounds for tuple of length " + receiver.params.len().toString(), expr.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         }
         var elementType: Type = receiver.params[tupleIndex];
         recordExprInfo(ctx, original, elementType, null, receiver, -1, tupleIndex, -1, -1);
         return elementType;
     }
-    if receiver.kind == "Any" { return makeType("Any"); }
+    if receiver.kind == kindAny { return makeType(kindAny); }
     if !isUnknown(receiver) { addError(ctx, "unknown field '" + expr.name + "' on " + typeName(receiver), expr.span.start); }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func inferUpdateTarget(ctx: TypecheckContext, env: TypeEnv, target: Expr, span: int): Type {
@@ -2843,8 +3006,8 @@ func inferUpdateTarget(ctx: TypecheckContext, env: TypeEnv, target: Expr, span: 
     if identPayload != null {
         var ident: IdentExpr = identPayload;
         var found = lookupEnv(env, ident.name);
-        if bindingTooEarly(ctx, env, ident.name, ident.span.start) { addError(ctx, "undefined variable '" + ident.name + "'", ident.span.start); return makeType("Unknown"); }
-        if !found.found { addError(ctx, "unknown identifier '" + ident.name + "'", ident.span.start); return makeType("Unknown"); }
+        if bindingTooEarly(ctx, env, ident.name, ident.span.start) { addError(ctx, "undefined variable '" + ident.name + "'", ident.span.start); return makeType(kindUnknown); }
+        if !found.found { addError(ctx, "unknown identifier '" + ident.name + "'", ident.span.start); return makeType(kindUnknown); }
         if found.symbol.isConst { addError(ctx, "cannot update const '" + ident.name + "'", span); }
         if found.crossedLambda { addError(ctx, "mutable capture of '" + ident.name + "'", span); }
         return found.symbol.ty;
@@ -2855,11 +3018,11 @@ func inferUpdateTarget(ctx: TypecheckContext, env: TypeEnv, target: Expr, span: 
     if indexExpr != null { return inferIndex(ctx, env, indexExpr); }
     var actual = inferExpr(ctx, env, target);
     if !isUnknown(actual) { addError(ctx, "increment/decrement target is not an lvalue", span); }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func inferArray(ctx: TypecheckContext, env: TypeEnv, expr: ArrayExpr): Type {
-    var element = makeType("Unknown");
+    var element = makeType(kindUnknown);
     var sawRaw = false;
     var i = 0;
     loop {
@@ -2870,14 +3033,14 @@ func inferArray(ctx: TypecheckContext, env: TypeEnv, expr: ArrayExpr): Type {
         else { element = joinTypes(ctx, element, actual, expr.span.start); }
         i = i + 1;
     }
-    if isUnknown(element) { element = makeType("Any"); }
+    if isUnknown(element) { element = makeType(kindAny); }
     if sawRaw { addError(ctx, "raw address cannot be stored in vector values", expr.span.start); }
     rejectRawAggregate(ctx, element, expr.span.start, "vector values");
     return arrayType(element);
 }
 
 func inferDict(ctx: TypecheckContext, env: TypeEnv, expr: DictExpr): Type {
-    var valueType = makeType("Unknown");
+    var valueType = makeType(kindUnknown);
     var sawRaw = false;
     var i = 0;
     loop {
@@ -2890,7 +3053,7 @@ func inferDict(ctx: TypecheckContext, env: TypeEnv, expr: DictExpr): Type {
             if keyLit.kind != LiteralKind::String { addError(ctx, "dictionary keys must be strings", entry.span.start); }
         } else if keyIdentifier == null {
             var keyType = inferExpr(ctx, env, entry.key);
-            expectType(ctx, makeType("String"), keyType, "dictionary keys must be strings", entry.span.start);
+            expectType(ctx, makeType(kindString), keyType, "dictionary keys must be strings", entry.span.start);
         }
         var actual = inferExpr(ctx, env, entry.value);
         if typeContainsRawAddress(actual) { sawRaw = true; }
@@ -2898,7 +3061,7 @@ func inferDict(ctx: TypecheckContext, env: TypeEnv, expr: DictExpr): Type {
         else { valueType = joinTypes(ctx, valueType, actual, expr.span.start); }
         i = i + 1;
     }
-    if isUnknown(valueType) { valueType = makeType("Any"); }
+    if isUnknown(valueType) { valueType = makeType(kindAny); }
     if sawRaw { addError(ctx, "raw address cannot be stored in dictionary values", expr.span.start); }
     rejectRawAggregate(ctx, valueType, expr.span.start, "dictionary values");
     return dictType(valueType);
@@ -2910,7 +3073,7 @@ func inferLambda(ctx: TypecheckContext, env: TypeEnv, expr: LambdaExpr, original
     var i = 0;
     loop {
         if i >= expr.params.len() { break; }
-        var paramType = makeType("Unknown");
+        var paramType = makeType(kindUnknown);
         var maybeParamTypeExpr: TypeExpr? = null;
         if i < expr.paramTypeExprs.len() { maybeParamTypeExpr = expr.paramTypeExprs[i]; }
         if maybeParamTypeExpr != null {
@@ -2921,7 +3084,7 @@ func inferLambda(ctx: TypecheckContext, env: TypeEnv, expr: LambdaExpr, original
         }
         paramTypes.push(paramType);
         defineSymbol(ctx, child, expr.params[i], paramType, false, expr.span.start);
-        recordBinding(ctx, original, exprNodeKey(original), expr.params[i], paramType, "LambdaParameter", false, i);
+        recordBinding(ctx, exprNodeKey(original), expr.params[i], paramType, "LambdaParameter", false, i);
         i = i + 1;
     }
     var oldInFunction = ctx.inFunction;
@@ -2929,10 +3092,10 @@ func inferLambda(ctx: TypecheckContext, env: TypeEnv, expr: LambdaExpr, original
     var oldReturns = ctx.returnTypes;
     var oldLoop = ctx.loopDepth;
     ctx.inFunction = true;
-    ctx.currentReturn = makeType("Unknown");
+    ctx.currentReturn = makeType(kindUnknown);
     ctx.returnTypes = [];
     ctx.loopDepth = 0;
-    var ret = makeType("Unknown");
+    var ret = makeType(kindUnknown);
     var bodyExpr = expr.bodyExpr;
     if bodyExpr != null {
         var lambdaExpr: Expr = bodyExpr;
@@ -3022,8 +3185,8 @@ func funcDeclNodeKey(decl: FuncDeclStmt): string {
 
 func recordExprInfo(ctx: TypecheckContext, expr: Expr, ty: Type, symbol: ResolvedSymbol?, receiverType: Type, structIndex: int, fieldIndex: int, enumIndex: int, variantIndex: int) {
     if !ctx.recording { return; }
-    var exprKey = exprNodeKey(expr);
-    var key = metadataKey(ctx.sourcePath, ctx.moduleId, exprKey);
+    ctx.lastRecordDepth = ctx.recordDepth;
+    var key = exprNodeKey(expr);
     if ctx.expressionIndex.has(key) {
         var indices: Vec<int> = ctx.expressionIndex.get(key);
         var candidateIndex = 0;
@@ -3034,12 +3197,13 @@ func recordExprInfo(ctx: TypecheckContext, expr: Expr, ty: Type, symbol: Resolve
             if old.expression == expr {
                 old.ty = ty;
                 if symbol != null { old.symbol = symbol; }
-                if receiverType.kind != "Unknown" { old.receiverType = receiverType; }
+                if receiverType.kind != kindUnknown { old.receiverType = receiverType; }
                 if structIndex >= 0 { old.structIndex = structIndex; }
                 if fieldIndex >= 0 { old.fieldIndex = fieldIndex; }
                 if enumIndex >= 0 { old.enumIndex = enumIndex; }
                 if variantIndex >= 0 { old.variantIndex = variantIndex; }
                 ctx.expressions[index] = old;
+                ctx.lastRecordIndex = index;
                 return;
             }
             candidateIndex = candidateIndex + 1;
@@ -3068,12 +3232,12 @@ func recordExprInfo(ctx: TypecheckContext, expr: Expr, ty: Type, symbol: Resolve
     } else {
         ctx.expressionIndex.set(key, [newIndex]);
     }
+    ctx.lastRecordIndex = newIndex;
 }
 
-func recordBinding(ctx: TypecheckContext, declaration, declarationKey: string, name: string, ty: Type, kind: string, isConst: bool, parameterIndex: int) {
+func recordBinding(ctx: TypecheckContext, declarationKey: string, name: string, ty: Type, kind: string, isConst: bool, parameterIndex: int) {
     if !ctx.recording { return; }
-    var identity = bindingIdentityKey(declarationKey, name, parameterIndex);
-    var key = metadataKey(ctx.sourcePath, ctx.moduleId, identity);
+    var key = bindingIdentityKey(declarationKey, name, parameterIndex);
     if ctx.bindingIndex.has(key) {
         var indices: Vec<int> = ctx.bindingIndex.get(key);
         var candidateIndex = 0;
@@ -3081,7 +3245,7 @@ func recordBinding(ctx: TypecheckContext, declaration, declarationKey: string, n
             if candidateIndex >= indices.len() { break; }
             var index: int = indices[candidateIndex];
             var old: CheckedBindingInfo = ctx.bindings[index];
-            if old.declaration == declaration {
+            if old.declarationKey == declarationKey {
                 old.ty = ty;
                 old.kind = kind;
                 old.isConst = isConst;
@@ -3097,7 +3261,6 @@ func recordBinding(ctx: TypecheckContext, declaration, declarationKey: string, n
         sourcePath: ctx.sourcePath,
         moduleId: ctx.moduleId,
         nodeId: nodeId,
-        declaration: declaration,
         declarationKey: declarationKey,
         name: name,
         ty: ty,
@@ -3117,9 +3280,7 @@ func recordBinding(ctx: TypecheckContext, declaration, declarationKey: string, n
 
 func recordFieldInitializer(ctx: TypecheckContext, expression: Expr, literal: StructLiteralExpr, initializer: StructInitField, fieldIndex: int, valueType: Type) {
     if !ctx.recording { return; }
-    var exprKey = exprNodeKey(expression);
-    var initializerKey = bindingIdentityKey(exprKey + ":" + literal.span.start.toString() + ":" + literal.span.end.toString(), initializer.name, initializer.span.start);
-    var key = metadataKey(ctx.sourcePath, ctx.moduleId, initializerKey + ":" + initializer.span.end.toString());
+    var key = exprNodeKey(expression) + ":" + initializer.name + ":" + initializer.span.start.toString() + ":" + initializer.span.end.toString();
     if ctx.fieldInitializerIndex.has(key) {
         var indices: Vec<int> = ctx.fieldInitializerIndex.get(key);
         var candidateIndex = 0;
@@ -3154,7 +3315,7 @@ func isAssignmentOp(op: string): bool {
 }
 
 func inferAssignExpr(ctx: TypecheckContext, env: TypeEnv, binary: BinaryExpr): Type {
-    var targetType = makeType("Unknown");
+    var targetType = makeType(kindUnknown);
     var identPayload = identifierPayload(binary.left);
     if identPayload != null {
         var ident: IdentExpr = identPayload;
@@ -3183,8 +3344,26 @@ func inferAssignExpr(ctx: TypecheckContext, env: TypeEnv, binary: BinaryExpr): T
 }
 
 func inferExpr(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
+    var savedDepth = ctx.recordDepth;
+    var savedLast = ctx.lastRecordDepth;
+    var savedIndex = ctx.lastRecordIndex;
+    ctx.recordDepth = savedDepth + 1;
+    var depth = ctx.recordDepth;
     var ty = inferExprCore(ctx, env, expr);
-    recordExprInfo(ctx, expr, ty, null, makeType("Unknown"), -1, -1, -1, -1);
+    if ctx.recording && ctx.lastRecordDepth == depth && ctx.lastRecordIndex >= 0 && ctx.lastRecordIndex < ctx.expressions.len() {
+        var recorded: CheckedExprInfo = ctx.expressions[ctx.lastRecordIndex];
+        if recorded.expression == expr {
+            recorded.ty = ty;
+            ctx.expressions[ctx.lastRecordIndex] = recorded;
+        } else {
+            recordExprInfo(ctx, expr, ty, null, makeType(kindUnknown), -1, -1, -1, -1);
+        }
+    } else if ctx.recording {
+        recordExprInfo(ctx, expr, ty, null, makeType(kindUnknown), -1, -1, -1, -1);
+    }
+    ctx.recordDepth = savedDepth;
+    ctx.lastRecordDepth = savedLast;
+    ctx.lastRecordIndex = savedIndex;
     return ty;
 }
 
@@ -3192,17 +3371,17 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
     match expr {
         Expr::Error(_) => {
             addError(ctx, "cannot typecheck an error expression", exprSpan(expr).start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         Expr::Literal(lit) => {
-            if lit.kind == LiteralKind::Int { return makeType("Int"); }
-            if lit.kind == LiteralKind::Float { return makeType("Float"); }
-            if lit.kind == LiteralKind::Bool { return makeType("Bool"); }
-            if lit.kind == LiteralKind::String { return makeType("String"); }
-            if lit.kind == LiteralKind::Char { return makeType("Char"); }
-            if lit.kind == LiteralKind::Null { return makeType("Null"); }
+            if lit.kind == LiteralKind::Int { return makeType(kindInt); }
+            if lit.kind == LiteralKind::Float { return makeType(kindFloat); }
+            if lit.kind == LiteralKind::Bool { return makeType(kindBool); }
+            if lit.kind == LiteralKind::String { return makeType(kindString); }
+            if lit.kind == LiteralKind::Char { return makeType(kindChar); }
+            if lit.kind == LiteralKind::Null { return makeType(kindNull); }
             addError(ctx, "unsupported literal kind", lit.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         Expr::Identifier(ident) => { return lookupIdentifier(ctx, env, ident.name, ident.span.start); },
         Expr::Binary(binary) => {
@@ -3211,7 +3390,7 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
                 var leftType = inferExpr(ctx, env, binary.left);
                 if typeContainsRawAddress(leftType) {
                     addError(ctx, "raw addresses do not support source operators", binary.span.start);
-                    return makeType("Bool");
+                    return makeType(kindBool);
                 }
                 var rightPayload = identifierPayload(binary.right);
                 if rightPayload != null {
@@ -3222,90 +3401,90 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
                 } else {
                     addError(ctx, "instanceof requires a declared type name", binary.span.start);
                 }
-                if leftType.kind == "Unknown" { return makeType("Bool"); }
-                return makeType("Bool");
+                if leftType.kind == kindUnknown { return makeType(kindBool); }
+                return makeType(kindBool);
             }
             var left = inferExpr(ctx, env, binary.left);
             var rightType = inferExpr(ctx, env, binary.right);
             if typeContainsRawAddress(left) || typeContainsRawAddress(rightType) {
                 if binary.op == "==" || binary.op == "!=" {
                     addError(ctx, "raw addresses must be compared with __reyRawEqual", binary.span.start);
-                    return makeType("Bool");
+                    return makeType(kindBool);
                 }
                 addError(ctx, "raw addresses do not support source operators", binary.span.start);
                 if binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" || binary.op == "&&" || binary.op == "||" {
-                    return makeType("Bool");
+                    return makeType(kindBool);
                 }
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             if binary.op == "&&" || binary.op == "||" {
-                expectType(ctx, makeType("Bool"), left, "logical operator requires bool operands", binary.span.start);
-                expectType(ctx, makeType("Bool"), rightType, "logical operator requires bool operands", binary.span.start);
-                return makeType("Bool");
+                expectType(ctx, makeType(kindBool), left, "logical operator requires bool operands", binary.span.start);
+                expectType(ctx, makeType(kindBool), rightType, "logical operator requires bool operands", binary.span.start);
+                return makeType(kindBool);
             }
-            if left.kind == "Any" || rightType.kind == "Any" {
-                if binary.op == "==" || binary.op == "!=" || binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" { return makeType("Bool"); }
-                if binary.op == "+" || binary.op == "-" || binary.op == "*" || binary.op == "/" || binary.op == "%" { return makeType("Any"); }
+            if left.kind == kindAny || rightType.kind == kindAny {
+                if binary.op == "==" || binary.op == "!=" || binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" { return makeType(kindBool); }
+                if binary.op == "+" || binary.op == "-" || binary.op == "*" || binary.op == "/" || binary.op == "%" { return makeType(kindAny); }
             }
             if binary.op == "+" {
-                if left.kind == "String" || rightType.kind == "String" {
-                    if left.kind == "String" && rightType.kind == "String" { return makeType("String"); }
+                if left.kind == kindString || rightType.kind == kindString {
+                    if left.kind == kindString && rightType.kind == kindString { return makeType(kindString); }
                     addError(ctx, "'+' not defined for " + arithmeticOperandLabel(left) + " and " + arithmeticOperandLabel(rightType) + "; mixed string + is not allowed; convert explicitly or use interpolation", binary.span.start);
-                    return makeType("Unknown");
+                    return makeType(kindUnknown);
                 }
                 if isNumeric(left) && isNumeric(rightType) {
-                    if left.kind == "Float" || rightType.kind == "Float" { return makeType("Float"); }
-                    return makeType("Int");
+                    if left.kind == kindFloat || rightType.kind == kindFloat { return makeType(kindFloat); }
+                    return makeType(kindInt);
                 }
                 if !isUnknown(left) && !isUnknown(rightType) { addError(ctx, "'+' not defined for " + arithmeticOperandLabel(left) + " and " + arithmeticOperandLabel(rightType), binary.span.start); }
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             if binary.op == "-" || binary.op == "*" || binary.op == "/" || binary.op == "%" {
                 if !isNumeric(left) || !isNumeric(rightType) {
                     if !isUnknown(left) && !isUnknown(rightType) { addError(ctx, "operator '" + binary.op + "' requires numeric operands", binary.span.start); }
-                    return makeType("Unknown");
+                    return makeType(kindUnknown);
                 }
-                if left.kind == "Float" || rightType.kind == "Float" { return makeType("Float"); }
-                return makeType("Int");
+                if left.kind == kindFloat || rightType.kind == kindFloat { return makeType(kindFloat); }
+                return makeType(kindInt);
             }
             if binary.op == "<" || binary.op == "<=" || binary.op == ">" || binary.op == ">=" {
-                if left.kind == "Char" && rightType.kind == "Char" { return makeType("Bool"); }
-                if isNumeric(left) && isNumeric(rightType) { return makeType("Bool"); }
-                if left.kind == "String" && rightType.kind == "String" { return makeType("Bool"); }
+                if left.kind == kindChar && rightType.kind == kindChar { return makeType(kindBool); }
+                if isNumeric(left) && isNumeric(rightType) { return makeType(kindBool); }
+                if left.kind == kindString && rightType.kind == kindString { return makeType(kindBool); }
                 if !isUnknown(left) && !isUnknown(rightType) { addError(ctx, "ordering operator not defined for " + diagnosticTypeName(left) + " and " + diagnosticTypeName(rightType), binary.span.start); }
-                return makeType("Bool");
+                return makeType(kindBool);
             }
             if binary.op == "==" || binary.op == "!=" {
-                if !isUnknown(left) && !isUnknown(rightType) && (left.kind == "Function" || rightType.kind == "Function") {
+                if !isUnknown(left) && !isUnknown(rightType) && (left.kind == kindFunction || rightType.kind == kindFunction) {
                     addError(ctx, "function values are not comparable", binary.span.start);
-                    return makeType("Bool");
+                    return makeType(kindBool);
                 }
                 if !isUnknown(left) && !isUnknown(rightType) && !canAssign(left, rightType) && !canAssign(rightType, left) {
                     addError(ctx, "equality operands have incompatible types " + typeName(left) + " and " + typeName(rightType), binary.span.start);
                 }
-                return makeType("Bool");
+                return makeType(kindBool);
             }
             addError(ctx, "unsupported binary operator '" + binary.op + "'", binary.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         Expr::Unary(unary) => {
             var operand = inferExpr(ctx, env, unary.right);
             if unary.op == "!" {
-                expectType(ctx, makeType("Bool"), operand, "'!' requires bool", unary.span.start);
-                return makeType("Bool");
+                expectType(ctx, makeType(kindBool), operand, "'!' requires bool", unary.span.start);
+                return makeType(kindBool);
             }
             if unary.op == "-" {
                 if isNumeric(operand) { return operand; }
                 if !isUnknown(operand) { addError(ctx, "unary '-' requires a number", unary.span.start); }
-                return makeType("Unknown");
+                return makeType(kindUnknown);
             }
             addError(ctx, "unsupported unary operator '" + unary.op + "'", unary.span.start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         Expr::Update(update) => {
             var target = inferUpdateTarget(ctx, env, update.target, update.span.start);
-            expectType(ctx, makeType("Int"), target, "increment/decrement requires int", update.span.start);
-            return makeType("Int");
+            expectType(ctx, makeType(kindInt), target, "increment/decrement requires int", update.span.start);
+            return makeType(kindInt);
         },
         Expr::Call(call) => { return inferCall(ctx, env, call, expr); },
         Expr::EnumVariant(variant) => { return inferEnumVariant(ctx, env, variant, expr); },
@@ -3314,16 +3493,16 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
         Expr::Lambda(lambda) => { return inferLambda(ctx, env, lambda, expr); },
         Expr::Match(_) => {
             addError(ctx, "match expressions are unsupported; match is a statement", exprSpan(expr).start);
-            return makeType("Unknown");
+            return makeType(kindUnknown);
         },
         Expr::If(ifExpr) => {
-            expectType(ctx, makeType("Bool"), inferExpr(ctx, env, ifExpr.condition), "if condition must be bool", ifExpr.span.start);
+            expectType(ctx, makeType(kindBool), inferExpr(ctx, env, ifExpr.condition), "if condition must be bool", ifExpr.span.start);
             var thenType = inferExpr(ctx, newEnv(env, false), ifExpr.thenBranch);
             var elseType = inferExpr(ctx, newEnv(env, false), ifExpr.elseBranch);
             return joinTypes(ctx, thenType, elseType, ifExpr.span.start);
         },
         Expr::Tuple(tupleExpr) => {
-            var tuple = makeType("Tuple");
+            var tuple = makeType(kindTuple);
             var i = 0;
             loop { if i >= tupleExpr.elements.len() { break; } tuple.params.push(inferExpr(ctx, env, tupleExpr.elements[i])); i = i + 1; }
             rejectRawAggregate(ctx, tuple, tupleExpr.span.start, "tuple values");
@@ -3333,12 +3512,12 @@ func inferExprCore(ctx: TypecheckContext, env: TypeEnv, expr: Expr): Type {
         Expr::Dict(dictExpr) => { return inferDict(ctx, env, dictExpr); },
         Expr::StructLiteral(structLiteral) => { return inferStructLiteral(ctx, env, structLiteral, expr); },
     }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func joinReturnTypes(ctx: TypecheckContext, types: Vec<Type>, span: int): Type {
-    if types.len() == 0 { return makeType("Void"); }
-    var result = makeType("Unknown");
+    if types.len() == 0 { return makeType(kindVoid); }
+    var result = makeType(kindUnknown);
     var sawUnknown = false;
     var i = 0;
     loop {
@@ -3348,40 +3527,40 @@ func joinReturnTypes(ctx: TypecheckContext, types: Vec<Type>, span: int): Type {
         else { result = joinTypes(ctx, result, types[i], span); }
         i = i + 1;
     }
-    if isUnknown(result) && sawUnknown { return makeType("Unknown"); }
+    if isUnknown(result) && sawUnknown { return makeType(kindUnknown); }
     return result;
 }
 
 func isInstanceofTypeName(ctx: TypecheckContext, name: string): bool {
     if name == "int" || name == "float" || name == "string" || name == "bool" || name == "char" || name == "any" { return true; }
-    if name == "Vec" || name == "HashMap" || name == "Option" || name == "Result" { return true; }
+    if name == "Vec" || name == "HashMap" || name == kindOption || name == kindResult { return true; }
     return ctx.structs.has(name);
 }
 
 func instanceofTestType(ctx: TypecheckContext, name: string): Type {
-    if name == "int" { return makeType("Int"); }
-    if name == "float" { return makeType("Float"); }
-    if name == "string" { return makeType("String"); }
-    if name == "bool" { return makeType("Bool"); }
-    if name == "char" { return makeType("Char"); }
-    if name == "any" { return makeType("Any"); }
-    if name == "Vec" { return arrayType(makeType("Any")); }
-    if name == "HashMap" { return dictType(makeType("Any")); }
-    if name == "Option" { return optionType(makeType("Any")); }
-    if name == "Result" { return resultType(makeType("Any"), makeType("Any")); }
+    if name == "int" { return makeType(kindInt); }
+    if name == "float" { return makeType(kindFloat); }
+    if name == "string" { return makeType(kindString); }
+    if name == "bool" { return makeType(kindBool); }
+    if name == "char" { return makeType(kindChar); }
+    if name == "any" { return makeType(kindAny); }
+    if name == "Vec" { return arrayType(makeType(kindAny)); }
+    if name == "HashMap" { return dictType(makeType(kindAny)); }
+    if name == kindOption { return optionType(makeType(kindAny)); }
+    if name == kindResult { return resultType(makeType(kindAny), makeType(kindAny)); }
     if ctx.structs.has(name) { return resolveNamedType(ctx, name, 0, false); }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func typeMatchesInstanceof(member: Type, tested: Type): bool {
     if typeEqual(member, tested) { return true; }
-    if member.kind == "Struct" && tested.kind == "Struct" && member.name == tested.name { return true; }
-    if member.kind == tested.kind && member.kind != "Struct" && member.kind != "Enum" && member.kind != "Union" && member.kind != "Array" && member.kind != "Dict" && member.kind != "Option" && member.kind != "Result" { return true; }
+    if member.kind == kindStruct && tested.kind == kindStruct && member.name == tested.name { return true; }
+    if member.kind == tested.kind && member.kind != kindStruct && member.kind != kindEnum && member.kind != kindUnion && member.kind != kindArray && member.kind != kindDict && member.kind != kindOption && member.kind != kindResult { return true; }
     return false;
 }
 
 func typeWithoutInstanceof(current: Type, tested: Type): Type {
-    if current.kind == "Union" {
+    if current.kind == kindUnion {
         var rest: Vec<Type> = [];
         var i = 0;
         loop {
@@ -3390,19 +3569,19 @@ func typeWithoutInstanceof(current: Type, tested: Type): Type {
             i = i + 1;
         }
         if rest.len() == current.params.len() { return current; }
-        if rest.len() == 0 { return makeType("Unknown"); }
+        if rest.len() == 0 { return makeType(kindUnknown); }
         if rest.len() == 1 { return rest[0]; }
-        var remaining = makeType("Union");
+        var remaining = makeType(kindUnion);
         remaining.params = rest;
         return remaining;
     }
-    if typeMatchesInstanceof(current, tested) { return makeType("Unknown"); }
+    if typeMatchesInstanceof(current, tested) { return makeType(kindUnknown); }
     return current;
 }
 
 func checkBooleanCondition(ctx: TypecheckContext, env: TypeEnv, expr: Expr, label: string) {
     var actual = inferExpr(ctx, env, expr);
-    expectType(ctx, makeType("Bool"), actual, label + " must be bool", exprSpan(expr).start);
+    expectType(ctx, makeType(kindBool), actual, label + " must be bool", exprSpan(expr).start);
 }
 
 func narrowedBinding(ctx: TypecheckContext, env: TypeEnv, condition: Expr, truthy: bool): LookupResult {
@@ -3428,14 +3607,14 @@ func narrowedBinding(ctx: TypecheckContext, env: TypeEnv, condition: Expr, truth
                 var lit: LiteralExpr = comparedLiteral;
                 if lit.kind == LiteralKind::Null {
                     var found = lookupEnv(env, ident.name);
-                    if found.found && found.symbol.ty.kind == "Nullable" {
+                    if found.found && found.symbol.ty.kind == kindNullable {
                         var maybeInner = found.symbol.ty.inner;
                         if maybeInner != null {
                             var innerType: Type = maybeInner;
                             var isNonNull = truthy;
                             if binary.op == "==" { isNonNull = !truthy; }
                             var narrowedTy = innerType;
-                            if !isNonNull { narrowedTy = makeType("Null"); }
+                            if !isNonNull { narrowedTy = makeType(kindNull); }
                             var narrowedSymbol = Symbol { name: found.symbol.name, ty: narrowedTy, isConst: found.symbol.isConst };
                             return LookupResult { found: true, symbol: narrowedSymbol, crossedLambda: false };
                         }
@@ -3462,7 +3641,7 @@ func narrowedBinding(ctx: TypecheckContext, env: TypeEnv, condition: Expr, truth
             }
         }
     }
-    return LookupResult { found: false, symbol: Symbol { name: "", ty: makeType("Unknown"), isConst: false }, crossedLambda: false };
+    return LookupResult { found: false, symbol: Symbol { name: "", ty: makeType(kindUnknown), isConst: false }, crossedLambda: false };
 }
 
 func checkBlock(ctx: TypecheckContext, parent: TypeEnv, block: BlockStmt) {
@@ -3475,7 +3654,7 @@ func checkBody(ctx: TypecheckContext, parent: TypeEnv, body: Vec<Stmt>) {
 }
 
 func checkAssign(ctx: TypecheckContext, env: TypeEnv, stmt: AssignStmt) {
-    var targetType = makeType("Unknown");
+    var targetType = makeType(kindUnknown);
     var identPayload = identifierPayload(stmt.target);
     if identPayload != null {
         var ident: IdentExpr = identPayload;
@@ -3486,6 +3665,7 @@ func checkAssign(ctx: TypecheckContext, env: TypeEnv, stmt: AssignStmt) {
             targetType = found.symbol.ty;
             if found.symbol.isConst { addError(ctx, "cannot assign to const '" + ident.name + "'", stmt.span.start); }
             if found.crossedLambda { addError(ctx, "mutable capture of '" + ident.name + "'", stmt.span.start); }
+            if !isUnknown(targetType) { recordExprInfo(ctx, stmt.target, targetType, null, makeType(kindUnknown), -1, -1, -1, -1); }
         }
     } else {
         var accessPayload = fieldAccessPayload(stmt.target);
@@ -3498,21 +3678,21 @@ func checkAssign(ctx: TypecheckContext, env: TypeEnv, stmt: AssignStmt) {
                 var indexExpr: IndexExpr = indexPayloadValue;
                 var receiver = inferExpr(ctx, env, indexExpr.target);
                 var index = inferExpr(ctx, env, indexExpr.index);
-                if receiver.kind == "Array" {
-                    expectType(ctx, makeType("Int"), index, "Vec index must be int", stmt.span.start);
+                if receiver.kind == kindArray {
+                    expectType(ctx, makeType(kindInt), index, "Vec index must be int", stmt.span.start);
                     var inner = receiver.inner;
                     if inner != null {
                         var elementType: Type = inner;
                         targetType = elementType;
-                    } else { targetType = makeType("Any"); }
-                } else if receiver.kind == "Dict" {
-                    expectType(ctx, makeType("String"), index, "HashMap key must be string", stmt.span.start);
+                    } else { targetType = makeType(kindAny); }
+                } else if receiver.kind == kindDict {
+                    expectType(ctx, makeType(kindString), index, "HashMap key must be string", stmt.span.start);
                     var value = receiver.value;
                     if value != null {
                         var valueType: Type = value;
                         targetType = valueType;
-                    } else { targetType = makeType("Any"); }
-                } else if receiver.kind == "String" { addError(ctx, "string indices are not assignable", stmt.span.start); }
+                    } else { targetType = makeType(kindAny); }
+                } else if receiver.kind == kindString { addError(ctx, "string indices are not assignable", stmt.span.start); }
                 else if !isUnknown(receiver) { addError(ctx, "indexed value is not mutable", stmt.span.start); }
             } else { addError(ctx, "assignment target is not an lvalue", stmt.span.start); }
         }
@@ -3521,8 +3701,8 @@ func checkAssign(ctx: TypecheckContext, env: TypeEnv, stmt: AssignStmt) {
     if stmt.op == "=" { expectType(ctx, targetType, valueType, "assignment type mismatch", stmt.span.start); }
     else {
         var op = stmt.op.slice(0, stmt.op.len() - 1);
-        if op == "+" && (targetType.kind == "String" || valueType.kind == "String") {
-            if targetType.kind != "String" || valueType.kind != "String" { addError(ctx, "'+' not defined for " + arithmeticOperandLabel(targetType) + " and " + arithmeticOperandLabel(valueType) + "; mixed string + is not allowed; convert explicitly or use interpolation", stmt.span.start); }
+        if op == "+" && (targetType.kind == kindString || valueType.kind == kindString) {
+            if targetType.kind != kindString || valueType.kind != kindString { addError(ctx, "'+' not defined for " + arithmeticOperandLabel(targetType) + " and " + arithmeticOperandLabel(valueType) + "; mixed string + is not allowed; convert explicitly or use interpolation", stmt.span.start); }
         } else if !isNumeric(targetType) || !isNumeric(valueType) { addError(ctx, "compound assignment requires compatible numeric operands", stmt.span.start); }
         else { expectType(ctx, targetType, valueType, "compound assignment type mismatch", stmt.span.start); }
     }
@@ -3561,19 +3741,19 @@ func enumHasSingleVariant(ctx: TypecheckContext, expected: Type, enumName: strin
 }
 
 func structPatternMatchesType(ctx: TypecheckContext, expected: Type, structName: string): bool {
-    if expected.kind != "Struct" || expected.name != structName { return false; }
+    if expected.kind != kindStruct || expected.name != structName { return false; }
     if expected.moduleId != "" && ctx.structOwners.has(structName) && ctx.structOwners.get(structName) != expected.moduleId { return false; }
     if expected.sourcePath != "" && ctx.structSources.has(structName) && ctx.structSources.get(structName) != expected.sourcePath { return false; }
     return true;
 }
 
 func enumTypeName(ty: Type): string {
-    if ty.kind == "Enum" { return ty.name; }
-    if ty.kind == "Nullable" {
+    if ty.kind == kindEnum { return ty.name; }
+    if ty.kind == kindNullable {
         var inner = ty.inner;
         if inner != null {
             var innerType: Type = inner;
-            if innerType.kind == "Enum" { return innerType.name; }
+            if innerType.kind == kindEnum { return innerType.name; }
         }
     }
     return "";
@@ -3585,22 +3765,22 @@ func patternNodeKey(pattern: Pattern): string {
 }
 
 func builtinSumPatternName(expected: Type, requestedName: string): bool {
-    if expected.kind == "Option" { return requestedName == "" || requestedName == "Option"; }
-    if expected.kind == "Result" { return requestedName == "" || requestedName == "Result"; }
+    if expected.kind == kindOption { return requestedName == "" || requestedName == kindOption; }
+    if expected.kind == kindResult { return requestedName == "" || requestedName == kindResult; }
     return false;
 }
 
 func builtinSumPayloadType(expected: Type, variant: string): Type {
-    if expected.kind == "Option" && variant == "Some" {
+    if expected.kind == kindOption && variant == "Some" {
         var optionInner = expected.inner;
         if optionInner != null { var resolvedOptionInner: Type = optionInner; return resolvedOptionInner; }
     }
-    if expected.kind == "Result" {
+    if expected.kind == kindResult {
         var resultPayload = expected.inner;
         if variant == "Err" { resultPayload = expected.key; }
         if resultPayload != null { var resolvedResultPayload: Type = resultPayload; return resolvedResultPayload; }
     }
-    return makeType("Unknown");
+    return makeType(kindUnknown);
 }
 
 func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expected: Type): PatternResult {
@@ -3611,52 +3791,52 @@ func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expecte
         },
         Pattern::Wildcard(_) => { return PatternResult { coversAll: true, variant: "", coversVariant: false }; },
         Pattern::Literal(literalPattern) => {
-            var actual = makeType("Unknown");
-            if literalPattern.literal.kind == LiteralKind::Int { actual = makeType("Int"); }
-            else if literalPattern.literal.kind == LiteralKind::Float { actual = makeType("Float"); }
-            else if literalPattern.literal.kind == LiteralKind::Bool { actual = makeType("Bool"); }
-            else if literalPattern.literal.kind == LiteralKind::String { actual = makeType("String"); }
-            else if literalPattern.literal.kind == LiteralKind::Char { actual = makeType("Char"); }
-            else if literalPattern.literal.kind == LiteralKind::Null { actual = makeType("Null"); }
+            var actual = makeType(kindUnknown);
+            if literalPattern.literal.kind == LiteralKind::Int { actual = makeType(kindInt); }
+            else if literalPattern.literal.kind == LiteralKind::Float { actual = makeType(kindFloat); }
+            else if literalPattern.literal.kind == LiteralKind::Bool { actual = makeType(kindBool); }
+            else if literalPattern.literal.kind == LiteralKind::String { actual = makeType(kindString); }
+            else if literalPattern.literal.kind == LiteralKind::Char { actual = makeType(kindChar); }
+            else if literalPattern.literal.kind == LiteralKind::Null { actual = makeType(kindNull); }
             expectType(ctx, expected, actual, "pattern type mismatch", patternSpan(pattern).start);
             return PatternResult { coversAll: false, variant: "", coversVariant: false };
         },
         Pattern::Variable(variable) => {
-            if expected.kind == "Option" && variable.name == "None" {
+            if expected.kind == kindOption && variable.name == "None" {
                 return PatternResult { coversAll: false, variant: "Option::None", coversVariant: true };
             }
             var knownEnum = enumTypeName(expected);
             if knownEnum != "" {
                 var bareVariant = findVariantDecl(ctx, knownEnum, variable.name);
                 if bareVariant != null {
-                    return PatternResult { coversAll: expected.kind == "Enum" && enumHasSingleVariant(ctx, expected, knownEnum), variant: variable.name, coversVariant: true };
+                    return PatternResult { coversAll: expected.kind == kindEnum && enumHasSingleVariant(ctx, expected, knownEnum), variant: variable.name, coversVariant: true };
                 }
             }
             var duplicate = env.symbols.has(variable.name);
             defineSymbol(ctx, env, variable.name, expected, true, variable.span.start);
-            if !duplicate { recordBinding(ctx, pattern, patternNodeKey(pattern), variable.name, expected, "Pattern", true, -1); }
+            if !duplicate { recordBinding(ctx, patternNodeKey(pattern), variable.name, expected, "Pattern", true, -1); }
             return PatternResult { coversAll: true, variant: "", coversVariant: false };
         },
         Pattern::EnumVariant(enumPattern) => {
-            if (enumPattern.enumName == "Option" || enumPattern.enumName == "Result") && !builtinSumPatternName(expected, enumPattern.enumName) {
+            if (enumPattern.enumName == kindOption || enumPattern.enumName == kindResult) && !builtinSumPatternName(expected, enumPattern.enumName) {
                 addError(ctx, "built-in sum pattern does not match scrutinee type " + typeName(expected), patternSpan(pattern).start);
                 return PatternResult { coversAll: false, variant: "", coversVariant: false };
             }
-            if expected.kind == "Option" || expected.kind == "Result" {
+            if expected.kind == kindOption || expected.kind == kindResult {
                 if !builtinSumPatternName(expected, enumPattern.enumName) {
                     addError(ctx, "built-in sum pattern does not match scrutinee type " + typeName(expected), patternSpan(pattern).start);
                     return PatternResult { coversAll: false, variant: "", coversVariant: false };
                 }
                 var builtinVariantValid = false;
-                if expected.kind == "Option" { builtinVariantValid = enumPattern.variant == "Some" || enumPattern.variant == "None"; }
+                if expected.kind == kindOption { builtinVariantValid = enumPattern.variant == "Some" || enumPattern.variant == "None"; }
                 else { builtinVariantValid = enumPattern.variant == "Ok" || enumPattern.variant == "Err"; }
                 if !builtinVariantValid {
                     addError(ctx, "unknown " + expected.kind + " variant '" + enumPattern.variant + "'", patternSpan(pattern).start);
                     return PatternResult { coversAll: false, variant: "", coversVariant: false };
                 }
                 var builtinPayloadCount = 0;
-                if expected.kind == "Option" && enumPattern.variant == "Some" { builtinPayloadCount = 1; }
-                if expected.kind == "Result" { builtinPayloadCount = 1; }
+                if expected.kind == kindOption && enumPattern.variant == "Some" { builtinPayloadCount = 1; }
+                if expected.kind == kindResult { builtinPayloadCount = 1; }
                 if builtinPayloadCount == 0 && enumPattern.payloads.len() != 0 {
                     addError(ctx, expected.kind + "::" + enumPattern.variant + " expects 0 payload patterns", patternSpan(pattern).start);
                     return PatternResult { coversAll: false, variant: "", coversVariant: false };
@@ -3701,7 +3881,7 @@ func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expecte
                     i = i + 1;
                 }
                 return PatternResult {
-                    coversAll: expected.kind == "Enum" && coversVariant && enumHasSingleVariant(ctx, expected, enumName),
+                    coversAll: expected.kind == kindEnum && coversVariant && enumHasSingleVariant(ctx, expected, enumName),
                     variant: enumPattern.variant,
                     coversVariant: coversVariant,
                 };
@@ -3735,7 +3915,7 @@ func checkPattern(ctx: TypecheckContext, env: TypeEnv, pattern: Pattern, expecte
             return PatternResult { coversAll: false, variant: "", coversVariant: false };
         },
         Pattern::Range(rangePattern) => {
-            if expected.kind != "Int" { addError(ctx, "range pattern requires an int scrutinee", patternSpan(pattern).start); }
+            if expected.kind != kindInt { addError(ctx, "range pattern requires an int scrutinee", patternSpan(pattern).start); }
             var first = integerLiteralValue(rangePattern.start.text);
             var last = integerLiteralValue(rangePattern.end.text);
             if first > last { addError(ctx, "range pattern start exceeds end", patternSpan(pattern).start); }
@@ -3751,24 +3931,31 @@ func checkBinding(ctx: TypecheckContext, env: TypeEnv, declaration: Stmt, name: 
         declared = resolveTypeTag(ctx, typeExpr, tag, span, false);
         expectType(ctx, declared, actual, "initializer type mismatch for '" + name + "'", span);
     }
-    if typeContainsRawAddress(declared) && declared.kind != "RawAddress" {
+    if typeContainsRawAddress(declared) && declared.kind != kindRawAddress {
         rejectRawAggregate(ctx, declared, span, "local bindings");
     }
-    if typeContainsRawAddress(actual) && actual.kind != "RawAddress" {
+    if typeContainsRawAddress(actual) && actual.kind != kindRawAddress {
         rejectRawAggregate(ctx, actual, span, "local bindings");
     }
     if typeContainsRawAddress(declared) && !ctx.rawAuthorized {
         addError(ctx, "raw address is only available in an authorized runtime unit", span);
     }
     defineSymbol(ctx, env, name, declared, isConst, span);
-    recordBinding(ctx, declaration, stmtNodeKey(declaration), name, declared, "Local", isConst, -1);
+    recordBinding(ctx, stmtNodeKey(declaration), name, declared, "Local", isConst, -1);
 }
 
-func inferGlobalBinding(ctx: TypecheckContext, name: string, tag: string, typeExpr: TypeExpr?, value: Expr, isConst: bool, span: int) {
+func inferGlobalBinding(ctx: TypecheckContext, name: string, tag: string, typeExpr: TypeExpr?, value: Expr, isConst: bool, span: int): bool {
     var actual = inferExpr(ctx, ctx.globals, value);
     var ty = actual;
     if typeExpr != null || tag != "" { ty = resolveTypeTag(ctx, typeExpr, tag, span, false); }
-    if !isUnknown(ty) { ctx.globals.symbols.set(name, Symbol { name: name, ty: ty, isConst: isConst }); }
+    if isUnknown(ty) { return false; }
+    var changed = true;
+    if ctx.globals.symbols.has(name) {
+        var previous: Symbol = ctx.globals.symbols.get(name);
+        if typeEqual(previous.ty, ty) && previous.isConst == isConst { changed = false; }
+    }
+    ctx.globals.symbols.set(name, Symbol { name: name, ty: ty, isConst: isConst });
+    return changed;
 }
 
 func checkGlobalBinding(ctx: TypecheckContext, declaration: Stmt, name: string, tag: string, typeExpr: TypeExpr?, value: Expr, isConst: bool, span: int) {
@@ -3783,12 +3970,12 @@ func checkGlobalBinding(ctx: TypecheckContext, declaration: Stmt, name: string, 
     }
     if isUnknown(ty) { addError(ctx, "cannot infer type of '" + name + "'", span); }
     ctx.globals.symbols.set(name, Symbol { name: name, ty: ty, isConst: isConst });
-    recordBinding(ctx, declaration, stmtNodeKey(declaration), name, ty, "Global", isConst, -1);
+    recordBinding(ctx, stmtNodeKey(declaration), name, ty, "Global", isConst, -1);
 }
 
 func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
     var scrutinee = inferExpr(ctx, env, stmt.scrutinee);
-    var covered = [];
+    var covered: Vec<string> = [];
     var sawTrue = false;
     var sawFalse = false;
     var sawNull = false;
@@ -3818,7 +4005,7 @@ func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
         i = i + 1;
     }
     if wildcard { return; }
-    if scrutinee.kind == "Option" {
+    if scrutinee.kind == kindOption {
         var optionVariants = ["Option::Some", "Option::None"];
         var optionVariantIndex = 0;
         loop {
@@ -3829,7 +4016,7 @@ func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
             if !optionSeen { addError(ctx, "non-exhaustive Option match; missing " + optionVariants[optionVariantIndex], stmt.span.start); }
             optionVariantIndex = optionVariantIndex + 1;
         }
-    } else if scrutinee.kind == "Result" {
+    } else if scrutinee.kind == kindResult {
         var resultVariants = ["Result::Ok", "Result::Err"];
         var resultVariantIndex = 0;
         loop {
@@ -3840,7 +4027,7 @@ func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
             if !resultSeen { addError(ctx, "non-exhaustive Result match; missing " + resultVariants[resultVariantIndex], stmt.span.start); }
             resultVariantIndex = resultVariantIndex + 1;
         }
-    } else if scrutinee.kind == "Enum" && ctx.enums.has(scrutinee.name) {
+    } else if scrutinee.kind == kindEnum && ctx.enums.has(scrutinee.name) {
         var decl: EnumDeclStmt = ctx.enums.get(scrutinee.name);
         var v = 0;
         loop {
@@ -3851,20 +4038,20 @@ func checkMatch(ctx: TypecheckContext, env: TypeEnv, stmt: MatchStmt) {
             if !seen { addError(ctx, "non-exhaustive match; missing " + scrutinee.name + "::" + decl.variantDecls[v].name + "; non-exhaustive match for enum", stmt.span.start); }
             v = v + 1;
         }
-    } else if scrutinee.kind == "Bool" {
+    } else if scrutinee.kind == kindBool {
         if !sawTrue { addError(ctx, "non-exhaustive bool match; missing true; non-exhaustive match for bool", stmt.span.start); }
         if !sawFalse { addError(ctx, "non-exhaustive bool match; missing false; non-exhaustive match for bool", stmt.span.start); }
-    } else if scrutinee.kind == "Nullable" {
+    } else if scrutinee.kind == kindNullable {
         if !sawNull { addError(ctx, "non-exhaustive nullable match; missing null", stmt.span.start); }
         var nullableHandled = false;
         var nullableInner = scrutinee.inner;
         if nullableInner != null {
             var innerType: Type = nullableInner;
-            if innerType.kind == "Bool" {
+            if innerType.kind == kindBool {
                 nullableHandled = true;
                 if !sawTrue { addError(ctx, "non-exhaustive nullable bool match; missing true", stmt.span.start); }
                 if !sawFalse { addError(ctx, "non-exhaustive nullable bool match; missing false", stmt.span.start); }
-            } else if innerType.kind == "Enum" && ctx.enums.has(innerType.name) {
+            } else if innerType.kind == kindEnum && ctx.enums.has(innerType.name) {
                 nullableHandled = true;
                 var innerEnum: EnumDeclStmt = ctx.enums.get(innerType.name);
                 var nullableVariant = 0;
@@ -3916,7 +4103,7 @@ func checkStmt(ctx: TypecheckContext, env: TypeEnv, stmt: Stmt) {
         Stmt::Assign(assignStmt) => { checkAssign(ctx, env, assignStmt); },
         Stmt::Return(retStmt) => {
             if !ctx.inFunction { addError(ctx, "return is only valid inside a function", retStmt.span.start); return; }
-            var retType = makeType("Void");
+            var retType = makeType(kindVoid);
             var hasValue = returnedExpressionHasValue(retStmt);
             if hasValue { retType = inferExpr(ctx, env, retStmt.value); }
             ctx.returnTypes.push(retType);
@@ -3938,18 +4125,18 @@ func checkStmt(ctx: TypecheckContext, env: TypeEnv, stmt: Stmt) {
         },
         Stmt::For(forStmt) => {
             var iterable = inferExpr(ctx, env, forStmt.iterable);
-            var itemType = makeType("Unknown");
-            if iterable.kind == "Array" {
+            var itemType = makeType(kindUnknown);
+            if iterable.kind == kindArray {
                 var maybeItemType = iterable.inner;
                 if maybeItemType != null {
                     var resolvedItemType: Type = maybeItemType;
                     itemType = resolvedItemType;
-                } else { itemType = makeType("Any"); }
-            } else if iterable.kind == "Any" { itemType = makeType("Any"); }
+                } else { itemType = makeType(kindAny); }
+            } else if iterable.kind == kindAny { itemType = makeType(kindAny); }
             else if !isUnknown(iterable) { addError(ctx, "for-in requires a Vec or range, got " + typeName(iterable), forStmt.span.start); }
             var loopEnv = newEnv(env, false);
             defineSymbol(ctx, loopEnv, forStmt.variable, itemType, true, forStmt.span.start);
-            recordBinding(ctx, stmt, stmtNodeKey(stmt), forStmt.variable, itemType, "LoopVariable", true, -1);
+            recordBinding(ctx, stmtNodeKey(stmt), forStmt.variable, itemType, "LoopVariable", true, -1);
             ctx.loopDepth = ctx.loopDepth + 1;
             checkBody(ctx, loopEnv, forStmt.body);
             ctx.loopDepth = ctx.loopDepth - 1;
@@ -3974,32 +4161,37 @@ func checkStatements(ctx: TypecheckContext, env: TypeEnv, statements: Vec<Stmt>)
     }
 }
 
-func inferGlobalTypes(ctx: TypecheckContext, program: Program) {
+func inferGlobalTypes(ctx: TypecheckContext, program: Program): bool {
     var oldSuppress = ctx.suppressErrors;
     ctx.suppressErrors = true;
+    var anyChanged = false;
     var pass = 0;
     loop {
         if pass > program.statements.len() { break; }
+        var changed = false;
         var i = 0;
         loop {
             if i >= program.statements.len() { break; }
             var stmt = program.statements[i];
             match stmt {
-                Stmt::VarDecl(decl) => { inferGlobalBinding(ctx, decl.name, decl.typeTag, decl.typeExpr, decl.value, false, decl.span.start); },
-                Stmt::ConstDecl(decl) => { inferGlobalBinding(ctx, decl.name, decl.typeTag, decl.typeExpr, decl.value, true, decl.span.start); },
+                Stmt::VarDecl(decl) => { if inferGlobalBinding(ctx, decl.name, decl.typeTag, decl.typeExpr, decl.value, false, decl.span.start) { changed = true; } },
+                Stmt::ConstDecl(decl) => { if inferGlobalBinding(ctx, decl.name, decl.typeTag, decl.typeExpr, decl.value, true, decl.span.start) { changed = true; } },
                 _ => {},
             }
             i = i + 1;
         }
+        if changed { anyChanged = true; }
+        if !changed { break; }
         pass = pass + 1;
     }
     ctx.suppressErrors = oldSuppress;
+    return anyChanged;
 }
 
 func inferFunctionReturn(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string): Type {
     var key = decl.name;
     if owner != "" { key = owner + "." + decl.name; }
-    if !ctx.functions.has(key) { return makeType("Unknown"); }
+    if !ctx.functions.has(key) { return makeType(kindUnknown); }
     var sig: FunctionSig = ctx.functions.get(key);
     if !sig.inferReturn { return sig.ret; }
     var oldSuppress = ctx.suppressErrors;
@@ -4011,7 +4203,7 @@ func inferFunctionReturn(ctx: TypecheckContext, decl: FuncDeclStmt, owner: strin
     ctx.suppressErrors = true;
     ctx.inFunction = true;
     ctx.currentStruct = owner;
-    ctx.currentReturn = makeType("Unknown");
+    ctx.currentReturn = makeType(kindUnknown);
     ctx.returnTypes = [];
     ctx.loopDepth = 0;
     var env = newEnv(ctx.globals, false);
@@ -4146,7 +4338,7 @@ func statementsDefinitelyReturn(statements: Vec<Stmt>): bool {
     return false;
 }
 
-func checkFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, declaration, declarationKey: string) {
+func checkFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, declarationKey: string) {
     if isRawIntrinsicName(decl.name) { return; }
     var key = decl.name;
     if owner != "" { key = owner + "." + decl.name; }
@@ -4169,7 +4361,7 @@ func checkFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, dec
         if i >= decl.params.len() { break; }
         var param = decl.params[i];
         defineSymbol(ctx, env, param.name, sig.params[i], false, decl.span.start);
-        recordBinding(ctx, declaration, declarationKey, param.name, sig.params[i], "Parameter", false, i);
+        recordBinding(ctx, declarationKey, param.name, sig.params[i], "Parameter", false, i);
         if param.hasDefault {
             var actualDefault = inferExpr(ctx, env, param.default);
             var expectedDefault = sig.params[i];
@@ -4195,12 +4387,12 @@ func checkFunction(ctx: TypecheckContext, decl: FuncDeclStmt, owner: string, dec
     var returnIndex = 0;
     loop {
         if returnIndex >= ctx.returnTypes.len() { break; }
-        if ctx.returnTypes[returnIndex].kind == "Void" { sawVoid = true; }
+        if ctx.returnTypes[returnIndex].kind == kindVoid { sawVoid = true; }
         else { sawValue = true; }
         returnIndex = returnIndex + 1;
     }
     if sawVoid && sawValue { addError(ctx, "function '" + key + "' cannot mix value and void returns", decl.span.start); }
-    if sig.ret.kind != "Void" && !bodyDefinitelyReturns(decl.body) { addError(ctx, "function '" + key + "' must return " + typeName(sig.ret) + " on all paths; not all code paths return a value", decl.span.start); }
+    if sig.ret.kind != kindVoid && !bodyDefinitelyReturns(decl.body) { addError(ctx, "function '" + key + "' must return " + typeName(sig.ret) + " on all paths; not all code paths return a value", decl.span.start); }
     ctx.inFunction = oldInFunction;
     ctx.currentReturn = oldReturn;
     ctx.returnTypes = oldReturns;
@@ -4212,7 +4404,7 @@ func rejectBadEntryMain(ctx: TypecheckContext) {
     if !ctx.isEntry || !ctx.functions.has("main") { return; }
     var sig: FunctionSig = ctx.functions.get("main");
     if sig.owner != "" { return; }
-    if sig.params.len() == 0 && !sig.variadic && sig.ret.kind == "Void" { return; }
+    if sig.params.len() == 0 && !sig.variadic && sig.ret.kind == kindVoid { return; }
     var span = 0;
     var i = 0;
     loop {
@@ -4287,10 +4479,10 @@ func checkFunctions(ctx: TypecheckContext, program: Program) {
         if i >= program.statements.len() { break; }
         var stmt = program.statements[i];
         match stmt {
-            Stmt::FuncDecl(decl) => { checkFunction(ctx, decl, "", stmt, stmtNodeKey(stmt)); },
+            Stmt::FuncDecl(decl) => { checkFunction(ctx, decl, "", stmtNodeKey(stmt)); },
             Stmt::StructDecl(decl) => {
                 var j = 0;
-                loop { if j >= decl.methods.len() { break; } checkFunction(ctx, decl.methods[j], decl.name, decl.methods[j], funcDeclNodeKey(decl.methods[j])); j = j + 1; }
+                loop { if j >= decl.methods.len() { break; } checkFunction(ctx, decl.methods[j], decl.name, funcDeclNodeKey(decl.methods[j])); j = j + 1; }
             },
             Stmt::VarDecl(_) => {},
             Stmt::ConstDecl(_) => {},
@@ -4317,7 +4509,7 @@ func refreshFunctionSymbols(ctx: TypecheckContext) {
     loop {
         if i >= ctx.symbols.len() { break; }
         var symbol = ctx.symbols[i];
-        if symbol.kind == "Function" && symbol.moduleId == ctx.moduleId && ctx.functions.has(symbol.sourceName) {
+        if symbol.kind == kindFunction && symbol.moduleId == ctx.moduleId && ctx.functions.has(symbol.sourceName) {
             var sig: FunctionSig = ctx.functions.get(symbol.sourceName);
             symbol.signature = functionType(sig.params, sig.ret);
             symbol.isPub = sig.isPub;
@@ -4444,8 +4636,7 @@ func typecheckSingle(unit: SourceUnit, graph: SourceGraph, summaries: HashMap<st
     defineGlobalPlaceholders(ctx, program);
     inferGlobalTypes(ctx, program);
     inferFunctionReturns(ctx, program);
-    inferGlobalTypes(ctx, program);
-    inferFunctionReturns(ctx, program);
+    if inferGlobalTypes(ctx, program) { inferFunctionReturns(ctx, program); }
     ctx.recording = true;
     checkGlobals(ctx, program);
     checkFunctions(ctx, program);

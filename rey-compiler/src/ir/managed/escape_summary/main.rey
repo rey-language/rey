@@ -1,0 +1,797 @@
+// Bounded, monotone summaries for managed references. Incomplete summaries are
+// deliberately top so callers never use a partially explored call graph as proof.
+import ir::{IRProgram, IRTypeKind, Instruction, InstructionKind, TerminatorKind};
+import ir::analysis::container::{ContainerEffect, containerEffect};
+import ir::managed::{ManagedAllocation, ManagedFunction, ManagedHook, ManagedProgram};
+
+pub struct EscapeStore {
+    pub ownerParameter: int,
+    pub childParameter: int,
+}
+
+pub struct AllocationEscape {
+    pub resultId: int,
+    pub escapesProgram: bool,
+    pub returned: bool,
+    pub storedInParameter: bool,
+}
+
+pub struct CallResultEscape {
+    pub blockId: int,
+    pub instructionIndex: int,
+    pub resultId: int,
+    pub escapesProgram: bool,
+    pub returned: bool,
+    pub storedInParameter: bool,
+    pub unknown: bool,
+}
+
+pub struct FunctionEscapeSummary {
+    pub functionId: int,
+    pub parameterEscapesProgram: Vec<bool>,
+    pub returnAliasesParameters: Vec<bool>,
+    pub stores: Vec<EscapeStore>,
+    pub allocations: Vec<AllocationEscape>,
+    pub callResults: Vec<CallResultEscape>,
+    pub returnsFresh: bool,
+    pub returnsUnknown: bool,
+    pub mayAllocateCurrentRegion: bool,
+    pub hasUnknownAmbientEffect: bool,
+    pub hasUnknownMemoryEffect: bool,
+    pub recursiveCycle: bool,
+    pub complete: bool,
+}
+
+pub struct EscapeSummaryPlan {
+    pub summaries: Vec<FunctionEscapeSummary>,
+    pub ambientSafeFunctions: HashMap<string, bool>,
+    pub complete: bool,
+    pub workRemaining: int,
+}
+
+struct AliasLink { pub left: int, pub right: int }
+struct StoreLink { pub owner: int, pub child: int }
+struct AnalysisResult { pub summary: FunctionEscapeSummary, pub exhausted: bool }
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 { budget.set(0, -1); return false; }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func hasInt(values: Vec<int>, value: int): bool {
+    var index = 0;
+    loop { if index >= values.len() { break; } if values[index] == value { return true; } index = index + 1; }
+    return false;
+}
+
+func addInt(values: Vec<int>, value: int): bool {
+    if value < 0 || hasInt(values, value) { return false; }
+    values.push(value);
+    return true;
+}
+
+func programIndices(program: IRProgram): HashMap<string, int> {
+    var indices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } indices.set(program.functions[index].id.toString(), index); index = index + 1; }
+    return indices;
+}
+
+func indexedProgram(indices: HashMap<string, int>, functionId: int): int {
+    var key = functionId.toString();
+    if !indices.has(key) { return -1; }
+    return indices.get(key);
+}
+
+func hookIndex(hooks: Vec<ManagedHook>, functionId: int): int {
+    var index = 0;
+    loop { if index >= hooks.len() { break; } if hooks[index].functionId == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+func addNode(nodes: Vec<int>, index: HashMap<string, int>, valueId: int): int {
+    if valueId < 0 { return -1; }
+    var key = valueId.toString();
+    if index.has(key) { return index.get(key); }
+    var node = nodes.len();
+    nodes.push(valueId);
+    index.set(key, node);
+    return node;
+}
+
+func nodeFor(index: HashMap<string, int>, valueId: int): int {
+    var key = valueId.toString();
+    if !index.has(key) { return -1; }
+    return index.get(key);
+}
+
+func addAlias(links: Vec<AliasLink>, left: int, right: int) {
+    if left < 0 || right < 0 || left == right { return; }
+    links.push(AliasLink { left: left, right: right });
+}
+
+func addStore(stores: Vec<StoreLink>, owner: int, child: int) {
+    if owner < 0 || child < 0 { return; }
+    stores.push(StoreLink { owner: owner, child: child });
+}
+
+func emptySummary(functionId: int, parameterCount: int, allocations: Vec<ManagedAllocation>): FunctionEscapeSummary {
+    var parameterEscapes: Vec<bool> = [];
+    var returnAliases: Vec<bool> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } parameterEscapes.push(false); returnAliases.push(false); index = index + 1; }
+    var allocationEscapes: Vec<AllocationEscape> = [];
+    index = 0;
+    loop {
+        if index >= allocations.len() { break; }
+        var allocation = allocations[index];
+        if allocation.functionId == functionId { allocationEscapes.push(AllocationEscape { resultId: allocation.resultId, escapesProgram: false, returned: false, storedInParameter: false }); }
+        index = index + 1;
+    }
+    return FunctionEscapeSummary { functionId: functionId, parameterEscapesProgram: parameterEscapes, returnAliasesParameters: returnAliases, stores: [], allocations: allocationEscapes, callResults: [], returnsFresh: false, returnsUnknown: false, mayAllocateCurrentRegion: false, hasUnknownAmbientEffect: false, hasUnknownMemoryEffect: false, recursiveCycle: false, complete: true };
+}
+
+func topSummary(functionId: int, parameterCount: int, allocations: Vec<ManagedAllocation>): FunctionEscapeSummary {
+    var summary = emptySummary(functionId, parameterCount, allocations);
+    var index = 0;
+    loop {
+        if index >= summary.parameterEscapesProgram.len() { break; }
+        summary.parameterEscapesProgram.set(index, true);
+        summary.returnAliasesParameters.set(index, true);
+        index = index + 1;
+    }
+    index = 0;
+    loop { if index >= summary.allocations.len() { break; } var item = summary.allocations[index]; item.escapesProgram = true; item.returned = true; item.storedInParameter = true; summary.allocations.set(index, item); index = index + 1; }
+    var owner = 0;
+    loop {
+        if owner >= parameterCount { break; }
+        var child = 0;
+        loop { if child >= parameterCount { break; } summary.stores.push(EscapeStore { ownerParameter: owner, childParameter: child }); child = child + 1; }
+        owner = owner + 1;
+    }
+    summary.returnsFresh = true;
+    summary.returnsUnknown = true;
+    summary.mayAllocateCurrentRegion = true;
+    summary.hasUnknownAmbientEffect = true;
+    summary.hasUnknownMemoryEffect = true;
+    summary.complete = false;
+    return summary;
+}
+
+func addSummaryStore(summary: FunctionEscapeSummary, owner: int, child: int): bool {
+    if owner < 0 || child < 0 { return false; }
+    var index = 0;
+    loop { if index >= summary.stores.len() { break; } if summary.stores[index].ownerParameter == owner && summary.stores[index].childParameter == child { return false; } index = index + 1; }
+    summary.stores.push(EscapeStore { ownerParameter: owner, childParameter: child });
+    return true;
+}
+
+func addSeed(seeds: Vec<int>, node: int) {
+    if node >= 0 { addInt(seeds, node); }
+}
+
+func hookEffect(name: string): ContainerEffect {
+    if name == "managedVecCreate" || name == "managedMapCreate" || name == "managedAllocateSized" || name == "managedVecJoin" || name == "managedMapKeys" || name == "managedReadFile" || name == "managedListDir" || name == "managedArgsCreate" || name == "managedStringFromCString" {
+        return ContainerEffect { known: true, receiverEscapes: false, argumentEscapes: false, argumentEscapesToReceiver: false, freshResult: true };
+    }
+    return containerEffect(name);
+}
+
+func findRoot(parent: Vec<int>, node: int): int {
+    if node < 0 || node >= parent.len() { return -1; }
+    var root = node;
+    loop { if parent[root] == root { break; } root = parent[root]; }
+    var current = node;
+    loop {
+        if parent[current] == current { break; }
+        var next = parent[current];
+        parent.set(current, root);
+        current = next;
+    }
+    return root;
+}
+
+func union(parent: Vec<int>, rank: Vec<int>, left: int, right: int) {
+    var leftRoot = findRoot(parent, left);
+    var rightRoot = findRoot(parent, right);
+    if leftRoot < 0 || rightRoot < 0 || leftRoot == rightRoot { return; }
+    if rank[leftRoot] < rank[rightRoot] { parent.set(leftRoot, rightRoot); }
+    else if rank[leftRoot] > rank[rightRoot] { parent.set(rightRoot, leftRoot); }
+    else { parent.set(rightRoot, leftRoot); rank.set(leftRoot, rank[leftRoot] + 1); }
+}
+
+func addCallAliasLinks(module: ManagedProgram, instruction: Instruction, summaries: Vec<FunctionEscapeSummary>, summaryIndices: HashMap<string, int>, nodeIndices: HashMap<string, int>, links: Vec<AliasLink>, freshSeeds: Vec<int>, unknownSeeds: Vec<int>, persistentSeeds: Vec<int>, storeLinks: Vec<StoreLink>, result: FunctionEscapeSummary, budget: Vec<int>): FunctionEscapeSummary {
+    if instruction.kind != InstructionKind::Call { return result; }
+    if instruction.functionId == module.allocateFunctionId {
+        addSeed(freshSeeds, nodeFor(nodeIndices, instruction.resultId));
+        result.mayAllocateCurrentRegion = true;
+        return result;
+    }
+    if instruction.functionId == module.storeReferenceFunctionId {
+        if instruction.operands.len() != 3 { result.complete = false; return result; }
+        addStore(storeLinks, nodeFor(nodeIndices, instruction.operands[0]), nodeFor(nodeIndices, instruction.operands[2]));
+        return result;
+    }
+    if instruction.functionId == module.collectFunctionId {
+        result.mayAllocateCurrentRegion = true;
+        result.hasUnknownAmbientEffect = true;
+        result.hasUnknownMemoryEffect = true;
+        var collectAt = 0;
+        loop { if collectAt >= instruction.operands.len() { break; } addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[collectAt])); collectAt = collectAt + 1; }
+        addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+        return result;
+    }
+    var hookAt = hookIndex(module.hooks, instruction.functionId);
+    if hookAt >= 0 {
+        var hook = module.hooks[hookAt];
+        var effect = hookEffect(hook.runtimeName);
+        result.mayAllocateCurrentRegion = true;
+        result.hasUnknownAmbientEffect = true;
+        if !effect.known {
+            result.hasUnknownMemoryEffect = true;
+            var operandAt = 0;
+            loop { if operandAt >= instruction.operands.len() { break; } addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[operandAt])); operandAt = operandAt + 1; }
+            addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+        } else {
+            if effect.receiverEscapes && instruction.operands.len() > 0 { addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[0])); }
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if operandAt > 0 {
+                    var operandNode = nodeFor(nodeIndices, instruction.operands[operandAt]);
+                    if effect.argumentEscapes { addSeed(persistentSeeds, operandNode); }
+                    if effect.argumentEscapesToReceiver && instruction.operands.len() > 0 { addStore(storeLinks, nodeFor(nodeIndices, instruction.operands[0]), operandNode); }
+                }
+                operandAt = operandAt + 1;
+            }
+            if effect.freshResult { addSeed(freshSeeds, nodeFor(nodeIndices, instruction.resultId)); }
+            else if effect.argumentEscapes {
+                addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+                if instruction.operands.len() > 0 { addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[0])); }
+            }
+        }
+        return result;
+    }
+    var calleeKey = instruction.functionId.toString();
+    if !summaryIndices.has(calleeKey) {
+        result.mayAllocateCurrentRegion = true;
+        result.hasUnknownAmbientEffect = true;
+        result.hasUnknownMemoryEffect = true;
+        var unknownAt = 0;
+        loop { if unknownAt >= instruction.operands.len() { break; } addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[unknownAt])); unknownAt = unknownAt + 1; }
+        addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+        return result;
+    }
+    var calleeAt = summaryIndices.get(calleeKey);
+    var callee = summaries[calleeAt];
+    if !callee.complete {
+        result.mayAllocateCurrentRegion = true;
+        result.hasUnknownAmbientEffect = true;
+        result.hasUnknownMemoryEffect = true;
+        var unknownParam = 0;
+        loop { if unknownParam >= instruction.operands.len() { break; } addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[unknownParam])); unknownParam = unknownParam + 1; }
+        addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+        return result;
+    }
+    if instruction.operands.len() != callee.parameterEscapesProgram.len() {
+        result.complete = false;
+        return result;
+    }
+    result.mayAllocateCurrentRegion = result.mayAllocateCurrentRegion || callee.mayAllocateCurrentRegion;
+    result.hasUnknownAmbientEffect = result.hasUnknownAmbientEffect || callee.hasUnknownAmbientEffect;
+    result.hasUnknownMemoryEffect = result.hasUnknownMemoryEffect || callee.hasUnknownMemoryEffect;
+    var parameterAt = 0;
+    loop {
+        if parameterAt >= callee.parameterEscapesProgram.len() || parameterAt >= instruction.operands.len() { break; }
+        if callee.parameterEscapesProgram[parameterAt] { addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[parameterAt])); }
+        parameterAt = parameterAt + 1;
+    }
+    var storeAt = 0;
+    loop {
+        if storeAt >= callee.stores.len() { break; }
+        var store = callee.stores[storeAt];
+        if store.ownerParameter < instruction.operands.len() && store.childParameter < instruction.operands.len() {
+            addStore(storeLinks, nodeFor(nodeIndices, instruction.operands[store.ownerParameter]), nodeFor(nodeIndices, instruction.operands[store.childParameter]));
+        }
+        storeAt = storeAt + 1;
+    }
+    parameterAt = 0;
+    loop {
+        if parameterAt >= callee.returnAliasesParameters.len() || parameterAt >= instruction.operands.len() { break; }
+        if callee.returnAliasesParameters[parameterAt] { addAlias(links, nodeFor(nodeIndices, instruction.resultId), nodeFor(nodeIndices, instruction.operands[parameterAt])); }
+        parameterAt = parameterAt + 1;
+    }
+    if callee.returnsFresh { addSeed(freshSeeds, nodeFor(nodeIndices, instruction.resultId)); }
+    if callee.returnsUnknown { addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId)); }
+    if !charge(budget) { result.complete = false; }
+    return result;
+}
+
+func analyzeFunction(module: ManagedProgram, managed: ManagedFunction, summaries: Vec<FunctionEscapeSummary>, summaryIndices: HashMap<string, int>, irIndices: HashMap<string, int>, budget: Vec<int>): AnalysisResult {
+    var realAt = indexedProgram(irIndices, managed.functionId);
+    if realAt < 0 { return AnalysisResult { summary: topSummary(managed.functionId, managed.parameterLayouts.len(), module.allocations), exhausted: false }; }
+    var function = module.program.functions[realAt];
+    var summary = emptySummary(managed.functionId, function.parameters.len(), module.allocations);
+    var nodes: Vec<int> = [];
+    var nodeIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop { if index >= function.parameters.len() { break; } if function.parameters[index].ty.kind == IRTypeKind::RawAddress { addNode(nodes, nodeIndices, function.parameters[index].id); } index = index + 1; }
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var valueAt = 0;
+        loop { if valueAt >= block.params.len() { break; } if block.params[valueAt].ty.kind == IRTypeKind::RawAddress { addNode(nodes, nodeIndices, block.params[valueAt].id); } valueAt = valueAt + 1; }
+        var instructionAt = 0;
+        loop { if instructionAt >= block.instructions.len() { break; } var instruction = block.instructions[instructionAt]; if instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 { addNode(nodes, nodeIndices, instruction.resultId); } instructionAt = instructionAt + 1; }
+        blockAt = blockAt + 1;
+    }
+    index = 0;
+    loop { if index >= module.allocations.len() { break; } var allocation = module.allocations[index]; if allocation.functionId == managed.functionId { addNode(nodes, nodeIndices, allocation.resultId); } index = index + 1; }
+    index = 0;
+    loop { if index >= module.derived.len() { break; } var derived = module.derived[index]; if derived.functionId == managed.functionId { addNode(nodes, nodeIndices, derived.valueId); addNode(nodes, nodeIndices, derived.ownerId); } index = index + 1; }
+
+    var links: Vec<AliasLink> = [];
+    var stores: Vec<StoreLink> = [];
+    var persistentSeeds: Vec<int> = [];
+    var freshSeeds: Vec<int> = [];
+    var unknownSeeds: Vec<int> = [];
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        if !charge(budget) { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; }
+        var block = function.blocks[blockAt];
+        var term = block.terminator;
+        if term.kind == TerminatorKind::Jump {
+            var targetAt = 0;
+            loop { if targetAt >= function.blocks.len() { break; } if function.blocks[targetAt].id == term.targetBlockId { break; } targetAt = targetAt + 1; }
+            if targetAt < function.blocks.len() {
+                var target = function.blocks[targetAt];
+                var argAt = 0;
+                loop { if argAt >= term.targetArgs.len() || argAt >= target.params.len() { break; } addAlias(links, nodeFor(nodeIndices, term.targetArgs[argAt]), nodeFor(nodeIndices, target.params[argAt].id)); argAt = argAt + 1; }
+            }
+        } else if term.kind == TerminatorKind::Branch {
+            var targetAt = 0;
+            loop {
+                if targetAt >= function.blocks.len() { break; }
+                var target = function.blocks[targetAt];
+                if target.id == term.trueTargetBlockId {
+                    var argAt = 0;
+                    loop { if argAt >= term.trueArgs.len() || argAt >= target.params.len() { break; } addAlias(links, nodeFor(nodeIndices, term.trueArgs[argAt]), nodeFor(nodeIndices, target.params[argAt].id)); argAt = argAt + 1; }
+                }
+                if target.id == term.falseTargetBlockId {
+                    var argAt = 0;
+                    loop { if argAt >= term.falseArgs.len() || argAt >= target.params.len() { break; } addAlias(links, nodeFor(nodeIndices, term.falseArgs[argAt]), nodeFor(nodeIndices, target.params[argAt].id)); argAt = argAt + 1; }
+                }
+                targetAt = targetAt + 1;
+            }
+        }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            if !charge(budget) { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call {
+                summary = addCallAliasLinks(module, instruction, summaries, summaryIndices, nodeIndices, links, freshSeeds, unknownSeeds, persistentSeeds, stores, summary, budget);
+                if !summary.complete || budget[0] < 0 { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; }
+            } else if instruction.kind == InstructionKind::RawOffset && instruction.operands.len() >= 1 {
+                addAlias(links, nodeFor(nodeIndices, instruction.resultId), nodeFor(nodeIndices, instruction.operands[0]));
+            } else if instruction.kind == InstructionKind::RawStoreAddress && instruction.operands.len() == 2 {
+                addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[1]));
+                summary.hasUnknownMemoryEffect = true;
+            } else if instruction.kind == InstructionKind::RawLoadAddress {
+                addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+                if instruction.operands.len() > 0 { addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[0])); }
+                summary.hasUnknownMemoryEffect = true;
+            } else if instruction.kind == InstructionKind::RawToInt && instruction.operands.len() > 0 {
+                addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[0]));
+                summary.hasUnknownMemoryEffect = true;
+            } else if instruction.kind == InstructionKind::RawFromInt {
+                addSeed(unknownSeeds, nodeFor(nodeIndices, instruction.resultId));
+                summary.hasUnknownMemoryEffect = true;
+            } else if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte || instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+                var operandAt = 0;
+                loop { if operandAt >= instruction.operands.len() { break; } addSeed(persistentSeeds, nodeFor(nodeIndices, instruction.operands[operandAt])); operandAt = operandAt + 1; }
+                summary.hasUnknownMemoryEffect = true;
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    index = 0;
+    loop {
+        if index >= module.derived.len() { break; }
+        var derived = module.derived[index];
+        if derived.functionId == managed.functionId { addAlias(links, nodeFor(nodeIndices, derived.valueId), nodeFor(nodeIndices, derived.ownerId)); }
+        index = index + 1;
+    }
+
+    var parent: Vec<int> = [];
+    var ranks: Vec<int> = [];
+    index = 0;
+    loop { if index >= nodes.len() { break; } parent.push(index); ranks.push(0); index = index + 1; }
+    index = 0;
+    loop { if index >= links.len() { break; } if !charge(budget) { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; } union(parent, ranks, links[index].left, links[index].right); index = index + 1; }
+    index = 0;
+    loop { if index >= nodes.len() { break; } findRoot(parent, index); index = index + 1; }
+    var parameterSources: Vec<Vec<int>> = [];
+    var allocationSources: Vec<Vec<int>> = [];
+    var persistent: Vec<bool> = [];
+    var fresh: Vec<bool> = [];
+    var unknown: Vec<bool> = [];
+    index = 0;
+    loop { if index >= nodes.len() { break; } parameterSources.push([]); allocationSources.push([]); persistent.push(false); fresh.push(false); unknown.push(false); index = index + 1; }
+    index = 0;
+    loop {
+        if index >= function.parameters.len() { break; }
+        var parameter = function.parameters[index];
+        var node = nodeFor(nodeIndices, parameter.id);
+        if node >= 0 { var root = findRoot(parent, node); addInt(parameterSources[root], index); }
+        index = index + 1;
+    }
+    index = 0;
+    loop {
+        if index >= module.allocations.len() { break; }
+        var allocation = module.allocations[index];
+        if allocation.functionId == managed.functionId { var node = nodeFor(nodeIndices, allocation.resultId); if node >= 0 { var root = findRoot(parent, node); addInt(allocationSources[root], index); } }
+        index = index + 1;
+    }
+    index = 0;
+    loop { if index >= persistentSeeds.len() { break; } var root = findRoot(parent, persistentSeeds[index]); if root >= 0 { persistent.set(root, true); } index = index + 1; }
+    index = 0;
+    loop { if index >= freshSeeds.len() { break; } var root = findRoot(parent, freshSeeds[index]); if root >= 0 { fresh.set(root, true); } index = index + 1; }
+    index = 0;
+    loop { if index >= unknownSeeds.len() { break; } var root = findRoot(parent, unknownSeeds[index]); if root >= 0 { unknown.set(root, true); } index = index + 1; }
+
+    var storeRoots: Vec<StoreLink> = [];
+    index = 0;
+    loop { if index >= stores.len() { break; } addStore(storeRoots, findRoot(parent, stores[index].owner), findRoot(parent, stores[index].child)); index = index + 1; }
+    var returnedRoots: Vec<bool> = [];
+    index = 0;
+    loop { if index >= nodes.len() { break; } returnedRoots.push(false); index = index + 1; }
+    blockAt = 0;
+    loop { if blockAt >= function.blocks.len() { break; } var term = function.blocks[blockAt].terminator; if term.kind == TerminatorKind::Return && term.valueId >= 0 { var returnedNode = nodeFor(nodeIndices, term.valueId); if returnedNode >= 0 { returnedRoots.set(findRoot(parent, returnedNode), true); } } blockAt = blockAt + 1; }
+    var changed = true;
+    var pass = 0;
+    loop {
+        if !changed || pass > function.parameters.len() * function.parameters.len() + nodes.len() + storeRoots.len() + 2 { break; }
+        changed = false;
+        index = 0;
+        loop {
+            if index >= storeRoots.len() { break; }
+            if !charge(budget) { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; }
+            var store = storeRoots[index];
+            var ownerHasKnownOrigin = parameterSources[store.owner].len() > 0 || allocationSources[store.owner].len() > 0 || fresh[store.owner];
+            var ownerPersists = persistent[store.owner] || unknown[store.owner] || !ownerHasKnownOrigin;
+            if ownerPersists && !persistent[store.child] { persistent.set(store.child, true); changed = true; }
+            if returnedRoots[store.owner] {
+                if !returnedRoots[store.child] { returnedRoots.set(store.child, true); changed = true; }
+                // A child embedded in a returned graph must outlive this invocation.
+                if !persistent[store.child] { persistent.set(store.child, true); changed = true; }
+            }
+            var ownerParams = parameterSources[store.owner];
+            var childParams = parameterSources[store.child];
+            var ownerAt = 0;
+            loop { if ownerAt >= ownerParams.len() { break; } var childAt = 0; loop { if childAt >= childParams.len() { break; } if addSummaryStore(summary, ownerParams[ownerAt], childParams[childAt]) { changed = true; } childAt = childAt + 1; } ownerAt = ownerAt + 1; }
+            if ownerParams.len() > 0 && (allocationSources[store.child].len() > 0 || fresh[store.child]) && !persistent[store.child] {
+                // A callee-local child stored in a borrowed object must outlive an unknown caller lifetime.
+                persistent.set(store.child, true);
+                changed = true;
+            }
+            index = index + 1;
+        }
+        pass = pass + 1;
+    }
+    if changed || budget[0] < 0 { return AnalysisResult { summary: topSummary(managed.functionId, function.parameters.len(), module.allocations), exhausted: true }; }
+
+    index = 0;
+    loop {
+        if index >= function.parameters.len() { break; }
+        var parameter = function.parameters[index];
+        var node = nodeFor(nodeIndices, parameter.id);
+        if node >= 0 && persistent[findRoot(parent, node)] { summary.parameterEscapesProgram.set(index, true); }
+        index = index + 1;
+    }
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var term = function.blocks[blockAt].terminator;
+        if term.kind == TerminatorKind::Return && term.valueId >= 0 {
+            var returnedNode = nodeFor(nodeIndices, term.valueId);
+            if returnedNode >= 0 {
+                var returnedRoot = findRoot(parent, returnedNode);
+                var parameterAt = 0;
+                loop { if parameterAt >= parameterSources[returnedRoot].len() { break; } var source = parameterSources[returnedRoot][parameterAt]; summary.returnAliasesParameters.set(source, true); parameterAt = parameterAt + 1; }
+                if allocationSources[returnedRoot].len() > 0 || fresh[returnedRoot] { summary.returnsFresh = true; }
+                if unknown[returnedRoot] { summary.returnsUnknown = true; }
+                parameterAt = 0;
+                loop { if parameterAt >= parameterSources[returnedRoot].len() { break; } var source = parameterSources[returnedRoot][parameterAt]; if persistent[returnedRoot] { summary.parameterEscapesProgram.set(source, true); } parameterAt = parameterAt + 1; }
+                var allocAt = 0;
+                loop { if allocAt >= allocationSources[returnedRoot].len() { break; } var source = allocationSources[returnedRoot][allocAt]; var localAt = 0; loop { if localAt >= summary.allocations.len() { break; } var item = summary.allocations[localAt]; if item.resultId == module.allocations[source].resultId { item.returned = true; summary.allocations.set(localAt, item); } localAt = localAt + 1; } allocAt = allocAt + 1; }
+            } else { summary.returnsUnknown = true; }
+        }
+        blockAt = blockAt + 1;
+    }
+    index = 0;
+    loop {
+        if index >= summary.allocations.len() { break; }
+        var item = summary.allocations[index];
+        var node = nodeFor(nodeIndices, item.resultId);
+        if node >= 0 {
+            var root = findRoot(parent, node);
+            item.escapesProgram = persistent[root];
+            if returnedRoots[root] { item.returned = true; }
+            if storesInParameter(storeRoots, parameterSources, root) { item.storedInParameter = true; item.escapesProgram = true; }
+            summary.allocations.set(index, item);
+        }
+        index = index + 1;
+    }
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.ty.kind == IRTypeKind::RawAddress && instruction.resultId >= 0 {
+                var callRoot = findRoot(parent, nodeFor(nodeIndices, instruction.resultId));
+                if callRoot >= 0 && (fresh[callRoot] || unknown[callRoot]) {
+                    summary.callResults.push(CallResultEscape { blockId: block.id, instructionIndex: instructionAt, resultId: instruction.resultId, escapesProgram: persistent[callRoot], returned: returnedRoots[callRoot], storedInParameter: storesInParameter(storeRoots, parameterSources, callRoot), unknown: unknown[callRoot] });
+                }
+            }
+            instructionAt = instructionAt + 1;
+        }
+        blockAt = blockAt + 1;
+    }
+    summary.hasUnknownMemoryEffect = summary.hasUnknownMemoryEffect || summary.returnsUnknown;
+    return AnalysisResult { summary: summary, exhausted: false };
+}
+
+func storesInParameter(stores: Vec<StoreLink>, parameterSources: Vec<Vec<int>>, childRoot: int): bool {
+    var index = 0;
+    loop { if index >= stores.len() { break; } var store = stores[index]; if store.child == childRoot && parameterSources[store.owner].len() > 0 { return true; } index = index + 1; }
+    return false;
+}
+
+func mergeSummary(current: FunctionEscapeSummary, incoming: FunctionEscapeSummary): bool {
+    var changed = false;
+    var index = 0;
+    loop {
+        if index >= current.parameterEscapesProgram.len() || index >= incoming.parameterEscapesProgram.len() { break; }
+        if incoming.parameterEscapesProgram[index] && !current.parameterEscapesProgram[index] { current.parameterEscapesProgram.set(index, true); changed = true; }
+        if incoming.returnAliasesParameters[index] && !current.returnAliasesParameters[index] { current.returnAliasesParameters.set(index, true); changed = true; }
+        index = index + 1;
+    }
+    index = 0;
+    loop { if index >= incoming.stores.len() { break; } var store = incoming.stores[index]; if addSummaryStore(current, store.ownerParameter, store.childParameter) { changed = true; } index = index + 1; }
+    index = 0;
+    loop {
+        if index >= incoming.callResults.len() { break; }
+        var incomingCall = incoming.callResults[index];
+        var found = false;
+        var existingAt = 0;
+        loop {
+            if existingAt >= current.callResults.len() { break; }
+            var existingCall = current.callResults[existingAt];
+            if existingCall.blockId == incomingCall.blockId && existingCall.instructionIndex == incomingCall.instructionIndex && existingCall.resultId == incomingCall.resultId {
+                found = true;
+                if incomingCall.escapesProgram && !existingCall.escapesProgram { existingCall.escapesProgram = true; changed = true; }
+                if incomingCall.returned && !existingCall.returned { existingCall.returned = true; changed = true; }
+                if incomingCall.storedInParameter && !existingCall.storedInParameter { existingCall.storedInParameter = true; changed = true; }
+                if incomingCall.unknown && !existingCall.unknown { existingCall.unknown = true; changed = true; }
+                current.callResults.set(existingAt, existingCall);
+                break;
+            }
+            existingAt = existingAt + 1;
+        }
+        if !found { current.callResults.push(incomingCall); changed = true; }
+        index = index + 1;
+    }
+    index = 0;
+    loop {
+        if index >= current.allocations.len() { break; }
+        var currentItem = current.allocations[index];
+        var incomingAt = 0;
+        loop { if incomingAt >= incoming.allocations.len() { break; } if incoming.allocations[incomingAt].resultId == currentItem.resultId { var incomingItem = incoming.allocations[incomingAt]; if incomingItem.escapesProgram && !currentItem.escapesProgram { currentItem.escapesProgram = true; changed = true; } if incomingItem.returned && !currentItem.returned { currentItem.returned = true; changed = true; } if incomingItem.storedInParameter && !currentItem.storedInParameter { currentItem.storedInParameter = true; changed = true; } break; } incomingAt = incomingAt + 1; }
+        current.allocations.set(index, currentItem);
+        index = index + 1;
+    }
+    if incoming.returnsFresh && !current.returnsFresh { current.returnsFresh = true; changed = true; }
+    if incoming.returnsUnknown && !current.returnsUnknown { current.returnsUnknown = true; changed = true; }
+    if incoming.mayAllocateCurrentRegion && !current.mayAllocateCurrentRegion { current.mayAllocateCurrentRegion = true; changed = true; }
+    if incoming.hasUnknownAmbientEffect && !current.hasUnknownAmbientEffect { current.hasUnknownAmbientEffect = true; changed = true; }
+    if incoming.hasUnknownMemoryEffect && !current.hasUnknownMemoryEffect { current.hasUnknownMemoryEffect = true; changed = true; }
+    if !incoming.complete && current.complete { current.complete = false; changed = true; }
+    return changed;
+}
+
+func buildCallGraph(module: ManagedProgram, summaryIndices: HashMap<string, int>, irIndices: HashMap<string, int>, budget: Vec<int>): Vec<Vec<int>> {
+    var graph: Vec<Vec<int>> = [];
+    var index = 0;
+    loop { if index >= module.functions.len() { break; } graph.push([]); index = index + 1; }
+    index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        var realAt = indexedProgram(irIndices, module.functions[index].functionId);
+        if realAt >= 0 {
+            var function = module.program.functions[realAt];
+            var blockAt = 0;
+            loop {
+                if blockAt >= function.blocks.len() { break; }
+                var instructionAt = 0;
+                loop {
+                    if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+                    if !charge(budget) { return graph; }
+                    var instruction = function.blocks[blockAt].instructions[instructionAt];
+                    if instruction.kind == InstructionKind::Call {
+                        var targetKey = instruction.functionId.toString();
+                        if summaryIndices.has(targetKey) { graph[index].push(summaryIndices.get(targetKey)); }
+                    }
+                    instructionAt = instructionAt + 1;
+                }
+                blockAt = blockAt + 1;
+            }
+        }
+        index = index + 1;
+    }
+    return graph;
+}
+
+func reverseGraph(graph: Vec<Vec<int>>): Vec<Vec<int>> {
+    var reverse: Vec<Vec<int>> = [];
+    var index = 0;
+    loop { if index >= graph.len() { break; } reverse.push([]); index = index + 1; }
+    index = 0;
+    loop { if index >= graph.len() { break; } var edgeAt = 0; loop { if edgeAt >= graph[index].len() { break; } addInt(reverse[graph[index][edgeAt]], index); edgeAt = edgeAt + 1; } index = index + 1; }
+    return reverse;
+}
+
+func recursiveNodes(graph: Vec<Vec<int>>, reverse: Vec<Vec<int>>, budget: Vec<int>): Vec<bool> {
+    var recursive: Vec<bool> = [];
+    var visited: Vec<bool> = [];
+    var assigned: Vec<bool> = [];
+    var order: Vec<int> = [];
+    var index = 0;
+    loop { if index >= graph.len() { break; } recursive.push(false); visited.push(false); assigned.push(false); index = index + 1; }
+    var start = 0;
+    loop {
+        if start >= graph.len() { break; }
+        if !visited[start] {
+            var stackNodes: Vec<int> = [start];
+            var stackNext: Vec<int> = [0];
+            visited.set(start, true);
+            loop {
+                if stackNodes.len() == 0 { break; }
+                if !charge(budget) { return recursive; }
+                var topAt = stackNodes.len() - 1;
+                var node = stackNodes[topAt];
+                var nextAt = stackNext[topAt];
+                if nextAt < graph[node].len() {
+                    var target = graph[node][nextAt];
+                    stackNext.set(topAt, nextAt + 1);
+                    if !visited[target] { visited.set(target, true); stackNodes.push(target); stackNext.push(0); }
+                } else { stackNodes.pop(); stackNext.pop(); order.push(node); }
+            }
+        }
+        start = start + 1;
+    }
+    var orderAt = order.len();
+    loop {
+        if orderAt <= 0 { break; }
+        orderAt = orderAt - 1;
+        var root = order[orderAt];
+        if !assigned[root] {
+            var component: Vec<int> = [];
+            var worklist: Vec<int> = [root];
+            assigned.set(root, true);
+            loop {
+                if worklist.len() == 0 { break; }
+                if !charge(budget) { return recursive; }
+                var node = worklist.pop();
+                component.push(node);
+                var edgeAt = 0;
+                loop { if edgeAt >= reverse[node].len() { break; } var target = reverse[node][edgeAt]; if !assigned[target] { assigned.set(target, true); worklist.push(target); } edgeAt = edgeAt + 1; }
+            }
+            var cyclic = component.len() > 1;
+            if !cyclic { var edgeAt = 0; loop { if edgeAt >= graph[root].len() { break; } if graph[root][edgeAt] == root { cyclic = true; } edgeAt = edgeAt + 1; } }
+            if cyclic { var memberAt = 0; loop { if memberAt >= component.len() { break; } recursive.set(component[memberAt], true); memberAt = memberAt + 1; } }
+        }
+    }
+    return recursive;
+}
+
+func instructionCount(module: ManagedProgram, irIndices: HashMap<string, int>): int {
+    var count = module.functions.len() * 128 + module.allocations.len() * 64 + module.derived.len() * 16 + 750000;
+    var index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        var realAt = indexedProgram(irIndices, module.functions[index].functionId);
+        if realAt >= 0 { var function = module.program.functions[realAt]; var blockAt = 0; loop { if blockAt >= function.blocks.len() { break; } count = count + function.blocks[blockAt].instructions.len() * 64 + function.blocks[blockAt].params.len() * 8; blockAt = blockAt + 1; } }
+        index = index + 1;
+    }
+    return count;
+}
+
+func failClosed(module: ManagedProgram, irIndices: HashMap<string, int>, budget: Vec<int>): EscapeSummaryPlan {
+    var summaries: Vec<FunctionEscapeSummary> = [];
+    var index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        var functionAt = indexedProgram(irIndices, module.functions[index].functionId);
+        var parameterCount = module.functions[index].parameterLayouts.len();
+        if functionAt >= 0 { parameterCount = module.program.functions[functionAt].parameters.len(); }
+        summaries.push(topSummary(module.functions[index].functionId, parameterCount, module.allocations));
+        index = index + 1;
+    }
+    return EscapeSummaryPlan { summaries: summaries, ambientSafeFunctions: HashMap.new(), complete: false, workRemaining: budget[0] };
+}
+
+// Summaries converge from bottom over the reverse call graph. This avoids a
+// whole-program function-count cutoff; exhaustion returns top for every function.
+pub func summarizeManagedProgram(module: ManagedProgram): EscapeSummaryPlan {
+    var irIndices = programIndices(module.program);
+    var budget: Vec<int> = [instructionCount(module, irIndices)];
+    var summaryIndices: HashMap<string, int> = HashMap.new();
+    var summaries: Vec<FunctionEscapeSummary> = [];
+    var index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        var managed = module.functions[index];
+        summaryIndices.set(managed.functionId.toString(), index);
+        var realAt = indexedProgram(irIndices, managed.functionId);
+        var parameterCount = managed.parameterLayouts.len();
+        if realAt >= 0 { parameterCount = module.program.functions[realAt].parameters.len(); }
+        summaries.push(emptySummary(managed.functionId, parameterCount, module.allocations));
+        index = index + 1;
+    }
+    var callers: Vec<Vec<int>> = [];
+    index = 0;
+    loop { if index >= module.functions.len() { break; } callers.push([]); index = index + 1; }
+    var graph = buildCallGraph(module, summaryIndices, irIndices, budget);
+    if budget[0] < 0 { return failClosed(module, irIndices, budget); }
+    index = 0;
+    loop { if index >= graph.len() { break; } var targetAt = 0; loop { if targetAt >= graph[index].len() { break; } callers[graph[index][targetAt]].push(index); targetAt = targetAt + 1; } index = index + 1; }
+
+    var queue: Vec<int> = [];
+    var queued: Vec<bool> = [];
+    index = 0;
+    loop { if index >= module.functions.len() { break; } queue.push(index); queued.push(true); index = index + 1; }
+    var cursor = 0;
+    loop {
+        if cursor >= queue.len() { break; }
+        if !charge(budget) { return failClosed(module, irIndices, budget); }
+        var functionAt = queue[cursor];
+        cursor = cursor + 1;
+        queued.set(functionAt, false);
+        var result = analyzeFunction(module, module.functions[functionAt], summaries, summaryIndices, irIndices, budget);
+        if result.exhausted || budget[0] < 0 { return failClosed(module, irIndices, budget); }
+        var current = summaries[functionAt];
+        var changed = mergeSummary(current, result.summary);
+        summaries.set(functionAt, current);
+        if changed {
+            var callerAt = 0;
+            loop {
+                if callerAt >= callers[functionAt].len() { break; }
+                var caller = callers[functionAt][callerAt];
+                if !queued[caller] { queued.set(caller, true); queue.push(caller); }
+                callerAt = callerAt + 1;
+            }
+        }
+    }
+    var reverse = reverseGraph(graph);
+    var recursive = recursiveNodes(graph, reverse, budget);
+    if budget[0] < 0 { return failClosed(module, irIndices, budget); }
+    var ambientSafe: HashMap<string, bool> = HashMap.new();
+    index = 0;
+    loop {
+        if index >= summaries.len() { break; }
+        var summary = summaries[index];
+        summary.recursiveCycle = recursive[index];
+        summaries.set(index, summary);
+        if summary.complete && !summary.hasUnknownAmbientEffect { ambientSafe.set(summary.functionId.toString(), true); }
+        index = index + 1;
+    }
+    return EscapeSummaryPlan { summaries: summaries, ambientSafeFunctions: ambientSafe, complete: true, workRemaining: budget[0] };
+}

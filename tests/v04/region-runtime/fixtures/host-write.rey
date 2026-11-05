@@ -1,0 +1,18 @@
+import host::{hostWrite};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2298); }
+}
+
+func main(): void {
+    var base = __reyRawMap(16);
+    __reyRawStoreByte(__reyRawOffset(base, 0), 104);
+    __reyRawStoreByte(__reyRawOffset(base, 1), 101);
+    __reyRawStoreByte(__reyRawOffset(base, 2), 108);
+    __reyRawStoreByte(__reyRawOffset(base, 3), 108);
+    __reyRawStoreByte(__reyRawOffset(base, 4), 111);
+    __reyRawStoreByte(__reyRawOffset(base, 5), 10);
+    var written = hostWrite(1, base, 6);
+    __reyRawUnmap(base, 16);
+    check(written == 6);
+}

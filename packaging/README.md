@@ -23,6 +23,8 @@ Windows `ExitProcess` import.
 
 The five release platforms are `darwin-arm64`, `darwin-x86_64`,
 `linux-aarch64`, `linux-x86_64`, and `windows-x86_64`. Cross-compiled images
-are not execution evidence. `scripts/v04-release-readiness.py` refuses a
-platform whose evidence file does not record passing build, run, bootstrap,
-and package gates.
+are not execution evidence. `scripts/build-release-v04.sh` can write local
+probe packages and checksums under `build/v04/release/`. Those directories are
+not downloads. `scripts/v04-release-readiness.py` refuses a platform whose
+evidence file does not record passing build, run, bootstrap, and package
+gates, and it marks every unmet section-8 hard condition blocked.

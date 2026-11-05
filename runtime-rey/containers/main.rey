@@ -1,3 +1,4 @@
+import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostGetdirentries, hostLseek, hostOpen, hostRead, hostUnlink, hostWrite};
 import layout::{layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
 import managed::{managedAllocateSized, managedLiveObjects, managedStoreReference};
 
@@ -11,11 +12,15 @@ func containersFail(code: int): void {
 }
 
 func containersContext(context: __rey_raw_address): void {
-    managedLiveObjects(context);
+    return;
 }
 
 func containersRegistry(context: __rey_raw_address): __rey_raw_address {
     return __reyRawLoadAddress(containersAddressAt(context, 8));
+}
+
+func containersLayoutDescriptor(registry: __rey_raw_address, layoutId: int): __rey_raw_address {
+    return __reyRawLoadAddress(containersAddressAt(registry, 64 + (layoutId - 1) * 8));
 }
 
 func containersHeapLayout(context: __rey_raw_address, object: __rey_raw_address): int {
@@ -34,8 +39,10 @@ func containersHeapLayout(context: __rey_raw_address, object: __rey_raw_address)
     var registry = containersRegistry(context);
     var payloadBytes = __reyRawLoadI64(containersAddressAt(object, 8));
     if layoutId < 1 || !layoutPayloadSizeValid(registry, layoutId, payloadBytes) { containersFail(2205); return 0; }
-    if layoutTailKind(registry, layoutId) == 2 {
-        var capacity = (payloadBytes - layoutPayloadBytes(registry, layoutId)) / 8;
+    var descriptor = containersLayoutDescriptor(registry, layoutId);
+    var tailMagic = __reyRawLoadI64(containersAddressAt(descriptor, 16));
+    if tailMagic == 1380273302 {
+        var capacity = (payloadBytes - __reyRawLoadI64(descriptor)) / 8;
         var initialized = __reyRawLoadI64(containersAddressAt(object, 16));
         if initialized < 0 || initialized > capacity { containersFail(2205); return 0; }
     }
@@ -43,10 +50,10 @@ func containersHeapLayout(context: __rey_raw_address, object: __rey_raw_address)
 }
 
 func containersStringLayout(context: __rey_raw_address, value: __rey_raw_address): int {
-    containersContext(context);
     var layoutId = containersHeapLayout(context, value);
     var registry = containersRegistry(context);
-    if layoutTailKind(registry, layoutId) != 1 || layoutPayloadBytes(registry, layoutId) != 8 || layoutReferenceCount(registry, layoutId) != 0 {
+    var descriptor = containersLayoutDescriptor(registry, layoutId);
+    if __reyRawLoadI64(containersAddressAt(descriptor, 16)) != 1380273301 || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 0 {
         containersFail(2205);
         return 0;
     }
@@ -78,6 +85,300 @@ pub func managedStringLength(context: __rey_raw_address, value: __rey_raw_addres
     return __reyRawLoadI64(containersAddressAt(value, 16));
 }
 
+pub func managedWriteString(context: __rey_raw_address, value: __rey_raw_address, fd: int): void {
+    var length = managedStringLength(context, value);
+    var written = hostWrite(fd, containersAddressAt(value, 24), length);
+    if written != length { containersFail(2206); }
+    return;
+}
+
+func containersCStringLength(value: __rey_raw_address): int {
+    var length = 0;
+    while __reyRawLoadByte(containersAddressAt(value, length)) != 0 {
+        if length >= 1048576 { containersFail(2207); return 0; }
+        length = length + 1;
+    }
+    return length;
+}
+
+pub func managedStringFromCString(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address): __rey_raw_address {
+    var length = containersCStringLength(value);
+    var result = containersNewString(context, stringLayoutId, length);
+    var index = 0;
+    while index < length {
+        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, index)));
+        index = index + 1;
+    }
+    return result;
+}
+
+pub func managedArgsCreate(context: __rey_raw_address, headerLayoutId: int, dataLayoutId: int, stringLayoutId: int): __rey_raw_address {
+    var count = hostArgCount();
+    var result = managedVecCreate(context, headerLayoutId, dataLayoutId, count);
+    var index = 0;
+    while index < count {
+        var argument = hostArg(index);
+        var text = managedStringFromCString(context, stringLayoutId, argument);
+        hostArgRelease(argument);
+        managedVecPushReference(context, result, dataLayoutId, text);
+        index = index + 1;
+    }
+    return result;
+}
+
+func containersPathData(path: __rey_raw_address): __rey_raw_address {
+    return containersAddressAt(path, 24);
+}
+
+pub func managedExit(context: __rey_raw_address, code: int): void {
+    hostExit(code);
+    __reyRawFail(2301);
+    return;
+}
+
+pub func managedFileExists(context: __rey_raw_address, path: __rey_raw_address): bool {
+    return hostAccess(containersPathData(path), 0) == 0;
+}
+
+pub func managedDeleteFile(context: __rey_raw_address, path: __rey_raw_address): void {
+    if hostUnlink(containersPathData(path)) != 0 { containersFail(2208); }
+    return;
+}
+
+pub func managedWriteFile(context: __rey_raw_address, path: __rey_raw_address, content: __rey_raw_address): void {
+    var fd = hostOpen(containersPathData(path), 577, 420);
+    if fd < 0 { containersFail(2208); return; }
+    var length = managedStringLength(context, content);
+    var offset = 0;
+    while offset < length {
+        var written = hostWrite(fd, containersAddressAt(content, 24 + offset), length - offset);
+        if written <= 0 { hostClose(fd); containersFail(2208); return; }
+        offset = offset + written;
+    }
+    if hostClose(fd) != 0 { containersFail(2208); }
+    return;
+}
+
+pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): bool {
+    containersStringLayout(context, path);
+    var backing = containersVecBacking(context, vector, 1);
+    var actualLayoutId = containersVecRequireKind(context, backing, 1);
+    if actualLayoutId != dataLayoutId { containersFail(2203); return false; }
+    var length = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if length < 0 || length > capacity { containersFail(2205); return false; }
+    var index = 0;
+    while index < length {
+        var value = __reyRawLoadI64(containersVecTailAddress(backing, index));
+        if value < 0 || value > 255 { return false; }
+        index = index + 1;
+    }
+
+    var fd = -1;
+    loop {
+        fd = hostOpen(containersPathData(path), 577, 420);
+        if fd != -4 { break; }
+    }
+    if fd < 0 { containersFail(2208); return false; }
+
+    var staging = __reyRawNull();
+    if length > 0 { staging = __reyRawMap(4096); }
+    var offset = 0;
+    while offset < length {
+        var count = 4096;
+        if length - offset < count { count = length - offset; }
+        index = 0;
+        while index < count {
+            var value = __reyRawLoadI64(containersVecTailAddress(backing, offset + index));
+            __reyRawStoreByte(__reyRawOffset(staging, index), value);
+            index = index + 1;
+        }
+
+        var writtenOffset = 0;
+        loop {
+            if writtenOffset >= count { break; }
+            var written = hostWrite(fd, __reyRawOffset(staging, writtenOffset), count - writtenOffset);
+            if written == -4 { continue; }
+            if written <= 0 {
+                __reyRawUnmap(staging, 4096);
+                var ignoredClose = hostClose(fd);
+                containersFail(2208);
+                return false;
+            }
+            writtenOffset = writtenOffset + written;
+        }
+        offset = offset + count;
+    }
+    if length > 0 { __reyRawUnmap(staging, 4096); }
+    if hostClose(fd) != 0 { containersFail(2208); return false; }
+    return true;
+}
+
+func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {
+    var offset = 0;
+    while offset < count {
+        var written = hostWrite(fd, containersAddressAt(staging, offset), count - offset);
+        if written == -4 { continue; }
+        if written <= 0 { return false; }
+        offset = offset + written;
+    }
+    return true;
+}
+
+// The compiler supplies the checked layouts for its private packed buffer.
+pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_address, header: __rey_raw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): bool {
+    containersStringLayout(context, path);
+    if containersHeapLayout(context, body) != bodyLayoutId { containersFail(2205); return false; }
+    var registry = containersRegistry(context);
+    if layoutPayloadBytes(registry, bodyLayoutId) != 24 || layoutTailKind(registry, bodyLayoutId) != 0 || layoutReferenceCount(registry, bodyLayoutId) != 1 || layoutReferenceOffset(registry, bodyLayoutId, 0) != 0 {
+        containersFail(2205);
+        return false;
+    }
+    var length = __reyRawLoadI64(containersAddressAt(body, 24));
+    if __reyRawLoadI64(containersAddressAt(body, 32)) != 1346458188 || length < 0 || length > 1073741823 { return false; }
+    var lanes = __reyRawLoadAddress(containersAddressAt(body, 16));
+    var headerBacking = containersVecBacking(context, header, 1);
+    var laneBacking = containersVecBacking(context, lanes, 1);
+    if containersVecRequireKind(context, headerBacking, 1) != dataLayoutId || containersVecRequireKind(context, laneBacking, 1) != dataLayoutId { containersFail(2203); return false; }
+    var headerLength = __reyRawLoadI64(containersAddressAt(headerBacking, 16));
+    var laneLength = __reyRawLoadI64(containersAddressAt(laneBacking, 16));
+    var headerCapacity = (__reyRawLoadI64(containersAddressAt(headerBacking, 8)) - 8) / 8;
+    var laneCapacity = (__reyRawLoadI64(containersAddressAt(laneBacking, 8)) - 8) / 8;
+    var usedLanes = (length + 6) / 7;
+    if headerLength < 0 || headerLength > 65536 || headerLength > headerCapacity || laneLength < usedLanes || laneLength > laneCapacity || laneLength > 153391689 { return false; }
+    var index = 0;
+    while index < headerLength {
+        var value = __reyRawLoadI64(containersVecTailAddress(headerBacking, index));
+        if value < 0 || value > 255 { return false; }
+        index = index + 1;
+    }
+    index = 0;
+    while index < usedLanes {
+        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
+        if lane < 0 || lane >= 72057594037927936 { return false; }
+        if index == usedLanes - 1 && length % 7 != 0 {
+            var limit = 1;
+            var tail = length % 7;
+            while tail > 0 { limit = limit * 256; tail = tail - 1; }
+            if lane >= limit { return false; }
+        }
+        index = index + 1;
+    }
+    var staging = __reyRawMap(4096);
+    var fd = -1;
+    loop {
+        fd = hostOpen(containersPathData(path), 577, 420);
+        if fd != -4 { break; }
+    }
+    if fd < 0 { __reyRawUnmap(staging, 4096); containersFail(2208); return false; }
+    var staged = 0;
+    index = 0;
+    while index < headerLength {
+        __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddress(headerBacking, index)));
+        staged = staged + 1;
+        index = index + 1;
+        if staged == 4096 {
+            if !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
+            staged = 0;
+        }
+    }
+    index = 0;
+    var remaining = length;
+    while index < usedLanes {
+        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
+        var count = 7;
+        if remaining < count { count = remaining; }
+        var byteAt = 0;
+        while byteAt < count {
+            __reyRawStoreByte(containersAddressAt(staging, staged), lane % 256);
+            lane = lane / 256;
+            staged = staged + 1;
+            byteAt = byteAt + 1;
+            if staged == 4096 {
+                if !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
+                staged = 0;
+            }
+        }
+        remaining = remaining - count;
+        index = index + 1;
+    }
+    if staged > 0 && !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
+    __reyRawUnmap(staging, 4096);
+    if hostClose(fd) != 0 { containersFail(2208); return false; }
+    return true;
+}
+
+pub func managedAppendFile(context: __rey_raw_address, path: __rey_raw_address, content: __rey_raw_address): void {
+    var fd = hostOpen(containersPathData(path), 1089, 420);
+    if fd < 0 { containersFail(2208); return; }
+    var length = managedStringLength(context, content);
+    var offset = 0;
+    while offset < length {
+        var written = hostWrite(fd, containersAddressAt(content, 24 + offset), length - offset);
+        if written <= 0 { hostClose(fd); containersFail(2208); return; }
+        offset = offset + written;
+    }
+    if hostClose(fd) != 0 { containersFail(2208); }
+    return;
+}
+
+pub func managedReadFile(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: int): __rey_raw_address {
+    var fd = hostOpen(containersPathData(path), 0, 0);
+    if fd < 0 { containersFail(2208); return __reyRawNull(); }
+    var size = hostLseek(fd, 0, 2);
+    if size < 0 || hostLseek(fd, 0, 0) < 0 { hostClose(fd); containersFail(2208); return __reyRawNull(); }
+    var result = containersNewString(context, stringLayoutId, size);
+    var offset = 0;
+    while offset < size {
+        var count = hostRead(fd, containersAddressAt(result, 24 + offset), size - offset);
+        if count <= 0 { hostClose(fd); containersFail(2208); return __reyRawNull(); }
+        offset = offset + count;
+    }
+    if hostClose(fd) != 0 { containersFail(2208); return __reyRawNull(); }
+    return result;
+}
+
+pub func managedListDir(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: int, headerLayoutId: int, dataLayoutId: int): __rey_raw_address {
+    var fd = hostOpen(containersPathData(path), 0, 0);
+    if fd < 0 { containersFail(2209); return __reyRawNull(); }
+    var buffer = __reyRawMap(8192);
+    var offsetCell = __reyRawMap(8);
+    var result = managedVecCreate(context, headerLayoutId, dataLayoutId, 8);
+    var done = false;
+    while !done {
+        var count = hostGetdirentries(fd, buffer, 8192, offsetCell);
+        if count < 0 { __reyRawUnmap(buffer, 8192); __reyRawUnmap(offsetCell, 8); hostClose(fd); containersFail(2209); return __reyRawNull(); }
+        if count == 0 { done = true; }
+        var cursor = 0;
+        while cursor < count {
+            var recordLength = __reyRawLoadByte(containersAddressAt(buffer, cursor + 16)) + __reyRawLoadByte(containersAddressAt(buffer, cursor + 17)) * 256;
+            if recordLength < 20 || cursor + recordLength > count { cursor = count; }
+            else {
+                var nameLength = 0;
+                while 19 + nameLength + 1 < recordLength && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19 + nameLength)) != 0 {
+                    nameLength = nameLength + 1;
+                }
+                var isCurrent = nameLength == 1 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19)) == 46;
+                var isParent = nameLength == 2 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19)) == 46 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 20)) == 46;
+                if !isCurrent && !isParent {
+                    var name = containersNewString(context, stringLayoutId, nameLength);
+                    var index = 0;
+                    while index < nameLength {
+                        __reyRawStoreByte(containersAddressAt(name, 24 + index), __reyRawLoadByte(containersAddressAt(buffer, cursor + 19 + index)));
+                        index = index + 1;
+                    }
+                    managedVecPushReference(context, result, dataLayoutId, name);
+                }
+                cursor = cursor + recordLength;
+            }
+        }
+    }
+    __reyRawUnmap(buffer, 8192);
+    __reyRawUnmap(offsetCell, 8);
+    if hostClose(fd) != 0 { containersFail(2209); }
+    return result;
+}
+
 pub func managedStringByte(context: __rey_raw_address, value: __rey_raw_address, index: int): int {
     var length = managedStringLength(context, value);
     if index < 0 || index >= length { containersFail(2205); return 0; }
@@ -85,8 +386,15 @@ pub func managedStringByte(context: __rey_raw_address, value: __rey_raw_address,
 }
 
 pub func managedStringEqual(context: __rey_raw_address, left: __rey_raw_address, right: __rey_raw_address): bool {
-    var leftLength = managedStringLength(context, left);
-    var rightLength = managedStringLength(context, right);
+    containersStringLayout(context, left);
+    containersStringLayout(context, right);
+    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));
+    var rightLength = __reyRawLoadI64(containersAddressAt(right, 16));
+    return containersStringEqualValidated(left, leftLength, right, rightLength);
+}
+
+func containersStringEqualValidated(left: __rey_raw_address, leftLength: int, right: __rey_raw_address, rightLength: int): bool {
+    if __reyRawEqual(left, right) { return true; }
     if leftLength != rightLength { return false; }
     var index = 0;
     while index < leftLength {
@@ -97,8 +405,10 @@ pub func managedStringEqual(context: __rey_raw_address, left: __rey_raw_address,
 }
 
 pub func managedStringCompare(context: __rey_raw_address, left: __rey_raw_address, right: __rey_raw_address): int {
-    var leftLength = managedStringLength(context, left);
-    var rightLength = managedStringLength(context, right);
+    containersStringLayout(context, left);
+    containersStringLayout(context, right);
+    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));
+    var rightLength = __reyRawLoadI64(containersAddressAt(right, 16));
     var common = leftLength;
     if rightLength < common { common = rightLength; }
     var index = 0;
@@ -186,8 +496,10 @@ pub func managedStringSlice(context: __rey_raw_address, stringLayoutId: int, val
 }
 
 pub func managedStringConcat(context: __rey_raw_address, stringLayoutId: int, left: __rey_raw_address, right: __rey_raw_address): __rey_raw_address {
-    var leftLength = managedStringLength(context, left);
-    var rightLength = managedStringLength(context, right);
+    containersStringLayout(context, left);
+    containersStringLayout(context, right);
+    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));
+    var rightLength = __reyRawLoadI64(containersAddressAt(right, 16));
     if leftLength > 9223372036854775798 - rightLength { containersFail(2201); return __reyRawNull(); }
     var length = leftLength + rightLength;
     var result = containersNewString(context, stringLayoutId, length);
@@ -533,34 +845,43 @@ pub func managedStringPad(context: __rey_raw_address, stringLayoutId: int, value
 }
 
 func containersVecHeader(context: __rey_raw_address, vector: __rey_raw_address): int {
-    containersContext(context);
     var layoutId = containersHeapLayout(context, vector);
     var registry = containersRegistry(context);
-    if layoutTailKind(registry, layoutId) != 0 || layoutPayloadBytes(registry, layoutId) != 8 || layoutReferenceCount(registry, layoutId) != 1 || layoutReferenceOffset(registry, layoutId, 0) != 0 {
+    var descriptor = containersLayoutDescriptor(registry, layoutId);
+    if __reyRawLoadI64(containersAddressAt(descriptor, 16)) != 0 || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 1 || __reyRawLoadI64(containersAddressAt(descriptor, 32)) != 0 {
         containersFail(2205);
         return 0;
     }
     return layoutId;
 }
 
-func containersVecBacking(context: __rey_raw_address, vector: __rey_raw_address): __rey_raw_address {
+func containersVecBacking(context: __rey_raw_address, vector: __rey_raw_address, expected: int): __rey_raw_address {
     containersVecHeader(context, vector);
     var backing = __reyRawLoadAddress(containersAddressAt(vector, 16));
     if __reyRawEqual(backing, __reyRawNull()) { containersFail(2205); return __reyRawNull(); }
     var layoutId = containersHeapLayout(context, backing);
     var registry = containersRegistry(context);
-    var tailKind = layoutTailKind(registry, layoutId);
-    if (tailKind != 1 && tailKind != 2) || layoutPayloadBytes(registry, layoutId) != 8 || layoutReferenceCount(registry, layoutId) != 0 || (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) % 8 != 0 {
+    var descriptor = containersLayoutDescriptor(registry, layoutId);
+    var tailMagic = __reyRawLoadI64(containersAddressAt(descriptor, 16));
+    if (tailMagic != 1380273301 && tailMagic != 1380273302) || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 0 || (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) % 8 != 0 {
         containersFail(2205);
         return __reyRawNull();
     }
+    if expected == 1 && tailMagic != 1380273301 || expected == 2 && tailMagic != 1380273302 { containersFail(2203); return __reyRawNull(); }
     return backing;
 }
 
 func containersVecRequireKind(context: __rey_raw_address, backing: __rey_raw_address, expected: int): int {
     var registry = containersRegistry(context);
-    var layoutId = containersHeapLayout(context, backing);
-    if layoutTailKind(registry, layoutId) != expected || layoutPayloadBytes(registry, layoutId) != 8 || layoutReferenceCount(registry, layoutId) != 0 {
+    var header = __reyRawLoadI64(backing);
+    var layoutId = header;
+    if header >= 8589934592 { layoutId = header - 8589934592; }
+    else if header >= 4294967296 { layoutId = header - 4294967296; }
+    var descriptor = containersLayoutDescriptor(registry, layoutId);
+    var tailMagic = __reyRawLoadI64(containersAddressAt(descriptor, 16));
+    var expectedMagic = 1380273301;
+    if expected == 2 { expectedMagic = 1380273302; }
+    if tailMagic != expectedMagic || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 0 {
         containersFail(2203);
         return 0;
     }
@@ -578,7 +899,7 @@ func containersVecTailAddress(backing: __rey_raw_address, index: int): __rey_raw
 }
 
 pub func managedVecCreate(context: __rey_raw_address, headerLayoutId: int, dataLayoutId: int, capacity: int): __rey_raw_address {
-    containersContext(context);
+    managedLiveObjects(context);
     var registry = containersRegistry(context);
     if capacity < 0 || capacity > 1152921504606846966 { containersFail(2201); return __reyRawNull(); }
     if layoutTailKind(registry, headerLayoutId) != 0 || layoutPayloadBytes(registry, headerLayoutId) != 8 || layoutReferenceCount(registry, headerLayoutId) != 1 || layoutReferenceOffset(registry, headerLayoutId, 0) != 0 {
@@ -598,50 +919,92 @@ pub func managedVecCreate(context: __rey_raw_address, headerLayoutId: int, dataL
     return vector;
 }
 
+pub func managedVecJoin(context: __rey_raw_address, vector: __rey_raw_address, separator: __rey_raw_address, stringLayoutId: int): __rey_raw_address {
+    var backing = containersVecBacking(context, vector, 0);
+    var count = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if count < 0 || count > capacity { containersFail(2205); return __reyRawNull(); }
+    if count > 0 { containersVecRequireKind(context, backing, 2); }
+    var separatorLength = 0;
+    if count > 1 { separatorLength = managedStringLength(context, separator); }
+    var total = 0;
+    var index = 0;
+    while index < count {
+        var item = __reyRawLoadAddress(containersVecTailAddress(backing, index));
+        var length = managedStringLength(context, item);
+        if index > 0 {
+            if separatorLength > 9223372036854774758 - total { containersFail(2201); return __reyRawNull(); }
+            total = total + separatorLength;
+        }
+        if length > 9223372036854774758 - total { containersFail(2201); return __reyRawNull(); }
+        total = total + length;
+        index = index + 1;
+    }
+    var result = containersNewString(context, stringLayoutId, total);
+    var offset = 0;
+    index = 0;
+    while index < count {
+        if index > 0 {
+            var sepAt = 0;
+            while sepAt < separatorLength {
+                __reyRawStoreByte(containersAddressAt(result, 24 + offset), __reyRawLoadByte(containersAddressAt(separator, 24 + sepAt)));
+                offset = offset + 1;
+                sepAt = sepAt + 1;
+            }
+        }
+        var item = __reyRawLoadAddress(containersVecTailAddress(backing, index));
+        var length = managedStringLength(context, item);
+        var itemAt = 0;
+        while itemAt < length {
+            __reyRawStoreByte(containersAddressAt(result, 24 + offset), __reyRawLoadByte(containersAddressAt(item, 24 + itemAt)));
+            offset = offset + 1;
+            itemAt = itemAt + 1;
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
 pub func managedVecLength(context: __rey_raw_address, vector: __rey_raw_address): int {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     return __reyRawLoadI64(containersAddressAt(backing, 16));
 }
 
 pub func managedVecCapacity(context: __rey_raw_address, vector: __rey_raw_address): int {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     var payloadBytes = __reyRawLoadI64(containersAddressAt(backing, 8));
     return (payloadBytes - 8) / 8;
 }
 
 pub func managedVecGetI64(context: __rey_raw_address, vector: __rey_raw_address, index: int): int {
-    var backing = containersVecBacking(context, vector);
-    containersVecRequireKind(context, backing, 1);
+    var backing = containersVecBacking(context, vector, 1);
     containersVecBounds(backing, index);
     return __reyRawLoadI64(containersVecTailAddress(backing, index));
 }
 
 pub func managedVecGetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int): __rey_raw_address {
-    var backing = containersVecBacking(context, vector);
-    containersVecRequireKind(context, backing, 2);
+    var backing = containersVecBacking(context, vector, 2);
     containersVecBounds(backing, index);
     return __reyRawLoadAddress(containersVecTailAddress(backing, index));
 }
 
 pub func managedVecSetI64(context: __rey_raw_address, vector: __rey_raw_address, index: int, value: int): void {
-    var backing = containersVecBacking(context, vector);
-    containersVecRequireKind(context, backing, 1);
+    var backing = containersVecBacking(context, vector, 1);
     containersVecBounds(backing, index);
     __reyRawStoreI64(containersVecTailAddress(backing, index), value);
 }
 
 pub func managedVecSetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int, value: __rey_raw_address): void {
-    var backing = containersVecBacking(context, vector);
-    containersVecRequireKind(context, backing, 2);
+    var backing = containersVecBacking(context, vector, 2);
     containersVecBounds(backing, index);
     managedStoreReference(context, backing, 8 + index * 8, value);
 }
 
 func containersVecGrow(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, required: int): void {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     var oldLayoutId = containersVecRequireKind(context, backing, layoutTailKind(containersRegistry(context), dataLayoutId));
     if oldLayoutId != dataLayoutId { containersFail(2203); return; }
-    var oldCapacity = managedVecCapacity(context, vector);
+    var oldCapacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
     if required <= oldCapacity { return; }
     if required < 0 || required > 1152921504606846966 { containersFail(2201); return; }
     var newCapacity = oldCapacity;
@@ -670,30 +1033,88 @@ func containersVecGrow(context: __rey_raw_address, vector: __rey_raw_address, da
 }
 
 pub func managedVecPushI64(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: int): void {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     var actualLayoutId = containersVecRequireKind(context, backing, 1);
     if actualLayoutId != dataLayoutId { containersFail(2203); return; }
     var length = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if length < 0 || length > capacity { containersFail(2205); return; }
     if length >= 1152921504606846966 { containersFail(2201); return; }
-    if length >= managedVecCapacity(context, vector) { containersVecGrow(context, vector, dataLayoutId, length + 1); }
-    backing = containersVecBacking(context, vector);
+    if length >= capacity {
+        containersVecGrow(context, vector, dataLayoutId, length + 1);
+        backing = containersVecBacking(context, vector, 0);
+    }
     __reyRawStoreI64(containersVecTailAddress(backing, length), value);
     __reyRawStoreI64(containersAddressAt(backing, 16), length + 1);
 }
 
 pub func managedVecPushReference(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: __rey_raw_address): void {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     var actualLayoutId = containersVecRequireKind(context, backing, 2);
     if actualLayoutId != dataLayoutId { containersFail(2203); return; }
     var length = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if length < 0 || length > capacity { containersFail(2205); return; }
     if length >= 1152921504606846966 { containersFail(2201); return; }
-    if length >= managedVecCapacity(context, vector) { containersVecGrow(context, vector, dataLayoutId, length + 1); }
-    backing = containersVecBacking(context, vector);
+    if length >= capacity {
+        containersVecGrow(context, vector, dataLayoutId, length + 1);
+        backing = containersVecBacking(context, vector, 0);
+    }
     managedStoreReference(context, backing, 8 + length * 8, value);
 }
 
+pub func managedVecContainsI64(context: __rey_raw_address, vector: __rey_raw_address, value: int): bool {
+    var backing = containersVecBacking(context, vector, 0);
+    var count = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if count < 0 || count > capacity { containersFail(2205); return false; }
+    if count > 0 { containersVecRequireKind(context, backing, 1); }
+    var index = 0;
+    while index < count {
+        if __reyRawLoadI64(containersVecTailAddress(backing, index)) == value { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
+pub func managedVecContainsReference(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_address): bool {
+    var backing = containersVecBacking(context, vector, 0);
+    var count = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if count < 0 || count > capacity { containersFail(2205); return false; }
+    if count > 0 { containersVecRequireKind(context, backing, 2); }
+    var index = 0;
+    while index < count {
+        if __reyRawEqual(__reyRawLoadAddress(containersVecTailAddress(backing, index)), value) { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
+pub func managedVecContainsString(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_address): bool {
+    var backing = containersVecBacking(context, vector, 0);
+    var count = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if count < 0 || count > capacity { containersFail(2205); return false; }
+    if count > 0 { containersVecRequireKind(context, backing, 2); }
+    var index = 0;
+    var valueLength = 0;
+    while index < count {
+        var item = __reyRawLoadAddress(containersVecTailAddress(backing, index));
+        containersStringLayout(context, item);
+        if index == 0 {
+            containersStringLayout(context, value);
+            valueLength = __reyRawLoadI64(containersAddressAt(value, 16));
+        }
+        var itemLength = __reyRawLoadI64(containersAddressAt(item, 16));
+        if containersStringEqualValidated(item, itemLength, value, valueLength) { return true; }
+        index = index + 1;
+    }
+    return false;
+}
+
 pub func managedVecPopI64(context: __rey_raw_address, vector: __rey_raw_address): int {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     containersVecRequireKind(context, backing, 1);
     var length = __reyRawLoadI64(containersAddressAt(backing, 16));
     if length <= 0 { containersFail(2205); return 0; }
@@ -705,7 +1126,7 @@ pub func managedVecPopI64(context: __rey_raw_address, vector: __rey_raw_address)
 }
 
 pub func managedVecPopReference(context: __rey_raw_address, vector: __rey_raw_address): __rey_raw_address {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     containersVecRequireKind(context, backing, 2);
     var length = __reyRawLoadI64(containersAddressAt(backing, 16));
     if length <= 0 { containersFail(2205); return __reyRawNull(); }
@@ -717,7 +1138,7 @@ pub func managedVecPopReference(context: __rey_raw_address, vector: __rey_raw_ad
 }
 
 pub func managedVecTruncate(context: __rey_raw_address, vector: __rey_raw_address, length: int): void {
-    var backing = containersVecBacking(context, vector);
+    var backing = containersVecBacking(context, vector, 0);
     var kind = layoutTailKind(containersRegistry(context), containersHeapLayout(context, backing));
     var oldLength = __reyRawLoadI64(containersAddressAt(backing, 16));
     if length < 0 || length > oldLength { containersFail(2205); return; }
@@ -738,7 +1159,6 @@ pub func managedVecTruncate(context: __rey_raw_address, vector: __rey_raw_addres
 }
 
 func containersMapHeader(context: __rey_raw_address, map: __rey_raw_address): int {
-    containersContext(context);
     var layoutId = containersHeapLayout(context, map);
     var registry = containersRegistry(context);
     if layoutTailKind(registry, layoutId) != 0 || layoutPayloadBytes(registry, layoutId) != 16 || layoutReferenceCount(registry, layoutId) != 1 || layoutReferenceOffset(registry, layoutId, 0) != 0 {
@@ -792,27 +1212,40 @@ func containersMapValidateNodeLayout(context: __rey_raw_address, nodeLayoutId: i
     }
 }
 
-func containersMapHash(context: __rey_raw_address, key: __rey_raw_address): int {
-    var length = managedStringLength(context, key);
+func containersMapHash(key: __rey_raw_address, length: int): int {
     var hash = 0;
     var index = 0;
     while index < length {
-        hash = (hash * 31 + managedStringByte(context, key, index)) % 2147483647;
+        hash = (hash * 31 + __reyRawLoadByte(containersAddressAt(key, 24 + index))) % 2147483647;
         index = index + 1;
     }
     return hash;
 }
 
-func containersMapBucket(context: __rey_raw_address, key: __rey_raw_address, capacity: int): int {
+func containersMapBucketValidated(key: __rey_raw_address, length: int, capacity: int): int {
     if capacity <= 0 { containersFail(2205); return 0; }
-    return containersMapHash(context, key) % capacity;
+    return containersMapHash(key, length) % capacity;
+}
+
+func containersMapBucket(context: __rey_raw_address, key: __rey_raw_address, capacity: int): int {
+    containersStringLayout(context, key);
+    return containersMapBucketValidated(key, __reyRawLoadI64(containersAddressAt(key, 16)), capacity);
 }
 
 func containersMapFind(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): __rey_raw_address {
-    managedStringLength(context, key);
+    containersStringLayout(context, key);
+    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));
+    return containersMapFindValidated(context, map, key, keyLength);
+}
+
+func containersMapFindValidated(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address, keyLength: int): __rey_raw_address {
     var buckets = containersMapBuckets(context, map);
-    var capacity = containersMapCapacity(context, buckets);
-    var index = containersMapBucket(context, key, capacity);
+    var capacity = (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;
+    return containersMapFindInBuckets(context, map, buckets, capacity, key, keyLength);
+}
+
+func containersMapFindInBuckets(context: __rey_raw_address, map: __rey_raw_address, buckets: __rey_raw_address, capacity: int, key: __rey_raw_address, keyLength: int): __rey_raw_address {
+    var index = containersMapBucketValidated(key, keyLength, capacity);
     var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + index * 8));
     var steps = 0;
     var limit = __reyRawLoadI64(containersAddressAt(map, 24));
@@ -820,7 +1253,9 @@ func containersMapFind(context: __rey_raw_address, map: __rey_raw_address, key: 
         if steps >= limit { containersFail(2202); return __reyRawNull(); }
         containersMapNodeIsReference(context, node);
         var nodeKey = __reyRawLoadAddress(containersAddressAt(node, 16));
-        if managedStringEqual(context, nodeKey, key) { return node; }
+        containersStringLayout(context, nodeKey);
+        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));
+        if containersStringEqualValidated(nodeKey, nodeKeyLength, key, keyLength) { return node; }
         node = __reyRawLoadAddress(containersAddressAt(node, 32));
         steps = steps + 1;
     }
@@ -836,8 +1271,7 @@ func containersMapInitializeBuckets(buckets: __rey_raw_address, capacity: int): 
     __reyRawStoreI64(containersAddressAt(buckets, 16), capacity);
 }
 
-func containersMapGrow(context: __rey_raw_address, map: __rey_raw_address, bucketsLayoutId: int): void {
-    var oldBuckets = containersMapBuckets(context, map);
+func containersMapGrow(context: __rey_raw_address, map: __rey_raw_address, oldBuckets: __rey_raw_address, bucketsLayoutId: int): void {
     var oldCapacity = containersMapCapacity(context, oldBuckets);
     if oldCapacity <= 0 || oldCapacity > 1152921504606846966 / 2 { containersFail(2201); return; }
     var newCapacity = oldCapacity * 2;
@@ -866,7 +1300,7 @@ func containersMapGrow(context: __rey_raw_address, map: __rey_raw_address, bucke
 }
 
 pub func managedMapCreate(context: __rey_raw_address, mapLayoutId: int, bucketsLayoutId: int): __rey_raw_address {
-    containersContext(context);
+    managedLiveObjects(context);
     var registry = containersRegistry(context);
     if layoutTailKind(registry, mapLayoutId) != 0 || layoutPayloadBytes(registry, mapLayoutId) != 16 || layoutReferenceCount(registry, mapLayoutId) != 1 || layoutReferenceOffset(registry, mapLayoutId, 0) != 0 {
         containersFail(2203);
@@ -908,27 +1342,32 @@ pub func managedMapGetReference(context: __rey_raw_address, map: __rey_raw_addre
 
 func containersMapInsert(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, scalarValue: int, referenceValue: __rey_raw_address, storesReference: bool): void {
     containersMapValidateNodeLayout(context, nodeLayoutId, storesReference);
-    managedStringLength(context, key);
-    var existing = containersMapFind(context, map, key);
+    containersStringLayout(context, key);
+    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));
+    var buckets = containersMapBuckets(context, map);
+    var capacity = (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;
+    var existing = containersMapFindInBuckets(context, map, buckets, capacity, key, keyLength);
     if !__reyRawEqual(existing, __reyRawNull()) {
         if containersMapNodeIsReference(context, existing) != storesReference { containersFail(2203); return; }
         if storesReference { managedStoreReference(context, existing, 8, referenceValue); }
         else { __reyRawStoreI64(containersAddressAt(existing, 24), scalarValue); }
         return;
     }
-    var buckets = containersMapBuckets(context, map);
-    var capacity = containersMapCapacity(context, buckets);
     var length = __reyRawLoadI64(containersAddressAt(map, 24));
     if length >= capacity / 2 {
-        containersMapGrow(context, map, containersHeapLayout(context, buckets));
+        var bucketsHeader = __reyRawLoadI64(buckets);
+        var bucketsLayoutId = bucketsHeader;
+        if bucketsHeader >= 8589934592 { bucketsLayoutId = bucketsHeader - 8589934592; }
+        else if bucketsHeader >= 4294967296 { bucketsLayoutId = bucketsHeader - 4294967296; }
+        containersMapGrow(context, map, buckets, bucketsLayoutId);
         buckets = containersMapBuckets(context, map);
-        capacity = containersMapCapacity(context, buckets);
+        capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);
     }
     var node = managedAllocateSized(context, nodeLayoutId, 24);
     managedStoreReference(context, node, 0, key);
     if storesReference { managedStoreReference(context, node, 8, referenceValue); }
     else { __reyRawStoreI64(containersAddressAt(node, 24), scalarValue); }
-    var bucket = containersMapBucket(context, key, capacity);
+    var bucket = containersMapBucketValidated(key, keyLength, capacity);
     var head = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucket * 8));
     managedStoreReference(context, node, 16, head);
     managedStoreReference(context, buckets, 8 + bucket * 8, node);
@@ -943,11 +1382,35 @@ pub func managedMapSetReference(context: __rey_raw_address, map: __rey_raw_addre
     containersMapInsert(context, map, nodeLayoutId, key, 0, value, true);
 }
 
-pub func managedMapDelete(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): bool {
-    managedStringLength(context, key);
+pub func managedMapKeys(context: __rey_raw_address, map: __rey_raw_address, headerLayoutId: int, dataLayoutId: int): __rey_raw_address {
+    var length = managedMapLength(context, map);
+    var vector = managedVecCreate(context, headerLayoutId, dataLayoutId, length);
     var buckets = containersMapBuckets(context, map);
-    var capacity = containersMapCapacity(context, buckets);
-    var bucket = containersMapBucket(context, key, capacity);
+    var capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);
+    var bucketIndex = 0;
+    while bucketIndex < capacity {
+        var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucketIndex * 8));
+        var steps = 0;
+        var limit = __reyRawLoadI64(containersAddressAt(map, 24));
+        while !__reyRawEqual(node, __reyRawNull()) {
+            if steps >= limit { containersFail(2202); return __reyRawNull(); }
+            containersMapNodeIsReference(context, node);
+            var key = __reyRawLoadAddress(containersAddressAt(node, 16));
+            managedVecPushReference(context, vector, dataLayoutId, key);
+            node = __reyRawLoadAddress(containersAddressAt(node, 32));
+            steps = steps + 1;
+        }
+        bucketIndex = bucketIndex + 1;
+    }
+    return vector;
+}
+
+pub func managedMapDelete(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): bool {
+    containersStringLayout(context, key);
+    var buckets = containersMapBuckets(context, map);
+    var capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);
+    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));
+    var bucket = containersMapBucketValidated(key, keyLength, capacity);
     var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucket * 8));
     var previous = __reyRawNull();
     var steps = 0;
@@ -957,7 +1420,9 @@ pub func managedMapDelete(context: __rey_raw_address, map: __rey_raw_address, ke
         containersMapNodeIsReference(context, node);
         var next = __reyRawLoadAddress(containersAddressAt(node, 32));
         var nodeKey = __reyRawLoadAddress(containersAddressAt(node, 16));
-        if managedStringEqual(context, nodeKey, key) {
+        containersStringLayout(context, nodeKey);
+        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));
+        if containersStringEqualValidated(nodeKey, nodeKeyLength, key, keyLength) {
             if __reyRawEqual(previous, __reyRawNull()) { managedStoreReference(context, buckets, 8 + bucket * 8, next); }
             else { managedStoreReference(context, previous, 16, next); }
             __reyRawStoreI64(containersAddressAt(map, 24), limit - 1);

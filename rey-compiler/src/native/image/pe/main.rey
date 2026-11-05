@@ -1,7 +1,15 @@
 // PE32+ x86-64 executable image. Cross-output only: nothing in this writer
 // executes the image or claims a Windows runner.
-import native::x64::{X64Image, X64Frame};
+import native::x64::{X64Image, X64Import, X64Frame};
 import native::bytes::{appendU32Le, appendU64Le};
+
+struct ImportGroup {
+    pub library: string,
+    pub count: int,
+    pub lookupOffset: int,
+    pub iatOffset: int,
+    pub libraryNameOffset: int,
+}
 
 func fail(message: string): Result<Vec<int>, string> { return Result.Err("pe x64: " + message); }
 
@@ -48,6 +56,20 @@ func writeI32(bytes: Vec<int>, offset: int, value: int): bool {
 }
 
 func unwindInfo(frameBytes: int): Result<Vec<int>, string> {
+    // frameBytes -1 is the windows entry stub: sub rsp, 40; call; set ecx; call ExitProcess.
+    // Prolog is only the 4-byte allocation. UWOP_ALLOC_SMALL OpInfo 4 is (40/8)-1.
+    if frameBytes == -1 {
+        var stub: Vec<int> = Vec.new();
+        stub.push(1);
+        stub.push(4);
+        stub.push(1);
+        stub.push(0);
+        stub.push(4);
+        stub.push(66);
+        stub.push(0);
+        stub.push(0);
+        return Result.Ok(stub);
+    }
     if frameBytes < 0 || frameBytes > 65520 || frameBytes % 8 != 0 { return Result.Err("frame"); }
     var info: Vec<int> = Vec.new();
     info.push(1);
@@ -97,6 +119,24 @@ func sectionHeader(bytes: Vec<int>, name: string, virtualSize: int, rva: int, ra
         && appendU16(bytes, 0) && appendU16(bytes, 0) && appendU32(bytes, characteristics);
 }
 
+func importIndex(imports: Vec<X64Import>, symbol: string): int {
+    var index = 0;
+    while index < imports.len() {
+        if imports[index].symbol == symbol { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+func importGroupIndex(groups: Vec<ImportGroup>, library: string): int {
+    var index = 0;
+    while index < groups.len() {
+        if groups[index].library == library { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
 pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     if image.target != "windows-x64" { return fail("target must be windows-x64"); }
     if image.convention != "win64" { return fail("calling convention must be win64"); }
@@ -106,8 +146,14 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     var i = 0;
     while i < image.imports.len() {
         var item = image.imports[i];
-        if item.library == "kernel32.dll" && item.symbol == "ExitProcess" { exitImport = true; }
-        else { return fail("unsupported import " + item.library + "!" + item.symbol); }
+        if item.library != "kernel32.dll" && item.library != "shell32.dll" { return fail("unsupported import library " + item.library); }
+        if item.symbol == "" { return fail("empty import symbol"); }
+        if item.symbol == "ExitProcess" && item.library == "kernel32.dll" { exitImport = true; }
+        var prior = 0;
+        while prior < i {
+            if image.imports[prior].symbol == item.symbol { return fail("duplicate import symbol " + item.symbol); }
+            prior += 1;
+        }
         i = i + 1;
     }
     if !exitImport { return fail("ExitProcess import is required"); }
@@ -119,7 +165,7 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     i = 0;
     while i < image.relocations.len() {
         var reloc = image.relocations[i];
-        if reloc.kind != 1 || reloc.symbol != "ExitProcess" { return fail("unsupported relocation"); }
+        if reloc.kind != 1 || importIndex(image.imports, reloc.symbol) < 0 { return fail("unsupported relocation"); }
         if reloc.offset < 0 || reloc.offset > image.code.bytes.len() - 4 { return fail("relocation is outside the instruction stream"); }
         i = i + 1;
     }
@@ -128,30 +174,117 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     var textRaw = 512;
     var textRawSize = align(codeSize, 512);
     var idataRva = textRva + align(codeSize, 4096);
+    var importCount = image.imports.len();
+    var importGroups: Vec<ImportGroup> = [];
+    var importGroupIndexes: Vec<int> = [];
+    var importSlotIndexes: Vec<int> = [];
+    i = 0;
+    while i < importCount {
+        var groupIndex = importGroupIndex(importGroups, image.imports[i].library);
+        if groupIndex < 0 {
+            importGroups.push(ImportGroup { library: image.imports[i].library, count: 0, lookupOffset: 0, iatOffset: 0, libraryNameOffset: 0 });
+            groupIndex = importGroups.len() - 1;
+        }
+        var group = importGroups[groupIndex];
+        importGroupIndexes.push(groupIndex);
+        importSlotIndexes.push(group.count);
+        group.count = group.count + 1;
+        importGroups.set(groupIndex, group);
+        i += 1;
+    }
+    var importDescriptorBytes = (importGroups.len() + 1) * 20;
+    var importCursor = align(importDescriptorBytes, 8);
+    i = 0;
+    while i < importGroups.len() {
+        var group = importGroups[i];
+        group.lookupOffset = importCursor;
+        importCursor += (group.count + 1) * 8;
+        importGroups.set(i, group);
+        i += 1;
+    }
+    i = 0;
+    while i < importGroups.len() {
+        var group = importGroups[i];
+        group.iatOffset = importCursor;
+        importCursor += (group.count + 1) * 8;
+        importGroups.set(i, group);
+        i += 1;
+    }
+    i = 0;
+    while i < importGroups.len() {
+        var group = importGroups[i];
+        group.libraryNameOffset = importCursor;
+        importCursor = align(importCursor + group.library.len() + 1, 2);
+        importGroups.set(i, group);
+        i += 1;
+    }
+    var idataNames = importCursor;
+    var importNameOffsets: Vec<int> = Vec.new();
+    var importNameCursor = idataNames;
+    i = 0;
+    while i < importCount {
+        importNameOffsets.push(importNameCursor);
+        importNameCursor = align(importNameCursor + 2 + image.imports[i].symbol.len() + 1, 2);
+        i += 1;
+    }
     var idata: Vec<int> = Vec.new();
-    var idataName = 86;
-    var idataIat = 56;
-    if !appendU32(idata, idataRva + 40) || !appendU32(idata, 0) || !appendU32(idata, 0)
-        || !appendU32(idata, idataRva + 72) || !appendU32(idata, idataRva + idataIat) {
-        return fail("import descriptor encoding failed");
+    i = 0;
+    while i < importGroups.len() {
+        var group = importGroups[i];
+        if !appendU32(idata, idataRva + group.lookupOffset) || !appendU32(idata, 0) || !appendU32(idata, 0)
+            || !appendU32(idata, idataRva + group.libraryNameOffset) || !appendU32(idata, idataRva + group.iatOffset) {
+            return fail("import descriptor encoding failed");
+        }
+        i += 1;
     }
     var zero = 0;
-    while zero < 20 { idata.push(0); zero = zero + 1; }
-    if !appendU64(idata, idataRva + idataName) || !appendU64(idata, 0) { return fail("import lookup encoding failed"); }
-    if !appendU64(idata, idataRva + idataName) || !appendU64(idata, 0) { return fail("import address encoding failed"); }
-    if idata.len() != 72 { return fail("import address table offset mismatch"); }
-    if !appendBytes(idata, "kernel32.dll") { return fail("import library encoding failed"); }
-    idata.push(0);
-    if idata.len() != 85 { return fail("import library size mismatch"); }
-    idata.push(0);
-    if !appendU16(idata, 0) || !appendBytes(idata, "ExitProcess") { return fail("import symbol encoding failed"); }
-    idata.push(0);
-    if idata.len() != 100 { return fail("import section size mismatch"); }
+    while zero < 20 { idata.push(0); zero += 1; }
+    while idata.len() < importGroups[0].lookupOffset { idata.push(0); }
+    i = 0;
+    var j = 0;
+    while i < importGroups.len() {
+        j = 0;
+        while j < importCount {
+            if importGroupIndexes[j] == i && !appendU64(idata, idataRva + importNameOffsets[j]) { return fail("import lookup encoding failed"); }
+            j += 1;
+        }
+        if !appendU64(idata, 0) { return fail("import lookup encoding failed"); }
+        i += 1;
+    }
+    i = 0;
+    while i < importGroups.len() {
+        j = 0;
+        while j < importCount {
+            if importGroupIndexes[j] == i && !appendU64(idata, idataRva + importNameOffsets[j]) { return fail("import address encoding failed"); }
+            j += 1;
+        }
+        if !appendU64(idata, 0) { return fail("import address encoding failed"); }
+        i += 1;
+    }
+    i = 0;
+    while i < importGroups.len() {
+        var group = importGroups[i];
+        while idata.len() < group.libraryNameOffset { idata.push(0); }
+        if !appendBytes(idata, group.library) { return fail("import library encoding failed"); }
+        idata.push(0);
+        while idata.len() % 2 != 0 { idata.push(0); }
+        i += 1;
+    }
+    if idata.len() != idataNames { return fail("import library size mismatch"); }
+    i = 0;
+    while i < importCount {
+        if !appendU16(idata, 0) || !appendBytes(idata, image.imports[i].symbol) { return fail("import symbol encoding failed"); }
+        idata.push(0);
+        while idata.len() % 2 != 0 { idata.push(0); }
+        i += 1;
+    }
+    if idata.len() != importNameCursor { return fail("import section size mismatch"); }
     var frames: Vec<X64Frame> = Vec.new();
     i = 0;
     while i < image.frames.len() {
         var frame = image.frames[i];
-        if frame.functionId >= 0 { frames.push(frame); }
+        if frame.functionId < -1 { return fail("frame id is outside the supported range"); }
+        frames.push(frame);
         i = i + 1;
     }
     var pdataRva = idataRva + align(idata.len(), 4096);
@@ -183,6 +316,17 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
         }
         i = i + 1;
     }
+    var entryRva = textRva + image.code.entryOffset;
+    var entryCovered = false;
+    i = 0;
+    while i < frames.len() {
+        var begin = textRva + frames[i].offset;
+        var endRva = textRva + codeSize;
+        if i + 1 < frames.len() { endRva = textRva + frames[i + 1].offset; }
+        if begin <= entryRva && entryRva < endRva { entryCovered = true; }
+        i = i + 1;
+    }
+    if !entryCovered { return fail("entry point is outside .pdata"); }
     i = 0;
     while i < unwindBlobs.len() { pdata.push(unwindBlobs[i]); i = i + 1; }
     var idataRaw = textRaw + textRawSize;
@@ -217,7 +361,7 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     while directory < 16 {
         var rva = 0;
         var size = 0;
-        if directory == 1 { rva = idataRva; size = 40; }
+        if directory == 1 { rva = idataRva; size = importDescriptorBytes; }
         if directory == 3 { rva = pdataRva; size = functionTable; }
         if !appendU32(file, rva) || !appendU32(file, size) { return fail("data directory encoding failed"); }
         directory = directory + 1;
@@ -235,11 +379,15 @@ pub func buildPeX64(image: X64Image): Result<Vec<int>, string> {
     i = 0;
     while i < pdata.len() { file.push(pdata[i]); i = i + 1; }
     while file.len() < pdataRaw + pdataRawSize { file.push(0); }
-    var iatRva = idataRva + idataIat;
     i = 0;
     while i < image.relocations.len() {
         var reloc = image.relocations[i];
         var nextIp = textRva + reloc.offset + 4;
+        var symbolIndex = importIndex(image.imports, reloc.symbol);
+        if symbolIndex < 0 { return fail("relocation import is missing"); }
+        var groupIndex = importGroupIndexes[symbolIndex];
+        var group = importGroups[groupIndex];
+        var iatRva = idataRva + group.iatOffset + importSlotIndexes[symbolIndex] * 8;
         var disp = iatRva - nextIp;
         if !writeI32(file, textRaw + reloc.offset, disp) { return fail("import displacement does not fit"); }
         i = i + 1;

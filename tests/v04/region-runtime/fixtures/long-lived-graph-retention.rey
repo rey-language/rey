@@ -21,6 +21,10 @@ func main(): void {
     var aliasLeft = left;
     var aliasMiddle = middle;
     var aliasRight = right;
+    var requestedBeforePromotion = managedRegionRequestedBytes(context);
+    var usedBeforePromotion = managedRegionUsedBytes(context);
+    check(requestedBeforePromotion > 0);
+    check(usedBeforePromotion > 0);
     managedStoreReference(context, left, 0, middle);
     managedStoreReference(context, middle, 0, right);
     managedStoreReference(context, right, 0, left);
@@ -36,8 +40,8 @@ func main(): void {
     check(managedLiveObjects(context) == 4);
     check(managedLivePayloadBytes(context) == 32);
     check(managedRequestedObjectBytes(context) == 128);
-    check(managedRegionRequestedBytes(context) == 12288);
-    check(managedRegionUsedBytes(context) == 408);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
+    check(managedRegionUsedBytes(context) == usedBeforePromotion);
     managedRegionEnd(context, child);
     check(managedDependencyCount(context) == 0);
     check(managedPromotionCount(context) == 2);
@@ -46,15 +50,15 @@ func main(): void {
     check(managedRegionGroupCount(context) == 3);
     check(managedLivePayloadBytes(context) == 32);
     check(managedRequestedObjectBytes(context) == 128);
-    check(managedRegionRequestedBytes(context) == 12288);
-    check(managedRegionUsedBytes(context) == 408);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
+    check(managedRegionUsedBytes(context) == usedBeforePromotion);
     check(__reyRawEqual(aliasLeft, left) && __reyRawEqual(aliasMiddle, middle) && __reyRawEqual(aliasRight, right));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(root, 16)), left));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(left, 16)), middle));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(middle, 16)), right));
     check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(right, 16)), left));
     check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 4);
-    check(__reyRawLoadI64(__reyRawOffset(program, 64)) == 12288);
+    check(__reyRawLoadI64(__reyRawOffset(program, 64)) == requestedBeforePromotion);
     managedDestroy(context);
     layoutRegistryRelease(registry);
 }

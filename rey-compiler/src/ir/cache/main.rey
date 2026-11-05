@@ -101,7 +101,7 @@ pub func miss(reason: string): CacheDecision {
 
 func hexDigit(value: int): string {
     var digits = "0123456789abcdef";
-    return digits[value].toString();
+    return string(digits[value]);
 }
 
 func hexByte(value: int): string {
@@ -216,7 +216,7 @@ func safeBuildId(buildId: string): bool {
         var digit = byte >= 48 && byte <= 57;
         var lower = byte >= 97 && byte <= 122;
         var upper = byte >= 65 && byte <= 90;
-        var mark = buildId[i].toString() == "-" || buildId[i].toString() == "_" || buildId[i].toString() == ".";
+        var mark = string(buildId[i]) == "-" || string(buildId[i]) == "_" || string(buildId[i]) == ".";
         if !digit && !lower && !upper && !mark { return false; }
         i = i + 1;
     }
@@ -739,4 +739,622 @@ pub func explanationLine(status: string, text: string): string {
     }
     if text == "" { return status + ": unavailable"; }
     return status + ": " + text;
+}
+
+// One driver call. `rey build --cache-dir <root> --cache-report <path>` should
+// open nothing itself: pass the flag values here with a unique buildId and a
+// positive maxBytes. Set each unit compilerAbi to compilerCacheIdentity(hash).
+// Fresh payloads may be empty for units planRebuild does not rebuild. A corrupt
+// or missing record never becomes a hit; pass every fresh payload to recover
+// with a clean rebuild. An empty payload on that path is an error and yields
+// no output.
+pub struct IncrementalUnit {
+    pub snapshot: UnitSnapshot,
+    pub freshPayload: string,
+}
+
+pub struct IncrementalResult {
+    pub output: string,
+    pub report: string,
+    pub kind: string,
+    pub rebuiltUnits: Vec<string>,
+    pub hitUnits: Vec<string>,
+    pub recovered: bool,
+    pub relink: bool,
+}
+
+pub func compilerCacheIdentity(compilerHash: string): string {
+    if compilerHash == "" || !flat(compilerHash) || compilerHash.contains(" ") || compilerHash.contains("@") {
+        return compilerAbi();
+    }
+    return compilerAbi() + "@" + compilerHash;
+}
+
+func yesNo(value: bool): string {
+    if value { return "true"; }
+    return "false";
+}
+
+func identityToken(text: string): bool {
+    return text != "" && text != "-" && flat(text) && !text.contains(" ") && !text.contains(",");
+}
+
+func containsString(values: Vec<string>, value: string): bool {
+    var i = 0;
+    while i < values.len() {
+        if values[i] == value { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func mentionsUnit(text: string, unitId: string): bool {
+    var from = 0;
+    while from < text.len() {
+        var rest = text.slice(from, text.len());
+        var at = rest.indexOf(unitId);
+        if at < 0 { return false; }
+        var start = from + at;
+        var end = start + unitId.len();
+        var beforeOk = start == 0;
+        if start > 0 {
+            var before = text.slice(start - 1, start);
+            beforeOk = before == " " || before == ":" || before == ">";
+        }
+        var afterOk = end >= text.len();
+        if end < text.len() {
+            var after = text.slice(end, end + 1);
+            afterOk = after == " " || after == ":" || after == "-" || after == ">";
+        }
+        if beforeOk && afterOk { return true; }
+        from = start + unitId.len();
+    }
+    return false;
+}
+
+func reasonFor(reasons: Vec<string>, unitId: string): string {
+    var found = "";
+    var i = 0;
+    while i < reasons.len() {
+        if mentionsUnit(reasons[i], unitId) && found == "" { found = reasons[i]; }
+        i = i + 1;
+    }
+    if found == "" { return "the unit is part of the rebuild set"; }
+    return found;
+}
+
+func validateSnapshot(unit: UnitSnapshot): string {
+    if !identityToken(unit.unitId) { return "unit id is not a single cache token"; }
+    if !flat(unit.sourceDigest) || unit.sourceDigest.contains(" ") || unit.sourceDigest.contains(",") { return "source digest is not a single line"; }
+    if !identityToken(unit.compilerAbi) && !(flat(unit.compilerAbi) && !unit.compilerAbi.contains(" ") && !unit.compilerAbi.contains(",")) {
+        return "compiler abi is not a single line";
+    }
+    if unit.compilerAbi == "" || !flat(unit.compilerAbi) || unit.compilerAbi.contains(" ") || unit.compilerAbi.contains(",") {
+        return "compiler abi is not a single line";
+    }
+    if unit.runtimeAbi == "" || !flat(unit.runtimeAbi) || unit.runtimeAbi.contains(" ") { return "runtime abi is not a single line"; }
+    if unit.target == "" || !flat(unit.target) || unit.target.contains(" ") { return "target is not a single line"; }
+    if unit.semanticFlags == "" || !flat(unit.semanticFlags) || unit.semanticFlags.contains(" ") { return "semantic flags are not a single line"; }
+    if unit.optimization == "" || !flat(unit.optimization) || unit.optimization.contains(" ") { return "optimization is not a single line"; }
+    var i = 0;
+    while i < unit.dependencyUnitIds.len() {
+        if !identityToken(unit.dependencyUnitIds[i]) { return "dependency id is not a single cache token"; }
+        i = i + 1;
+    }
+    i = 0;
+    while i < unit.functions.len() {
+        var fn = unit.functions[i];
+        if !identityToken(fn.name) || !identityToken(fn.bodyDigest) || !identityToken(fn.effectDigest) || !identityToken(fn.layoutDigest) || !identityToken(fn.inlineDigest) || !identityToken(fn.specializationDigest) {
+            return "function fingerprint is not a single cache token";
+        }
+        i = i + 1;
+    }
+    return "";
+}
+
+func validateUnits(units: Vec<IncrementalUnit>): string {
+    var i = 0;
+    while i < units.len() {
+        var j = i + 1;
+        while j < units.len() {
+            if units[i].snapshot.unitId == units[j].snapshot.unitId {
+                return "incremental cache: duplicate unit " + units[i].snapshot.unitId;
+            }
+            j = j + 1;
+        }
+        var problem = validateSnapshot(units[i].snapshot);
+        if problem != "" { return "incremental cache: " + problem; }
+        i = i + 1;
+    }
+    return "";
+}
+
+func snapshotsOf(units: Vec<IncrementalUnit>): Vec<UnitSnapshot> {
+    var snapshots: Vec<UnitSnapshot> = Vec.new();
+    var i = 0;
+    while i < units.len() {
+        snapshots.push(units[i].snapshot);
+        i = i + 1;
+    }
+    return snapshots;
+}
+
+func joinedFunctionField(unit: UnitSnapshot, field: string): string {
+    var rows: Vec<string> = Vec.new();
+    var i = 0;
+    while i < unit.functions.len() {
+        var fn = unit.functions[i];
+        var value = fn.bodyDigest;
+        if field == "effect" { value = fn.effectDigest; }
+        if field == "layout" { value = fn.layoutDigest; }
+        if field == "inline" { value = fn.inlineDigest; }
+        if field == "spec" { value = fn.specializationDigest; }
+        rows.push(fn.name + " " + value);
+        i = i + 1;
+    }
+    return joinComma(sortStrings(rows));
+}
+
+func dependencyDigest(unit: UnitSnapshot, units: Vec<UnitSnapshot>): Result<string, string> {
+    var rows: Vec<string> = Vec.new();
+    var i = 0;
+    while i < unit.dependencyUnitIds.len() {
+        var depId = unit.dependencyUnitIds[i];
+        var idx = unitIndex(units, depId);
+        if idx < 0 {
+            rows.push(depId + " missing");
+        } else {
+            var iface = joinedFunctionField(units[idx], "effect") + "|" + joinedFunctionField(units[idx], "layout") + "|" + joinedFunctionField(units[idx], "inline") + "|" + joinedFunctionField(units[idx], "spec");
+            rows.push(depId + " " + iface);
+        }
+        i = i + 1;
+    }
+    return transitiveDigest(rows);
+}
+
+func objectRequest(unit: UnitSnapshot, units: Vec<UnitSnapshot>): Result<CacheRequest, string> {
+    var source = digestText(unit.sourceDigest + "\n" + joinedFunctionField(unit, "body"));
+    if source.isErr() { return Result.Err(source.unwrapErr()); }
+    var deps = dependencyDigest(unit, units);
+    if deps.isErr() { return Result.Err(deps.unwrapErr()); }
+    var effect = digestText(joinedFunctionField(unit, "effect"));
+    if effect.isErr() { return Result.Err(effect.unwrapErr()); }
+    var layout = digestText(joinedFunctionField(unit, "layout"));
+    if layout.isErr() { return Result.Err(layout.unwrapErr()); }
+    var inlineDigest = digestText(joinedFunctionField(unit, "inline"));
+    if inlineDigest.isErr() { return Result.Err(inlineDigest.unwrapErr()); }
+    var spec = digestText(joinedFunctionField(unit, "spec"));
+    if spec.isErr() { return Result.Err(spec.unwrapErr()); }
+    var keys: Vec<string> = Vec.new();
+    return Result.Ok(CacheRequest {
+        kind: "object", unitId: unit.unitId, sourceDigest: source.unwrap(), dependencyDigest: deps.unwrap(),
+        compilerAbi: unit.compilerAbi, runtimeAbi: unit.runtimeAbi, target: unit.target, semanticFlags: unit.semanticFlags,
+        optimization: unit.optimization, effectDigest: effect.unwrap(), layoutDigest: layout.unwrap(),
+        inlineDigest: inlineDigest.unwrap(), specializationDigest: spec.unwrap(), dependencyKeys: keys,
+    });
+}
+
+func digestColumn(units: Vec<UnitSnapshot>, field: string): Result<string, string> {
+    var rows: Vec<string> = Vec.new();
+    var i = 0;
+    while i < units.len() {
+        var value = units[i].compilerAbi;
+        if field == "runtime" { value = units[i].runtimeAbi; }
+        if field == "target" { value = units[i].target; }
+        if field == "flags" { value = units[i].semanticFlags; }
+        if field == "optimization" { value = units[i].optimization; }
+        rows.push(units[i].unitId + " " + value);
+        i = i + 1;
+    }
+    return transitiveDigest(rows);
+}
+
+func linkRequest(units: Vec<UnitSnapshot>, objectKeys: Vec<string>): Result<CacheRequest, string> {
+    var rows: Vec<string> = Vec.new();
+    var i = 0;
+    while i < units.len() {
+        rows.push(units[i].unitId + " " + units[i].sourceDigest);
+        i = i + 1;
+    }
+    var source = transitiveDigest(rows);
+    if source.isErr() { return Result.Err(source.unwrapErr()); }
+    var deps = transitiveDigest(objectKeys);
+    if deps.isErr() { return Result.Err(deps.unwrapErr()); }
+    var compiler = digestColumn(units, "compiler");
+    if compiler.isErr() { return Result.Err(compiler.unwrapErr()); }
+    var runtime = digestColumn(units, "runtime");
+    if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
+    var target = digestColumn(units, "target");
+    if target.isErr() { return Result.Err(target.unwrapErr()); }
+    var flags = digestColumn(units, "flags");
+    if flags.isErr() { return Result.Err(flags.unwrapErr()); }
+    var optimization = digestColumn(units, "optimization");
+    if optimization.isErr() { return Result.Err(optimization.unwrapErr()); }
+    var effect = digestText("link-effect");
+    if effect.isErr() { return Result.Err(effect.unwrapErr()); }
+    var layout = digestText("link-layout");
+    if layout.isErr() { return Result.Err(layout.unwrapErr()); }
+    var inlineDigest = digestText("link-inline");
+    if inlineDigest.isErr() { return Result.Err(inlineDigest.unwrapErr()); }
+    var spec = digestText("link-spec");
+    if spec.isErr() { return Result.Err(spec.unwrapErr()); }
+    return Result.Ok(CacheRequest {
+        kind: "link", unitId: "rey-link", sourceDigest: source.unwrap(), dependencyDigest: deps.unwrap(),
+        compilerAbi: compiler.unwrap(), runtimeAbi: runtime.unwrap(), target: target.unwrap(), semanticFlags: flags.unwrap(),
+        optimization: optimization.unwrap(), effectDigest: effect.unwrap(), layoutDigest: layout.unwrap(),
+        inlineDigest: inlineDigest.unwrap(), specializationDigest: spec.unwrap(), dependencyKeys: objectKeys,
+    });
+}
+
+func linkText(ids: Vec<string>, payloads: Vec<string>): string {
+    var order: Vec<int> = Vec.new();
+    var i = 0;
+    while i < ids.len() {
+        order.push(i);
+        i = i + 1;
+    }
+    var a = 0;
+    while a < order.len() {
+        var best = a;
+        var b = a + 1;
+        while b < order.len() {
+            if ids[order[b]] < ids[order[best]] { best = b; }
+            b = b + 1;
+        }
+        var swap = order[a];
+        order.set(a, order[best]);
+        order.set(best, swap);
+        a = a + 1;
+    }
+    var text = "rey-link 1\n";
+    var n = 0;
+    while n < order.len() {
+        var at = order[n];
+        text = text + ids[at] + "\n" + payloads[at].len().toString() + "\n" + payloads[at] + "\n";
+        n = n + 1;
+    }
+    return text;
+}
+
+func publishPayload(store: CacheStore, request: CacheRequest, payload: string): Result<string, string> {
+    var first = commit(store, request, payload);
+    if first.isOk() { return first; }
+    var message = first.unwrapErr();
+    if !message.contains("corrupt") { return first; }
+    return commit(store, request, payload);
+}
+
+func publishText(finalPath: string, text: string): Result<bool, string> {
+    if finalPath == "" || !flat(finalPath) { return Result.Err("incremental cache: report path is empty"); }
+    var temp = finalPath + ".partial";
+    fs.mkdirAll(fs.dirname(finalPath));
+    fs.write(temp, text);
+    if !fs.isFile(temp) || fs.read(temp) != text {
+        if fs.exists(temp) { fs.remove(temp); }
+        return Result.Err("incremental cache: staged text did not match");
+    }
+    if fs.exists(finalPath) { fs.remove(finalPath); }
+    fs.move(temp, finalPath);
+    if !fs.isFile(finalPath) || fs.read(finalPath) != text {
+        if fs.exists(finalPath) { fs.remove(finalPath); }
+        return Result.Err("incremental cache: published text failed verification");
+    }
+    return Result.Ok(true);
+}
+
+func encodeManifest(units: Vec<UnitSnapshot>): string {
+    var text = "rey-manifest 1\nunits " + units.len().toString() + "\n";
+    var i = 0;
+    while i < units.len() {
+        var unit = units[i];
+        text = text + "unit " + unit.unitId + "\nsource " + unit.sourceDigest + "\ndeps " + joinComma(unit.dependencyUnitIds)
+            + "\ncompilerAbi " + unit.compilerAbi + "\nruntimeAbi " + unit.runtimeAbi + "\ntarget " + unit.target
+            + "\nflags " + unit.semanticFlags + "\noptimization " + unit.optimization
+            + "\nfunctions " + unit.functions.len().toString() + "\n";
+        var f = 0;
+        while f < unit.functions.len() {
+            var fn = unit.functions[f];
+            text = text + "fn " + fn.name + " " + fn.bodyDigest + " " + fn.effectDigest + " " + fn.layoutDigest + " " + fn.inlineDigest + " " + fn.specializationDigest + "\n";
+            f = f + 1;
+        }
+        text = text + "end-unit\n";
+        i = i + 1;
+    }
+    return text;
+}
+
+func fieldValue(line: string, prefix: string): Result<string, string> {
+    if !line.startsWith(prefix) { return Result.Err("missing " + prefix); }
+    return Result.Ok(line.slice(prefix.len(), line.len()));
+}
+
+func parseFunctionLine(line: string): Result<FunctionSnapshot, string> {
+    if !line.startsWith("fn ") { return Result.Err("function line"); }
+    var parts = line.slice(3, line.len()).split(" ");
+    if parts.len() != 6 { return Result.Err("function line"); }
+    var i = 0;
+    while i < parts.len() {
+        if !identityToken(parts[i]) { return Result.Err("function field"); }
+        i = i + 1;
+    }
+    return Result.Ok(FunctionSnapshot {
+        name: parts[0], bodyDigest: parts[1], effectDigest: parts[2], layoutDigest: parts[3],
+        inlineDigest: parts[4], specializationDigest: parts[5],
+    });
+}
+
+func parseManifest(text: string): Result<Vec<UnitSnapshot>, string> {
+    if !text.startsWith("rey-manifest 1\n") { return Result.Err("manifest version"); }
+    var lines = text.split("\n");
+    if lines.len() < 2 { return Result.Err("manifest truncated"); }
+    var countText = fieldValue(lines[1], "units ");
+    if countText.isErr() { return Result.Err("manifest unit count"); }
+    var countValue = countText.unwrap();
+    if !digits(countValue) { return Result.Err("manifest unit count"); }
+    var count = countValue.toInt();
+    var units: Vec<UnitSnapshot> = Vec.new();
+    var line = 2;
+    var seen = 0;
+    while seen < count {
+        if line >= lines.len() { return Result.Err("manifest truncated"); }
+        var unitId = fieldValue(lines[line], "unit ");
+        line = line + 1;
+        if unitId.isErr() || line >= lines.len() { return Result.Err("manifest unit"); }
+        var source = fieldValue(lines[line], "source ");
+        line = line + 1;
+        if source.isErr() || line >= lines.len() { return Result.Err("manifest source"); }
+        var deps = fieldValue(lines[line], "deps ");
+        line = line + 1;
+        if deps.isErr() || line >= lines.len() { return Result.Err("manifest deps"); }
+        var compiler = fieldValue(lines[line], "compilerAbi ");
+        line = line + 1;
+        if compiler.isErr() || line >= lines.len() { return Result.Err("manifest compiler"); }
+        var runtime = fieldValue(lines[line], "runtimeAbi ");
+        line = line + 1;
+        if runtime.isErr() || line >= lines.len() { return Result.Err("manifest runtime"); }
+        var target = fieldValue(lines[line], "target ");
+        line = line + 1;
+        if target.isErr() || line >= lines.len() { return Result.Err("manifest target"); }
+        var flags = fieldValue(lines[line], "flags ");
+        line = line + 1;
+        if flags.isErr() || line >= lines.len() { return Result.Err("manifest flags"); }
+        var optimization = fieldValue(lines[line], "optimization ");
+        line = line + 1;
+        if optimization.isErr() || line >= lines.len() { return Result.Err("manifest optimization"); }
+        var functionCountText = fieldValue(lines[line], "functions ");
+        line = line + 1;
+        if functionCountText.isErr() { return Result.Err("manifest functions"); }
+        var functionCountValue = functionCountText.unwrap();
+        if !digits(functionCountValue) { return Result.Err("manifest functions"); }
+        var functionCount = functionCountValue.toInt();
+        var functions: Vec<FunctionSnapshot> = Vec.new();
+        var f = 0;
+        while f < functionCount {
+            if line >= lines.len() { return Result.Err("manifest truncated"); }
+            var parsed = parseFunctionLine(lines[line]);
+            if parsed.isErr() { return Result.Err(parsed.unwrapErr()); }
+            functions.push(parsed.unwrap());
+            line = line + 1;
+            f = f + 1;
+        }
+        if line >= lines.len() || lines[line] != "end-unit" { return Result.Err("manifest end"); }
+        line = line + 1;
+        var snapshot = UnitSnapshot {
+            unitId: unitId.unwrap(), sourceDigest: source.unwrap(), dependencyUnitIds: splitKeys(deps.unwrap()), functions: functions,
+            compilerAbi: compiler.unwrap(), runtimeAbi: runtime.unwrap(), target: target.unwrap(), semanticFlags: flags.unwrap(),
+            optimization: optimization.unwrap(),
+        };
+        if validateSnapshot(snapshot) != "" { return Result.Err("manifest snapshot"); }
+        units.push(snapshot);
+        seen = seen + 1;
+    }
+    while line < lines.len() {
+        if lines[line] != "" { return Result.Err("manifest trailing junk"); }
+        line = line + 1;
+    }
+    return Result.Ok(units);
+}
+
+func readManifest(store: CacheStore): Result<Vec<UnitSnapshot>, string> {
+    var path = fs.join(store.root, "manifest.txt");
+    if !fs.isFile(path) {
+        var empty: Vec<UnitSnapshot> = Vec.new();
+        return Result.Ok(empty);
+    }
+    var parsed = parseManifest(fs.read(path));
+    if parsed.isErr() { return Result.Err("incremental cache: manifest is corrupt"); }
+    return parsed;
+}
+
+func formatReport(kind: string, recovered: bool, relink: bool, functionName: string, reasons: Vec<string>, rebuilt: Vec<string>, hits: Vec<string>): string {
+    var shownFunction = functionName;
+    if kind != "one-function" || shownFunction == "" { shownFunction = "-"; }
+    var text = "rey-cache-report 1\nkind " + kind + "\nrecovered " + yesNo(recovered) + "\nrelink " + yesNo(relink) + "\nfunction " + shownFunction + "\n";
+    text = text + explanationLine("established", "build kind " + kind) + "\n";
+    text = text + explanationLine("established", "relink " + yesNo(relink)) + "\n";
+    text = text + explanationLine("established", "rebuilt count " + rebuilt.len().toString()) + "\n";
+    text = text + explanationLine("established", "hit count " + hits.len().toString()) + "\n";
+    if recovered {
+        text = text + explanationLine("established", "corrupt cache fell back to a clean rebuild") + "\n";
+    }
+    if kind == "noop" && !recovered {
+        text = text + explanationLine("established", "cache hit for every unit") + "\n";
+    }
+    var i = 0;
+    while i < reasons.len() {
+        text = text + explanationLine("established", reasons[i]) + "\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < rebuilt.len() {
+        text = text + explanationLine("established", "unit " + rebuilt[i] + " rebuilt because " + reasonFor(reasons, rebuilt[i])) + "\n";
+        i = i + 1;
+    }
+    i = 0;
+    while i < hits.len() {
+        text = text + explanationLine("established", "unit " + hits[i] + " hit") + "\n";
+        i = i + 1;
+    }
+    if kind == "one-function" {
+        text = text + explanationLine("estimate", "callers stay cached while effect, layout, inline, and specialization digests are unchanged") + "\n";
+    } else if kind == "noop" {
+        text = text + explanationLine("estimate", "none") + "\n";
+    } else {
+        text = text + explanationLine("estimate", "unchanged units keep their cached objects when the recovery path is not taken") + "\n";
+    }
+    text = text + explanationLine("observation", "not measured") + "\n";
+    return text;
+}
+
+func makeResult(output: string, kind: string, rebuilt: Vec<string>, hits: Vec<string>, recovered: bool, relink: bool, functionName: string, reasons: Vec<string>): IncrementalResult {
+    var report = formatReport(kind, recovered, relink, functionName, reasons, rebuilt, hits);
+    return IncrementalResult {
+        output: output, report: report, kind: kind, rebuiltUnits: rebuilt, hitUnits: hits, recovered: recovered, relink: relink,
+    };
+}
+
+func copyReasons(plan: EditPlan, recovered: bool): Vec<string> {
+    var reasons: Vec<string> = Vec.new();
+    var i = 0;
+    while i < plan.reasons.len() {
+        reasons.push(plan.reasons[i]);
+        i = i + 1;
+    }
+    if recovered { reasons.push("corrupt or missing cache record"); }
+    return reasons;
+}
+
+func assemble(store: CacheStore, units: Vec<IncrementalUnit>, previous: Vec<UnitSnapshot>, useFreshAll: bool, recoveredFlag: bool): Result<IncrementalResult, string> {
+    var current = snapshotsOf(units);
+    var plan = planRebuild(previous, current);
+    var freshAll = useFreshAll || plan.kind == "full";
+    var recovered = recoveredFlag;
+    var ids: Vec<string> = Vec.new();
+    var i = 0;
+    while i < units.len() {
+        ids.push(units[i].snapshot.unitId);
+        i = i + 1;
+    }
+    if freshAll {
+        i = 0;
+        while i < units.len() {
+            if units[i].freshPayload == "" {
+                return Result.Err("incremental cache: clean rebuild required for " + units[i].snapshot.unitId + "; fresh payload is empty");
+            }
+            i = i + 1;
+        }
+        var payloads: Vec<string> = Vec.new();
+        var keys: Vec<string> = Vec.new();
+        var rebuilt: Vec<string> = Vec.new();
+        var hits: Vec<string> = Vec.new();
+        i = 0;
+        while i < units.len() {
+            var request = objectRequest(current[i], current);
+            if request.isErr() { return Result.Err(request.unwrapErr()); }
+            var ready = request.unwrap();
+            var key = requestKey(ready);
+            if key.isErr() { return Result.Err(key.unwrapErr()); }
+            var keyText = key.unwrap();
+            var published = publishPayload(store, ready, units[i].freshPayload);
+            if published.isErr() { return Result.Err(published.unwrapErr()); }
+            keys.push(keyText);
+            payloads.push(units[i].freshPayload);
+            rebuilt.push(current[i].unitId);
+            i = i + 1;
+        }
+        var linked = linkText(ids, payloads);
+        if units.len() > 0 {
+            var link = linkRequest(current, keys);
+            if link.isErr() { return Result.Err(link.unwrapErr()); }
+            var publishedLink = publishPayload(store, link.unwrap(), linked);
+            if publishedLink.isErr() { return Result.Err(publishedLink.unwrapErr()); }
+        }
+        var kind = "full";
+        var relink = rebuilt.len() > 0;
+        return Result.Ok(makeResult(linked, kind, rebuilt, hits, recovered, relink, "", copyReasons(plan, recovered)));
+    }
+    var payloadsIncremental: Vec<string> = Vec.new();
+    var keysIncremental: Vec<string> = Vec.new();
+    var rebuiltIncremental: Vec<string> = Vec.new();
+    var hitsIncremental: Vec<string> = Vec.new();
+    i = 0;
+    while i < units.len() {
+        var requestIncremental = objectRequest(current[i], current);
+        if requestIncremental.isErr() { return Result.Err(requestIncremental.unwrapErr()); }
+        var ready = requestIncremental.unwrap();
+        var keyIncremental = requestKey(ready);
+        if keyIncremental.isErr() { return Result.Err(keyIncremental.unwrapErr()); }
+        var keyText = keyIncremental.unwrap();
+        keysIncremental.push(keyText);
+        if containsString(plan.rebuildUnits, current[i].unitId) {
+            if units[i].freshPayload == "" {
+                return Result.Err("incremental cache: clean rebuild required for " + current[i].unitId + "; fresh payload is empty");
+            }
+            payloadsIncremental.push(units[i].freshPayload);
+            rebuiltIncremental.push(current[i].unitId);
+        } else {
+            var found = lookup(store, ready);
+            if !found.accepted { return Result.Err("incremental cache: retry clean rebuild"); }
+            payloadsIncremental.push(found.payload);
+            hitsIncremental.push(current[i].unitId);
+        }
+        i = i + 1;
+    }
+    var linkedIncremental = linkText(ids, payloadsIncremental);
+    if plan.kind == "noop" {
+        var cachedLink = linkRequest(current, keysIncremental);
+        if cachedLink.isErr() { return Result.Err(cachedLink.unwrapErr()); }
+        var hit = lookup(store, cachedLink.unwrap());
+        if !hit.accepted || hit.payload != linkedIncremental {
+            return Result.Err("incremental cache: retry clean rebuild");
+        }
+        var noRebuild: Vec<string> = Vec.new();
+        return Result.Ok(makeResult(hit.payload, "noop", noRebuild, hitsIncremental, false, false, "", copyReasons(plan, false)));
+    }
+    i = 0;
+    while i < units.len() {
+        if containsString(rebuiltIncremental, current[i].unitId) {
+            var again = objectRequest(current[i], current);
+            if again.isErr() { return Result.Err(again.unwrapErr()); }
+            var publishedUnit = publishPayload(store, again.unwrap(), payloadsIncremental[i]);
+            if publishedUnit.isErr() { return Result.Err(publishedUnit.unwrapErr()); }
+        }
+        i = i + 1;
+    }
+    var rebuiltLink = linkRequest(current, keysIncremental);
+    if rebuiltLink.isErr() { return Result.Err(rebuiltLink.unwrapErr()); }
+    var publishedRelink = publishPayload(store, rebuiltLink.unwrap(), linkedIncremental);
+    if publishedRelink.isErr() { return Result.Err(publishedRelink.unwrapErr()); }
+    var relinkIncremental = rebuiltIncremental.len() > 0;
+    var kindIncremental = plan.kind;
+    var functionIncremental = plan.functionName;
+    var reasonsIncremental = copyReasons(plan, false);
+    return Result.Ok(makeResult(linkedIncremental, kindIncremental, rebuiltIncremental, hitsIncremental, false, relinkIncremental, functionIncremental, reasonsIncremental));
+}
+
+pub func compileWithCache(root: string, buildId: string, maxBytes: int, units: Vec<IncrementalUnit>, reportPath: string): Result<IncrementalResult, string> {
+    var problem = validateUnits(units);
+    if problem != "" { return Result.Err(problem); }
+    if reportPath == "" || !flat(reportPath) { return Result.Err("incremental cache: report path is empty"); }
+    var opened = openStore(root, buildId, maxBytes);
+    if opened.isErr() { return Result.Err(opened.unwrapErr()); }
+    var store = opened.unwrap();
+    var loaded = readManifest(store);
+    var previous: Vec<UnitSnapshot> = Vec.new();
+    var manifestCorrupt = loaded.isErr();
+    if !manifestCorrupt { previous = loaded.unwrap(); }
+    var attempt = assemble(store, units, previous, manifestCorrupt, manifestCorrupt);
+    if attempt.isErr() {
+        var message = attempt.unwrapErr();
+        if message != "incremental cache: retry clean rebuild" { return Result.Err(message); }
+        attempt = assemble(store, units, previous, true, true);
+        if attempt.isErr() { return Result.Err(attempt.unwrapErr()); }
+    }
+    var result = attempt.unwrap();
+    var manifest = encodeManifest(snapshotsOf(units));
+    var saved = publishText(fs.join(store.root, "manifest.txt"), manifest);
+    if saved.isErr() { return Result.Err(saved.unwrapErr()); }
+    var written = publishText(reportPath, result.report);
+    if written.isErr() { return Result.Err(written.unwrapErr()); }
+    return Result.Ok(result);
 }

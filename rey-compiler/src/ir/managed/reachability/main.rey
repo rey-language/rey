@@ -1,0 +1,48 @@
+import ir::{IRFunction, IRProgram, InstructionKind};
+
+pub func pruneUnreachableImageFunctions(program: IRProgram): Result<IRProgram, string> {
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    while index < program.functions.len() {
+        var key = program.functions[index].id.toString();
+        if functionIndices.has(key) { return Result.Err("managed reachability: duplicate function ID"); }
+        functionIndices.set(key, index);
+        index += 1;
+    }
+    var entryKey = program.entryFunctionId.toString();
+    if !functionIndices.has(entryKey) { return Result.Err("managed reachability: program entry is missing"); }
+    var reachable: HashMap<string, bool> = HashMap.new();
+    reachable.set(entryKey, true);
+    var pending: Vec<int> = [program.entryFunctionId];
+    var cursor = 0;
+    while cursor < pending.len() {
+        var functionIndex = functionIndices.get(pending[cursor].toString());
+        var function = program.functions[functionIndex];
+        var blockIndex = 0;
+        while blockIndex < function.blocks.len() {
+            var instructions = function.blocks[blockIndex].instructions;
+            var instructionIndex = 0;
+            while instructionIndex < instructions.len() {
+                var instruction = instructions[instructionIndex];
+                if instruction.kind == InstructionKind::Call {
+                    var calleeKey = instruction.functionId.toString();
+                    if !functionIndices.has(calleeKey) { return Result.Err("managed reachability: call target is missing"); }
+                    if !reachable.has(calleeKey) {
+                        reachable.set(calleeKey, true);
+                        pending.push(instruction.functionId);
+                    }
+                }
+                instructionIndex += 1;
+            }
+            blockIndex += 1;
+        }
+        cursor += 1;
+    }
+    var functions: Vec<IRFunction> = [];
+    index = 0;
+    while index < program.functions.len() {
+        if reachable.has(program.functions[index].id.toString()) { functions.push(program.functions[index]); }
+        index += 1;
+    }
+    return Result.Ok(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions });
+}

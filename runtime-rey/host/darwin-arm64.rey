@@ -1,0 +1,94 @@
+// Darwin arm64 uses bare BSD syscall numbers; errno is normalized by the host syscall IR op.
+func hostRawInt(value: int): __rey_raw_address {
+    return __reyRawFromInt(value);
+}
+
+func hostCall(number: int, first: __rey_raw_address, second: __rey_raw_address, third: __rey_raw_address, fourth: __rey_raw_address, fifth: __rey_raw_address, sixth: __rey_raw_address): __rey_raw_address {
+    return __reyRawHostSyscall(number, first, second, third, fourth, fifth, sixth);
+}
+
+pub func hostArgCount(): int {
+    return __reyRawArgCount();
+}
+
+pub func hostArg(index: int): __rey_raw_address {
+    return __reyRawArg(index);
+}
+
+pub func hostArgRelease(argument: __rey_raw_address): void {
+    return;
+}
+
+pub func hostWrite(fd: int, base: __rey_raw_address, length: int): int {
+    return __reyRawToInt(hostCall(4, hostRawInt(fd), base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostRead(fd: int, base: __rey_raw_address, length: int): int {
+    return __reyRawToInt(hostCall(3, hostRawInt(fd), base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+func hostOpenFlags(flags: int): int {
+    if flags == 577 { return 1537; }
+    if flags == 1089 { return 521; }
+    if flags == 0 { return 0; }
+    return -22;
+}
+
+pub func hostOpen(path: __rey_raw_address, flags: int, mode: int): int {
+    var nativeFlags = hostOpenFlags(flags);
+    if nativeFlags < 0 { return nativeFlags; }
+    return __reyRawToInt(hostCall(5, path, hostRawInt(nativeFlags), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostClose(fd: int): int {
+    return __reyRawToInt(hostCall(6, hostRawInt(fd), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostLseek(fd: int, offset: int, whence: int): int {
+    return __reyRawToInt(hostCall(199, hostRawInt(fd), hostRawInt(offset), hostRawInt(whence), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostUnlink(path: __rey_raw_address): int {
+    return __reyRawToInt(hostCall(10, path, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostAccess(path: __rey_raw_address, mode: int): int {
+    return __reyRawToInt(hostCall(33, path, hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+func hostNormalizeDirents(buffer: __rey_raw_address, count: int) {
+    var cursor = 0;
+    while cursor < count {
+        var recordLength = __reyRawLoadByte(__reyRawOffset(buffer, cursor + 16)) + __reyRawLoadByte(__reyRawOffset(buffer, cursor + 17)) * 256;
+        if recordLength < 22 || cursor + recordLength > count {
+            cursor = count;
+        } else {
+            var nameLength = __reyRawLoadByte(__reyRawOffset(buffer, cursor + 18)) + __reyRawLoadByte(__reyRawOffset(buffer, cursor + 19)) * 256;
+            if nameLength >= recordLength - 21 {
+                cursor = count;
+            } else {
+                var entryType = __reyRawLoadByte(__reyRawOffset(buffer, cursor + 20));
+                var index = 0;
+                while index <= nameLength {
+                    var value = __reyRawLoadByte(__reyRawOffset(buffer, cursor + 21 + index));
+                    __reyRawStoreByte(__reyRawOffset(buffer, cursor + 19 + index), value);
+                    index = index + 1;
+                }
+                __reyRawStoreByte(__reyRawOffset(buffer, cursor + 18), entryType);
+                cursor = cursor + recordLength;
+            }
+        }
+    }
+}
+
+pub func hostGetdirentries(fd: int, buffer: __rey_raw_address, count: int, basep: __rey_raw_address): int {
+    var result = __reyRawToInt(hostCall(196, hostRawInt(fd), buffer, hostRawInt(count), basep, __reyRawNull(), __reyRawNull()));
+    if result > 0 { hostNormalizeDirents(buffer, result); }
+    return result;
+}
+
+pub func hostExit(code: int): void {
+    var ignored = hostCall(1, hostRawInt(code), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    __reyRawFail(2301);
+    return;
+}

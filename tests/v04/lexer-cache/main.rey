@@ -1,0 +1,99 @@
+import lexer::{tokenize, LexerResult};
+
+func hexDigit(value: int): string {
+    return string("0123456789abcdef"[value]);
+}
+
+func hexBytes(value: string): string {
+    if value.len() == 0 { return "_"; }
+    var result = "";
+    var i = 0;
+    loop {
+        if i >= value.len() { break; }
+        var byte = int(value[i]);
+        if byte < 0 { byte = byte + 256; }
+        result = result + hexDigit(byte / 16) + hexDigit(byte % 16);
+        i = i + 1;
+    }
+    return result;
+}
+
+func spanText(start: int, end: int, line: int, column: int): string {
+    return string(start) + "," + string(end) + "," + string(line) + "," + string(column);
+}
+
+func printResult(label: string, result: LexerResult) {
+    println("CASE|" + label + "|" + string(result.tokens.len()) + "|" + string(result.errors.len()));
+    var i = 0;
+    loop {
+        if i >= result.tokens.len() { break; }
+        var token = result.tokens[i];
+        println("T|" + token.kind + "|" + spanText(token.span.start, token.span.end, token.span.line, token.span.column) + "|" + hexBytes(token.lexeme));
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= result.errors.len() { break; }
+        var error = result.errors[i];
+        println("E|" + error.kind + "|" + spanText(error.span.start, error.span.end, error.span.line, error.span.column) + "|" + hexBytes(error.message));
+        i = i + 1;
+    }
+}
+
+func mix(value: int, next: int): int {
+    return (value * 131 + next + 1) % 1000000007;
+}
+
+func mixText(value: int, text: string): int {
+    var result = mix(value, text.len());
+    var i = 0;
+    while i < text.len() {
+        result = mix(result, int(text[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+func printLongResult(result: LexerResult): void {
+    var digest = 1;
+    var i = 0;
+    while i < result.tokens.len() {
+        var token = result.tokens[i];
+        digest = mixText(digest, token.kind);
+        digest = mixText(digest, token.lexeme);
+        digest = mix(digest, token.span.start);
+        digest = mix(digest, token.span.end);
+        digest = mix(digest, token.span.line);
+        digest = mix(digest, token.span.column);
+        i = i + 1;
+    }
+    i = 0;
+    while i < result.errors.len() {
+        var error = result.errors[i];
+        digest = mixText(digest, error.kind);
+        digest = mixText(digest, error.message);
+        digest = mix(digest, error.span.start);
+        digest = mix(digest, error.span.end);
+        digest = mix(digest, error.span.line);
+        digest = mix(digest, error.span.column);
+        i = i + 1;
+    }
+    println("LONG|" + string(result.tokens.len()) + "|" + string(result.errors.len()) + "|" + string(digest));
+}
+
+func main(): void {
+    printResult("lookahead", tokenize("a==b!=c<=d>=e->f::g++h--i...j", "lookahead.rey"));
+    printResult("escapes", tokenize("\"\\n\\t\\r\\\\\\\"\\'\\0\\x41\"", "escapes.rey"));
+    printResult("linebreaks", tokenize("alpha\r\nbeta\tgamma\n@delta", "linebreaks.rey"));
+    printResult("raw-nul", tokenize("left\x00right", "raw-nul.rey"));
+    printResult("high-bytes", tokenize("A\x80B \xFF", "high-bytes.rey"));
+    printResult("utf8", tokenize("\xC3\xA9", "utf8.rey"));
+    printResult("errors", tokenize("@ \"\\q\" 1__2 'ab'", "errors.rey"));
+    var longSource = "a\x00B\x80c\xC3\xA9+";
+    var n = 0;
+    while n < 8 {
+        longSource = longSource + longSource;
+        n = n + 1;
+    }
+    printLongResult(tokenize(longSource, "long-mixed.rey"));
+}

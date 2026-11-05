@@ -7,6 +7,19 @@ struct ValueDef {
     pub instructionIndex: int,
 }
 
+struct DefinitionTable {
+    pub definitions: Vec<ValueDef>,
+    pub denseIndices: Vec<int>,
+    pub sparseIndices: HashMap<string, int>,
+    pub usesDenseIndices: bool,
+}
+
+struct DominatorTraversal {
+    pub reversePostorder: Vec<int>,
+    pub order: Vec<int>,
+    pub parent: Vec<int>,
+}
+
 pub struct VerifyResult {
     pub ok: bool,
     pub errors: Vec<string>,
@@ -30,23 +43,50 @@ func findFunctionIndex(program: IRProgram, functionId: int): int {
     return -1;
 }
 
-func findBlockIndex(function: IRFunction, blockId: int): int {
-    var i = 0;
-    loop {
-        if i >= function.blocks.len() { break; }
-        if function.blocks[i].id == blockId { return i; }
-        i = i + 1;
-    }
+func findBlockIndex(indices: HashMap<string, int>, blockId: int): int {
+    var key = blockId.toString();
+    if indices.has(key) { return indices.get(key); }
     return -1;
 }
 
-func findDefinition(definitions: Vec<ValueDef>, valueId: int): ValueDef {
-    var i = 0;
+func buildDefinitionTable(definitions: Vec<ValueDef>, indices: HashMap<string, int>): DefinitionTable {
+    var maximumId = -1;
+    var index = 0;
     loop {
-        if i >= definitions.len() { break; }
-        if definitions[i].id == valueId { return definitions[i]; }
-        i = i + 1;
+        if index >= definitions.len() { break; }
+        if definitions[index].id > maximumId { maximumId = definitions[index].id; }
+        index = index + 1;
     }
+    if maximumId >= 0 && maximumId <= 1000000 && maximumId <= definitions.len() * 4 + 1024 {
+        var denseIndices: Vec<int> = [];
+        index = 0;
+        loop {
+            if index > maximumId { break; }
+            denseIndices.push(-1);
+            index = index + 1;
+        }
+        index = 0;
+        loop {
+            if index >= definitions.len() { break; }
+            var definitionId = definitions[index].id;
+            if denseIndices[definitionId] < 0 { denseIndices.set(definitionId, index); }
+            index = index + 1;
+        }
+        return DefinitionTable { definitions: definitions, denseIndices: denseIndices, sparseIndices: HashMap.new(), usesDenseIndices: true };
+    }
+    return DefinitionTable { definitions: definitions, denseIndices: [], sparseIndices: indices, usesDenseIndices: false };
+}
+
+func findDefinition(table: DefinitionTable, valueId: int): ValueDef {
+    if table.usesDenseIndices {
+        if valueId >= 0 && valueId < table.denseIndices.len() {
+            var definitionIndex = table.denseIndices[valueId];
+            if definitionIndex >= 0 { return table.definitions[definitionIndex]; }
+        }
+        return ValueDef { id: -1, ty: irVoid(), blockIndex: -1, instructionIndex: -1 };
+    }
+    var key = valueId.toString();
+    if table.sparseIndices.has(key) { return table.definitions[table.sparseIndices.get(key)]; }
     return ValueDef { id: -1, ty: irVoid(), blockIndex: -1, instructionIndex: -1 };
 }
 
@@ -56,12 +96,12 @@ func checkSource(errors: Vec<string>, source: SourceRef, context: string): void 
     }
 }
 
-func checkUse(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, useBlockIndex: int, useInstructionIndex: int, dominators: Vec<int>, blockCount: int, context: string): void {
+func checkUse(errors: Vec<string>, table: DefinitionTable, valueId: int, useBlockIndex: int, useInstructionIndex: int, dominance: Vec<int>, blockCount: int, context: string): void {
     if valueId < 0 {
         errors.push(context + ": invalid negative SSA operand");
         return;
     }
-    var definition = findDefinition(definitions, valueId);
+    var definition = findDefinition(table, valueId);
     if definition.id < 0 {
         errors.push(context + ": undefined SSA value %v" + valueId.toString());
         return;
@@ -76,28 +116,264 @@ func checkUse(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, use
         }
         return;
     }
-    var matrixIndex = useBlockIndex * blockCount + definition.blockIndex;
-    if matrixIndex < 0 || matrixIndex >= dominators.len() || dominators[matrixIndex] == 0 {
+    var definitionIndex = definition.blockIndex * 2;
+    var useIndex = useBlockIndex * 2;
+    if definitionIndex < 0 || useIndex < 0 || definitionIndex + 1 >= dominance.len() || useIndex + 1 >= dominance.len() {
+        errors.push(context + ": definition of %v" + valueId.toString() + " does not dominate this use");
+        return;
+    }
+    var definitionStart = dominance[definitionIndex];
+    var useStart = dominance[useIndex];
+    var definitionEnd = dominance[definitionIndex + 1];
+    var useEnd = dominance[useIndex + 1];
+    if definitionStart < 0 || useStart < 0 || definitionStart > useStart || useEnd > definitionEnd {
         errors.push(context + ": definition of %v" + valueId.toString() + " does not dominate this use");
     }
 }
 
-func checkI64Operand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
-    var definition = findDefinition(definitions, valueId);
+func appendGraphEdge(graph: Vec<Vec<int>>, source: int, target: int): void {
+    var neighbors = graph[source];
+    neighbors.push(target);
+    graph.set(source, neighbors);
+}
+
+func computeReversePostorder(successors: Vec<Vec<int>>, blockCount: int): DominatorTraversal {
+    var postorder: Vec<int> = [];
+    var visited: Vec<int> = [];
+    var iterator: Vec<int> = [];
+    var parent: Vec<int> = [];
+    var order: Vec<int> = [];
+    var index = 0;
+    loop {
+        if index >= blockCount { break; }
+        visited.push(0);
+        iterator.push(0);
+        parent.push(-1);
+        index = index + 1;
+    }
+    var stack: Vec<int> = [];
+    if blockCount > 0 {
+        visited.set(0, 1);
+        stack.push(0);
+        order.push(0);
+    }
+    loop {
+        if stack.len() == 0 { break; }
+        var node = stack[stack.len() - 1];
+        var next = iterator[node];
+        var found = -1;
+        var neighbors = successors[node];
+        loop {
+            if next >= neighbors.len() { break; }
+            var candidate = neighbors[next];
+            next = next + 1;
+            if visited[candidate] == 0 { found = candidate; break; }
+        }
+        iterator.set(node, next);
+        if found < 0 {
+            postorder.push(node);
+            stack.pop();
+        } else {
+            visited.set(found, 1);
+            parent.set(found, node);
+            order.push(found);
+            stack.push(found);
+        }
+    }
+    var rpo: Vec<int> = [];
+    var postIndex = postorder.len();
+    loop {
+        if postIndex <= 0 { break; }
+        postIndex = postIndex - 1;
+        rpo.push(postorder[postIndex]);
+    }
+    return DominatorTraversal { reversePostorder: rpo, order: order, parent: parent };
+}
+
+func intersectDominators(left: int, right: int, idom: Vec<int>, rpoNumber: Vec<int>): int {
+    var first = left;
+    var second = right;
+    loop {
+        if first == second { return first; }
+        loop {
+            if rpoNumber[first] <= rpoNumber[second] { break; }
+            first = idom[first];
+        }
+        loop {
+            if rpoNumber[second] <= rpoNumber[first] { break; }
+            second = idom[second];
+        }
+    }
+    return 0;
+}
+
+func evalDominator(value: int, semi: Vec<int>, ancestor: Vec<int>, label: Vec<int>): int {
+    var path: Vec<int> = [];
+    var current = value;
+    loop {
+        var parent = ancestor[current];
+        if parent < 0 || ancestor[parent] < 0 { break; }
+        path.push(current);
+        current = parent;
+    }
+    loop {
+        if path.len() == 0 { break; }
+        var node = path.pop();
+        var parent = ancestor[node];
+        var grandparent = ancestor[parent];
+        if semi[label[parent]] < semi[label[node]] { label.set(node, label[parent]); }
+        ancestor.set(node, grandparent);
+    }
+    return label[value];
+}
+
+func computeImmediateDominators(predecessors: Vec<Vec<int>>, blockCount: int, traversal: DominatorTraversal): Vec<int> {
+    var idom: Vec<int> = [];
+    var semi: Vec<int> = [];
+    var ancestor: Vec<int> = [];
+    var label: Vec<int> = [];
+    var bucket: Vec<Vec<int>> = [];
+    var index = 0;
+    loop {
+        if index >= blockCount { break; }
+        idom.push(-1);
+        semi.push(-1);
+        ancestor.push(-1);
+        label.push(index);
+        bucket.push([]);
+        index = index + 1;
+    }
+    if traversal.order.len() == 0 { return idom; }
+    var orderIndex = 0;
+    loop {
+        if orderIndex >= traversal.order.len() { break; }
+        semi.set(traversal.order[orderIndex], orderIndex);
+        label.set(traversal.order[orderIndex], traversal.order[orderIndex]);
+        orderIndex = orderIndex + 1;
+    }
+    var root = traversal.order[0];
+    idom.set(root, root);
+    orderIndex = traversal.order.len() - 1;
+    loop {
+        if orderIndex <= 0 { break; }
+        var block = traversal.order[orderIndex];
+        var semidominator = semi[block];
+        var predecessorIndex = 0;
+        var blockPredecessors = predecessors[block];
+        loop {
+            if predecessorIndex >= blockPredecessors.len() { break; }
+            var predecessor = blockPredecessors[predecessorIndex];
+            if semi[predecessor] >= 0 {
+                var candidate = evalDominator(predecessor, semi, ancestor, label);
+                if semi[candidate] < semidominator { semidominator = semi[candidate]; }
+            }
+            predecessorIndex = predecessorIndex + 1;
+        }
+        semi.set(block, semidominator);
+        var semiVertex = traversal.order[semidominator];
+        var semiBucket = bucket[semiVertex];
+        semiBucket.push(block);
+        bucket.set(semiVertex, semiBucket);
+        var parent = traversal.parent[block];
+        ancestor.set(block, parent);
+        var parentBucket = bucket[parent];
+        var bucketAt = 0;
+        loop {
+            if bucketAt >= parentBucket.len() { break; }
+            var pending = parentBucket[bucketAt];
+            var candidate = evalDominator(pending, semi, ancestor, label);
+            if semi[candidate] < semi[pending] { idom.set(pending, candidate); }
+            else { idom.set(pending, parent); }
+            bucketAt = bucketAt + 1;
+        }
+        bucket.set(parent, []);
+        orderIndex = orderIndex - 1;
+    }
+    orderIndex = 1;
+    loop {
+        if orderIndex >= traversal.order.len() { break; }
+        var block = traversal.order[orderIndex];
+        var semiVertex = traversal.order[semi[block]];
+        if idom[block] >= 0 && idom[block] != semiVertex { idom.set(block, idom[idom[block]]); }
+        orderIndex = orderIndex + 1;
+    }
+    return idom;
+}
+
+func computeDominanceIntervals(idom: Vec<int>, blockCount: int): Vec<int> {
+    var interval: Vec<int> = [];
+    var index = 0;
+    loop {
+        if index >= blockCount * 2 { break; }
+        interval.push(-1);
+        index = index + 1;
+    }
+    if blockCount == 0 { return interval; }
+    var firstChild: Vec<int> = [];
+    var nextSibling: Vec<int> = [];
+    index = 0;
+    loop {
+        if index >= blockCount { break; }
+        firstChild.push(-1);
+        nextSibling.push(-1);
+        index = index + 1;
+    }
+    var childIndex = 1;
+    loop {
+        if childIndex >= blockCount { break; }
+        var parentIndex = idom[childIndex];
+        if parentIndex >= 0 {
+            nextSibling.set(childIndex, firstChild[parentIndex]);
+            firstChild.set(parentIndex, childIndex);
+        }
+        childIndex = childIndex + 1;
+    }
+    var stack: Vec<int> = [];
+    stack.push(0);
+    var timer = 0;
+    loop {
+        if stack.len() == 0 { break; }
+        var marker = stack.pop();
+        if marker >= blockCount {
+            var exitIndex = marker - blockCount;
+            interval.set(exitIndex * 2 + 1, timer);
+            continue;
+        }
+        interval.set(marker * 2, timer);
+        timer = timer + 1;
+        stack.push(marker + blockCount);
+        var child = firstChild[marker];
+        loop {
+            if child < 0 { break; }
+            stack.push(child);
+            child = nextSibling[child];
+        }
+    }
+    return interval;
+}
+
+func analyzeDominance(successors: Vec<Vec<int>>, predecessors: Vec<Vec<int>>, blockCount: int): Vec<int> {
+    var traversal = computeReversePostorder(successors, blockCount);
+    var idom = computeImmediateDominators(predecessors, blockCount, traversal);
+    return computeDominanceIntervals(idom, blockCount);
+}
+
+func checkI64Operand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
+    var definition = findDefinition(table, valueId);
     if definition.id >= 0 && definition.ty.kind != IRTypeKind::I64 {
         errors.push(context + ": operand must have type i64");
     }
 }
 
-func checkBoolOperand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
-    var definition = findDefinition(definitions, valueId);
+func checkBoolOperand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
+    var definition = findDefinition(table, valueId);
     if definition.id >= 0 && definition.ty.kind != IRTypeKind::Bool {
         errors.push(context + ": operand must have type bool");
     }
 }
 
-func checkRawAddressOperand(errors: Vec<string>, definitions: Vec<ValueDef>, valueId: int, context: string): void {
-    var definition = findDefinition(definitions, valueId);
+func checkRawAddressOperand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
+    var definition = findDefinition(table, valueId);
     if definition.id >= 0 && definition.ty.kind != IRTypeKind::RawAddress {
         errors.push(context + ": operand must have type raw.address");
     }
@@ -109,19 +385,19 @@ func checkRawUnusedFields(errors: Vec<string>, instruction: Instruction, context
     }
 }
 
-func checkCheckedI64Instruction(errors: Vec<string>, definitions: Vec<ValueDef>, instruction: Instruction, context: string, name: string): void {
+func checkCheckedI64Instruction(errors: Vec<string>, table: DefinitionTable, instruction: Instruction, context: string, name: string): void {
     if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": " + name + " requires an i64 result"); }
     if instruction.operands.len() != 2 { errors.push(context + ": " + name + " requires exactly two operands"); }
     if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": " + name + " has invalid unused fields"); }
     var operandIndex = 0;
     loop {
         if operandIndex >= instruction.operands.len() { break; }
-        checkI64Operand(errors, definitions, instruction.operands[operandIndex], context);
+        checkI64Operand(errors, table, instruction.operands[operandIndex], context);
         operandIndex = operandIndex + 1;
     }
 }
 
-func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
+func checkFunction(program: IRProgram, function: IRFunction, functionIndices: HashMap<string, int>): Vec<string> {
     var errors: Vec<string> = [];
     var functionLabel = "function %f" + function.id.toString() + " (" + functionKeyName(function.key) + ")";
 
@@ -135,6 +411,10 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
         errors.push(functionLabel + ": effect argument vector does not match signature arity");
     }
 
+    var blockIndices: HashMap<string, int> = HashMap.new();
+    var blockAt = 0;
+    loop { if blockAt >= function.blocks.len() { break; } var key = function.blocks[blockAt].id.toString(); if !blockIndices.has(key) { blockIndices.set(key, blockAt); } blockAt = blockAt + 1; }
+
     var paramIndex = 0;
     loop {
         if paramIndex >= function.signature.parameterTypes.len() { break; }
@@ -145,6 +425,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
     }
 
     var definitions: Vec<ValueDef> = [];
+    var definitionIndices: HashMap<string, int> = HashMap.new();
     paramIndex = 0;
     loop {
         if paramIndex >= function.parameters.len() { break; }
@@ -157,8 +438,11 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             }
         }
         if parameter.id >= 0 {
-            if findDefinition(definitions, parameter.id).id >= 0 {
+            var key = parameter.id.toString();
+            if definitionIndices.has(key) {
                 errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
+            } else {
+                definitionIndices.set(key, definitions.len());
             }
             definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: -1, instructionIndex: -1 });
         }
@@ -170,15 +454,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
         if blockIndex >= function.blocks.len() { break; }
         var block = function.blocks[blockIndex];
         if block.id < 0 { errors.push(functionLabel + ": block ID must be nonnegative"); }
-        var earlierBlock = 0;
-        loop {
-            if earlierBlock >= blockIndex { break; }
-            if function.blocks[earlierBlock].id == block.id {
-                errors.push(functionLabel + ": duplicate block ID bb" + block.id.toString());
-                break;
-            }
-            earlierBlock = earlierBlock + 1;
-        }
+        if blockIndices.get(block.id.toString()) != blockIndex { errors.push(functionLabel + ": duplicate block ID bb" + block.id.toString()); }
         if blockIndex == 0 && block.params.len() != 0 {
             errors.push(functionLabel + ": entry block cannot have parameters");
         }
@@ -189,8 +465,11 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             if parameter.id < 0 { errors.push(functionLabel + ": block parameter ID must be nonnegative"); }
             if parameter.ty.kind == IRTypeKind::Void { errors.push(functionLabel + ": block parameter cannot be void"); }
             if parameter.id >= 0 {
-                if findDefinition(definitions, parameter.id).id >= 0 {
+                var key = parameter.id.toString();
+                if definitionIndices.has(key) {
                     errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
+                } else {
+                    definitionIndices.set(key, definitions.len());
                 }
                 definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: blockIndex, instructionIndex: -1 });
             }
@@ -202,8 +481,11 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             var instruction = block.instructions[instructionIndex];
             if instruction.resultId < -1 { errors.push(functionLabel + ": result ID must be nonnegative or the void sentinel -1"); }
             if instruction.resultId >= 0 {
-                if findDefinition(definitions, instruction.resultId).id >= 0 {
+                var key = instruction.resultId.toString();
+                if definitionIndices.has(key) {
                     errors.push(functionLabel + ": duplicate SSA value ID %v" + instruction.resultId.toString());
+                } else {
+                    definitionIndices.set(key, definitions.len());
                 }
                 definitions.push(ValueDef { id: instruction.resultId, ty: instruction.ty, blockIndex: blockIndex, instructionIndex: instructionIndex });
             }
@@ -214,13 +496,17 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
         blockIndex = blockIndex + 1;
     }
 
+    var definitionTable = buildDefinitionTable(definitions, definitionIndices);
+
     var blockCount = function.blocks.len();
-    var edges: Vec<int> = [];
-    var edgeCell = 0;
+    var successors: Vec<Vec<int>> = [];
+    var predecessors: Vec<Vec<int>> = [];
+    var edgeNode = 0;
     loop {
-        if edgeCell >= blockCount * blockCount { break; }
-        edges.push(0);
-        edgeCell = edgeCell + 1;
+        if edgeNode >= blockCount { break; }
+        successors.push([]);
+        predecessors.push([]);
+        edgeNode = edgeNode + 1;
     }
 
     blockIndex = 0;
@@ -235,11 +521,12 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             if terminator.conditionValueId != -1 || terminator.trueTargetBlockId != -1 || terminator.falseTargetBlockId != -1 || terminator.trueArgs.len() != 0 || terminator.falseArgs.len() != 0 || terminator.valueId != -1 {
                 errors.push(context + ": jump contains fields belonging to another terminator kind");
             }
-            var targetIndex = findBlockIndex(function, terminator.targetBlockId);
+            var targetIndex = findBlockIndex(blockIndices, terminator.targetBlockId);
             if targetIndex < 0 {
                 errors.push(context + ": jump target bb" + terminator.targetBlockId.toString() + " does not exist");
             } else {
-                edges.set(blockIndex * blockCount + targetIndex, 1);
+                appendGraphEdge(successors, blockIndex, targetIndex);
+                appendGraphEdge(predecessors, targetIndex, blockIndex);
                 var target = function.blocks[targetIndex];
                 if terminator.targetArgs.len() != target.params.len() {
                     errors.push(context + ": jump argument count does not match target parameters");
@@ -247,7 +534,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 var argumentIndex = 0;
                 loop {
                     if argumentIndex >= terminator.targetArgs.len() || argumentIndex >= target.params.len() { break; }
-                    var argument = findDefinition(definitions, terminator.targetArgs[argumentIndex]);
+                    var argument = findDefinition(definitionTable, terminator.targetArgs[argumentIndex]);
                     if argument.id >= 0 && !sameType(argument.ty, target.params[argumentIndex].ty) {
                         errors.push(context + ": jump argument type does not match target parameter");
                     }
@@ -258,34 +545,36 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             if terminator.targetBlockId != -1 || terminator.targetArgs.len() != 0 || terminator.valueId != -1 {
                 errors.push(context + ": branch contains fields belonging to another terminator kind");
             }
-            var condition = findDefinition(definitions, terminator.conditionValueId);
+            var condition = findDefinition(definitionTable, terminator.conditionValueId);
             if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(context + ": branch condition must have type bool"); }
-            var trueIndex = findBlockIndex(function, terminator.trueTargetBlockId);
+            var trueIndex = findBlockIndex(blockIndices, terminator.trueTargetBlockId);
             if trueIndex < 0 {
                 errors.push(context + ": true branch target bb" + terminator.trueTargetBlockId.toString() + " does not exist");
             } else {
-                edges.set(blockIndex * blockCount + trueIndex, 1);
+                appendGraphEdge(successors, blockIndex, trueIndex);
+                appendGraphEdge(predecessors, trueIndex, blockIndex);
                 var trueBlock = function.blocks[trueIndex];
                 if terminator.trueArgs.len() != trueBlock.params.len() { errors.push(context + ": true branch argument count does not match target parameters"); }
                 var trueArgIndex = 0;
                 loop {
                     if trueArgIndex >= terminator.trueArgs.len() || trueArgIndex >= trueBlock.params.len() { break; }
-                    var trueArg = findDefinition(definitions, terminator.trueArgs[trueArgIndex]);
+                    var trueArg = findDefinition(definitionTable, terminator.trueArgs[trueArgIndex]);
                     if trueArg.id >= 0 && !sameType(trueArg.ty, trueBlock.params[trueArgIndex].ty) { errors.push(context + ": true branch argument type does not match target parameter"); }
                     trueArgIndex = trueArgIndex + 1;
                 }
             }
-            var falseIndex = findBlockIndex(function, terminator.falseTargetBlockId);
+            var falseIndex = findBlockIndex(blockIndices, terminator.falseTargetBlockId);
             if falseIndex < 0 {
                 errors.push(context + ": false branch target bb" + terminator.falseTargetBlockId.toString() + " does not exist");
             } else {
-                edges.set(blockIndex * blockCount + falseIndex, 1);
+                appendGraphEdge(successors, blockIndex, falseIndex);
+                appendGraphEdge(predecessors, falseIndex, blockIndex);
                 var falseBlock = function.blocks[falseIndex];
                 if terminator.falseArgs.len() != falseBlock.params.len() { errors.push(context + ": false branch argument count does not match target parameters"); }
                 var falseArgIndex = 0;
                 loop {
                     if falseArgIndex >= terminator.falseArgs.len() || falseArgIndex >= falseBlock.params.len() { break; }
-                    var falseArg = findDefinition(definitions, terminator.falseArgs[falseArgIndex]);
+                    var falseArg = findDefinition(definitionTable, terminator.falseArgs[falseArgIndex]);
                     if falseArg.id >= 0 && !sameType(falseArg.ty, falseBlock.params[falseArgIndex].ty) { errors.push(context + ": false branch argument type does not match target parameter"); }
                     falseArgIndex = falseArgIndex + 1;
                 }
@@ -299,25 +588,17 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
             } else if terminator.valueId < 0 {
                 errors.push(context + ": non-void function must return an SSA value");
             } else {
-                var returned = findDefinition(definitions, terminator.valueId);
+                var returned = findDefinition(definitionTable, terminator.valueId);
                 if returned.id >= 0 && !sameType(returned.ty, function.signature.returnType) { errors.push(context + ": return value type does not match function result"); }
             }
         }
         blockIndex = blockIndex + 1;
     }
 
-    if blockCount > 0 {
-        var incomingEntry = 0;
-        loop {
-            if incomingEntry >= blockCount { break; }
-            if edges.get(incomingEntry * blockCount) != 0 {
-                errors.push(functionLabel + ": entry block bb" + function.blocks[0].id.toString() + " cannot have incoming edges");
-                break;
-            }
-            incomingEntry = incomingEntry + 1;
-        }
-    }
+    if blockCount > 0 && predecessors[0].len() > 0 { errors.push(functionLabel + ": entry block bb" + function.blocks[0].id.toString() + " cannot have incoming edges"); }
 
+    var dominance = analyzeDominance(successors, predecessors, blockCount);
+    var useErrors: Vec<string> = [];
     blockIndex = 0;
     loop {
         if blockIndex >= blockCount { break; }
@@ -336,15 +617,15 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 if instruction.immediate != 0 && instruction.immediate != 1 { errors.push(context + ": bool immediate must be 0 or 1"); }
                 if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.bool has invalid unused fields"); }
             } else if instruction.kind == InstructionKind::AddCheckedI64 {
-                checkCheckedI64Instruction(errors, definitions, instruction, context, "add.checked.i64");
+                checkCheckedI64Instruction(errors, definitionTable, instruction, context, "add.checked.i64");
             } else if instruction.kind == InstructionKind::SubCheckedI64 {
-                checkCheckedI64Instruction(errors, definitions, instruction, context, "sub.checked.i64");
+                checkCheckedI64Instruction(errors, definitionTable, instruction, context, "sub.checked.i64");
             } else if instruction.kind == InstructionKind::MulCheckedI64 {
-                checkCheckedI64Instruction(errors, definitions, instruction, context, "mul.checked.i64");
+                checkCheckedI64Instruction(errors, definitionTable, instruction, context, "mul.checked.i64");
             } else if instruction.kind == InstructionKind::DivCheckedI64 {
-                checkCheckedI64Instruction(errors, definitions, instruction, context, "div.checked.i64");
+                checkCheckedI64Instruction(errors, definitionTable, instruction, context, "div.checked.i64");
             } else if instruction.kind == InstructionKind::RemCheckedI64 {
-                checkCheckedI64Instruction(errors, definitions, instruction, context, "rem.checked.i64");
+                checkCheckedI64Instruction(errors, definitionTable, instruction, context, "rem.checked.i64");
             } else if instruction.kind == InstructionKind::CompareI64 {
                 if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": compare.i64 requires a bool result"); }
                 if operandCount != 2 { errors.push(context + ": compare.i64 requires exactly two operands"); }
@@ -352,7 +633,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 var compareIndex = 0;
                 loop {
                     if compareIndex >= operandCount { break; }
-                    checkI64Operand(errors, definitions, instruction.operands[compareIndex], context);
+                    checkI64Operand(errors, definitionTable, instruction.operands[compareIndex], context);
                     compareIndex = compareIndex + 1;
                 }
             } else if instruction.kind == InstructionKind::CompareBool {
@@ -363,7 +644,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 var boolCompareIndex = 0;
                 loop {
                     if boolCompareIndex >= operandCount { break; }
-                    checkBoolOperand(errors, definitions, instruction.operands[boolCompareIndex], context);
+                    checkBoolOperand(errors, definitionTable, instruction.operands[boolCompareIndex], context);
                     boolCompareIndex = boolCompareIndex + 1;
                 }
             } else if instruction.kind == InstructionKind::RawNull {
@@ -374,52 +655,52 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.map requires a raw.address result"); }
                 if operandCount != 1 { errors.push(context + ": raw.map requires exactly one operand"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.map");
-                if operandCount > 0 { checkI64Operand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::RawUnmap {
                 if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.unmap requires a void result and ID -1"); }
                 if operandCount != 2 { errors.push(context + ": raw.unmap requires exactly two operands"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.unmap");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
-                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitionTable, instruction.operands[1], context); }
             } else if instruction.kind == InstructionKind::RawOffset {
                 if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.offset requires a raw.address result"); }
                 if operandCount != 2 { errors.push(context + ": raw.offset requires exactly two operands"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.offset");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
-                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitionTable, instruction.operands[1], context); }
             } else if instruction.kind == InstructionKind::RawLoadI64 {
                 if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.load.i64 requires an i64 result"); }
                 if operandCount != 1 { errors.push(context + ": raw.load.i64 requires exactly one operand"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.load.i64");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::RawStoreI64 {
                 if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.i64 requires a void result and ID -1"); }
                 if operandCount != 2 { errors.push(context + ": raw.store.i64 requires exactly two operands"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.store.i64");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
-                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitionTable, instruction.operands[1], context); }
             } else if instruction.kind == InstructionKind::RawLoadAddress {
                 if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.load.address requires a raw.address result"); }
                 if operandCount != 1 { errors.push(context + ": raw.load.address requires exactly one operand"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.load.address");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::RawStoreAddress {
                 if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.address requires a void result and ID -1"); }
                 if operandCount != 2 { errors.push(context + ": raw.store.address requires exactly two operands"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.store.address");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
-                if operandCount > 1 { checkRawAddressOperand(errors, definitions, instruction.operands[1], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+                if operandCount > 1 { checkRawAddressOperand(errors, definitionTable, instruction.operands[1], context); }
             } else if instruction.kind == InstructionKind::RawLoadByte {
                 if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.load.byte requires an i64 result"); }
                 if operandCount != 1 { errors.push(context + ": raw.load.byte requires exactly one operand"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.load.byte");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::RawStoreByte {
                 if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.store.byte requires a void result and ID -1"); }
                 if operandCount != 2 { errors.push(context + ": raw.store.byte requires exactly two operands"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.store.byte");
-                if operandCount > 0 { checkRawAddressOperand(errors, definitions, instruction.operands[0], context); }
-                if operandCount > 1 { checkI64Operand(errors, definitions, instruction.operands[1], context); }
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+                if operandCount > 1 { checkI64Operand(errors, definitionTable, instruction.operands[1], context); }
             } else if instruction.kind == InstructionKind::RawEqual {
                 if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": raw.equal requires a bool result"); }
                 if operandCount != 2 { errors.push(context + ": raw.equal requires exactly two operands"); }
@@ -427,17 +708,49 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                 var rawEqualIndex = 0;
                 loop {
                     if rawEqualIndex >= operandCount { break; }
-                    checkRawAddressOperand(errors, definitions, instruction.operands[rawEqualIndex], context);
+                    checkRawAddressOperand(errors, definitionTable, instruction.operands[rawEqualIndex], context);
                     rawEqualIndex = rawEqualIndex + 1;
                 }
             } else if instruction.kind == InstructionKind::RawFail {
                 if instruction.ty.kind != IRTypeKind::Void || instruction.resultId != -1 { errors.push(context + ": raw.fail requires a void result and ID -1"); }
                 if operandCount != 1 { errors.push(context + ": raw.fail requires exactly one operand"); }
                 checkRawUnusedFields(errors, instruction, context, "raw.fail");
-                if operandCount > 0 { checkI64Operand(errors, definitions, instruction.operands[0], context); }
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawFromInt {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.from.int requires a raw.address result"); }
+                if operandCount != 1 { errors.push(context + ": raw.from.int requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.from.int");
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawToInt {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.to.int requires an i64 result"); }
+                if operandCount != 1 { errors.push(context + ": raw.to.int requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.to.int");
+                if operandCount > 0 { checkRawAddressOperand(errors, definitionTable, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+                var operationName = "raw.syscall";
+                if instruction.kind == InstructionKind::RawHostSyscall { operationName = "raw.host.syscall"; }
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": " + operationName + " requires a raw.address result"); }
+                if operandCount != 7 { errors.push(context + ": " + operationName + " requires a number and six arguments"); }
+                checkRawUnusedFields(errors, instruction, context, operationName);
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
+                var syscallIndex = 1;
+                while syscallIndex < operandCount {
+                    checkRawAddressOperand(errors, definitionTable, instruction.operands[syscallIndex], context);
+                    syscallIndex = syscallIndex + 1;
+                }
+            } else if instruction.kind == InstructionKind::RawArgCount {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": raw.arg.count requires an i64 result"); }
+                if operandCount != 0 { errors.push(context + ": raw.arg.count requires no operands"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.arg.count");
+            } else if instruction.kind == InstructionKind::RawArg {
+                if instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 { errors.push(context + ": raw.arg requires a raw.address result"); }
+                if operandCount != 1 { errors.push(context + ": raw.arg requires exactly one operand"); }
+                checkRawUnusedFields(errors, instruction, context, "raw.arg");
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::Call {
                 if instruction.immediate != 0 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": call has invalid unused fields"); }
-                var calleeIndex = findFunctionIndex(program, instruction.functionId);
+                var calleeIndex = -1;
+                if functionIndices.has(instruction.functionId.toString()) { calleeIndex = functionIndices.get(instruction.functionId.toString()); }
                 if calleeIndex < 0 {
                     errors.push(context + ": call target %f" + instruction.functionId.toString() + " does not exist");
                 } else {
@@ -447,7 +760,7 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                     var callArgIndex = 0;
                     loop {
                         if callArgIndex >= instruction.operands.len() || callArgIndex >= callee.signature.parameterTypes.len() { break; }
-                        var callArg = findDefinition(definitions, instruction.operands[callArgIndex]);
+                        var callArg = findDefinition(definitionTable, instruction.operands[callArgIndex]);
                         if callArg.id >= 0 && !sameType(callArg.ty, callee.signature.parameterTypes[callArgIndex]) { errors.push(context + ": call argument type does not match callee signature"); }
                         callArgIndex = callArgIndex + 1;
                     }
@@ -458,172 +771,60 @@ func checkFunction(program: IRProgram, function: IRFunction): Vec<string> {
                     errors.push(context + ": non-void call must define an SSA result");
                 }
             }
-            instructionIndex = instructionIndex + 1;
-        }
-        var terminator = block.terminator;
-        var termContext = functionLabel + " block bb" + block.id.toString() + " terminator";
-        if terminator.kind == TerminatorKind::Branch {
-            var condition = findDefinition(definitions, terminator.conditionValueId);
-            if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(termContext + ": branch condition must have type bool"); }
-        }
-        blockIndex = blockIndex + 1;
-    }
-
-    var reachable: Vec<int> = [];
-    var reachIndex = 0;
-    loop {
-        if reachIndex >= blockCount { break; }
-        reachable.push(0);
-        reachIndex = reachIndex + 1;
-    }
-    if blockCount > 0 { reachable.set(0, 1); }
-    var reachPass = 0;
-    var reachChanged = true;
-    loop {
-        if reachPass >= blockCount || !reachChanged { break; }
-        reachChanged = false;
-        var fromIndex = 0;
-        loop {
-            if fromIndex >= blockCount { break; }
-            if reachable[fromIndex] != 0 {
-                var toIndex = 0;
-                loop {
-                    if toIndex >= blockCount { break; }
-                    if edges.get(fromIndex * blockCount + toIndex) != 0 && reachable[toIndex] == 0 {
-                        reachable.set(toIndex, 1);
-                        reachChanged = true;
-                    }
-                    toIndex = toIndex + 1;
-                }
-            }
-            fromIndex = fromIndex + 1;
-        }
-        reachPass = reachPass + 1;
-    }
-    blockIndex = 0;
-    loop {
-        if blockIndex >= blockCount { break; }
-        if reachable[blockIndex] == 0 { errors.push(functionLabel + ": unreachable block bb" + function.blocks[blockIndex].id.toString()); }
-        blockIndex = blockIndex + 1;
-    }
-
-    var dominators: Vec<int> = [];
-    var domCell = 0;
-    loop {
-        if domCell >= blockCount * blockCount { break; }
-        dominators.push(0);
-        domCell = domCell + 1;
-    }
-    blockIndex = 0;
-    loop {
-        if blockIndex >= blockCount { break; }
-        var candidateIndex = 0;
-        loop {
-            if candidateIndex >= blockCount { break; }
-            if blockIndex == 0 {
-                if candidateIndex == 0 { dominators.set(blockIndex * blockCount + candidateIndex, 1); }
-            } else if reachable[blockIndex] != 0 && reachable[candidateIndex] != 0 {
-                dominators.set(blockIndex * blockCount + candidateIndex, 1);
-            }
-            candidateIndex = candidateIndex + 1;
-        }
-        blockIndex = blockIndex + 1;
-    }
-    var domPass = 0;
-    var domChanged = true;
-    loop {
-        if domPass >= blockCount || !domChanged { break; }
-        var nextDominators: Vec<int> = [];
-        domCell = 0;
-        loop {
-            if domCell >= blockCount * blockCount { break; }
-            nextDominators.push(0);
-            domCell = domCell + 1;
-        }
-        blockIndex = 0;
-        loop {
-            if blockIndex >= blockCount { break; }
-            if blockIndex == 0 {
-                nextDominators.set(0, 1);
-            } else if reachable[blockIndex] != 0 {
-                var candidateIndex = 0;
-                loop {
-                    if candidateIndex >= blockCount { break; }
-                    var inAllPredecessors = 1;
-                    var hasPredecessor = 0;
-                    var predecessorIndex = 0;
-                    loop {
-                        if predecessorIndex >= blockCount { break; }
-                        if edges.get(predecessorIndex * blockCount + blockIndex) != 0 && reachable[predecessorIndex] != 0 {
-                            hasPredecessor = 1;
-                            if dominators.get(predecessorIndex * blockCount + candidateIndex) == 0 { inAllPredecessors = 0; }
-                        }
-                        predecessorIndex = predecessorIndex + 1;
-                    }
-                    if hasPredecessor == 0 { inAllPredecessors = 0; }
-                    if candidateIndex == blockIndex { inAllPredecessors = 1; }
-                    nextDominators.set(blockIndex * blockCount + candidateIndex, inAllPredecessors);
-                    candidateIndex = candidateIndex + 1;
-                }
-            }
-            blockIndex = blockIndex + 1;
-        }
-        domChanged = false;
-        domCell = 0;
-        loop {
-            if domCell >= dominators.len() { break; }
-            if dominators[domCell] != nextDominators[domCell] { domChanged = true; }
-            domCell = domCell + 1;
-        }
-        dominators = nextDominators;
-        domPass = domPass + 1;
-    }
-
-    blockIndex = 0;
-    loop {
-        if blockIndex >= blockCount { break; }
-        var block = function.blocks[blockIndex];
-        var instructionIndex = 0;
-        loop {
-            if instructionIndex >= block.instructions.len() { break; }
-            var instruction = block.instructions[instructionIndex];
-            var context = functionLabel + " block bb" + block.id.toString() + " instruction " + instructionIndex.toString();
             var operandIndex = 0;
             loop {
                 if operandIndex >= instruction.operands.len() { break; }
-                checkUse(errors, definitions, instruction.operands[operandIndex], blockIndex, instructionIndex, dominators, blockCount, context);
+                checkUse(useErrors, definitionTable, instruction.operands[operandIndex], blockIndex, instructionIndex, dominance, blockCount, context);
                 operandIndex = operandIndex + 1;
             }
             instructionIndex = instructionIndex + 1;
         }
         var terminator = block.terminator;
         var termContext = functionLabel + " block bb" + block.id.toString() + " terminator";
+        if terminator.kind == TerminatorKind::Branch {
+            var condition = findDefinition(definitionTable, terminator.conditionValueId);
+            if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(termContext + ": branch condition must have type bool"); }
+        }
         var useIndex = block.instructions.len();
         if terminator.kind == TerminatorKind::Jump {
             var argumentIndex = 0;
             loop {
                 if argumentIndex >= terminator.targetArgs.len() { break; }
-                checkUse(errors, definitions, terminator.targetArgs[argumentIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                checkUse(useErrors, definitionTable, terminator.targetArgs[argumentIndex], blockIndex, useIndex, dominance, blockCount, termContext);
                 argumentIndex = argumentIndex + 1;
             }
         } else if terminator.kind == TerminatorKind::Branch {
-            checkUse(errors, definitions, terminator.conditionValueId, blockIndex, useIndex, dominators, blockCount, termContext);
+            checkUse(useErrors, definitionTable, terminator.conditionValueId, blockIndex, useIndex, dominance, blockCount, termContext);
             var trueArgIndex = 0;
             loop {
                 if trueArgIndex >= terminator.trueArgs.len() { break; }
-                checkUse(errors, definitions, terminator.trueArgs[trueArgIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                checkUse(useErrors, definitionTable, terminator.trueArgs[trueArgIndex], blockIndex, useIndex, dominance, blockCount, termContext);
                 trueArgIndex = trueArgIndex + 1;
             }
             var falseArgIndex = 0;
             loop {
                 if falseArgIndex >= terminator.falseArgs.len() { break; }
-                checkUse(errors, definitions, terminator.falseArgs[falseArgIndex], blockIndex, useIndex, dominators, blockCount, termContext);
+                checkUse(useErrors, definitionTable, terminator.falseArgs[falseArgIndex], blockIndex, useIndex, dominance, blockCount, termContext);
                 falseArgIndex = falseArgIndex + 1;
             }
         } else if terminator.kind == TerminatorKind::Return && terminator.valueId != -1 {
-            checkUse(errors, definitions, terminator.valueId, blockIndex, useIndex, dominators, blockCount, termContext);
+            checkUse(useErrors, definitionTable, terminator.valueId, blockIndex, useIndex, dominance, blockCount, termContext);
         }
         blockIndex = blockIndex + 1;
+    }
+
+    blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        if dominance.get(blockIndex * 2) < 0 { errors.push(functionLabel + ": unreachable block bb" + function.blocks[blockIndex].id.toString()); }
+        blockIndex = blockIndex + 1;
+    }
+
+    var useErrorIndex = 0;
+    loop {
+        if useErrorIndex >= useErrors.len() { break; }
+        errors.push(useErrors[useErrorIndex]);
+        useErrorIndex = useErrorIndex + 1;
     }
     return errors;
 }
@@ -632,7 +833,11 @@ pub func verifyProgram(program: IRProgram): VerifyResult {
     var errors: Vec<string> = [];
     if program.functions.len() == 0 { errors.push("program: must contain at least one function"); }
     if program.entryFunctionId < 0 { errors.push("program: entry function ID must be nonnegative"); }
-    var entryIndex = findFunctionIndex(program, program.entryFunctionId);
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } var key = program.functions[index].id.toString(); if !functionIndices.has(key) { functionIndices.set(key, index); } index = index + 1; }
+    var entryIndex = -1;
+    if functionIndices.has(program.entryFunctionId.toString()) { entryIndex = functionIndices.get(program.entryFunctionId.toString()); }
     if entryIndex < 0 {
         errors.push("program: entry function %f" + program.entryFunctionId.toString() + " does not exist");
     } else {
@@ -645,22 +850,26 @@ pub func verifyProgram(program: IRProgram): VerifyResult {
         }
     }
 
+    var functionIdCounts: HashMap<string, int> = HashMap.new();
+    var stableKeyCounts: HashMap<string, int> = HashMap.new();
     var functionIndex = 0;
     loop {
         if functionIndex >= program.functions.len() { break; }
         var function = program.functions[functionIndex];
         if function.id < 0 { errors.push("program: function IDs must be nonnegative"); }
-        var earlierFunction = 0;
-        loop {
-            if earlierFunction >= functionIndex { break; }
-            var prior = program.functions[earlierFunction];
-            if prior.id == function.id { errors.push("program: duplicate function ID %f" + function.id.toString()); }
-            if prior.key.module == function.key.module && prior.key.owner == function.key.owner && prior.key.name == function.key.name {
-                errors.push("program: duplicate stable function key " + functionKeyName(function.key));
-            }
-            earlierFunction = earlierFunction + 1;
-        }
-        var functionErrors = checkFunction(program, function);
+        var functionKey = function.id.toString();
+        var priorCount = 0;
+        if functionIdCounts.has(functionKey) { priorCount = functionIdCounts.get(functionKey); }
+        var duplicateAt = 0;
+        loop { if duplicateAt >= priorCount { break; } errors.push("program: duplicate function ID %f" + function.id.toString()); duplicateAt = duplicateAt + 1; }
+        functionIdCounts.set(functionKey, priorCount + 1);
+        var stableKey = function.key.module.len().toString() + ":" + function.key.module + function.key.owner.len().toString() + ":" + function.key.owner + function.key.name.len().toString() + ":" + function.key.name;
+        priorCount = 0;
+        if stableKeyCounts.has(stableKey) { priorCount = stableKeyCounts.get(stableKey); }
+        duplicateAt = 0;
+        loop { if duplicateAt >= priorCount { break; } errors.push("program: duplicate stable function key " + functionKeyName(function.key)); duplicateAt = duplicateAt + 1; }
+        stableKeyCounts.set(stableKey, priorCount + 1);
+        var functionErrors = checkFunction(program, function, functionIndices);
         var errorIndex = 0;
         loop {
             if errorIndex >= functionErrors.len() { break; }

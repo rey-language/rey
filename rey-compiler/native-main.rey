@@ -1,28 +1,68 @@
-// Historical-seed bring-up driver for direct scalar machine-code generation.
-// The generated executable contains no seed runtime. The driver itself still
-// uses that runtime until the full native self-hosting gate is implemented.
-import frontend::graph::{checkSourceFileGraph};
-import ir::lower::{lowerProgram};
+// Native compiler driver. Managed runtime source is embedded in this executable;
+// --runtime-root remains an explicit source override for development.
+import frontend::graph::{EmbeddedSource, canonicalSourcePath, checkSourceFileGraphWithEmbedded};
+import frontend::embedded_stdlib::{embeddedStdRoot, embeddedStdSources};
+import ir::lower::{lowerProgram, setLowerTargetOS, setTrustedPackedOutput};
 import ir::{IRProgram};
-import ir::managed::link::{requiresManagedLowering, findManagedRuntimeRoot, buildManagedProgram, buildRegionProgram, buildCompletedRegionProgram};
+import ir::managed::link::{requiresManagedLowering, buildManagedProgram, buildRegionProgram, buildCompletedRegionProgram};
+import ir::managed::completion::{setExperimentalEscapeSummary};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::arm64::{Arm64Code, emitArm64, emitArm64WithReuse};
 import native::image::{buildMachOArm64, buildElfArm64};
-import native::x64::{X64Code, X64Image, emitProgram, emitProgramWithReuse, emitImage, emitImageWithReuse};
-import native::image::x64::{buildElfX64, buildMachOX64};
+import native::x64::{X64Code, X64Image, X64FunctionOffset, PackedX64Code, emitProgram, emitProgramWithReuse, emitProgramVerified, emitProgramVerifiedWithReuse, emitProgramPacked, emitProgramPackedWithReuse, emitProgramPackedVerified, emitProgramPackedVerifiedWithReuse, emitImage, emitImageWithReuse};
+import native::image::x64::{buildElfX64Owned, buildElfX64HeaderForLength, buildMachOX64};
 import native::image::pe::{buildPeX64};
-import native::bytes::{byteString};
+import native::output::{writeCompilerOutputBytes, writeVerifiedCompilerOutputBytes, writeCompilerOutputPackedSegments};
+import native::packed::{packedBufferTryLength};
 import ir::optimize::scalar::{foldConstants};
+
+func symbolHex(value: int): string {
+    var digits = "0123456789abcdef";
+    if value == 0 { return "0"; }
+    var number = value;
+    var result = "";
+    while number > 0 {
+        result = digits[number % 16].toString() + result;
+        number = number / 16;
+    }
+    return result;
+}
+
+func symbolMap(program: IRProgram, functions: Vec<X64FunctionOffset>): string {
+    var result = "401000 <entry>\n";
+    var i = 0;
+    while i < functions.len() {
+        var functionOffset = functions[i];
+        var name = "function" + functionOffset.functionId.toString();
+        var f = 0;
+        while f < program.functions.len() {
+            if program.functions[f].id == functionOffset.functionId {
+                name = program.functions[f].key.name;
+                if program.functions[f].key.owner != "" { name = program.functions[f].key.owner + "." + name; }
+                break;
+            }
+            f += 1;
+        }
+        result = result + symbolHex(4198400 + functionOffset.offset) + " " + name + "\n";
+        i += 1;
+    }
+    return result;
+}
 
 func main(): void {
     var argv = args();
     if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
-        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        println("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress] [--symbol-map <path>] [--trust-packed-output] [--selfhost-fast-exit] [--experimental-escape-summary] [--experimental-packed-x64]");
+        println("Managed runtime sources are embedded; --runtime-root overrides them.");
+        println("--trust-packed-output trusts the checked-in native output/byte helpers and embedded managed runtime; use only for compiler self-host builds.");
+        println("--selfhost-fast-exit requires --trust-packed-output; after writing output it exits without explicit region cleanup or its integrity checks.");
+        println("--experimental-escape-summary enables candidate region proofs with the embedded runtime; off by default and not enabled by self-host scripts.");
+        println("--experimental-packed-x64 requires linux-x64 and --trust-packed-output; it stores and writes instruction bytes in packed lanes.");
         return;
     }
     if argv.len() < 7 || argv[1] != "build" || argv[3] != "-o" || argv[5] != "--target" {
-        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        eprintln("Usage: rey-native build <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [--std-root <directory>] [--fold-constants] [--reuse-slots] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress] [--symbol-map <path>] [--trust-packed-output] [--selfhost-fast-exit] [--experimental-escape-summary] [--experimental-packed-x64]");
         exit(2);
         return;
     }
@@ -32,11 +72,17 @@ func main(): void {
     var folding = false;
     var reuse = false;
     var forceManaged = false;
+    var trustPackedOutput = false;
+    var selfhostFastExit = false;
+    var experimentalEscapeSummary = false;
+    var experimentalPackedX64 = false;
     var runtimeRoot = "";
     var hasRuntimeRoot = false;
     var gcStress = false;
     var promotionStress = false;
     var regionFlag = 0;
+    var symbolMapPath = "";
+    var hasSymbolMap = false;
     var optionIndex = 7;
     while optionIndex < argv.len() {
         if argv[optionIndex] == "--std-root" && !hasStdRoot {
@@ -54,6 +100,15 @@ func main(): void {
         } else if argv[optionIndex] == "--managed" && !forceManaged {
             forceManaged = true;
             optionIndex += 1;
+        } else if argv[optionIndex] == "--trust-packed-output" && !trustPackedOutput {
+            trustPackedOutput = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--selfhost-fast-exit" && !selfhostFastExit {
+            selfhostFastExit = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--experimental-escape-summary" && !experimentalEscapeSummary {
+            experimentalEscapeSummary = true;
+            optionIndex += 1;
         } else if argv[optionIndex] == "--runtime-root" && !hasRuntimeRoot {
             if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
                 eprintln("expected --runtime-root <directory>"); exit(2); return;
@@ -64,9 +119,19 @@ func main(): void {
         } else if argv[optionIndex] == "--gc-stress" && !gcStress {
             gcStress = true;
             optionIndex += 1;
+        } else if argv[optionIndex] == "--experimental-packed-x64" && !experimentalPackedX64 {
+            experimentalPackedX64 = true;
+            optionIndex += 1;
         } else if argv[optionIndex] == "--promotion-stress" && !promotionStress {
             promotionStress = true;
             optionIndex += 1;
+        } else if argv[optionIndex] == "--symbol-map" && !hasSymbolMap {
+            if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
+                eprintln("expected --symbol-map <path>"); exit(2); return;
+            }
+            symbolMapPath = argv[optionIndex + 1];
+            hasSymbolMap = true;
+            optionIndex += 2;
         } else if argv[optionIndex] == "--regions" && regionFlag == 0 {
             regionFlag = 1;
             optionIndex += 1;
@@ -77,6 +142,7 @@ func main(): void {
             eprintln("unknown or duplicate option: " + argv[optionIndex]); exit(2); return;
         }
     }
+    if hasStdRoot && stdRoot == embeddedStdRoot() { eprintln("--std-root uses a reserved embedded source path"); exit(2); return; }
     var regions = regionFlag != 2;
     if regions && gcStress {
         eprintln("--gc-stress is not available on the region path; pass --no-regions to use the legacy collector experiment");
@@ -88,6 +154,24 @@ func main(): void {
         exit(2);
         return;
     }
+    if trustPackedOutput && (!forceManaged || !regions || hasRuntimeRoot) {
+        eprintln("--trust-packed-output requires --managed region lowering with the embedded runtime");
+        exit(2);
+        return;
+    }
+    if selfhostFastExit && !trustPackedOutput {
+        eprintln("--selfhost-fast-exit requires --trust-packed-output");
+        exit(2);
+        return;
+    }
+    if experimentalEscapeSummary && (!forceManaged || !regions || hasRuntimeRoot) {
+        eprintln("--experimental-escape-summary requires --managed region lowering with the embedded runtime");
+        exit(2);
+        return;
+    }
+    if experimentalPackedX64 && (!trustPackedOutput || target != "linux-x64") {
+        eprintln("--experimental-packed-x64 requires linux-x64 and --trust-packed-output"); exit(2); return;
+    }
     var os = "";
     if target == "darwin-arm64" { os = "darwin"; }
     else if target == "linux-arm64" { os = "linux"; }
@@ -95,38 +179,75 @@ func main(): void {
     else if target == "windows-x64" { os = "windows"; }
     else if target == "darwin-x64" || target == "macos-x64" { os = "darwin"; target = "darwin-x64"; }
     else { eprintln("unsupported native target: " + target); exit(2); return; }
+    setLowerTargetOS(target);
+    setTrustedPackedOutput(trustPackedOutput);
+    setExperimentalEscapeSummary(experimentalEscapeSummary);
+    var verifiedByRegionLowering = false;
     var path = argv[2];
     var output = argv[4];
-    if output == path { eprintln("output must differ from the source path"); exit(2); return; }
+    var normalizedPath = canonicalSourcePath(path);
+    var normalizedOutput = canonicalSourcePath(output);
+    if normalizedOutput == normalizedPath { eprintln("output must differ from the source path"); exit(2); return; }
+    if hasSymbolMap && target != "linux-x64" { eprintln("--symbol-map is only supported for linux-x64"); exit(2); return; }
+    if hasSymbolMap {
+        var normalizedSymbolMap = canonicalSourcePath(symbolMapPath);
+        if normalizedSymbolMap == normalizedPath || normalizedSymbolMap == normalizedOutput {
+            eprintln("symbol map must differ from the source and output paths"); exit(2); return;
+        }
+    }
     if !fileExists(path) { eprintln(path + ": error: source file not found"); exit(1); return; }
-    var checked = checkSourceFileGraph(path, stdRoot);
+    var embeddedStd: Vec<EmbeddedSource> = [];
+    if !hasStdRoot { stdRoot = embeddedStdRoot(); embeddedStd = embeddedStdSources(); }
+    var checked = checkSourceFileGraphWithEmbedded(path, stdRoot, [], embeddedStd);
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); return; }
     var lowered: Result<IRProgram, string> = Result.Err("not lowered");
     if forceManaged || gcStress || promotionStress || requiresManagedLowering(checked.unwrap()) {
-        runtimeRoot = findManagedRuntimeRoot(runtimeRoot, argv[0]);
-        if runtimeRoot == "" { eprintln("managed runtime source not found; use --runtime-root <directory>"); exit(1); return; }
-        if regions { lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
+        if regions {
+            lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress);
+            verifiedByRegionLowering = true;
+        }
         else { lowered = buildManagedProgram(checked.unwrap(), runtimeRoot, stdRoot, gcStress, false); }
     } else {
         lowered = lowerProgram(checked.unwrap());
     }
     if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); return; }
     var program = lowered.unwrap();
-    var verified = verifyProgram(program);
-    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); return; }
-    program = inferEffects(program);
+    if !verifiedByRegionLowering {
+        var verified = verifyProgram(program);
+        if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); return; }
+        program = inferEffects(program);
+    }
     if folding {
         var folded = foldConstants(program);
         if folded.isErr() { eprintln(folded.unwrapErr()); exit(1); return; }
         program = folded.unwrap();
     }
     var image: Result<Vec<int>, string> = Result.Err("unsupported target");
+    var emittedX64Code: Result<X64Code, string> = Result.Err("not emitted");
+    var emittedPackedCode: Result<PackedX64Code, string> = Result.Err("not emitted");
+    var packedHeader: Result<Vec<int>, string> = Result.Err("not emitted");
     if target == "linux-x64" {
-        var code: Result<X64Code, string> = Result.Err("not emitted");
-        if reuse { code = emitProgramWithReuse(program, target); }
-        else { code = emitProgram(program, target); }
-        if code.isErr() { eprintln(code.unwrapErr()); exit(1); return; }
-        image = buildElfX64(code.unwrap());
+        if experimentalPackedX64 {
+            if verifiedByRegionLowering {
+                if reuse { emittedPackedCode = emitProgramPackedVerifiedWithReuse(program, target); }
+                else { emittedPackedCode = emitProgramPackedVerified(program, target); }
+            } else if reuse { emittedPackedCode = emitProgramPackedWithReuse(program, target); }
+            else { emittedPackedCode = emitProgramPacked(program, target); }
+            if emittedPackedCode.isErr() { eprintln(emittedPackedCode.unwrapErr()); exit(1); return; }
+            var packed = emittedPackedCode.unwrap();
+            eprintln("phase: x64 elf");
+            packedHeader = buildElfX64HeaderForLength(packedBufferTryLength(packed.bytes), packed.entryOffset, packed.functions);
+            if packedHeader.isErr() { eprintln(packedHeader.unwrapErr()); exit(1); return; }
+        } else {
+            if verifiedByRegionLowering {
+                if reuse { emittedX64Code = emitProgramVerifiedWithReuse(program, target); }
+                else { emittedX64Code = emitProgramVerified(program, target); }
+            } else if reuse { emittedX64Code = emitProgramWithReuse(program, target); }
+            else { emittedX64Code = emitProgram(program, target); }
+            if emittedX64Code.isErr() { eprintln(emittedX64Code.unwrapErr()); exit(1); return; }
+            eprintln("phase: x64 elf");
+            image = buildElfX64Owned(emittedX64Code.unwrap());
+        }
     } else if target == "windows-x64" || target == "darwin-x64" {
         var x64: Result<X64Image, string> = Result.Err("not emitted");
         if reuse { x64 = emitImageWithReuse(program, target); }
@@ -143,12 +264,21 @@ func main(): void {
         if os == "darwin" { image = buildMachOArm64(code.unwrap()); }
         else { image = buildElfArm64(code.unwrap()); }
     }
-    if image.isErr() { eprintln(image.unwrapErr()); exit(1); return; }
-    var encoded = byteString(image.unwrap());
-    if encoded.isErr() { eprintln(encoded.unwrapErr()); exit(1); return; }
-    var bytes = encoded.unwrap();
-    writeFile(output, bytes);
+    if !experimentalPackedX64 && image.isErr() { eprintln(image.unwrapErr()); exit(1); return; }
+    if hasSymbolMap {
+        var functions: Vec<X64FunctionOffset> = [];
+        if experimentalPackedX64 { functions = emittedPackedCode.unwrap().functions; }
+        else { functions = emittedX64Code.unwrap().functions; }
+        writeFile(symbolMapPath, symbolMap(program, functions));
+        if !fileExists(symbolMapPath) { eprintln(symbolMapPath + ": error: failed to create symbol map"); exit(1); return; }
+    }
+    eprintln("phase: encoding native image");
+    var written: Result<bool, string> = Result.Err("output not written");
+    if experimentalPackedX64 { written = writeCompilerOutputPackedSegments(output, packedHeader.unwrap(), emittedPackedCode.unwrap().bytes); }
+    else if trustPackedOutput { written = writeCompilerOutputBytes(output, image.unwrap()); }
+    else { written = writeVerifiedCompilerOutputBytes(output, image.unwrap()); }
+    if written.isErr() { eprintln(written.unwrapErr()); exit(1); return; }
     if !fileExists(output) { eprintln(output + ": error: failed to create native image"); exit(1); return; }
-    if readFile(output) != bytes { eprintln(output + ": error: native image write verification failed"); exit(1); return; }
     println(output);
+    if selfhostFastExit { exit(0); }
 }

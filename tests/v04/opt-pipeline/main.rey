@@ -1,0 +1,108 @@
+import frontend::graph::{checkSourceFileGraph};
+import ir::{IRProgram, printIR};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import ir::lower::{lowerProgram};
+import ir::optimize::pipeline::{optimizeProgram, parseFlags};
+import ir::optimize::selftest::{runOptimizerSelftest};
+import ir::verify::{verifyProgram};
+import native::arm64::{emitArm64, emitArm64WithReuse};
+import native::bytes::{byteString};
+import native::image::{buildElfArm64, buildMachOArm64};
+
+func fail(message: string, status: int): void { eprintln(message); exit(status); }
+
+func usage() {
+    println("Usage: rey-opt <selftest|eval|dump|native> [source.rey] [-o output --target darwin-arm64|linux-arm64] [--passes off|all|fold,propagate,copy,dead,range,inline,specialize,loops,bounds,loads,zero,fuse] [--reuse-slots]");
+}
+
+func optimizedProgram(path: string, passText: string): IRProgram {
+    if !fileExists(path) { fail(path + ": error: source file not found", 1); }
+    var checked = checkSourceFileGraph(path, "");
+    if checked.isErr() { fail(checked.unwrapErr(), 1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { fail(lowered.unwrapErr(), 1); }
+    var verified = verifyProgram(lowered.unwrap());
+    if !verified.ok { fail(verified.errors.join("\n"), 1); }
+    var flags = parseFlags(passText);
+    if flags.isErr() { fail(flags.unwrapErr(), 2); }
+    var optimized = optimizeProgram(inferEffects(lowered.unwrap()), flags.unwrap());
+    if optimized.isErr() { fail(optimized.unwrapErr(), 1); }
+    var again = verifyProgram(optimized.unwrap());
+    if !again.ok { fail(again.errors.join("\n"), 1); }
+    return optimized.unwrap();
+}
+
+func emitNative(program: IRProgram, target: string, reuse: bool): Result<Vec<int>, string> {
+    if target == "darwin-arm64" || target == "linux-arm64" {
+        var os = "linux";
+        if target == "darwin-arm64" { os = "darwin"; }
+        if reuse {
+            var reused = emitArm64WithReuse(program, os);
+            if reused.isErr() { return Result.Err(reused.unwrapErr()); }
+            if os == "darwin" { return buildMachOArm64(reused.unwrap()); }
+            return buildElfArm64(reused.unwrap());
+        }
+        var code = emitArm64(program, os);
+        if code.isErr() { return Result.Err(code.unwrapErr()); }
+        if os == "darwin" { return buildMachOArm64(code.unwrap()); }
+        return buildElfArm64(code.unwrap());
+    }
+    return Result.Err("unsupported native target: " + target);
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") { usage(); return; }
+    if argv.len() < 2 { usage(); fail("missing command", 2); }
+    var command = argv[1];
+    if command == "selftest" {
+        if argv.len() != 2 { fail("selftest takes no arguments", 2); }
+        runOptimizerSelftest();
+        return;
+    }
+    if command != "eval" && command != "dump" && command != "native" { fail("unknown command: " + command, 2); }
+    var path = "";
+    var output = "";
+    var target = "";
+    var passText = "off";
+    var reuse = false;
+    var index = 2;
+    loop {
+        if index >= argv.len() { break; }
+        if path == "" && !argv[index].startsWith("--") && argv[index] != "-o" { path = argv[index]; index = index + 1; }
+        else if argv[index] == "-o" {
+            if index + 1 >= argv.len() { fail("expected -o <output>", 2); }
+            output = argv[index + 1];
+            index = index + 2;
+        } else if argv[index] == "--target" {
+            if index + 1 >= argv.len() { fail("expected --target <target>", 2); }
+            target = argv[index + 1];
+            index = index + 2;
+        } else if argv[index] == "--passes" {
+            if index + 1 >= argv.len() { fail("expected --passes <list>", 2); }
+            passText = argv[index + 1];
+            index = index + 2;
+        } else if argv[index] == "--reuse-slots" && !reuse { reuse = true; index = index + 1; }
+        else { fail("unknown or duplicate option: " + argv[index], 2); }
+    }
+    if path == "" { fail("missing source file", 2); }
+    if command == "native" && (output == "" || target == "") { fail("native requires -o and --target", 2); }
+    var program = optimizedProgram(path, passText);
+    if command == "dump" { print(printIR(program)); return; }
+    if command == "eval" {
+        var evaluated = evaluateProgram(program, 2000000, 64);
+        if !evaluated.ok { eprintln(evaluated.error); exit(1); return; }
+        if evaluated.isVoid { println("void"); }
+        else if evaluated.isBool { println((evaluated.value != 0).toString()); }
+        else { println(evaluated.value.toString()); }
+        return;
+    }
+    var image = emitNative(program, target, reuse);
+    if image.isErr() { fail(image.unwrapErr(), 1); }
+    var encoded = byteString(image.unwrap());
+    if encoded.isErr() { fail(encoded.unwrapErr(), 1); }
+    writeFile(output, encoded.unwrap());
+    if !fileExists(output) || readFile(output) != encoded.unwrap() { fail(output + ": error: native image write verification failed", 1); }
+    println(output);
+}

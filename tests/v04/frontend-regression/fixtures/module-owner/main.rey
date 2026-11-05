@@ -1,0 +1,9 @@
+import token.{Token, id};
+import bag.{Bag, put, first};
+
+func main(): void {
+    var token = Token { n: 1 };
+    var bag: Bag = put(id(token));
+    var again: Token = first(bag);
+    println(again.n);
+}

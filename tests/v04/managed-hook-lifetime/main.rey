@@ -1,0 +1,97 @@
+import ir;
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedFunction, ManagedHook, ManagedProgram};
+import ir::managed::completion::{completeManagedMemory, setExperimentalEscapeSummary, verifyMemoryCompletion};
+import ir::managed::hook_lifetime::{hookLifetimeCandidates};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-hook-lifetime.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } escapes.push(Escape::Unknown); index += 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("managed-hook-lifetime", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func targetFunction(cyclicCall: bool, returnsAddress: bool, userCall: bool): IRFunction {
+    var resultType = ir.irVoid();
+    if returnsAddress { resultType = ir.irRawAddress(); }
+    var entryInstructions: Vec<Instruction> = [ir.constI64(4, 0, source()), ir.constI64(5, 1, source()), ir.call(1, ir.irRawAddress(), 7001, [], source())];
+    if userCall { entryInstructions.push(ir.call(-1, ir.irVoid(), 7003, [], source())); }
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.jump(1, [4], source()));
+    var loopInstructions: Vec<Instruction> = [ir.compareI64(3, CompareI64Predicate::Slt, 2, 5, source()), ir.addCheckedI64(6, 2, 5, source())];
+    if cyclicCall { loopInstructions.push(ir.call(7, ir.irI64(), 7002, [1], source())); }
+    var loopBlock = ir.basicBlock(1, [ir.irValue(2, ir.irI64())], loopInstructions, ir.branch(3, 1, [6], 2, [], source()));
+    var exit = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    if returnsAddress { exit.terminator = ir.returnValue(1, source()); }
+    return makeFunction(1, "candidate", [], resultType, [], [entry, loopBlock, exit]);
+}
+
+func stub(id: int): IRFunction {
+    return makeFunction(id, "stub" + id.toString(), [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func freshHook(): IRFunction {
+    return makeFunction(7001, "managedVecCreate", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], [ir.rawNull(0, source())], ir.returnValue(0, source()))]);
+}
+
+func readHook(): IRFunction {
+    var parameters = [ir.irValue(20, ir.irRawAddress())];
+    return makeFunction(7002, "managedVecLength", [ir.irRawAddress()], ir.irI64(), parameters, [ir.basicBlock(0, [], [ir.constI64(21, 0, source())], ir.returnValue(21, source()))]);
+}
+
+func userHook(): IRFunction {
+    return makeFunction(7003, "userFunction", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func fixture(cyclicCall: bool, returnsAddress: bool, userCall: bool): ManagedProgram {
+    var programFunctions: Vec<IRFunction> = [];
+    var managedFunctions: Vec<ManagedFunction> = [];
+    var id = 1;
+    loop {
+        if id > 513 { break; }
+        var function = stub(id);
+        if id == 1 { function = targetFunction(cyclicCall, returnsAddress, userCall); }
+        programFunctions.push(function);
+        var references: Vec<int> = [];
+        if id == 1 { references.push(1); }
+        managedFunctions.push(ManagedFunction { functionId: id, referenceValues: references, parameterLayouts: [], returnLayout: 0 });
+        id += 1;
+    }
+    programFunctions.push(freshHook());
+    programFunctions.push(readHook());
+    programFunctions.push(userHook());
+    var hooks: Vec<ManagedHook> = [ManagedHook { functionId: 7001, runtimeName: "managedVecCreate", mayCollect: true }, ManagedHook { functionId: 7002, runtimeName: "managedVecLength", mayCollect: true }];
+    return ManagedProgram { program: ir.irProgram(1, programFunctions), layouts: [], functions: managedFunctions, allocations: [], derived: [], allocateFunctionId: 8001, storeReferenceFunctionId: 8002, collectFunctionId: 8003, variableLayouts: [], hooks: hooks };
+}
+
+func main(): void {
+    var safe = fixture(false, false, false);
+    var candidates = hookLifetimeCandidates(safe);
+    require(candidates.has("1"), "fresh hook before a call-free CFG cycle is an invocation-region candidate");
+    setExperimentalEscapeSummary(true);
+    var completed = completeManagedMemory(safe);
+    require(completed.isOk(), "large-program completion accepts the bounded hook proof");
+    var memory = completed.unwrap();
+    require(memory.placement.regionFunctions.len() == 1 && memory.placement.regionFunctions[0] == 1, "large-program completion records the hook region");
+    require(verifyMemoryCompletion(safe, memory).isOk(), "verifier recomputes the call-free-cycle hook proof");
+
+    var cyclicRead = fixture(true, false, false);
+    require(!hookLifetimeCandidates(cyclicRead).has("1"), "read helper call in a CFG cycle is rejected");
+    require(verifyMemoryCompletion(cyclicRead, memory).isErr(), "verifier rejects a stale hook region when a cyclic call appears");
+
+    var returning = fixture(false, true, false);
+    require(!hookLifetimeCandidates(returning).has("1"), "raw-address return cannot use an invocation region");
+    var callingUser = fixture(false, false, true);
+    require(!hookLifetimeCandidates(callingUser).has("1"), "user call cannot use an invocation region");
+    setExperimentalEscapeSummary(false);
+    print("managed hook lifetime: all fixtures passed");
+}

@@ -1,4 +1,4 @@
-import regions::{regionCreateCohort, regionCurrent, regionEnd, regionIsActive, regionIsCurrent, regionProgram, regionPromote, regionSetTaskState};
+import regions::{regionCurrent, regionHandleAddress, regionHandleCreateCohort, regionHandleCurrent, regionHandleEnd, regionHandleFromAddress, regionHandleIsActive, regionHandleIsCurrent, regionHandlePromote, regionHandleSetTaskState, regionProgram};
 
 func taskFail(code: int): void {
     __reyRawFail(code);
@@ -14,12 +14,10 @@ func taskCheck(task: __rey_raw_address, context: __rey_raw_address): void {
     if !__reyRawEqual(__reyRawLoadAddress(taskAddress(task, 8)), context) { taskFail(2204); return; }
 }
 
-pub func taskCreate(context: __rey_raw_address, parent: __rey_raw_address): __rey_raw_address {
-    var actual = parent;
-    if __reyRawEqual(actual, __reyRawNull()) { actual = regionCurrent(context); }
-    var region = regionCreateCohort(context, actual, 5, 0);
+func taskCreateFromHandle(context: __rey_raw_address, parentHandle: __rey_raw_address): __rey_raw_address {
+    var region = regionHandleCreateCohort(context, parentHandle, 5, 0);
     if __reyRawEqual(region, __reyRawNull()) { return __reyRawNull(); }
-    regionSetTaskState(context, region, 1);
+    regionHandleSetTaskState(context, region, 1);
     var task = __reyRawMap(64);
     __reyRawStoreI64(task, 1380272226);
     __reyRawStoreAddress(taskAddress(task, 8), context);
@@ -27,12 +25,29 @@ pub func taskCreate(context: __rey_raw_address, parent: __rey_raw_address): __re
     __reyRawStoreI64(taskAddress(task, 24), 1);
     __reyRawStoreI64(taskAddress(task, 32), 0);
     __reyRawStoreAddress(taskAddress(task, 40), __reyRawNull());
-    __reyRawStoreAddress(taskAddress(task, 48), actual);
+    __reyRawStoreAddress(taskAddress(task, 48), parentHandle);
     __reyRawStoreI64(taskAddress(task, 56), 0);
     return task;
 }
 
+pub func taskCreate(context: __rey_raw_address, parent: __rey_raw_address): __rey_raw_address {
+    var actual = parent;
+    if __reyRawEqual(actual, __reyRawNull()) { actual = regionCurrent(context); }
+    return taskCreateFromHandle(context, regionHandleFromAddress(context, actual));
+}
+
+pub func taskCreateHandle(context: __rey_raw_address, parent: __rey_raw_address): __rey_raw_address {
+    var actual = parent;
+    if __reyRawEqual(actual, __reyRawNull()) { actual = regionHandleCurrent(context); }
+    return taskCreateFromHandle(context, actual);
+}
+
 pub func taskRegion(context: __rey_raw_address, task: __rey_raw_address): __rey_raw_address {
+    taskCheck(task, context);
+    return regionHandleAddress(context, __reyRawLoadAddress(taskAddress(task, 16)));
+}
+
+pub func taskRegionHandle(context: __rey_raw_address, task: __rey_raw_address): __rey_raw_address {
     taskCheck(task, context);
     return __reyRawLoadAddress(taskAddress(task, 16));
 }
@@ -46,7 +61,7 @@ pub func taskTransfer(context: __rey_raw_address, task: __rey_raw_address, objec
     taskCheck(task, context);
     if __reyRawLoadI64(taskAddress(task, 24)) != 1 { taskFail(2206); return __reyRawNull(); }
     if __reyRawEqual(object, __reyRawNull()) { return __reyRawNull(); }
-    var transferred = regionPromote(context, object, __reyRawLoadAddress(taskAddress(task, 16)));
+    var transferred = regionHandlePromote(context, object, __reyRawLoadAddress(taskAddress(task, 16)));
     __reyRawStoreAddress(taskAddress(task, 40), transferred);
     return transferred;
 }
@@ -59,7 +74,7 @@ pub func taskFinish(context: __rey_raw_address, task: __rey_raw_address, status:
         var next = 2;
         if status != 0 { next = 3; }
         __reyRawStoreI64(taskAddress(task, 24), next);
-        regionSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), next);
+        regionHandleSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), next);
     }
     __reyRawStoreI64(taskAddress(task, 32), status);
     __reyRawStoreAddress(taskAddress(task, 40), result);
@@ -69,7 +84,7 @@ pub func taskCancel(context: __rey_raw_address, task: __rey_raw_address): void {
     taskCheck(task, context);
     if __reyRawLoadI64(taskAddress(task, 24)) != 1 { return; }
     __reyRawStoreI64(taskAddress(task, 24), 4);
-    regionSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), 4);
+    regionHandleSetTaskState(context, __reyRawLoadAddress(taskAddress(task, 16)), 4);
 }
 
 pub func taskJoin(context: __rey_raw_address, task: __rey_raw_address): int {
@@ -77,13 +92,13 @@ pub func taskJoin(context: __rey_raw_address, task: __rey_raw_address): int {
     var state = __reyRawLoadI64(taskAddress(task, 24));
     if state == 1 { taskFail(2207); return 0; }
     var region = __reyRawLoadAddress(taskAddress(task, 16));
-    if regionIsActive(context, region) && !regionIsCurrent(context, region) { taskFail(2203); return 0; }
+    if regionHandleIsActive(context, region) && !regionHandleIsCurrent(context, region) { taskFail(2203); return 0; }
     var result = __reyRawLoadAddress(taskAddress(task, 40));
     if !__reyRawEqual(result, __reyRawNull()) {
-        var promoted = regionPromote(context, result, __reyRawLoadAddress(taskAddress(task, 48)));
+        var promoted = regionHandlePromote(context, result, __reyRawLoadAddress(taskAddress(task, 48)));
         __reyRawStoreAddress(taskAddress(task, 40), promoted);
     }
-    if regionIsCurrent(context, region) { regionEnd(context, region); }
+    if regionHandleIsCurrent(context, region) { regionHandleEnd(context, region); }
     var status = __reyRawLoadI64(taskAddress(task, 32));
     if state == 4 && status == 0 { return 2208; }
     return status;

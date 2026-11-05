@@ -35,19 +35,37 @@ struct RootColorPlan { pub colors: Vec<int>, pub colorCount: int }
 struct RootConflictGraph { pub neighbors: Vec<Vec<int>>, pub edges: HashMap<string, bool> }
 struct Definition { pub id: int, pub ty: IRType }
 
+var activeFunctionIndices: HashMap<string, int> = HashMap.new();
+
+func activateFunctionIndices(program: IRProgram) {
+    activeFunctionIndices = HashMap.new();
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } var key = program.functions[index].id.toString(); if !activeFunctionIndices.has(key) { activeFunctionIndices.set(key, index); } index += 1; }
+}
+
 func functionIndex(program: IRProgram, id: int): int {
+    var key = id.toString();
+    if activeFunctionIndices.has(key) { return activeFunctionIndices.get(key); }
     var i = 0;
     loop { if i >= program.functions.len() { break; } if program.functions[i].id == id { return i; } i = i + 1; }
     return -1;
 }
 
+var activeManagedIndices: HashMap<string, int> = HashMap.new();
+
 func managedIndex(functions: Vec<ManagedFunction>, id: int): int {
+    var key = id.toString();
+    if activeManagedIndices.has(key) { return activeManagedIndices.get(key); }
     var i = 0;
     loop { if i >= functions.len() { break; } if functions[i].functionId == id { return i; } i = i + 1; }
     return -1;
 }
 
+var activeHookIndices: HashMap<string, int> = HashMap.new();
+
 func managedHookIndex(hooks: Vec<ManagedHook>, id: int): int {
+    var key = id.toString();
+    if activeHookIndices.has(key) { return activeHookIndices.get(key); }
     var i = 0;
     loop { if i >= hooks.len() { break; } if hooks[i].functionId == id { return i; } i = i + 1; }
     return -1;
@@ -59,7 +77,11 @@ func hookBindingIndex(hooks: Vec<ManagedHookBinding>, id: int): int {
     return -1;
 }
 
+var activeVariableIndices: HashMap<string, int> = HashMap.new();
+
 func variableLayoutIndex(layouts: Vec<ManagedVariableLayout>, id: int): int {
+    var key = id.toString();
+    if activeVariableIndices.has(key) { return activeVariableIndices.get(key); }
     var i = 0;
     loop { if i >= layouts.len() { break; } if layouts[i].layoutId == id { return i; } i = i + 1; }
     return -1;
@@ -202,19 +224,32 @@ func instructionLiveness(functionLive: FunctionLiveness, blockId: int, index: in
     return InstructionLiveness { instructionIndex: -1, liveBefore: [], liveAfter: [] };
 }
 
+var activeLiveIndices: HashMap<string, int> = HashMap.new();
+var activePlacementAllocationIndices: HashMap<string, int> = HashMap.new();
+var activePlacementCallIndices: HashMap<string, int> = HashMap.new();
+
+func rootPlacementKey(functionId: int, resultId: int): string { return functionId.toString() + ":" + resultId.toString(); }
+func rootCallKey(functionId: int, blockId: int, instructionIndex: int): string { return functionId.toString() + ":" + blockId.toString() + ":" + instructionIndex.toString(); }
+
 func functionLiveness(programLive: Vec<FunctionLiveness>, functionId: int): int {
+    var key = functionId.toString();
+    if activeLiveIndices.has(key) { return activeLiveIndices.get(key); }
     var i = 0;
     loop { if i >= programLive.len() { break; } if programLive[i].functionId == functionId { return i; } i = i + 1; }
     return -1;
 }
 
 func allocationPlacementIndex(placement: ManagedPlacement, functionId: int, resultId: int): int {
+    var key = rootPlacementKey(functionId, resultId);
+    if activePlacementAllocationIndices.has(key) { return activePlacementAllocationIndices.get(key); }
     var i = 0;
     loop { if i >= placement.allocations.len() { break; } if placement.allocations[i].functionId == functionId && placement.allocations[i].resultId == resultId { return i; } i = i + 1; }
     return -1;
 }
 
 func callPlacementIndex(placement: ManagedPlacement, functionId: int, blockId: int, instructionIndex: int): int {
+    var key = rootCallKey(functionId, blockId, instructionIndex);
+    if activePlacementCallIndices.has(key) { return activePlacementCallIndices.get(key); }
     var i = 0;
     loop { if i >= placement.calls.len() { break; } var value = placement.calls[i]; if value.functionId == functionId && value.blockId == blockId && value.instructionIndex == instructionIndex { return i; } i = i + 1; }
     return -1;
@@ -996,6 +1031,22 @@ func emitWrapper(program: IRProgram, module: ManagedProgram, bindings: RuntimeBi
 }
 
 pub func lowerManagedRoots(module: ManagedProgram, bindings: RuntimeBindings, placements: ManagedPlacement, stress: bool): Result<IRProgram, string> {
+    activateFunctionIndices(module.program);
+    activeHookIndices = HashMap.new();
+    var hookAt = 0;
+    loop { if hookAt >= module.hooks.len() { break; } var key = module.hooks[hookAt].functionId.toString(); if !activeHookIndices.has(key) { activeHookIndices.set(key, hookAt); } hookAt += 1; }
+    activeVariableIndices = HashMap.new();
+    var variableAt = 0;
+    loop { if variableAt >= module.variableLayouts.len() { break; } var key = module.variableLayouts[variableAt].layoutId.toString(); if !activeVariableIndices.has(key) { activeVariableIndices.set(key, variableAt); } variableAt += 1; }
+    activePlacementAllocationIndices = HashMap.new();
+    var placementAt = 0;
+    loop { if placementAt >= placements.allocations.len() { break; } var item = placements.allocations[placementAt]; var key = rootPlacementKey(item.functionId, item.resultId); if !activePlacementAllocationIndices.has(key) { activePlacementAllocationIndices.set(key, placementAt); } placementAt += 1; }
+    activePlacementCallIndices = HashMap.new();
+    placementAt = 0;
+    loop { if placementAt >= placements.calls.len() { break; } var item = placements.calls[placementAt]; var key = rootCallKey(item.functionId, item.blockId, item.instructionIndex); if !activePlacementCallIndices.has(key) { activePlacementCallIndices.set(key, placementAt); } placementAt += 1; }
+    activeManagedIndices = HashMap.new();
+    var managedAt = 0;
+    loop { if managedAt >= module.functions.len() { break; } var key = module.functions[managedAt].functionId.toString(); if !activeManagedIndices.has(key) { activeManagedIndices.set(key, managedAt); } managedAt += 1; }
     var verification = verifyProgram(module.program);
     if !verification.ok { return Result.Err("managed roots: linked input IR verification failed"); }
     var bindingError = validateBindings(module.program, bindings);
@@ -1013,6 +1064,9 @@ pub func lowerManagedRoots(module: ManagedProgram, bindings: RuntimeBindings, pl
     var livenessResult = analyzeProgram(module.program);
     if livenessResult.isErr() { return Result.Err("managed roots: " + livenessResult.unwrapErr()); }
     var programLive = livenessResult.unwrap().functions;
+    activeLiveIndices = HashMap.new();
+    var liveAt = 0;
+    loop { if liveAt >= programLive.len() { break; } var key = programLive[liveAt].functionId.toString(); if !activeLiveIndices.has(key) { activeLiveIndices.set(key, liveAt); } liveAt += 1; }
     var lowered = copyProgram(module.program);
     var mi = 0;
     loop {

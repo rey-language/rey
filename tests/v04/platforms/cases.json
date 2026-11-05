@@ -7,6 +7,8 @@
     "windows-x64 PE32+ ExitProcess import",
     "darwin-x64 Mach-O header, dyld, and libSystem",
     "emitProgram still rejects windows-x64",
-    "native driver emits linux-x64, windows-x64, darwin-x64, and macos-x64 aliases"
+    "native driver emits linux-x64, windows-x64, darwin-x64, and macos-x64 aliases",
+    "windows entry stub is inside .pdata with UWOP_ALLOC_SMALL for 40 bytes",
+    "exit-42 images are written when an output directory is passed"
   ]
 }

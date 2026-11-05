@@ -1,0 +1,79 @@
+import containers::{managedStringFromCString, managedVecCreate, managedVecGetI64, managedVecPushI64, managedVecSetI64, managedWritePackedSegments};
+import host::{hostArg, hostArgCount, hostArgRelease};
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateSized, managedCreate, managedDestroy, managedStoreReference};
+
+func check(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func pathArgument(context: __rey_raw_address, stringLayout: int, index: int): __rey_raw_address {
+    var argument = hostArg(index);
+    var path = managedStringFromCString(context, stringLayout, argument);
+    hostArgRelease(argument);
+    return path;
+}
+
+func main(): void {
+    check(hostArgCount() == 5, 2290);
+    var registry = layoutRegistryCreate(4);
+    var referenceOffset = __reyRawMap(8);
+    __reyRawStoreI64(referenceOffset, 0);
+    var vectorLayout = layoutRegisterFixed(registry, 8, referenceOffset, 1);
+    var dataLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var bodyLayout = layoutRegisterFixed(registry, 24, referenceOffset, 1);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var context = managedCreate(registry);
+
+    var header = managedVecCreate(context, vectorLayout, dataLayout, 4);
+    managedVecPushI64(context, header, dataLayout, 0);
+    managedVecPushI64(context, header, dataLayout, 128);
+    managedVecPushI64(context, header, dataLayout, 255);
+    managedVecPushI64(context, header, dataLayout, 65);
+
+    var length = 5003;
+    var lanes = managedVecCreate(context, vectorLayout, dataLayout, (length + 6) / 7);
+    var at = 0;
+    while at < length {
+        var lane = 0;
+        var factor = 1;
+        var byteAt = 0;
+        while byteAt < 7 && at < length {
+            var value = (at * 131 + 17) % 256;
+            lane = lane + value * factor;
+            factor = factor * 256;
+            byteAt = byteAt + 1;
+            at = at + 1;
+        }
+        managedVecPushI64(context, lanes, dataLayout, lane);
+    }
+
+    var body = managedAllocateSized(context, bodyLayout, 24);
+    managedStoreReference(context, body, 0, lanes);
+    __reyRawStoreI64(__reyRawOffset(body, 24), length);
+    __reyRawStoreI64(__reyRawOffset(body, 32), 1346458188);
+
+    var outputPath = pathArgument(context, stringLayout, 1);
+    var badHeaderPath = pathArgument(context, stringLayout, 2);
+    var badLanePath = pathArgument(context, stringLayout, 3);
+    var badTailPath = pathArgument(context, stringLayout, 4);
+    check(managedWritePackedSegments(context, outputPath, header, body, bodyLayout, dataLayout), 2291);
+
+    managedVecSetI64(context, header, 1, 256);
+    check(!managedWritePackedSegments(context, badHeaderPath, header, body, bodyLayout, dataLayout), 2292);
+    managedVecSetI64(context, header, 1, 128);
+
+    var originalFirstLane = managedVecGetI64(context, lanes, 0);
+    managedVecSetI64(context, lanes, 0, 72057594037927936);
+    check(!managedWritePackedSegments(context, badLanePath, header, body, bodyLayout, dataLayout), 2293);
+    managedVecSetI64(context, lanes, 0, originalFirstLane);
+
+    var tailIndex = (length + 6) / 7 - 1;
+    var tailLane = managedVecGetI64(context, lanes, tailIndex);
+    managedVecSetI64(context, lanes, tailIndex, tailLane + 1099511627776);
+    check(!managedWritePackedSegments(context, badTailPath, header, body, bodyLayout, dataLayout), 2294);
+
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+    __reyRawUnmap(referenceOffset, 8);
+}

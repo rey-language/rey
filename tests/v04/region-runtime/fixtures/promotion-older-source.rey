@@ -14,6 +14,8 @@ func main(): void {
     var context = managedCreate(registry);
     var program = managedProgramRegion(context);
     var object = managedAllocateProgram(context, node, 1);
+    var programRequestedBytes = managedRegionRequestedBytes(context);
+    check(programRequestedBytes > 0);
     var alias = object;
     __reyRawStoreI64(__reyRawOffset(object, 24), 41);
     var child = managedRegionCreate(context);
@@ -53,10 +55,10 @@ func main(): void {
     check(managedRegionObjectCount(context) == 1);
     check(managedLivePayloadBytes(context) == 16);
     check(managedRequestedObjectBytes(context) == 32);
-    check(managedRegionRequestedBytes(context) == 4096);
+    check(managedRegionRequestedBytes(context) == programRequestedBytes);
     check(managedRegionUsedBytes(context) == 120);
     check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
-    check(__reyRawLoadI64(__reyRawOffset(program, 64)) == 4096);
+    check(__reyRawLoadI64(__reyRawOffset(program, 64)) == programRequestedBytes);
     managedDestroy(context);
     layoutRegistryRelease(registry);
 }

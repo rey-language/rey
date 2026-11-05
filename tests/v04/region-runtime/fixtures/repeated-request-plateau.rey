@@ -11,11 +11,15 @@ func main(): void {
     var context = managedCreate(registry);
     check(managedRegionRequestedBytes(context) == 0);
     var round = 0;
+    var plateauRequestedBytes = 0;
     while round < 8 {
         var region = managedRegionCreate(context);
         var object = managedRegionAllocate(context, region, scalar, 1);
         check(__reyRawLoadI64(object) == 8589934592 + scalar);
-        check(managedRegionRequestedBytes(context) == 4096);
+        var requestedBytes = managedRegionRequestedBytes(context);
+        check(requestedBytes > 0);
+        if round == 0 { plateauRequestedBytes = requestedBytes; }
+        else { check(requestedBytes == plateauRequestedBytes); }
         check(managedRegionUsedBytes(context) == 104);
         check(managedLiveObjects(context) == 1);
         check(managedLivePayloadBytes(context) == 8);

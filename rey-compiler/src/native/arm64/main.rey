@@ -2,6 +2,7 @@
 import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRType, IRValue, CompareI64Predicate};
 import ir::verify::{verifyProgram};
 import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
+import ir::storage::arm64_registers::{Arm64FunctionRegisterPlan, Arm64ProgramRegisterPlan, planArm64RegistersFromSlots};
 
 pub struct NativeFunctionOffset {
     pub functionId: int,
@@ -17,6 +18,17 @@ pub struct Arm64Code {
 struct ValueSlot {
     pub valueId: int,
     pub index: int,
+    pub registerId: int,
+}
+
+struct ValueSlotIndexes {
+    pub dense: Vec<int>,
+    pub sparse: HashMap<string, int>,
+}
+
+struct ValueSlotTable {
+    pub values: Vec<ValueSlot>,
+    pub indexes: ValueSlotIndexes,
 }
 
 struct BlockOffset {
@@ -56,20 +68,56 @@ func addFixup(emitter: Emitter, offset: int, kind: int, functionId: int, blockId
     emitter.fixups.push(Fixup { offset: offset, kind: kind, targetFunctionId: functionId, targetBlockId: blockId, targetOffset: targetOffset, condition: condition });
 }
 
-func valueSlot(slots: Vec<ValueSlot>, valueId: int): int {
-    var i = 0;
-    loop {
-        if i >= slots.len() { break; }
-        if slots[i].valueId == valueId { return slots[i].index; }
-        i = i + 1;
-    }
+func valueSlot(indexes: ValueSlotIndexes, valueId: int): int {
+    if valueId < 0 { return -1; }
+    if valueId < indexes.dense.len() { return indexes.dense[valueId]; }
+    var key = valueId.toString();
+    if indexes.sparse.has(key) { return indexes.sparse.get(key); }
     return -1;
 }
 
-func slotOffset(slots: Vec<ValueSlot>, valueId: int): int {
-    var index = valueSlot(slots, valueId);
+func valueSlotIndexes(slots: Vec<ValueSlot>): ValueSlotIndexes {
+    var maximumId = -1;
+    var i = 0;
+    loop {
+        if i >= slots.len() { break; }
+        if slots[i].valueId > maximumId { maximumId = slots[i].valueId; }
+        i = i + 1;
+    }
+
+    // Keep the direct table bounded while avoiding a sparse allocation for
+    // valid IRs whose monotonically assigned IDs have large gaps.
+    var denseLimit = slots.len() * 4 + 1024;
+    if denseLimit > 1000000 { denseLimit = 1000000; }
+    var dense: Vec<int> = [];
+    var sparse: HashMap<string, int> = HashMap.new();
+    if maximumId >= 0 && maximumId <= denseLimit {
+        i = 0;
+        while i <= maximumId { dense.push(-1); i = i + 1; }
+        i = 0;
+        while i < slots.len() {
+            if slots[i].valueId >= 0 { dense.set(slots[i].valueId, i); }
+            i = i + 1;
+        }
+    } else {
+        i = 0;
+        while i < slots.len() {
+            if slots[i].valueId >= 0 { sparse.set(slots[i].valueId.toString(), i); }
+            i = i + 1;
+        }
+    }
+    return ValueSlotIndexes { dense: dense, sparse: sparse };
+}
+
+func valueSlotTable(slots: Vec<ValueSlot>): ValueSlotTable {
+    return ValueSlotTable { values: slots, indexes: valueSlotIndexes(slots) };
+}
+
+func slotOffset(slots: ValueSlotTable, valueId: int): int {
+    var index = valueSlot(slots.indexes, valueId);
     if index < 0 { return -1; }
-    return index * 8;
+    if slots.values[index].registerId >= 0 { return -100000 - slots.values[index].registerId; }
+    return slots.values[index].index * 8;
 }
 
 func blockOffset(blocks: Vec<BlockOffset>, blockId: int): int {
@@ -93,6 +141,15 @@ func functionOffset(functions: Vec<NativeFunctionOffset>, functionId: int): int 
 }
 
 func putLoad(emitter: Emitter, target: int, offset: int): void {
+    if offset <= -100000 {
+        var source = -offset - 100000;
+        if source < 0 || source > 30 || target < 0 || target > 30 {
+            emitter.error = "native arm64: register move operand is invalid";
+            return;
+        }
+        if source != target { emitWord(emitter, 2852127712 + source * 65536 + target); }
+        return;
+    }
     if offset < 0 || offset > 32760 || offset % 8 != 0 {
         emitter.error = "native arm64: stack load offset is not encodable";
         return;
@@ -109,6 +166,15 @@ func putLoadIncoming(emitter: Emitter, target: int, offset: int): void {
 }
 
 func putStore(emitter: Emitter, source: int, offset: int): void {
+    if offset <= -100000 {
+        var target = -offset - 100000;
+        if source < 0 || source > 30 || target < 0 || target > 30 {
+            emitter.error = "native arm64: register move operand is invalid";
+            return;
+        }
+        if source != target { emitWord(emitter, 2852127712 + source * 65536 + target); }
+        return;
+    }
     if offset < 0 || offset > 32760 || offset % 8 != 0 {
         emitter.error = "native arm64: stack store offset is not encodable";
         return;
@@ -155,7 +221,7 @@ func putFrameAdjustment(emitter: Emitter, amount: int, subtract: bool): void {
 }
 
 func appendDefinition(slots: Vec<ValueSlot>, valueId: int): void {
-    if valueId >= 0 { slots.push(ValueSlot { valueId: valueId, index: slots.len() }); }
+    if valueId >= 0 { slots.push(ValueSlot { valueId: valueId, index: slots.len(), registerId: -1 }); }
 }
 
 func collectSlots(function: IRFunction): Vec<ValueSlot> {
@@ -198,7 +264,7 @@ func maxEdgeParams(function: IRFunction): int {
     return maximum;
 }
 
-func emitEdgeCopy(emitter: Emitter, slots: Vec<ValueSlot>, scratchOffset: int, target: BasicBlock, arguments: Vec<int>): void {
+func emitEdgeCopy(emitter: Emitter, slots: ValueSlotTable, scratchOffset: int, target: BasicBlock, arguments: Vec<int>): void {
     var i = 0;
     loop {
         if i >= arguments.len() { break; }
@@ -263,6 +329,14 @@ func emitRawSyscall(emitter: Emitter, targetOS: string, number: int): void {
     }
 }
 
+func emitRawSyscallRegister(emitter: Emitter, targetOS: string, numberRegister: int): void {
+    var destination = 8;
+    if targetOS == "darwin" { destination = 16; }
+    emitWord(emitter, 2852127712 + numberRegister * 65536 + destination);
+    if targetOS == "darwin" { emitWord(emitter, 3556773889); }
+    else { emitWord(emitter, 3556769793); }
+}
+
 func emitSyscallFailureCheck(emitter: Emitter, targetOS: string, overflowOffset: int): void {
     if targetOS == "darwin" {
         emitTrapBranch(emitter, 2, overflowOffset);
@@ -283,7 +357,7 @@ func emitRawAddressCheck(emitter: Emitter, addressRegister: int, aligned: bool, 
     }
 }
 
-func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, instruction: Instruction, overflowOffset: int, targetOS: string): void {
+func emitInstruction(emitter: Emitter, function: IRFunction, slots: ValueSlotTable, instruction: Instruction, overflowOffset: int, targetOS: string): void {
     if instruction.kind == InstructionKind::ConstI64 {
         putConstant(emitter, 9, instruction.immediate);
         putStore(emitter, 9, slotOffset(slots, instruction.resultId));
@@ -430,6 +504,34 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
         putStore(emitter, 11, slotOffset(slots, instruction.resultId));
         return;
     }
+    if instruction.kind == InstructionKind::RawFromInt || instruction.kind == InstructionKind::RawToInt {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        putStore(emitter, 9, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawArgCount {
+        putStore(emitter, 19, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawArg {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        emitWord(emitter, 2332626570);
+        emitWord(emitter, 4181721417);
+        putStore(emitter, 9, slotOffset(slots, instruction.resultId));
+        return;
+    }
+    if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+        putLoad(emitter, 9, slotOffset(slots, instruction.operands[0]));
+        var syscallArgument = 1;
+        while syscallArgument < instruction.operands.len() && syscallArgument <= 6 {
+            putLoad(emitter, syscallArgument - 1, slotOffset(slots, instruction.operands[syscallArgument]));
+            syscallArgument = syscallArgument + 1;
+        }
+        emitRawSyscallRegister(emitter, targetOS, 9);
+        if instruction.kind == InstructionKind::RawHostSyscall && targetOS == "darwin" { emitWord(emitter, 1409286211); emitWord(emitter, 3405775840); }
+        putStore(emitter, 0, slotOffset(slots, instruction.resultId));
+        return;
+    }
     if instruction.kind == InstructionKind::RawFail {
         var branchOffset = emitter.bytes.len();
         emitWord(emitter, 335544320);
@@ -458,7 +560,7 @@ func emitInstruction(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlo
     emitter.error = "native arm64: unsupported scalar instruction";
 }
 
-func emitTerminator(emitter: Emitter, function: IRFunction, slots: Vec<ValueSlot>, block: BasicBlock, blockOffsets: Vec<BlockOffset>, scratchOffset: int): void {
+func emitTerminator(emitter: Emitter, function: IRFunction, slots: ValueSlotTable, block: BasicBlock, blockOffsets: Vec<BlockOffset>, scratchOffset: int): void {
     var terminator = block.terminator;
     if terminator.kind == TerminatorKind::Jump {
         var target = findBlock(function, terminator.targetBlockId);
@@ -570,35 +672,46 @@ func maxCallArguments(function: IRFunction): int {
     return maximum;
 }
 
-func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string, layout: FunctionSlots, reuse: bool): void {
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, targetOS: string, layout: FunctionSlots, registerPlan: Arm64FunctionRegisterPlan, reuse: bool): void {
     if function.parameters.len() > 16 {
         emitter.error = "native arm64: functions with more than sixteen scalar arguments are unsupported";
         return;
     }
-    var slots = collectSlots(function);
-    var slotCount = slots.len();
+    if reuse && (layout.functionId != function.id || registerPlan.functionId != function.id) {
+        emitter.error = "native arm64: storage/register function order mismatch";
+        return;
+    }
+    var slotValues = collectSlots(function);
+    var slotCount = slotValues.len();
+    var savedRegisters: Vec<int> = [];
     if reuse {
-        slots = [];
+        slotValues = [];
         var slotIndex = 0;
-        while slotIndex < layout.values.len() {
-            slots.push(ValueSlot { valueId: layout.values[slotIndex].valueId, index: layout.values[slotIndex].index });
+        while slotIndex < registerPlan.values.len() {
+            var value = registerPlan.values[slotIndex];
+            slotValues.push(ValueSlot { valueId: value.valueId, index: value.spillIndex, registerId: value.registerId });
             slotIndex = slotIndex + 1;
         }
-        slotCount = layout.slotCount;
+        slotCount = registerPlan.spillCount;
+        savedRegisters = registerPlan.savedRegisters;
     }
     var outgoingSlots = maxCallArguments(function) - 8;
     if outgoingSlots < 0 { outgoingSlots = 0; }
     if outgoingSlots > 0 {
         var shifted: Vec<ValueSlot> = [];
         var slotIndex = 0;
-        while slotIndex < slots.len() {
-            shifted.push(ValueSlot { valueId: slots[slotIndex].valueId, index: slots[slotIndex].index + outgoingSlots });
+        while slotIndex < slotValues.len() {
+            var index = slotValues[slotIndex].index;
+            if slotValues[slotIndex].registerId < 0 { index = index + outgoingSlots; }
+            shifted.push(ValueSlot { valueId: slotValues[slotIndex].valueId, index: index, registerId: slotValues[slotIndex].registerId });
             slotIndex = slotIndex + 1;
         }
-        slots = shifted;
+        slotValues = shifted;
     }
+    var slots = valueSlotTable(slotValues);
     var scratchBytes = maxEdgeParams(function) * 8;
-    var rawFrame = (slotCount + outgoingSlots) * 8 + scratchBytes;
+    var saveOffset = (slotCount + outgoingSlots) * 8 + scratchBytes;
+    var rawFrame = saveOffset + savedRegisters.len() * 8;
     if rawFrame > 32768 {
         emitter.error = "native arm64: stack frame exceeds the supported 32768-byte limit";
         return;
@@ -612,6 +725,12 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
     emitWord(emitter, 2847898621);
     emitWord(emitter, 2432697341);
     if frameSize > 0 { putFrameAdjustment(emitter, frameSize, true); }
+    var savedIndex = 0;
+    loop {
+        if savedIndex >= savedRegisters.len() { break; }
+        putStore(emitter, savedRegisters[savedIndex], saveOffset + savedIndex * 8);
+        savedIndex = savedIndex + 1;
+    }
     var parameterIndex = 0;
     loop {
         if parameterIndex >= function.parameters.len() { break; }
@@ -648,6 +767,12 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
         blockIndex = blockIndex + 1;
     }
     var epilogueOffset = emitter.bytes.len();
+    savedIndex = 0;
+    loop {
+        if savedIndex >= savedRegisters.len() { break; }
+        putLoad(emitter, savedRegisters[savedIndex], saveOffset + savedIndex * 8);
+        savedIndex = savedIndex + 1;
+    }
     if frameSize > 0 { putFrameAdjustment(emitter, frameSize, false); }
     emitWord(emitter, 2831252477);
     emitWord(emitter, 3596551104);
@@ -655,6 +780,10 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, t
 }
 
 func appendStub(emitter: Emitter, targetOS: string, entryFunction: IRFunction): int {
+    // Preserve the process argument vector in callee-saved registers. Generated
+    // functions do not otherwise use x19/x20, so raw.arg can read it later.
+    emitWord(emitter, 2852127731);
+    emitWord(emitter, 2852193268);
     var callOffset = emitter.bytes.len();
     emitWord(emitter, 2483027968);
     addFixup(emitter, callOffset, 6, entryFunction.id, -1, -1, 0);
@@ -721,11 +850,16 @@ func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Resul
         i = i + 1;
     }
     var planned = ProgramSlots { functions: [] };
+    var registerPlans = Arm64ProgramRegisterPlan { functions: [] };
     if reuse {
         var result = planSlots(program);
         if result.isErr() { return Result.Err("native arm64: " + result.unwrapErr()); }
         planned = result.unwrap();
         if planned.functions.len() != program.functions.len() { return Result.Err("native arm64: incomplete storage plan"); }
+        var registerResult = planArm64RegistersFromSlots(program, planned);
+        if registerResult.isErr() { return Result.Err("native arm64: " + registerResult.unwrapErr()); }
+        registerPlans = registerResult.unwrap();
+        if registerPlans.functions.len() != program.functions.len() { return Result.Err("native arm64: incomplete register plan"); }
     }
     var emitter = Emitter { bytes: Vec.new(), functions: Vec.new(), fixups: Vec.new(), error: "" };
     var overflowOffset = appendStub(emitter, targetOS, entryFunction);
@@ -733,11 +867,14 @@ func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Resul
     loop {
         if i >= program.functions.len() { break; }
         var layout = FunctionSlots { functionId: -1, values: [], slotCount: 0 };
+        var registerPlan = Arm64FunctionRegisterPlan { functionId: -1, values: [], savedRegisters: [], spillCount: 0, rawArgumentsReserved: false };
         if reuse {
             layout = planned.functions[i];
             if layout.functionId != program.functions[i].id { return Result.Err("native arm64: storage function order mismatch"); }
+            registerPlan = registerPlans.functions[i];
+            if registerPlan.functionId != program.functions[i].id { return Result.Err("native arm64: register function order mismatch"); }
         }
-        emitFunction(emitter, program.functions[i], overflowOffset, targetOS, layout, reuse);
+        emitFunction(emitter, program.functions[i], overflowOffset, targetOS, layout, registerPlan, reuse);
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }

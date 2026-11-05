@@ -1,0 +1,251 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Instruction, IRFunction, IRProgram, IRType, IRValue, SourceRef};
+import ir::eval::{evaluateProgram};
+import ir::optimize::cleanup::{eliminateBoundsChecks, eliminateDeadValues, eliminateRedundantLoads, eliminateRedundantZeroes, simplifyLoops};
+import ir::optimize::inline::{inlineSmallFunctions, specializeConstants};
+import ir::optimize::pipeline::{flagsAll, flagsNone, optimizeProgram, parseFlags};
+import ir::optimize::propagate::{propagateConstants, propagateCopies};
+import ir::optimize::range::{foldRanges};
+import ir::optimize::stream::{fuseStreams};
+
+func fail(label: string): void { eprintln("opt-selftest FAIL " + label); exit(1); }
+
+func pass(label: string) { println("opt-selftest PASS " + label); }
+
+func check(ok: bool, label: string) { if !ok { fail(label); } pass(label); }
+
+func sourceAt(start: int): SourceRef { return ir.sourceRef("opt-selftest.rey", start, start + 4); }
+
+func effectsFor(arity: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= arity { break; } escapes.push(ir.escapeNoEscape()); index = index + 1; }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func makeFunction(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("opt-selftest", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effectsFor(parameterTypes.len()));
+}
+
+func requireValue(program: IRProgram, expected: int, label: string) {
+    var evaluated = evaluateProgram(program, 100000, 32);
+    check(evaluated.ok && !evaluated.isVoid && !evaluated.isBool && evaluated.value == expected, label);
+}
+
+func requireBool(program: IRProgram, expected: bool, label: string) {
+    var evaluated = evaluateProgram(program, 100000, 32);
+    var value = evaluated.value != 0;
+    check(evaluated.ok && evaluated.isBool && value == expected, label);
+}
+
+func requireTrap(program: IRProgram, label: string) {
+    var evaluated = evaluateProgram(program, 100000, 32);
+    check(!evaluated.ok && (evaluated.error.contains("division by zero") || evaluated.error.contains("overflow")), label);
+}
+
+func unwrapProgram(result: Result<IRProgram, string>, label: string): IRProgram {
+    if result.isErr() { fail(label + " " + result.unwrapErr()); }
+    return result.unwrap();
+}
+
+func propagateCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 5, sourceAt(1))];
+    var entry = ir.basicBlock(0, [], instructions, ir.jump(1, [1], sourceAt(2)));
+    var bodyInstructions: Vec<Instruction> = [ir.addCheckedI64(3, 2, 2, sourceAt(3))];
+    var body = ir.basicBlock(1, [ir.irValue(2, ir.irI64())], bodyInstructions, ir.returnValue(3, sourceAt(4)));
+    var function = makeFunction(1, "propagateCase", [], [], ir.irI64(), [entry, body]);
+    var input = ir.irProgram(1, [function]);
+    var output = unwrapProgram(propagateConstants(input), "propagate");
+    requireValue(output, 10, "propagate-value");
+    check(ir.printIR(output).contains("const.i64 10") && !ir.printIR(output).contains("add.checked.i64"), "propagate-folded-add");
+}
+
+func copyCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 7, sourceAt(1)), ir.constI64(2, 0, sourceAt(2)), ir.addCheckedI64(3, 1, 2, sourceAt(3))];
+    var function = makeFunction(1, "copyCase", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(3, sourceAt(4)))]);
+    var output = unwrapProgram(propagateCopies(ir.irProgram(1, [function])), "copy");
+    requireValue(output, 7, "copy-value");
+    check(ir.printIR(output).contains("return %v1 "), "copy-return-uses-source");
+}
+
+func deadCase() {
+    var trapInstructions: Vec<Instruction> = [ir.constI64(1, 1, sourceAt(1)), ir.constI64(2, 0, sourceAt(2)), ir.divCheckedI64(3, 1, 2, sourceAt(3)), ir.constI64(4, 7, sourceAt(4))];
+    var trapFunction = makeFunction(1, "deadTrap", [], [], ir.irI64(), [ir.basicBlock(0, [], trapInstructions, ir.returnValue(4, sourceAt(5)))]);
+    var trapOutput = unwrapProgram(eliminateDeadValues(ir.irProgram(1, [trapFunction])), "dead-trap");
+    check(ir.printIR(trapOutput).contains("div.checked.i64"), "dead-keeps-trapping-div");
+    requireTrap(trapOutput, "dead-trap-still-traps");
+    var pureInstructions: Vec<Instruction> = [ir.constI64(1, 1, sourceAt(1)), ir.constI64(2, 7, sourceAt(2))];
+    var pureFunction = makeFunction(1, "deadPure", [], [], ir.irI64(), [ir.basicBlock(0, [], pureInstructions, ir.returnValue(2, sourceAt(3)))]);
+    var pureOutput = unwrapProgram(eliminateDeadValues(ir.irProgram(1, [pureFunction])), "dead-pure");
+    requireValue(pureOutput, 7, "dead-pure-value");
+    check(!ir.printIR(pureOutput).contains("const.i64 1"), "dead-removes-unused-const");
+}
+
+func inlineCase() {
+    var calleeInstructions: Vec<Instruction> = [ir.constI64(1, 1, sourceAt(1)), ir.addCheckedI64(2, 0, 1, sourceAt(2))];
+    var callee = makeFunction(0, "addOne", [ir.irValue(0, ir.irI64())], [ir.irI64()], ir.irI64(), [ir.basicBlock(0, [], calleeInstructions, ir.returnValue(2, sourceAt(3)))]);
+    var callerInstructions: Vec<Instruction> = [ir.constI64(0, 41, sourceAt(4)), ir.call(1, ir.irI64(), 0, [0], sourceAt(5))];
+    var caller = makeFunction(1, "main", [], [], ir.irI64(), [ir.basicBlock(0, [], callerInstructions, ir.returnValue(1, sourceAt(6)))]);
+    var output = unwrapProgram(inlineSmallFunctions(ir.irProgram(1, [callee, caller])), "inline");
+    requireValue(output, 42, "inline-value");
+    check(!ir.printIR(output).contains("call "), "inline-removes-call");
+}
+
+func inlineTrapCase() {
+    var calleeInstructions: Vec<Instruction> = [ir.constI64(0, 1, sourceAt(1)), ir.constI64(1, 0, sourceAt(2)), ir.divCheckedI64(2, 0, 1, sourceAt(3))];
+    var callee = makeFunction(0, "boom", [], [], ir.irI64(), [ir.basicBlock(0, [], calleeInstructions, ir.returnValue(2, sourceAt(4)))]);
+    var callerInstructions: Vec<Instruction> = [ir.call(0, ir.irI64(), 0, [], sourceAt(5)), ir.constI64(1, 7, sourceAt(6))];
+    var caller = makeFunction(1, "main", [], [], ir.irI64(), [ir.basicBlock(0, [], callerInstructions, ir.returnValue(1, sourceAt(7)))]);
+    var output = unwrapProgram(inlineSmallFunctions(ir.irProgram(1, [callee, caller])), "inline-trap");
+    requireTrap(output, "inline-preserves-trap");
+}
+
+func specializeCase() {
+    var calleeInstructions: Vec<Instruction> = [ir.addCheckedI64(2, 0, 1, sourceAt(1))];
+    var callee = makeFunction(0, "addK", [ir.irValue(0, ir.irI64()), ir.irValue(1, ir.irI64())], [ir.irI64(), ir.irI64()], ir.irI64(), [ir.basicBlock(0, [], calleeInstructions, ir.returnValue(2, sourceAt(2)))]);
+    var callerInstructions: Vec<Instruction> = [ir.constI64(0, 40, sourceAt(3)), ir.constI64(1, 2, sourceAt(4)), ir.call(2, ir.irI64(), 0, [0, 1], sourceAt(5))];
+    var caller = makeFunction(1, "main", [], [], ir.irI64(), [ir.basicBlock(0, [], callerInstructions, ir.returnValue(2, sourceAt(6)))]);
+    var output = unwrapProgram(specializeConstants(ir.irProgram(1, [callee, caller])), "specialize");
+    requireValue(output, 42, "specialize-value");
+    check(ir.printIR(output).contains("#spec"), "specialize-clones-constant-argument");
+}
+
+func loopCase() {
+    var entryInstructions: Vec<Instruction> = [ir.constBool(1, false, sourceAt(1))];
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.branch(1, 1, [], 2, [], sourceAt(2)));
+    var body = ir.basicBlock(1, [], [ir.constI64(2, 1, sourceAt(3))], ir.returnValue(2, sourceAt(4)));
+    var exitBlock = ir.basicBlock(2, [], [ir.constI64(3, 2, sourceAt(5))], ir.returnValue(3, sourceAt(6)));
+    var function = makeFunction(1, "loopCase", [], [], ir.irI64(), [entry, body, exitBlock]);
+    var output = unwrapProgram(simplifyLoops(ir.irProgram(1, [function])), "loops");
+    requireValue(output, 2, "loops-takes-constant-exit");
+    check(!ir.printIR(output).contains("const.i64 1"), "loops-deletes-unreachable-body");
+}
+
+func boundsCase() {
+    var entryInstructions: Vec<Instruction> = [ir.constI64(1, 3, sourceAt(1)), ir.constI64(2, 10, sourceAt(2)), ir.compareI64(3, ir.compareSlt(), 1, 2, sourceAt(3))];
+    var entry = ir.basicBlock(0, [], entryInstructions, ir.branch(3, 1, [], 2, [], sourceAt(4)));
+    var body = ir.basicBlock(1, [], [ir.compareI64(4, ir.compareSlt(), 1, 2, sourceAt(5))], ir.returnValue(4, sourceAt(6)));
+    var exitBlock = ir.basicBlock(2, [], [ir.constBool(5, false, sourceAt(7))], ir.returnValue(5, sourceAt(8)));
+    var function = makeFunction(1, "boundsCase", [], [], ir.irBool(), [entry, body, exitBlock]);
+    var input = ir.irProgram(1, [function]);
+    var output = unwrapProgram(eliminateBoundsChecks(input), "bounds");
+    requireBool(output, true, "bounds-value");
+    var printed = ir.printIR(output);
+    check(printed.contains("const.bool true") && printed.contains("compare.i64 slt"), "bounds-folds-dominated-check");
+}
+
+func rangeCase() {
+    var entry = ir.basicBlock(0, [], [ir.constBool(1, true, sourceAt(1))], ir.branch(1, 1, [], 2, [], sourceAt(2)));
+    var left = ir.basicBlock(1, [], [ir.constI64(2, 1, sourceAt(3))], ir.jump(3, [2], sourceAt(4)));
+    var right = ir.basicBlock(2, [], [ir.constI64(3, 2, sourceAt(5))], ir.jump(3, [3], sourceAt(6)));
+    var joinInstructions: Vec<Instruction> = [ir.constI64(5, 10, sourceAt(7)), ir.compareI64(6, ir.compareSlt(), 4, 5, sourceAt(8))];
+    var join = ir.basicBlock(3, [ir.irValue(4, ir.irI64())], joinInstructions, ir.returnValue(6, sourceAt(9)));
+    var function = makeFunction(1, "rangeCase", [], [], ir.irBool(), [entry, left, right, join]);
+    var output = unwrapProgram(foldRanges(ir.irProgram(1, [function])), "range");
+    requireBool(output, true, "range-value");
+    check(ir.printIR(output).contains("const.bool true") && !ir.printIR(output).contains("compare.i64 slt"), "range-folds-joined-bounds");
+}
+
+func loadCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, sourceAt(1)), ir.rawMap(2, 1, sourceAt(2)), ir.constI64(3, 42, sourceAt(3)), ir.rawStoreI64(2, 3, sourceAt(4)), ir.rawLoadI64(4, 2, sourceAt(5)), ir.rawLoadI64(5, 2, sourceAt(6)), ir.rawUnmap(2, 1, sourceAt(7))];
+    var function = makeFunction(1, "loadCase", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(5, sourceAt(8)))]);
+    var output = unwrapProgram(eliminateRedundantLoads(ir.irProgram(1, [function])), "loads");
+    requireValue(output, 42, "loads-value");
+    var printed = ir.printIR(output);
+    check(!printed.contains("raw.load.i64"), "loads-forwards-store-to-load");
+}
+
+func zeroCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, sourceAt(1)), ir.rawMap(2, 1, sourceAt(2)), ir.constI64(3, 0, sourceAt(3)), ir.rawStoreI64(2, 3, sourceAt(4)), ir.constI64(4, 5, sourceAt(5)), ir.rawStoreI64(2, 4, sourceAt(6)), ir.rawLoadI64(5, 2, sourceAt(7)), ir.rawUnmap(2, 1, sourceAt(8))];
+    var function = makeFunction(1, "zeroCase", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(5, sourceAt(9)))]);
+    var output = unwrapProgram(eliminateRedundantZeroes(ir.irProgram(1, [function])), "zero");
+    requireValue(output, 5, "zero-value");
+    var printed = ir.printIR(output);
+    check(printed.contains("raw.store.i64(%v2, %v4)") && !printed.contains("raw.store.i64(%v2, %v3)"), "zero-removes-overwritten-store");
+}
+
+func loadChainCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, sourceAt(1)), ir.rawMap(2, 1, sourceAt(2)), ir.constI64(3, 8, sourceAt(3)), ir.rawMap(4, 3, sourceAt(4)), ir.constI64(5, 42, sourceAt(5)), ir.rawStoreI64(2, 5, sourceAt(6)), ir.rawLoadI64(6, 2, sourceAt(7)), ir.rawStoreI64(4, 6, sourceAt(8)), ir.rawLoadI64(7, 4, sourceAt(9)), ir.rawUnmap(2, 1, sourceAt(10)), ir.rawUnmap(4, 3, sourceAt(11))];
+    var function = makeFunction(1, "loadChainCase", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(7, sourceAt(12)))]);
+    var output = unwrapProgram(eliminateRedundantLoads(ir.irProgram(1, [function])), "loads-chain");
+    requireValue(output, 42, "loads-chain-value");
+    check(!ir.printIR(output).contains("raw.load.i64"), "loads-chain-forwards-through-removed-load");
+}
+
+func loadCallCase() {
+    var calleeInstructions: Vec<Instruction> = [ir.constI64(1, 2, sourceAt(1)), ir.rawStoreI64(0, 1, sourceAt(2))];
+    var callee = makeFunction(2, "storeTwo", [ir.irValue(0, ir.irRawAddress())], [ir.irRawAddress()], ir.irVoid(), [ir.basicBlock(0, [], calleeInstructions, ir.returnVoid(sourceAt(3)))]);
+    var callerInstructions: Vec<Instruction> = [ir.constI64(0, 8, sourceAt(4)), ir.rawMap(1, 0, sourceAt(5)), ir.constI64(2, 1, sourceAt(6)), ir.rawStoreI64(1, 2, sourceAt(7)), ir.call(-1, ir.irVoid(), 2, [1], sourceAt(8)), ir.rawLoadI64(3, 1, sourceAt(9)), ir.rawUnmap(1, 0, sourceAt(10))];
+    var caller = makeFunction(1, "loadCallCase", [], [], ir.irI64(), [ir.basicBlock(0, [], callerInstructions, ir.returnValue(3, sourceAt(11)))]);
+    var output = unwrapProgram(eliminateRedundantLoads(ir.irProgram(1, [callee, caller])), "loads-call");
+    requireValue(output, 2, "loads-call-sees-callee-store");
+    check(ir.printIR(output).contains("raw.load.i64"), "loads-call-keeps-load-after-call");
+}
+
+func boundsBackedgeCase() {
+    var entry = ir.basicBlock(0, [], [ir.constI64(1, 0, sourceAt(1))], ir.jump(1, [1], sourceAt(2)));
+    var headerInstructions: Vec<Instruction> = [ir.constI64(3, 10, sourceAt(3)), ir.compareI64(4, ir.compareSlt(), 2, 3, sourceAt(4)), ir.constI64(5, 1, sourceAt(5)), ir.addCheckedI64(6, 2, 5, sourceAt(6))];
+    var header = ir.basicBlock(1, [ir.irValue(2, ir.irI64())], headerInstructions, ir.branch(4, 1, [6], 2, [2], sourceAt(7)));
+    var exitBlock = ir.basicBlock(2, [ir.irValue(7, ir.irI64())], [], ir.returnValue(7, sourceAt(8)));
+    var function = makeFunction(1, "boundsBackedgeCase", [], [], ir.irI64(), [entry, header, exitBlock]);
+    var output = unwrapProgram(eliminateBoundsChecks(ir.irProgram(1, [function])), "bounds-backedge");
+    requireValue(output, 10, "bounds-backedge-reaches-limit");
+    check(ir.printIR(output).contains("compare.i64 slt"), "bounds-keeps-loop-carried-compare");
+}
+
+func rangeLoopCase() {
+    var entry = ir.basicBlock(0, [], [ir.constI64(1, 0, sourceAt(1))], ir.jump(1, [1], sourceAt(2)));
+    var headerInstructions: Vec<Instruction> = [ir.constI64(3, 10, sourceAt(3)), ir.compareI64(4, ir.compareSlt(), 2, 3, sourceAt(4)), ir.constI64(5, 1, sourceAt(5)), ir.addCheckedI64(6, 2, 5, sourceAt(6))];
+    var header = ir.basicBlock(1, [ir.irValue(2, ir.irI64())], headerInstructions, ir.branch(4, 2, [], 3, [2], sourceAt(7)));
+    var body = ir.basicBlock(2, [], [], ir.jump(1, [6], sourceAt(8)));
+    var exitBlock = ir.basicBlock(3, [ir.irValue(7, ir.irI64())], [], ir.returnValue(7, sourceAt(9)));
+    var function = makeFunction(1, "rangeLoopCase", [], [], ir.irI64(), [entry, header, body, exitBlock]);
+    var output = unwrapProgram(foldRanges(ir.irProgram(1, [function])), "range-loop");
+    requireValue(output, 10, "range-loop-reaches-limit");
+    check(ir.printIR(output).contains("compare.i64 slt"), "range-does-not-fold-growing-induction");
+}
+
+func fuseCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, sourceAt(1)), ir.rawMap(2, 1, sourceAt(2)), ir.constI64(3, 42, sourceAt(3)), ir.rawStoreI64(2, 3, sourceAt(4)), ir.rawLoadI64(4, 2, sourceAt(5)), ir.rawUnmap(2, 1, sourceAt(6))];
+    var function = makeFunction(1, "sumBufferedCsv", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(4, sourceAt(7)))]);
+    var output = unwrapProgram(fuseStreams(ir.irProgram(1, [function])), "fuse");
+    requireValue(output, 42, "fuse-value");
+    check(!ir.printIR(output).contains("raw.map"), "fuse-removes-intermediate-buffer");
+}
+
+func pipelineCase() {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 1, sourceAt(1)), ir.constI64(2, 0, sourceAt(2)), ir.divCheckedI64(3, 1, 2, sourceAt(3)), ir.constI64(4, 7, sourceAt(4))];
+    var function = makeFunction(1, "pipelineTrap", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(4, sourceAt(5)))]);
+    var input = ir.irProgram(1, [function]);
+    var output = unwrapProgram(optimizeProgram(input, flagsAll()), "pipeline");
+    requireTrap(output, "pipeline-preserves-trap");
+    var unchanged = unwrapProgram(optimizeProgram(input, flagsNone()), "pipeline-off");
+    check(ir.printIR(unchanged) == ir.printIR(input), "flags-off-keeps-ir");
+    var parsed = parseFlags("nope");
+    check(parsed.isErr(), "parse-rejects-unknown-pass");
+    var allFlags = parseFlags("all");
+    if allFlags.isErr() { fail("parse-all-enables-passes"); }
+    var parsedFlags = allFlags.unwrap();
+    check(parsedFlags.fuse && parsedFlags.dead, "parse-all-enables-passes");
+}
+
+pub func runOptimizerSelftest() {
+    propagateCase();
+    copyCase();
+    deadCase();
+    inlineCase();
+    inlineTrapCase();
+    specializeCase();
+    loopCase();
+    boundsCase();
+    rangeCase();
+    loadCase();
+    loadChainCase();
+    loadCallCase();
+    boundsBackedgeCase();
+    rangeLoopCase();
+    zeroCase();
+    fuseCase();
+    pipelineCase();
+    pass("complete");
+}

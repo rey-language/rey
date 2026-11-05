@@ -1,0 +1,18 @@
+pub enum Expr { Call(CallExpr), Literal(int) }
+pub struct CallExpr { pub value: int }
+func tag(expr: Expr): string {
+    match expr {
+        Expr::Call(_) => { return "Call"; },
+        Expr::Literal(_) => { return "Literal"; },
+    }
+    return "?";
+}
+func inspectBefore(original: Expr, call: CallExpr): string { return tag(original); }
+func inspectAfter(call: CallExpr, original: Expr): string { return tag(original); }
+func main(): void {
+    var expr = Expr::Call(CallExpr { value: 7 });
+    match expr {
+        Expr::Call(call) => { if inspectBefore(expr, call) != "Call" { exit(1); } if inspectAfter(call, expr) != "Call" { exit(2); } },
+        Expr::Literal(_) => { println("wrong"); },
+    }
+}

@@ -5,12 +5,18 @@ import parser::ast::{ImportStmt, ImportSourceKind, Program, Stmt};
 import typecheck::{CheckedProgram, ImportEdge, SourceGraph, SourceUnit, TypeError, typecheckGraphWithRuntime};
 import diagnostics::{Diagnostic, Severity, formatDiagnostic, spanFromOffsets, unknownSpan};
 
+pub struct EmbeddedSource {
+    pub path: string,
+    pub source: string,
+}
+
 struct GraphLoadState {
     pub graph: SourceGraph,
     pub visited: HashMap<string, bool>,
     pub stack: Vec<string>,
     pub projectRoot: string,
     pub stdRoot: string,
+    pub embeddedSources: Vec<EmbeddedSource>,
 }
 
 func lastSlashIndex(path: string): int {
@@ -91,7 +97,30 @@ func modulePathAsRelative(path: string): string {
     return out;
 }
 
-func dirHasExactName(dir: string, name: string): bool {
+func hasEmbeddedSource(sources: Vec<EmbeddedSource>, path: string): bool {
+    var index = 0;
+    while index < sources.len() {
+        if sources[index].path == path { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+func dirHasExactName(dir: string, name: string, sources: Vec<EmbeddedSource>): bool {
+    var prefix = dir;
+    if prefix != "/" { prefix = prefix + "/"; }
+    var embeddedIndex = 0;
+    while embeddedIndex < sources.len() {
+        var path = sources[embeddedIndex].path;
+        if path.startsWith(prefix) {
+            var relative = path.slice(prefix.len(), path.len());
+            var slash = relative.indexOf("/");
+            var child = relative;
+            if slash >= 0 { child = relative.slice(0, slash); }
+            if child == name { return true; }
+        }
+        embeddedIndex += 1;
+    }
     var names = listDir(dir);
     var i = 0;
     loop {
@@ -102,8 +131,8 @@ func dirHasExactName(dir: string, name: string): bool {
     return false;
 }
 
-func pathExistsExact(path: string): bool {
-    if !fileExists(path) { return false; }
+func pathExistsExact(path: string, sources: Vec<EmbeddedSource>): bool {
+    if !hasEmbeddedSource(sources, path) && !fileExists(path) { return false; }
     if !path.startsWith("/") { return true; }
     var parent = "/";
     var i = 1;
@@ -115,7 +144,7 @@ func pathExistsExact(path: string): bool {
             i = i + 1;
         }
         var name = path.slice(start, i);
-        if name.len() > 0 && !dirHasExactName(parent, name) { return false; }
+        if name.len() > 0 && !dirHasExactName(parent, name, sources) { return false; }
         if parent == "/" { parent = "/" + name; }
         else if name.len() > 0 { parent = parent + "/" + name; }
         if i < path.len() { i = i + 1; }
@@ -127,11 +156,11 @@ func addCandidate(candidates: Vec<string>, path: string) {
     candidates.push(normalizePath(path));
 }
 
-func firstExistingPath(candidates: Vec<string>, fallback: string): string {
+func firstExistingPath(candidates: Vec<string>, fallback: string, sources: Vec<EmbeddedSource>): string {
     var i = 0;
     loop {
         if i >= candidates.len() { break; }
-        if pathExistsExact(candidates[i]) { return candidates[i]; }
+        if pathExistsExact(candidates[i], sources) { return candidates[i]; }
         i = i + 1;
     }
     return fallback;
@@ -165,7 +194,7 @@ func resolveStdModule(state: GraphLoadState, importPath: string): string {
         addCandidate(candidates, state.stdRoot + "/src/" + relative + "/main.rey");
         addCandidate(candidates, state.stdRoot + "/src/" + relative + ".rey");
     }
-    return firstExistingPath(candidates, candidates[0]);
+    return firstExistingPath(candidates, candidates[0], state.embeddedSources);
 }
 
 func resolveModulePath(state: GraphLoadState, basePath: string, importPath: string): string {
@@ -185,7 +214,7 @@ func resolveModulePath(state: GraphLoadState, basePath: string, importPath: stri
         addCandidate(candidates, root + "/" + relative + ".rey");
         addCandidate(candidates, root + "/src/" + relative + ".rey");
     }
-    return firstExistingPath(candidates, candidates[0]);
+    return firstExistingPath(candidates, candidates[0], state.embeddedSources);
 }
 
 func resolveFilePath(state: GraphLoadState, basePath: string, importPath: string): string {
@@ -194,9 +223,9 @@ func resolveFilePath(state: GraphLoadState, basePath: string, importPath: string
     if importPath.startsWith("/") { return normalizePath(importPath); }
     if importPath.startsWith("./") || importPath.startsWith("../") || importPath.contains("/") || importPath.endsWith(".rey") {
         var local = normalizePath(base + "/" + importPath);
-        if pathExistsExact(local) { return local; }
+        if pathExistsExact(local, state.embeddedSources) { return local; }
         var project = normalizePath(root + "/" + importPath);
-        if pathExistsExact(project) { return project; }
+        if pathExistsExact(project, state.embeddedSources) { return project; }
         return local;
     }
     var candidates: Vec<string> = [];
@@ -204,7 +233,7 @@ func resolveFilePath(state: GraphLoadState, basePath: string, importPath: string
     addCandidate(candidates, base + "/src/" + importPath + ".rey");
     addCandidate(candidates, root + "/" + importPath + ".rey");
     addCandidate(candidates, root + "/src/" + importPath + ".rey");
-    return firstExistingPath(candidates, candidates[0]);
+    return firstExistingPath(candidates, candidates[0], state.embeddedSources);
 }
 
 func resolveImportPath(state: GraphLoadState, basePath: string, importStmt: ImportStmt): string {
@@ -234,9 +263,9 @@ func existingModuleItem(state: GraphLoadState, basePath: string, modulePath: str
         if i >= prefixes.len() { break; }
         var prefix = prefixes[i];
         var folder = normalizePath(prefix + "/" + relative + "/" + item + "/main.rey");
-        if pathExistsExact(folder) { return folder; }
+        if pathExistsExact(folder, state.embeddedSources) { return folder; }
         var file = normalizePath(prefix + "/" + relative + "/" + item + ".rey");
-        if pathExistsExact(file) { return file; }
+        if pathExistsExact(file, state.embeddedSources) { return file; }
         i = i + 1;
     }
     return "";
@@ -257,6 +286,15 @@ func graphDiagnostic(path: string, source: string, start: int, end: int, message
 func pushMissingImport(state: GraphLoadState, target: string, originPath: string, originSource: string, originStart: int, originEnd: int) {
     state.graph.errors.push(graphDiagnostic(originPath, originSource, originStart, originEnd,
         "file not found: " + target));
+}
+
+func embeddedSourceForPath(sources: Vec<EmbeddedSource>, path: string): string? {
+    var index = 0;
+    while index < sources.len() {
+        if sources[index].path == path { return sources[index].source; }
+        index += 1;
+    }
+    return null;
 }
 
 func importCyclePath(stack: Vec<string>, repeated: string): string {
@@ -280,7 +318,8 @@ func loadUnit(state: GraphLoadState, path: string, originPath: string, originSou
         return;
     }
     if state.visited.has(normalizedPath) { return; }
-    if !pathExistsExact(normalizedPath) {
+    var embeddedSource = embeddedSourceForPath(state.embeddedSources, normalizedPath);
+    if embeddedSource == null && !pathExistsExact(normalizedPath, state.embeddedSources) {
         if originPath == "" {
             state.graph.errors.push(graphDiagnostic(normalizedPath, "", -1, -1, "file not found"));
         } else {
@@ -291,7 +330,9 @@ func loadUnit(state: GraphLoadState, path: string, originPath: string, originSou
     }
 
     state.stack.push(normalizedPath);
-    var source = readFile(normalizedPath);
+    var source = "";
+    if embeddedSource == null { source = readFile(normalizedPath); }
+    else { source = embeddedSource; }
     var lexed = lexer.tokenize(source, normalizedPath);
     if lexed.errors.len() > 0 {
         var lexIndex = 0;
@@ -328,7 +369,7 @@ func loadUnit(state: GraphLoadState, path: string, originPath: string, originSou
             Stmt::Import(importStmt) => {
                 var target = normalizePath(resolveImportPath(state, normalizedPath, importStmt));
                 var selectedModuleItems = importStmt.sourceKind == ImportSourceKind::Module && importStmt.items.len() > 0;
-                if selectedModuleItems && pathExistsExact(target) {
+                if selectedModuleItems && pathExistsExact(target, state.embeddedSources) {
                     state.graph.edges.push(ImportEdge {
                         fromPath: normalizedPath,
                         toPath: target,
@@ -441,7 +482,17 @@ pub func canonicalSourcePath(path: string): string {
 }
 
 pub func checkSourceFileGraphWithRuntime(entryPath: string, stdRoot: string, runtimeUnits: Vec<string>): Result<CheckedProgram, string> {
+    return checkSourceFileGraphWithEmbedded(entryPath, stdRoot, runtimeUnits, []);
+}
+
+pub func checkSourceFileGraphWithEmbedded(entryPath: string, stdRoot: string, runtimeUnits: Vec<string>, embeddedSources: Vec<EmbeddedSource>): Result<CheckedProgram, string> {
     var normalizedEntry = normalizePath(entryPath);
+    var normalizedSources: Vec<EmbeddedSource> = [];
+    var sourceIndex = 0;
+    while sourceIndex < embeddedSources.len() {
+        normalizedSources.push(EmbeddedSource { path: normalizePath(embeddedSources[sourceIndex].path), source: embeddedSources[sourceIndex].source });
+        sourceIndex += 1;
+    }
     var graph = SourceGraph { entryPath: normalizedEntry, units: [], edges: [], errors: [] };
     var state = GraphLoadState {
         graph: graph,
@@ -449,6 +500,7 @@ pub func checkSourceFileGraphWithRuntime(entryPath: string, stdRoot: string, run
         stack: [],
         projectRoot: projectRootDir(normalizedEntry),
         stdRoot: stdRoot,
+        embeddedSources: normalizedSources,
     };
     if state.stdRoot != "" { state.stdRoot = normalizePath(state.stdRoot); }
     loadUnit(state, normalizedEntry, "", "", -1, -1);

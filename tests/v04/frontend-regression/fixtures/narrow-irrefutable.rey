@@ -1,0 +1,27 @@
+struct Point { pub x: int }
+struct Payload { pub value: int }
+enum Leaf { Value(value: Payload) }
+enum Node { Leaf(value: Leaf), Empty }
+
+func stringLength(value: string?): int {
+    if value != null { return value.len(); }
+    return 0;
+}
+
+func pointX(value: any): int {
+    if value instanceof Point { return value.x; }
+    return 0;
+}
+
+func leafValue(node: Node): int {
+    match node {
+        Node::Leaf(Leaf::Value(Payload { value: _ })) => { return 1; },
+        Node::Empty => { return 0; },
+    }
+}
+
+func main(): void {
+    const base: int = 5;
+    var add = (value: int) => value + base;
+    println(stringLength("ok"), pointX(Point { x: 1 }), leafValue(Node::Empty), add(2));
+}

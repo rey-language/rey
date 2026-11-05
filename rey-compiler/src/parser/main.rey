@@ -870,7 +870,7 @@ func fileStem(path: string): string {
     var i = 0;
     loop {
         if i >= path.len() { break; }
-        if path[i].toString() == "/" { start = i + 1; }
+        if string(path[i]) == "/" { start = i + 1; }
         i = i + 1;
     }
     var stem = path.slice(start, path.len());

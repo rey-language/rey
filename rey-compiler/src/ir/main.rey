@@ -31,6 +31,12 @@ pub enum InstructionKind {
     RawLoadAddress,
     RawStoreAddress,
     RawFail,
+    RawFromInt,
+    RawToInt,
+    RawSyscall,
+    RawHostSyscall,
+    RawArgCount,
+    RawArg,
 }
 
 pub enum TerminatorKind {
@@ -354,6 +360,22 @@ pub func rawEqual(resultId: int, leftId: int, rightId: int, source: SourceRef): 
 pub func rawLoadAddress(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawLoadAddress, resultId, irRawAddress(), [addressId], source); }
 pub func rawStoreAddress(addressId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawStoreAddress, -1, irVoid(), [addressId, valueId], source); }
 pub func rawFail(codeId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawFail, -1, irVoid(), [codeId], source); }
+pub func rawFromInt(resultId: int, valueId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawFromInt, resultId, irRawAddress(), [valueId], source); }
+pub func rawToInt(resultId: int, addressId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawToInt, resultId, irI64(), [addressId], source); }
+pub func rawArgCount(resultId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawArgCount, resultId, irI64(), [], source); }
+pub func rawArg(resultId: int, indexId: int, source: SourceRef): Instruction { return rawInstruction(InstructionKind::RawArg, resultId, irRawAddress(), [indexId], source); }
+pub func rawSyscall(resultId: int, numberId: int, argumentIds: Vec<int>, source: SourceRef): Instruction {
+    var operands: Vec<int> = [numberId];
+    var index = 0;
+    while index < argumentIds.len() { operands.push(argumentIds[index]); index += 1; }
+    return rawInstruction(InstructionKind::RawSyscall, resultId, irRawAddress(), operands, source);
+}
+pub func rawHostSyscall(resultId: int, numberId: int, argumentIds: Vec<int>, source: SourceRef): Instruction {
+    var operands: Vec<int> = [numberId];
+    var index = 0;
+    while index < argumentIds.len() { operands.push(argumentIds[index]); index += 1; }
+    return rawInstruction(InstructionKind::RawHostSyscall, resultId, irRawAddress(), operands, source);
+}
 
 pub func rawInstructionName(kind: InstructionKind): string {
     if kind == InstructionKind::RawNull { return "raw.null"; }
@@ -368,6 +390,12 @@ pub func rawInstructionName(kind: InstructionKind): string {
     if kind == InstructionKind::RawLoadAddress { return "raw.load.address"; }
     if kind == InstructionKind::RawStoreAddress { return "raw.store.address"; }
     if kind == InstructionKind::RawFail { return "raw.fail"; }
+    if kind == InstructionKind::RawFromInt { return "raw.from.int"; }
+    if kind == InstructionKind::RawToInt { return "raw.to.int"; }
+    if kind == InstructionKind::RawSyscall { return "raw.syscall"; }
+    if kind == InstructionKind::RawHostSyscall { return "raw.host.syscall"; }
+    if kind == InstructionKind::RawArgCount { return "raw.arg.count"; }
+    if kind == InstructionKind::RawArg { return "raw.arg"; }
     return "";
 }
 

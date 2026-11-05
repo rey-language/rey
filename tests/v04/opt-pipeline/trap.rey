@@ -1,0 +1,4 @@
+func main(): void {
+    var failure = 1 / 0;
+    return;
+}
