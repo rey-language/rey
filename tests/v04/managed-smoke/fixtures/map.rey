@@ -1,0 +1,7 @@
+func main(): void {
+    var values: HashMap<string, int> = {"a": 7};
+    if values.len() != 1 || values.get("a") != 7 {
+        var zero: int = 0; var fail: int = 1 / zero;
+    }
+    return;
+}

@@ -1,0 +1,3 @@
+import "common.rey";
+
+pub func two(value: int): int { return common.base(value) * 100; }

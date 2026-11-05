@@ -1,0 +1,57 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir::{printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, label: string) {
+    if !ok { eprintln("FAIL " + label); exit(1); }
+}
+
+func exercise(source: string, output: string, expected: int) {
+    require(checkSourceFileGraph(source, "").isErr(), "ordinary checking grants no raw authority");
+    var checked = checkSourceFileGraphWithRuntime(source, "", [source]);
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var result = evaluateProgram(program, 100000, 32);
+    if expected == 0 {
+        if !result.ok { eprintln(result.error); exit(1); }
+        require(result.isVoid, "source returns void after memory checks");
+    } else {
+        require(!result.ok && result.error.contains("byte"), "bad byte is an evaluator error");
+    }
+    writeFile(output + ".ir", printIR(program));
+    var darwin = emitArm64(program, "darwin");
+    if darwin.isErr() { eprintln(darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(macho.unwrapErr()); exit(1); }
+    var encoded = byteString(macho.unwrap());
+    require(encoded.isOk(), "Mach-O binary encoding");
+    writeFile(output + ".macho", encoded.unwrap());
+    require(readFile(output + ".macho") == encoded.unwrap(), "Mach-O exact write");
+    var linux = emitArm64(program, "linux");
+    if linux.isErr() { eprintln(linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(elf.unwrapErr()); exit(1); }
+    var linuxBytes = byteString(elf.unwrap());
+    require(linuxBytes.isOk(), "ELF binary encoding");
+    writeFile(output + ".elf", linuxBytes.unwrap());
+    require(readFile(output + ".elf") == linuxBytes.unwrap(), "ELF exact write");
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 3, "expected fixture root and output directory");
+    exercise(argv[1] + "/memory.rey", argv[2] + "/memory", 0);
+    exercise(argv[1] + "/bad-byte.rey", argv[2] + "/bad-byte", 1);
+    println("raw source pipeline fixtures ready");
+}

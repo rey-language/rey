@@ -1,0 +1,1600 @@
+// Direct x86-64 emission. linux-x64 keeps the SysV syscall image that the
+// existing executable writer consumes. windows-x64's entry stub allocates 40
+// bytes (shadow space plus alignment) and is recorded as frame id -1 so .pdata
+// covers it. darwin-x64 stays a SysV direct syscall. emitProgram still accepts
+// only linux-x64.
+// abi linux-x64 syscall-exit 60 convention sysv shadow 0 stack-align 16 red-zone 128 loader none
+// abi windows-x64 syscall-exit -1 convention win64 shadow 32 stack-align 16 red-zone 0 loader kernel32.dll symbol ExitProcess
+// abi darwin-x64 syscall-exit 33554433 convention sysv shadow 0 stack-align 16 red-zone 128 loader /usr/lib/dyld symbol direct-syscall
+import ir::{IRProgram, IRFunction, BasicBlock, Instruction, InstructionKind, TerminatorKind, IRTypeKind, IRValue, CompareI64Predicate};
+import ir::verify::{verifyProgram};
+import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
+import ir::storage::registers::{FunctionRegisterPlan, ProgramRegisterPlan, RegisterLocationKind, planRegistersFromSlots};
+import native::packed::{PackedBuffer, packedBufferCreate, packedBufferTryAppendByte, packedBufferTryAppendU32Le, packedBufferTryLength, packedBufferTryPatchByte};
+
+pub struct X64FunctionOffset {
+    pub functionId: int,
+    pub offset: int,
+}
+
+pub struct X64Code {
+    pub bytes: Vec<int>,
+    pub entryOffset: int,
+    pub functions: Vec<X64FunctionOffset>,
+}
+
+pub struct PackedX64Code {
+    pub bytes: PackedBuffer,
+    pub entryOffset: int,
+    pub functions: Vec<X64FunctionOffset>,
+}
+
+pub struct X64Relocation {
+    pub offset: int,
+    pub kind: int,
+    pub symbol: string,
+}
+
+pub struct X64Import {
+    pub library: string,
+    pub symbol: string,
+}
+
+func windowsHostCallArgumentCount(selector: int): int {
+    if selector == 7101 { return 7; }
+    if selector == 7102 || selector == 7103 || selector == 7107 { return 6; }
+    if selector == 7118 { return 8; }
+    return 0;
+}
+
+pub struct X64Frame {
+    pub functionId: int,
+    pub offset: int,
+    pub frameBytes: int,
+}
+
+pub struct X64Image {
+    pub code: X64Code,
+    pub target: string,
+    pub convention: string,
+    pub relocations: Vec<X64Relocation>,
+    pub imports: Vec<X64Import>,
+    pub frames: Vec<X64Frame>,
+    pub maxFrameBytes: int,
+    pub stackMetadata: string,
+}
+
+pub func relocationRipDisp32(): int { return 1; }
+
+struct ValueSlot {
+    pub valueId: int,
+    pub index: int,
+}
+
+struct BlockOffset {
+    pub blockId: int,
+    pub offset: int,
+}
+
+struct Fixup {
+    pub offset: int,
+    pub kind: int,
+    pub targetFunctionId: int,
+    pub targetBlockId: int,
+    pub targetOffset: int,
+}
+
+struct IdIndex {
+    pub dense: Vec<int>,
+    pub sparseKeys: Vec<int>,
+    pub sparseValues: Vec<int>,
+    pub isDense: bool,
+    pub maximumId: int,
+}
+
+struct Emitter {
+    pub bytes: Vec<int>,
+    pub packedBytes: PackedBuffer?,
+    pub functions: Vec<X64FunctionOffset>,
+    pub fixups: Vec<Fixup>,
+    pub error: string,
+    pub convention: string,
+    pub os: string,
+    pub relocations: Vec<X64Relocation>,
+    pub imports: Vec<X64Import>,
+    pub frames: Vec<X64Frame>,
+    pub maxFrame: int,
+}
+
+func emitterLength(emitter: Emitter): int {
+    var packed = emitter.packedBytes;
+    if packed != null {
+        var length = packedBufferTryLength(packed);
+        if length < 0 {
+            emitter.error = "native x64: invalid packed byte buffer";
+            return 0;
+        }
+        return length;
+    }
+    return emitter.bytes.len();
+}
+
+func emitterStoreByte(emitter: Emitter, index: int, value: int): bool {
+    var packed = emitter.packedBytes;
+    if packed != null { return packedBufferTryPatchByte(packed, index, value); }
+    if index < 0 || index >= emitterLength(emitter) { return false; }
+    emitter.bytes.set(index, value);
+    return true;
+}
+
+func emitByte(emitter: Emitter, value: int): void {
+    if emitter.error != "" { return; }
+    if value < 0 || value > 255 {
+        emitter.error = "native x64: byte does not fit unsigned byte";
+        return;
+    }
+    var packed = emitter.packedBytes;
+    if packed != null {
+        if !packedBufferTryAppendByte(packed, value) { emitter.error = "native x64: packed byte append failed"; }
+    } else { emitter.bytes.push(value); }
+}
+
+func emitU32(emitter: Emitter, value: int): void {
+    if emitter.error != "" { return; }
+    if value < 0 || value > 4294967295 {
+        emitter.error = "native x64: immediate does not fit uint32";
+        return;
+    }
+    var packed = emitter.packedBytes;
+    if packed != null {
+        if !packedBufferTryAppendU32Le(packed, value) { emitter.error = "native x64: packed uint32 append failed"; }
+        return;
+    }
+    emitByte(emitter, value % 256);
+    emitByte(emitter, (value / 256) % 256);
+    emitByte(emitter, (value / 65536) % 256);
+    emitByte(emitter, (value / 16777216) % 256);
+}
+
+func emitI32(emitter: Emitter, value: int): void {
+    if value < -2147483648 || value > 2147483647 {
+        emitter.error = "native x64: displacement does not fit int32";
+        return;
+    }
+    var remaining = value;
+    var i = 0;
+    loop {
+        if i >= 4 { break; }
+        var limb = remaining % 256;
+        if limb < 0 { limb = limb + 256; }
+        emitByte(emitter, limb);
+        remaining = (remaining - limb) / 256;
+        i = i + 1;
+    }
+}
+
+func emitI64(emitter: Emitter, value: int): void {
+    var remaining = value;
+    var i = 0;
+    loop {
+        if i >= 8 { break; }
+        var limb = remaining % 256;
+        if limb < 0 { limb = limb + 256; }
+        emitByte(emitter, limb);
+        remaining = (remaining - limb) / 256;
+        i = i + 1;
+    }
+}
+
+func emitRex(emitter: Emitter, wide: bool, reg: int, base: int): void {
+    var value = 64;
+    if wide { value = value + 8; }
+    if reg >= 8 { value = value + 4; }
+    if base >= 8 { value = value + 1; }
+    emitByte(emitter, value);
+}
+
+func emitLoad(emitter: Emitter, register: int, displacement: int): void {
+    if displacement > 0 || displacement < -2147483648 {
+        emitter.error = "native x64: stack load offset is outside the supported frame";
+        return;
+    }
+    emitRex(emitter, true, register, 5);
+    emitByte(emitter, 139);
+    emitByte(emitter, 128 + (register % 8) * 8 + 5);
+    emitI32(emitter, displacement);
+}
+
+func emitStore(emitter: Emitter, register: int, displacement: int): void {
+    if displacement > 0 || displacement < -2147483648 {
+        emitter.error = "native x64: stack store offset is outside the supported frame";
+        return;
+    }
+    emitRex(emitter, true, register, 5);
+    emitByte(emitter, 137);
+    emitByte(emitter, 128 + (register % 8) * 8 + 5);
+    emitI32(emitter, displacement);
+}
+
+func emitLoadPositive(emitter: Emitter, register: int, displacement: int): void {
+    if displacement < 0 || displacement > 2147483647 {
+        emitter.error = "native x64: incoming argument offset is outside the supported frame";
+        return;
+    }
+    emitRex(emitter, true, register, 5);
+    emitByte(emitter, 139);
+    emitByte(emitter, 128 + (register % 8) * 8 + 5);
+    emitI32(emitter, displacement);
+}
+
+func emitTest(emitter: Emitter, register: int): void {
+    emitRex(emitter, true, register, register);
+    emitByte(emitter, 133);
+    emitByte(emitter, 192 + (register % 8) * 8 + register % 8);
+}
+
+func emitAddRegs(emitter: Emitter, destination: int, source: int): void {
+    emitRex(emitter, true, source, destination);
+    emitByte(emitter, 1);
+    emitByte(emitter, 192 + (source % 8) * 8 + destination % 8);
+}
+
+func emitMoveRegister(emitter: Emitter, destination: int, source: int): void {
+    if destination == source { return; }
+    emitRex(emitter, true, source, destination);
+    emitByte(emitter, 137);
+    emitByte(emitter, 192 + (source % 8) * 8 + destination % 8);
+}
+
+func emitTrapIfZero(emitter: Emitter, register: int, overflowOffset: int): void {
+    emitTest(emitter, register);
+    emitJmp(emitter, 6, -1, -1, overflowOffset);
+}
+
+func emitTrapIfSign(emitter: Emitter, register: int, overflowOffset: int): void {
+    emitTest(emitter, register);
+    emitJmp(emitter, 7, -1, -1, overflowOffset);
+}
+
+func emitTrapIfNonPositive(emitter: Emitter, register: int, overflowOffset: int): void {
+    emitTest(emitter, register);
+    emitJmp(emitter, 10, -1, -1, overflowOffset);
+}
+
+func emitAddressCheck(emitter: Emitter, register: int, aligned: bool, overflowOffset: int): void {
+    emitTrapIfZero(emitter, register, overflowOffset);
+    if aligned {
+        emitByte(emitter, 168);
+        emitByte(emitter, 7);
+        emitJmp(emitter, 5, -1, -1, overflowOffset);
+    }
+}
+
+func emitLoadIndirect(emitter: Emitter): void {
+    emitRex(emitter, true, 0, 0);
+    emitByte(emitter, 139);
+    emitByte(emitter, 0);
+}
+
+func emitStoreIndirectRcx(emitter: Emitter): void {
+    emitRex(emitter, true, 1, 0);
+    emitByte(emitter, 137);
+    emitByte(emitter, 8);
+}
+
+func emitLoadByteIndirect(emitter: Emitter): void {
+    emitRex(emitter, true, 0, 0);
+    emitByte(emitter, 15);
+    emitByte(emitter, 182);
+    emitByte(emitter, 0);
+}
+
+func emitStoreByteIndirect(emitter: Emitter): void {
+    emitByte(emitter, 136);
+    emitByte(emitter, 8);
+}
+
+func emitSyscallInsn(emitter: Emitter): void {
+    emitByte(emitter, 15);
+    emitByte(emitter, 5);
+}
+
+func functionConstantI64(function: IRFunction, valueId: int): int {
+    var blockIndex = 0;
+    while blockIndex < function.blocks.len() {
+        var instructions = function.blocks[blockIndex].instructions;
+        var instructionIndex = 0;
+        while instructionIndex < instructions.len() {
+            var instruction = instructions[instructionIndex];
+            if instruction.resultId == valueId && instruction.kind == InstructionKind::ConstI64 { return instruction.immediate; }
+            instructionIndex += 1;
+        }
+        blockIndex += 1;
+    }
+    return -1;
+}
+
+func emitterHasImportFrom(emitter: Emitter, library: string, symbol: string): bool {
+    var index = 0;
+    while index < emitter.imports.len() {
+        if emitter.imports[index].library == library && emitter.imports[index].symbol == symbol { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+func emitterHasImport(emitter: Emitter, symbol: string): bool {
+    return emitterHasImportFrom(emitter, "kernel32.dll", symbol);
+}
+
+func emitWindowsImportCallFrom(emitter: Emitter, library: string, symbol: string): void {
+    if !emitterHasImportFrom(emitter, library, symbol) { emitter.imports.push(X64Import { library: library, symbol: symbol }); }
+    emitByte(emitter, 255);
+    emitByte(emitter, 21);
+    var displacement = emitterLength(emitter);
+    emitI32(emitter, 0);
+    emitter.relocations.push(X64Relocation { offset: displacement, kind: relocationRipDisp32(), symbol: symbol });
+}
+
+func emitWindowsImportCall(emitter: Emitter, symbol: string): void {
+    emitWindowsImportCallFrom(emitter, "kernel32.dll", symbol);
+}
+
+func emitWindowsHostCall(emitter: Emitter, instruction: Instruction, indexes: IdIndex, selector: int): void {
+    if instruction.operands.len() != 7 {
+        emitter.error = "native x64: windows host call requires six arguments";
+        return;
+    }
+    if selector == 7101 {
+        // CreateFileA's final template handle is always null.
+        var registers: Vec<int> = [1, 2, 8, 9];
+        var index = 0;
+        while index < 4 {
+            emitLoadValue(emitter, indexes, registers[index], instruction.operands[index + 1]);
+            index += 1;
+        }
+        index = 4;
+        while index < 6 {
+            emitLoadValue(emitter, indexes, 0, instruction.operands[index + 1]);
+            emitStoreRsp(emitter, 0, 32 + (index - 4) * 8);
+            index += 1;
+        }
+        emitMovImmediate(emitter, 0, 0);
+        emitStoreRsp(emitter, 0, 48);
+        emitWindowsImportCall(emitter, "CreateFileA");
+        return;
+    }
+    if selector == 7102 || selector == 7103 {
+        // ReadFile and WriteFile need an output DWORD past their stack arguments.
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        emitLoadValue(emitter, indexes, 2, instruction.operands[2]);
+        emitLoadValue(emitter, indexes, 8, instruction.operands[3]);
+        emitMovImmediate(emitter, 0, 0);
+        emitStoreRsp(emitter, 0, 32);
+        emitStoreRsp(emitter, 0, 40);
+        emitByte(emitter, 76); emitByte(emitter, 141); emitByte(emitter, 76); emitByte(emitter, 36); emitByte(emitter, 40);
+        if selector == 7102 { emitWindowsImportCall(emitter, "ReadFile"); }
+        else { emitWindowsImportCall(emitter, "WriteFile"); }
+        emitByte(emitter, 133); emitByte(emitter, 192);
+        emitByte(emitter, 139); emitByte(emitter, 68); emitByte(emitter, 36); emitByte(emitter, 40);
+        emitMovImmediate(emitter, 1, -1);
+        emitByte(emitter, 72); emitByte(emitter, 15); emitByte(emitter, 68); emitByte(emitter, 193);
+        return;
+    }
+    if selector == 7104 || selector == 7108 || selector == 7112 || selector == 7113 {
+        var symbol = "CloseHandle";
+        if selector == 7108 { symbol = "DeleteFileA"; }
+        if selector == 7112 { symbol = "FindNextFileA"; }
+        if selector == 7113 { symbol = "FindClose"; }
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        if selector == 7112 { emitLoadValue(emitter, indexes, 2, instruction.operands[2]); }
+        emitWindowsImportCall(emitter, symbol);
+        if selector != 7112 {
+            emitByte(emitter, 133); emitByte(emitter, 192);
+            emitMovImmediate(emitter, 0, 0);
+            emitMovImmediate(emitter, 1, -1);
+            emitByte(emitter, 72); emitByte(emitter, 15); emitByte(emitter, 68); emitByte(emitter, 193);
+        }
+        return;
+    }
+    if selector == 7105 || selector == 7109 || selector == 7110 {
+        var symbol = "GetStdHandle";
+        if selector == 7109 { symbol = "GetFileAttributesA"; }
+        if selector == 7110 { symbol = "GetFinalPathNameByHandleA"; }
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        if selector == 7110 {
+            emitLoadValue(emitter, indexes, 2, instruction.operands[2]);
+            emitLoadValue(emitter, indexes, 8, instruction.operands[3]);
+            emitLoadValue(emitter, indexes, 9, instruction.operands[4]);
+        }
+        emitWindowsImportCall(emitter, symbol);
+        return;
+    }
+    if selector == 7106 || selector == 7111 || selector == 7114 {
+        var symbol = "ExitProcess";
+        if selector == 7111 { symbol = "FindFirstFileA"; }
+        if selector == 7114 { symbol = "GetLastError"; }
+        if selector == 7106 { emitLoadValue(emitter, indexes, 1, instruction.operands[1]); }
+        else if selector == 7111 {
+            emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+            emitLoadValue(emitter, indexes, 2, instruction.operands[2]);
+        }
+        emitWindowsImportCall(emitter, symbol);
+        return;
+    }
+    if selector == 7107 {
+        // SetFilePointerEx writes its 64-bit result to a frame scratch cell.
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        emitLoadValue(emitter, indexes, 2, instruction.operands[2]);
+        emitMovImmediate(emitter, 0, 0);
+        emitStoreRsp(emitter, 0, 40);
+        emitByte(emitter, 76); emitByte(emitter, 141); emitByte(emitter, 68); emitByte(emitter, 36); emitByte(emitter, 40);
+        emitLoadValue(emitter, indexes, 9, instruction.operands[4]);
+        emitWindowsImportCall(emitter, "SetFilePointerEx");
+        emitByte(emitter, 133); emitByte(emitter, 192);
+        emitByte(emitter, 72); emitByte(emitter, 139); emitByte(emitter, 68); emitByte(emitter, 36); emitByte(emitter, 40);
+        emitMovImmediate(emitter, 1, -1);
+        emitByte(emitter, 72); emitByte(emitter, 15); emitByte(emitter, 68); emitByte(emitter, 193);
+        return;
+    }
+    if selector == 7115 { emitWindowsImportCall(emitter, "GetCommandLineW"); return; }
+    if selector == 7116 {
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        emitLoadValue(emitter, indexes, 2, instruction.operands[2]);
+        emitWindowsImportCallFrom(emitter, "shell32.dll", "CommandLineToArgvW");
+        return;
+    }
+    if selector == 7117 {
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        emitWindowsImportCall(emitter, "LocalFree");
+        return;
+    }
+    if selector == 7118 {
+        var registers: Vec<int> = [1, 2, 8, 9];
+        var index = 0;
+        while index < 4 {
+            emitLoadValue(emitter, indexes, registers[index], instruction.operands[index + 1]);
+            index += 1;
+        }
+        index = 4;
+        while index < 6 {
+            emitLoadValue(emitter, indexes, 0, instruction.operands[index + 1]);
+            emitStoreRsp(emitter, 0, 32 + (index - 4) * 8);
+            index += 1;
+        }
+        emitMovImmediate(emitter, 0, 0);
+        emitStoreRsp(emitter, 0, 48);
+        emitStoreRsp(emitter, 0, 56);
+        emitWindowsImportCall(emitter, "WideCharToMultiByte");
+        return;
+    }
+    if selector == 7120 {
+        emitLoadValue(emitter, indexes, 1, instruction.operands[1]);
+        emitMovImmediate(emitter, 2, 0);
+        emitMovImmediate(emitter, 8, 32768);
+        emitWindowsImportCall(emitter, "VirtualFree");
+        return;
+    }
+    emitter.error = "native x64: unsupported windows host-call selector " + selector.toString();
+}
+
+func emitStoreRsp(emitter: Emitter, register: int, displacement: int): void {
+    if displacement < 0 || displacement > 2147483647 {
+        emitter.error = "native x64: outgoing argument offset is outside the supported frame";
+        return;
+    }
+    emitRex(emitter, true, register, 4);
+    emitByte(emitter, 137);
+    emitByte(emitter, 132 + (register % 8) * 8);
+    emitByte(emitter, 36);
+    emitI32(emitter, displacement);
+}
+
+func emitMovImmediate(emitter: Emitter, register: int, value: int): void {
+    emitRex(emitter, true, 0, register);
+    emitByte(emitter, 184 + register % 8);
+    emitI64(emitter, value);
+}
+
+func emitLoadImmediate32(emitter: Emitter, register: int, value: int): void {
+    if register >= 8 {
+        emitter.error = "native x64: 32-bit immediate register is unsupported";
+        return;
+    }
+    emitByte(emitter, 184 + register);
+    emitU32(emitter, value);
+}
+
+func emitJmp(emitter: Emitter, kind: int, targetFunctionId: int, targetBlockId: int, targetOffset: int): void {
+    if kind == 0 || kind == 1 || kind == 3 || kind == 9 { emitByte(emitter, 233); }
+    else {
+        emitByte(emitter, 15);
+        if kind == 2 || kind == 6 { emitByte(emitter, 132); }
+        else if kind == 4 { emitByte(emitter, 128); }
+        else if kind == 5 { emitByte(emitter, 133); }
+        else if kind == 7 { emitByte(emitter, 136); }
+        else if kind == 8 { emitByte(emitter, 135); }
+        else if kind == 10 { emitByte(emitter, 142); }
+        else { emitter.error = "native x64: invalid conditional branch kind"; return; }
+    }
+    var offset = emitterLength(emitter);
+    emitI32(emitter, 0);
+    emitter.fixups.push(Fixup { offset: offset, kind: kind, targetFunctionId: targetFunctionId, targetBlockId: targetBlockId, targetOffset: targetOffset });
+}
+
+func patchRelative(emitter: Emitter, fixup: Fixup, target: int): void {
+    if emitter.error != "" { return; }
+    var delta = target - (fixup.offset + 4);
+    if delta < -2147483648 || delta > 2147483647 {
+        emitter.error = "native x64: relative branch target is outside signed rel32 range";
+        return;
+    }
+    if fixup.offset < 0 || fixup.offset > emitterLength(emitter) || emitterLength(emitter) - fixup.offset < 4 {
+        emitter.error = "native x64: fixup offset is outside emitted code";
+        return;
+    }
+    var remaining = delta;
+    var i = 0;
+    loop {
+        if i >= 4 { break; }
+        var limb = remaining % 256;
+        if limb < 0 { limb = limb + 256; }
+        if !emitterStoreByte(emitter, fixup.offset + i, limb) { emitter.error = "native x64: fixup patch failed"; return; }
+        remaining = (remaining - limb) / 256;
+        i = i + 1;
+    }
+}
+
+func idIndexUseDense(maximumId: int, count: int): bool {
+    return maximumId >= 0 && maximumId <= 1048575 && maximumId / 8 < count;
+}
+
+func idIndexCreate(maximumId: int, count: int): IdIndex {
+    var dense: Vec<int> = [];
+    var sparseKeys: Vec<int> = [];
+    var sparseValues: Vec<int> = [];
+    var isDense = idIndexUseDense(maximumId, count);
+    if isDense {
+        var i = 0;
+        while i <= maximumId { dense.push(-1); i = i + 1; }
+    } else {
+        var sparseCapacity = 0;
+        if count > 0 {
+            if count > 4611686018427387903 { sparseCapacity = count; }
+            else { sparseCapacity = count * 2 + 1; }
+        }
+        var i = 0;
+        while i < sparseCapacity {
+            sparseKeys.push(-1);
+            sparseValues.push(-1);
+            i = i + 1;
+        }
+    }
+    return IdIndex { dense: dense, sparseKeys: sparseKeys, sparseValues: sparseValues, isDense: isDense, maximumId: maximumId };
+}
+
+func idIndexSet(index: IdIndex, id: int, value: int): void {
+    if id < 0 { return; }
+    if index.isDense {
+        if id < index.dense.len() { index.dense.set(id, value); }
+    } else {
+        var capacity = index.sparseKeys.len();
+        if capacity > 0 {
+            var slot = id % capacity;
+            var probes = 0;
+            while probes < capacity {
+                var key = index.sparseKeys[slot];
+                if key == -1 || key == id {
+                    index.sparseKeys.set(slot, id);
+                    index.sparseValues.set(slot, value);
+                    return;
+                }
+                slot = slot + 1;
+                if slot == capacity { slot = 0; }
+                probes = probes + 1;
+            }
+        }
+    }
+}
+
+func idIndexGet(index: IdIndex, id: int): int {
+    if id < 0 { return -1; }
+    if index.isDense {
+        if id >= index.dense.len() { return -1; }
+        return index.dense[id];
+    }
+    var capacity = index.sparseKeys.len();
+    if capacity > 0 {
+        var slot = id % capacity;
+        var probes = 0;
+        while probes < capacity {
+            var key = index.sparseKeys[slot];
+            if key == -1 { return -1; }
+            if key == id { return index.sparseValues[slot]; }
+            slot = slot + 1;
+            if slot == capacity { slot = 0; }
+            probes = probes + 1;
+        }
+    }
+    return -1;
+}
+
+func valueSlotIndexes(slots: Vec<ValueSlot>): IdIndex {
+    var maximumId = -1;
+    var i = 0;
+    while i < slots.len() {
+        if slots[i].valueId > maximumId { maximumId = slots[i].valueId; }
+        i = i + 1;
+    }
+    var indexes = idIndexCreate(maximumId, slots.len());
+    i = 0;
+    while i < slots.len() {
+        var slot = slots[i];
+        idIndexSet(indexes, slot.valueId, slot.index);
+        i = i + 1;
+    }
+    return indexes;
+}
+
+func slotOffset(indexes: IdIndex, valueId: int): int {
+    var index = -1;
+    if valueId >= 0 {
+        if indexes.isDense {
+            if valueId < indexes.dense.len() { index = indexes.dense[valueId]; }
+        } else { index = idIndexGet(indexes, valueId); }
+    }
+    if index < 0 { return 2147483647; }
+    return (index + 1) * -8;
+}
+
+func blockIndexes(blocks: Vec<BasicBlock>): IdIndex {
+    var maximumId = -1;
+    var i = 0;
+    while i < blocks.len() {
+        if blocks[i].id > maximumId { maximumId = blocks[i].id; }
+        i = i + 1;
+    }
+    var indexes = idIndexCreate(maximumId, blocks.len());
+    i = 0;
+    while i < blocks.len() {
+        idIndexSet(indexes, blocks[i].id, i);
+        i = i + 1;
+    }
+    return indexes;
+}
+
+func blockIndex(indexes: IdIndex, blockId: int): int {
+    return idIndexGet(indexes, blockId);
+}
+
+func blockOffset(offsets: IdIndex, blockId: int): int {
+    return idIndexGet(offsets, blockId);
+}
+
+func functionOffsets(functions: Vec<X64FunctionOffset>): IdIndex {
+    var maximumId = -1;
+    var i = 0;
+    while i < functions.len() {
+        if functions[i].functionId > maximumId { maximumId = functions[i].functionId; }
+        i = i + 1;
+    }
+    var index = idIndexCreate(maximumId, functions.len());
+    i = 0;
+    while i < functions.len() {
+        var function = functions[i];
+        idIndexSet(index, function.functionId, function.offset);
+        i = i + 1;
+    }
+    return index;
+}
+
+func appendDefinition(slots: Vec<ValueSlot>, valueId: int): void {
+    if valueId >= 0 { slots.push(ValueSlot { valueId: valueId, index: slots.len() }); }
+}
+
+func collectSlots(function: IRFunction): Vec<ValueSlot> {
+    var slots: Vec<ValueSlot> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= function.parameters.len() { break; }
+        appendDefinition(slots, function.parameters[i].id);
+        i = i + 1;
+    }
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        var paramIndex = 0;
+        loop {
+            if paramIndex >= block.params.len() { break; }
+            appendDefinition(slots, block.params[paramIndex].id);
+            paramIndex = paramIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            appendDefinition(slots, block.instructions[instructionIndex].resultId);
+            instructionIndex = instructionIndex + 1;
+        }
+        blockIndex = blockIndex + 1;
+    }
+    return slots;
+}
+
+func maxEdgeParams(function: IRFunction): int {
+    var maximum = 0;
+    var i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        if function.blocks[i].params.len() > maximum { maximum = function.blocks[i].params.len(); }
+        i = i + 1;
+    }
+    return maximum;
+}
+
+func maxCallArguments(function: IRFunction, windows: bool): int {
+    var maximum = 0;
+    var b = 0;
+    loop {
+        if b >= function.blocks.len() { break; }
+        var n = 0;
+        loop {
+            if n >= function.blocks[b].instructions.len() { break; }
+            var instruction = function.blocks[b].instructions[n];
+            if instruction.kind == InstructionKind::Call && instruction.operands.len() > maximum { maximum = instruction.operands.len(); }
+            else if windows && instruction.kind == InstructionKind::RawHostSyscall {
+                var selector = functionConstantI64(function, instruction.operands[0]);
+                var apiArguments = windowsHostCallArgumentCount(selector);
+                if apiArguments > maximum { maximum = apiArguments; }
+            }
+            n = n + 1;
+        }
+        b = b + 1;
+    }
+    return maximum;
+}
+
+func emitLoadValue(emitter: Emitter, indexes: IdIndex, register: int, valueId: int): void {
+    var location = -1;
+    if valueId >= 0 {
+        if indexes.isDense {
+            if valueId < indexes.dense.len() { location = indexes.dense[valueId]; }
+        } else { location = idIndexGet(indexes, valueId); }
+    }
+    if valueId >= 0 && location <= -2 {
+        emitMoveRegister(emitter, register, -2 - location);
+        return;
+    }
+    var offset = slotOffset(indexes, valueId);
+    if offset == 2147483647 { emitter.error = "native x64: SSA value has no stack slot"; return; }
+    emitLoad(emitter, register, offset);
+}
+
+func emitStoreValue(emitter: Emitter, indexes: IdIndex, register: int, valueId: int): void {
+    var location = -1;
+    if valueId >= 0 {
+        if indexes.isDense {
+            if valueId < indexes.dense.len() { location = indexes.dense[valueId]; }
+        } else { location = idIndexGet(indexes, valueId); }
+    }
+    if valueId >= 0 && location <= -2 {
+        emitMoveRegister(emitter, -2 - location, register);
+        return;
+    }
+    var offset = slotOffset(indexes, valueId);
+    if offset == 2147483647 { emitter.error = "native x64: SSA result has no stack slot"; return; }
+    emitStore(emitter, register, offset);
+}
+
+func emitEdgeCopy(emitter: Emitter, indexes: IdIndex, scratchStart: int, target: BasicBlock, arguments: Vec<int>): void {
+    var i = 0;
+    loop {
+        if i >= arguments.len() { break; }
+        emitLoadValue(emitter, indexes, 0, arguments[i]);
+        emitStore(emitter, 0, (scratchStart + i + 1) * -8);
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= target.params.len() { break; }
+        emitLoad(emitter, 0, (scratchStart + i + 1) * -8);
+        emitStoreValue(emitter, indexes, 0, target.params[i].id);
+        i = i + 1;
+    }
+}
+
+func emitFirstOperand(emitter: Emitter, indexes: IdIndex, valueId: int, cachedValueId: int): void {
+    if valueId != cachedValueId { emitLoadValue(emitter, indexes, 0, valueId); return; }
+    var location = -1;
+    if valueId >= 0 {
+        if indexes.isDense {
+            if valueId < indexes.dense.len() { location = indexes.dense[valueId]; }
+        } else { location = idIndexGet(indexes, valueId); }
+    }
+    if location <= -2 { return; }
+    if slotOffset(indexes, valueId) == 2147483647 { emitter.error = "native x64: SSA value has no stack slot"; }
+}
+
+func emitSecondOperand(emitter: Emitter, indexes: IdIndex, valueId: int, cachedValueId: int): void {
+    if valueId != cachedValueId { emitLoadValue(emitter, indexes, 1, valueId); return; }
+    var location = -1;
+    if valueId >= 0 {
+        if indexes.isDense {
+            if valueId < indexes.dense.len() { location = indexes.dense[valueId]; }
+        } else { location = idIndexGet(indexes, valueId); }
+    }
+    if location <= -2 { return; }
+    if slotOffset(indexes, valueId) == 2147483647 { emitter.error = "native x64: SSA value has no stack slot"; }
+}
+
+func keepsResultInRax(instruction: Instruction): bool {
+    if instruction.resultId < 0 { return false; }
+    var kind = instruction.kind;
+    if kind == InstructionKind::Call || kind == InstructionKind::RawNull || kind == InstructionKind::RawMap || kind == InstructionKind::RawOffset || kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawEqual || kind == InstructionKind::RawLoadAddress || kind == InstructionKind::RawFromInt || kind == InstructionKind::RawToInt || kind == InstructionKind::RawSyscall || kind == InstructionKind::RawHostSyscall || kind == InstructionKind::RawArgCount || kind == InstructionKind::RawArg { return true; }
+    return kind == InstructionKind::ConstI64 || kind == InstructionKind::ConstBool || kind == InstructionKind::AddCheckedI64 || kind == InstructionKind::SubCheckedI64 || kind == InstructionKind::MulCheckedI64 || kind == InstructionKind::DivCheckedI64 || kind == InstructionKind::RemCheckedI64 || kind == InstructionKind::CompareI64 || kind == InstructionKind::CompareBool;
+}
+
+func instructionSetsRcx(instruction: Instruction): bool {
+    var kind = instruction.kind;
+    return kind == InstructionKind::AddCheckedI64 || kind == InstructionKind::SubCheckedI64 || kind == InstructionKind::MulCheckedI64 || kind == InstructionKind::DivCheckedI64 || kind == InstructionKind::RemCheckedI64 || kind == InstructionKind::CompareI64 || kind == InstructionKind::CompareBool || kind == InstructionKind::RawOffset || kind == InstructionKind::RawEqual || kind == InstructionKind::RawStoreI64 || kind == InstructionKind::RawStoreByte || kind == InstructionKind::RawStoreAddress;
+}
+
+func instructionPreservesRcx(instruction: Instruction): bool {
+    var kind = instruction.kind;
+    return kind == InstructionKind::ConstI64 || kind == InstructionKind::ConstBool || kind == InstructionKind::RawNull || kind == InstructionKind::RawLoadI64 || kind == InstructionKind::RawLoadByte || kind == InstructionKind::RawLoadAddress || kind == InstructionKind::RawFromInt || kind == InstructionKind::RawToInt || kind == InstructionKind::RawArgCount || kind == InstructionKind::RawArg;
+}
+
+func emitInstruction(emitter: Emitter, instruction: Instruction, indexes: IdIndex, overflowOffset: int, cachedRaxValueId: int, cachedRcxValueId: int, windowsSelector: int): void {
+    if instruction.kind == InstructionKind::ConstI64 || instruction.kind == InstructionKind::ConstBool {
+        var value = instruction.immediate;
+        emitMovImmediate(emitter, 0, value);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        if instruction.kind == InstructionKind::AddCheckedI64 { emitByte(emitter, 72); emitByte(emitter, 1); emitByte(emitter, 200); }
+        else { emitByte(emitter, 72); emitByte(emitter, 41); emitByte(emitter, 200); }
+        emitJmp(emitter, 4, -1, -1, overflowOffset);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::MulCheckedI64 {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitByte(emitter, 72); emitByte(emitter, 247); emitByte(emitter, 233);
+        emitByte(emitter, 73); emitByte(emitter, 137); emitByte(emitter, 194);
+        emitByte(emitter, 73); emitByte(emitter, 193); emitByte(emitter, 250); emitByte(emitter, 63);
+        emitByte(emitter, 76); emitByte(emitter, 57); emitByte(emitter, 210);
+        emitJmp(emitter, 5, -1, -1, overflowOffset);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitByte(emitter, 72); emitByte(emitter, 133); emitByte(emitter, 201);
+        emitJmp(emitter, 6, -1, -1, overflowOffset);
+        emitMovImmediate(emitter, 10, -9223372036854775807 - 1);
+        emitByte(emitter, 76); emitByte(emitter, 57); emitByte(emitter, 208);
+        emitJmp(emitter, 5, -1, -1, emitterLength(emitter) + 16);
+        emitByte(emitter, 72); emitByte(emitter, 131); emitByte(emitter, 249); emitByte(emitter, 255);
+        emitJmp(emitter, 6, -1, -1, overflowOffset);
+        emitByte(emitter, 72); emitByte(emitter, 153);
+        emitByte(emitter, 72); emitByte(emitter, 247); emitByte(emitter, 249);
+        if instruction.kind == InstructionKind::RemCheckedI64 { emitByte(emitter, 72); emitByte(emitter, 137); emitByte(emitter, 208); }
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitByte(emitter, 72); emitByte(emitter, 57); emitByte(emitter, 200);
+        var condition = 148;
+        if instruction.comparison == CompareI64Predicate::Ne { condition = 149; }
+        else if instruction.comparison == CompareI64Predicate::Slt { condition = 156; }
+        else if instruction.comparison == CompareI64Predicate::Sle { condition = 158; }
+        else if instruction.comparison == CompareI64Predicate::Sgt { condition = 159; }
+        else if instruction.comparison == CompareI64Predicate::Sge { condition = 157; }
+        emitByte(emitter, 15); emitByte(emitter, condition); emitByte(emitter, 192);
+        emitByte(emitter, 15); emitByte(emitter, 182); emitByte(emitter, 192);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::Call && emitter.convention == "win64" {
+        var count = instruction.operands.len();
+        var i = 4;
+        loop {
+            if i >= count { break; }
+            emitLoadValue(emitter, indexes, 0, instruction.operands[i]);
+            emitStoreRsp(emitter, 0, 32 + (i - 4) * 8);
+            i = i + 1;
+        }
+        var winRegisters: Vec<int> = [1, 2, 8, 9];
+        i = 0;
+        loop {
+            if i >= count || i >= 4 { break; }
+            emitLoadValue(emitter, indexes, winRegisters[i], instruction.operands[i]);
+            i = i + 1;
+        }
+        emitByte(emitter, 232);
+        var winCall = emitterLength(emitter);
+        emitI32(emitter, 0);
+        emitter.fixups.push(Fixup { offset: winCall, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
+        if instruction.resultId >= 0 { emitStoreValue(emitter, indexes, 0, instruction.resultId); }
+        return;
+    }
+    if instruction.kind == InstructionKind::Call {
+        var count = instruction.operands.len();
+        var i = 6;
+        loop {
+            if i >= count { break; }
+            emitLoadValue(emitter, indexes, 0, instruction.operands[i]);
+            emitStoreRsp(emitter, 0, (i - 6) * 8);
+            i = i + 1;
+        }
+        var argumentRegisters: Vec<int> = [7, 6, 2, 1, 8, 9];
+        i = 0;
+        loop {
+            if i >= count || i >= 6 { break; }
+            emitLoadValue(emitter, indexes, argumentRegisters[i], instruction.operands[i]);
+            i = i + 1;
+        }
+        emitByte(emitter, 232);
+        var callOffset = emitterLength(emitter);
+        emitI32(emitter, 0);
+        emitter.fixups.push(Fixup { offset: callOffset, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
+        if instruction.resultId >= 0 { emitStoreValue(emitter, indexes, 0, instruction.resultId); }
+        return;
+    }
+    if instruction.kind == InstructionKind::RawNull {
+        emitMovImmediate(emitter, 0, 0);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawFromInt || instruction.kind == InstructionKind::RawToInt {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawEqual {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitByte(emitter, 72); emitByte(emitter, 57); emitByte(emitter, 200);
+        emitByte(emitter, 15); emitByte(emitter, 148); emitByte(emitter, 192);
+        emitByte(emitter, 15); emitByte(emitter, 182); emitByte(emitter, 192);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawOffset {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitTrapIfNonPositive(emitter, 0, overflowOffset);
+        emitTrapIfSign(emitter, 1, overflowOffset);
+        emitAddRegs(emitter, 0, 1);
+        emitJmp(emitter, 4, -1, -1, overflowOffset);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress || instruction.kind == InstructionKind::RawLoadByte {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitAddressCheck(emitter, 0, instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadAddress, overflowOffset);
+        if instruction.kind == InstructionKind::RawLoadByte { emitLoadByteIndirect(emitter); }
+        else { emitLoadIndirect(emitter); }
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreAddress || instruction.kind == InstructionKind::RawStoreByte {
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSecondOperand(emitter, indexes, instruction.operands[1], cachedRcxValueId);
+        emitAddressCheck(emitter, 0, instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreAddress, overflowOffset);
+        if instruction.kind == InstructionKind::RawStoreByte {
+            emitMovImmediate(emitter, 2, 255);
+            emitRex(emitter, true, 2, 1);
+            emitByte(emitter, 57);
+            emitByte(emitter, 209);
+            emitJmp(emitter, 8, -1, -1, overflowOffset);
+            emitStoreByteIndirect(emitter);
+        } else {
+            emitStoreIndirectRcx(emitter);
+        }
+        return;
+    }
+    if instruction.kind == InstructionKind::RawMap {
+        if emitter.os == "windows" {
+            emitLoadValue(emitter, indexes, 2, instruction.operands[0]);
+            emitTrapIfZero(emitter, 2, overflowOffset);
+            emitTrapIfSign(emitter, 2, overflowOffset);
+            emitMovImmediate(emitter, 1, 0);
+            emitLoadValue(emitter, indexes, 2, instruction.operands[0]);
+            emitMovImmediate(emitter, 8, 12288);
+            emitMovImmediate(emitter, 9, 4);
+            emitWindowsImportCall(emitter, "VirtualAlloc");
+            emitTrapIfZero(emitter, 0, overflowOffset);
+            emitTrapIfSign(emitter, 0, overflowOffset);
+            emitStoreValue(emitter, indexes, 0, instruction.resultId);
+            return;
+        }
+        emitLoadValue(emitter, indexes, 6, instruction.operands[0]);
+        emitTrapIfZero(emitter, 6, overflowOffset);
+        emitTrapIfSign(emitter, 6, overflowOffset);
+        emitMovImmediate(emitter, 7, 0);
+        emitMovImmediate(emitter, 2, 3);
+        if emitter.os == "darwin" { emitMovImmediate(emitter, 10, 4098); }
+        else { emitMovImmediate(emitter, 10, 34); }
+        emitMovImmediate(emitter, 8, -1);
+        emitMovImmediate(emitter, 9, 0);
+        var mapNumber = 9;
+        if emitter.os == "darwin" { mapNumber = 33554629; }
+        emitMovImmediate(emitter, 0, mapNumber);
+        emitSyscallInsn(emitter);
+        emitTrapIfZero(emitter, 0, overflowOffset);
+        emitTrapIfSign(emitter, 0, overflowOffset);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawUnmap {
+        if emitter.os == "windows" {
+            emitLoadValue(emitter, indexes, 1, instruction.operands[0]);
+            emitLoadValue(emitter, indexes, 2, instruction.operands[1]);
+            emitTrapIfZero(emitter, 1, overflowOffset);
+            emitTrapIfZero(emitter, 2, overflowOffset);
+            emitTrapIfSign(emitter, 2, overflowOffset);
+            emitLoadValue(emitter, indexes, 1, instruction.operands[0]);
+            emitMovImmediate(emitter, 2, 0);
+            emitMovImmediate(emitter, 8, 32768);
+            emitWindowsImportCall(emitter, "VirtualFree");
+            emitByte(emitter, 133); emitByte(emitter, 192);
+            emitMovImmediate(emitter, 0, 0);
+            emitMovImmediate(emitter, 1, -1);
+            emitByte(emitter, 72); emitByte(emitter, 15); emitByte(emitter, 68); emitByte(emitter, 193);
+            emitByte(emitter, 72); emitByte(emitter, 133); emitByte(emitter, 192);
+            emitJmp(emitter, 5, -1, -1, overflowOffset);
+            return;
+        }
+        emitLoadValue(emitter, indexes, 7, instruction.operands[0]);
+        emitLoadValue(emitter, indexes, 6, instruction.operands[1]);
+        emitTrapIfZero(emitter, 7, overflowOffset);
+        emitTrapIfZero(emitter, 6, overflowOffset);
+        emitTrapIfSign(emitter, 6, overflowOffset);
+        var unmapNumber = 11;
+        if emitter.os == "darwin" { unmapNumber = 33554505; }
+        emitMovImmediate(emitter, 0, unmapNumber);
+        emitSyscallInsn(emitter);
+        emitTest(emitter, 0);
+        emitJmp(emitter, 5, -1, -1, overflowOffset);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawArgCount {
+        if emitter.os == "windows" {
+            emitter.error = "native x64: raw.argument-count is unavailable on windows-x64";
+            return;
+        }
+        emitRex(emitter, true, 12, 0);
+        emitByte(emitter, 137);
+        emitByte(emitter, 224);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawArg {
+        if emitter.os == "windows" {
+            emitter.error = "native x64: raw.argument is unavailable on windows-x64";
+            return;
+        }
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitTrapIfSign(emitter, 0, overflowOffset);
+        emitByte(emitter, 72); emitByte(emitter, 193); emitByte(emitter, 224); emitByte(emitter, 3);
+        emitRex(emitter, true, 0, 13);
+        emitByte(emitter, 3);
+        emitByte(emitter, 197);
+        emitLoadIndirect(emitter);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawSyscall || instruction.kind == InstructionKind::RawHostSyscall {
+        if emitter.os == "windows" {
+            if instruction.kind == InstructionKind::RawSyscall {
+                emitter.error = "native x64: raw.syscall is unavailable on windows-x64";
+                return;
+            }
+            if (windowsSelector < 7101 || windowsSelector > 7118) && windowsSelector != 7120 {
+                emitter.error = "native x64: windows host-call selector must be a known literal";
+                return;
+            }
+            emitWindowsHostCall(emitter, instruction, indexes, windowsSelector);
+            if instruction.resultId >= 0 { emitStoreValue(emitter, indexes, 0, instruction.resultId); }
+            return;
+        }
+        var syscallArgument = 1;
+        var syscallRegisters: Vec<int> = [7, 6, 2, 10, 8, 9];
+        loop {
+            if syscallArgument >= instruction.operands.len() || syscallArgument > 6 { break; }
+            emitLoadValue(emitter, indexes, syscallRegisters[syscallArgument - 1], instruction.operands[syscallArgument]);
+            syscallArgument = syscallArgument + 1;
+        }
+        emitFirstOperand(emitter, indexes, instruction.operands[0], cachedRaxValueId);
+        emitSyscallInsn(emitter);
+        if instruction.kind == InstructionKind::RawHostSyscall && emitter.os == "darwin" {
+            emitByte(emitter, 115); emitByte(emitter, 3);
+            emitByte(emitter, 72); emitByte(emitter, 247); emitByte(emitter, 216);
+        }
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::RawFail {
+        emitJmp(emitter, 9, -1, -1, overflowOffset);
+        return;
+    }
+    emitter.error = "native x64: unsupported scalar instruction";
+}
+
+func emitTerminator(emitter: Emitter, function: IRFunction, indexes: IdIndex, blocksById: IdIndex, block: BasicBlock, scratchStart: int): void {
+    var terminator = block.terminator;
+    if terminator.kind == TerminatorKind::Jump {
+        var targetIndex = blockIndex(blocksById, terminator.targetBlockId);
+        var target = function.blocks[targetIndex];
+        emitEdgeCopy(emitter, indexes, scratchStart, target, terminator.targetArgs);
+        emitJmp(emitter, 0, -1, terminator.targetBlockId, -1);
+        return;
+    }
+    if terminator.kind == TerminatorKind::Branch {
+        emitLoadValue(emitter, indexes, 0, terminator.conditionValueId);
+        emitByte(emitter, 72); emitByte(emitter, 133); emitByte(emitter, 192);
+        emitJmp(emitter, 2, -1, -1, -1);
+        var conditionalFixupIndex = emitter.fixups.len() - 1;
+        var trueIndex = blockIndex(blocksById, terminator.trueTargetBlockId);
+        var trueBlock = function.blocks[trueIndex];
+        emitEdgeCopy(emitter, indexes, scratchStart, trueBlock, terminator.trueArgs);
+        emitJmp(emitter, 0, -1, terminator.trueTargetBlockId, -1);
+        var falseOffset = emitterLength(emitter);
+        var conditionalFixup = emitter.fixups[conditionalFixupIndex];
+        conditionalFixup.targetOffset = falseOffset;
+        emitter.fixups.set(conditionalFixupIndex, conditionalFixup);
+        var falseIndex = blockIndex(blocksById, terminator.falseTargetBlockId);
+        var falseBlock = function.blocks[falseIndex];
+        emitEdgeCopy(emitter, indexes, scratchStart, falseBlock, terminator.falseArgs);
+        emitJmp(emitter, 0, -1, terminator.falseTargetBlockId, -1);
+        return;
+    }
+    if terminator.kind == TerminatorKind::Return {
+        if terminator.valueId >= 0 { emitLoadValue(emitter, indexes, 0, terminator.valueId); }
+        emitJmp(emitter, 1, -1, -1, -1);
+        return;
+    }
+    emitter.error = "native x64: unsupported scalar terminator";
+}
+
+func resolveLocalFixups(emitter: Emitter, fixupStart: int, fixupFinish: int, blockOffsets: IdIndex, epilogueOffset: int): void {
+    var i = fixupStart;
+    loop {
+        if i >= fixupFinish { break; }
+        var fixup = emitter.fixups[i];
+        if fixup.kind == 0 || fixup.kind == 1 || fixup.kind == 2 {
+            var target = fixup.targetOffset;
+            if fixup.kind == 0 { target = blockOffset(blockOffsets, fixup.targetBlockId); }
+            if fixup.kind == 1 { target = epilogueOffset; }
+            if target < 0 { emitter.error = "native x64: unresolved local control-flow target"; return; }
+            patchRelative(emitter, fixup, target);
+        }
+        i = i + 1;
+    }
+}
+
+func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, layout: FunctionSlots, reuse: bool, registers: FunctionRegisterPlan): void {
+    if function.parameters.len() > 16 {
+        emitter.error = "native x64: functions with more than sixteen scalar arguments are unsupported";
+        return;
+    }
+    var slots = collectSlots(function);
+    var slotCount = slots.len();
+    if reuse {
+        slots = [];
+        var slotIndex = 0;
+        while slotIndex < layout.values.len() {
+            slots.push(ValueSlot { valueId: layout.values[slotIndex].valueId, index: layout.values[slotIndex].index });
+            slotIndex = slotIndex + 1;
+        }
+        slotCount = layout.slotCount;
+    }
+    if registers.functionId == function.id {
+        slots = [];
+        var valueAt = 0;
+        while valueAt < registers.locations.len() {
+            var value = registers.locations[valueAt];
+            var location = value.location.index;
+            if value.location.kind == RegisterLocationKind::Register { location = -2 - location; }
+            slots.push(ValueSlot { valueId: value.valueId, index: location });
+            valueAt = valueAt + 1;
+        }
+        slotCount = registers.spillCount;
+    }
+    var slotIndexes = valueSlotIndexes(slots);
+    var blocksById = blockIndexes(function.blocks);
+    var blockOffsets = idIndexCreate(blocksById.maximumId, function.blocks.len());
+    var fixupStart = emitter.fixups.len();
+    var scratchCount = maxEdgeParams(function);
+    var outgoingBytes = 16;
+    var registerCount = 6;
+    var incomingBase = 16;
+    if emitter.convention == "win64" {
+        outgoingBytes = 32;
+        registerCount = 4;
+        incomingBase = 48;
+    }
+    var requiredOutgoingBytes = (maxCallArguments(function, emitter.convention == "win64") - registerCount) * 8;
+    if emitter.convention == "win64" {
+        if requiredOutgoingBytes < 0 { requiredOutgoingBytes = 0; }
+        requiredOutgoingBytes = requiredOutgoingBytes + 32;
+    }
+    if requiredOutgoingBytes > outgoingBytes { outgoingBytes = requiredOutgoingBytes; }
+    var savedCount = 0;
+    if registers.functionId == function.id { savedCount = registers.savedRegisters.len(); }
+    var rawFrame = slotCount * 8 + scratchCount * 8 + savedCount * 8 + outgoingBytes;
+    if rawFrame > 1048576 {
+        emitter.error = "native x64: stack frame exceeds the supported 1048576-byte limit";
+        return;
+    }
+    var frameSize = rawFrame;
+    if frameSize % 16 != 0 { frameSize = frameSize + (16 - frameSize % 16); }
+    if emitter.convention == "win64" && frameSize > 65520 {
+        emitter.error = "native x64: windows frame exceeds the PE unwind limit";
+        return;
+    }
+    var start = emitterLength(emitter);
+    emitter.functions.push(X64FunctionOffset { functionId: function.id, offset: start });
+    emitter.frames.push(X64Frame { functionId: function.id, offset: start, frameBytes: frameSize });
+    if frameSize > emitter.maxFrame { emitter.maxFrame = frameSize; }
+    emitByte(emitter, 85);
+    emitByte(emitter, 72); emitByte(emitter, 137); emitByte(emitter, 229);
+    emitByte(emitter, 72); emitByte(emitter, 129); emitByte(emitter, 236); emitU32(emitter, frameSize);
+    var savedAt = 0;
+    while savedAt < savedCount {
+        emitStore(emitter, registers.savedRegisters[savedAt], (slotCount + scratchCount + savedAt + 1) * -8);
+        savedAt = savedAt + 1;
+    }
+    var argumentRegisters: Vec<int> = [7, 6, 2, 1, 8, 9];
+    if emitter.convention == "win64" { argumentRegisters = [1, 2, 8, 9]; }
+    var parameterIndex = 0;
+    loop {
+        if parameterIndex >= function.parameters.len() { break; }
+        var parameter = function.parameters[parameterIndex];
+        if parameterIndex < registerCount { emitStoreValue(emitter, slotIndexes, argumentRegisters[parameterIndex], parameter.id); }
+        else {
+            emitLoadPositive(emitter, 0, incomingBase + (parameterIndex - registerCount) * 8);
+            emitStoreValue(emitter, slotIndexes, 0, parameter.id);
+        }
+        parameterIndex = parameterIndex + 1;
+    }
+    var scratchStart = slotCount;
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= function.blocks.len() { break; }
+        var block = function.blocks[blockIndex];
+        idIndexSet(blockOffsets, block.id, emitterLength(emitter));
+        var instructionIndex = 0;
+        var cachedRaxValueId = -1;
+        var cachedRcxValueId = -1;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionIndex];
+            var windowsSelector = -1;
+            if instruction.kind == InstructionKind::RawHostSyscall { windowsSelector = functionConstantI64(function, instruction.operands[0]); }
+            emitInstruction(emitter, instruction, slotIndexes, overflowOffset, cachedRaxValueId, cachedRcxValueId, windowsSelector);
+            cachedRaxValueId = -1;
+            if keepsResultInRax(instruction) { cachedRaxValueId = instruction.resultId; }
+            if instructionSetsRcx(instruction) && instruction.operands.len() > 1 { cachedRcxValueId = instruction.operands[1]; }
+            else if !instructionPreservesRcx(instruction) { cachedRcxValueId = -1; }
+            instructionIndex = instructionIndex + 1;
+        }
+        emitTerminator(emitter, function, slotIndexes, blocksById, block, scratchStart);
+        blockIndex = blockIndex + 1;
+    }
+    var epilogueOffset = emitterLength(emitter);
+    savedAt = 0;
+    while savedAt < savedCount {
+        emitLoad(emitter, registers.savedRegisters[savedAt], (slotCount + scratchCount + savedAt + 1) * -8);
+        savedAt = savedAt + 1;
+    }
+    emitByte(emitter, 201);
+    emitByte(emitter, 195);
+    resolveLocalFixups(emitter, fixupStart, emitter.fixups.len(), blockOffsets, epilogueOffset);
+}
+
+func programUsesRawArgs(program: IRProgram): bool {
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        var b = 0;
+        loop {
+            if b >= program.functions[i].blocks.len() { break; }
+            var n = 0;
+            loop {
+                if n >= program.functions[i].blocks[b].instructions.len() { break; }
+                var kind = program.functions[i].blocks[b].instructions[n].kind;
+                if kind == InstructionKind::RawArg || kind == InstructionKind::RawArgCount { return true; }
+                n = n + 1;
+            }
+            b = b + 1;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+func appendEntryStub(emitter: Emitter, entryFunction: IRFunction, exitNumber: int, captureArgs: bool): void {
+    if captureArgs && emitter.convention != "win64" {
+        emitRex(emitter, true, 12, 4);
+        emitByte(emitter, 139);
+        emitByte(emitter, 36);
+        emitByte(emitter, 36);
+        emitRex(emitter, true, 13, 4);
+        emitByte(emitter, 141);
+        emitByte(emitter, 108);
+        emitByte(emitter, 36);
+        emitByte(emitter, 8);
+    }
+    if emitter.convention == "win64" {
+        // Loader enters at 8 mod 16. 40 bytes leaves rsp 0 mod 16 and reserves the 32-byte shadow.
+        emitByte(emitter, 72); emitByte(emitter, 131); emitByte(emitter, 236); emitByte(emitter, 40);
+    }
+    emitByte(emitter, 232);
+    var callOffset = emitterLength(emitter);
+    emitI32(emitter, 0);
+    emitter.fixups.push(Fixup { offset: callOffset, kind: 3, targetFunctionId: entryFunction.id, targetBlockId: -1, targetOffset: -1 });
+    if emitter.convention == "win64" {
+        if entryFunction.signature.returnType.kind == IRTypeKind::Void {
+            emitByte(emitter, 49); emitByte(emitter, 201);
+        } else {
+            emitByte(emitter, 137); emitByte(emitter, 193);
+        }
+        emitByte(emitter, 255); emitByte(emitter, 21);
+        var dispAt = emitterLength(emitter);
+        emitI32(emitter, 0);
+        emitter.relocations.push(X64Relocation { offset: dispAt, kind: relocationRipDisp32(), symbol: "ExitProcess" });
+        return;
+    }
+    if entryFunction.signature.returnType.kind == IRTypeKind::Void {
+        emitByte(emitter, 49); emitByte(emitter, 255);
+    } else {
+        emitByte(emitter, 137); emitByte(emitter, 199);
+    }
+    emitLoadImmediate32(emitter, 0, exitNumber);
+    emitByte(emitter, 15); emitByte(emitter, 5);
+}
+
+func canonicalTarget(target: string): string {
+    if target == "macos-x64" { return "darwin-x64"; }
+    return target;
+}
+
+func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packedOutput: bool): Result<Emitter, string> {
+    var canonical = canonicalTarget(target);
+    var convention = "";
+    if canonical == "linux-x64" || canonical == "darwin-x64" { convention = "sysv"; }
+    if canonical == "windows-x64" { convention = "win64"; }
+    if convention == "" { return Result.Err("native x64: target must be linux-x64, darwin-x64, or windows-x64"); }
+    if packedOutput && canonical != "linux-x64" { return Result.Err("native x64: packed emission requires linux-x64"); }
+    var entryIndex = 0;
+    loop {
+        if entryIndex >= program.functions.len() { break; }
+        if program.functions[entryIndex].id == program.entryFunctionId { break; }
+        entryIndex = entryIndex + 1;
+    }
+    if entryIndex >= program.functions.len() { return Result.Err("native x64: entry function is missing"); }
+    var entryFunction = program.functions[entryIndex];
+    if entryFunction.parameters.len() != 0 { return Result.Err("native x64: program entry function must have zero scalar arguments"); }
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        if program.functions[i].parameters.len() > 16 { return Result.Err("native x64: functions with more than sixteen scalar arguments are unsupported"); }
+        var b = 0;
+        loop {
+            if b >= program.functions[i].blocks.len() { break; }
+            var n = 0;
+            loop {
+                if n >= program.functions[i].blocks[b].instructions.len() { break; }
+                var instruction = program.functions[i].blocks[b].instructions[n];
+                if instruction.kind == InstructionKind::Call && instruction.operands.len() > 16 {
+                    return Result.Err("native x64: calls with more than sixteen scalar arguments are unsupported");
+                }
+                n = n + 1;
+            }
+            b = b + 1;
+        }
+        i = i + 1;
+    }
+    var planned = ProgramSlots { functions: [] };
+    var registerPlan = ProgramRegisterPlan { functions: [] };
+    if reuse {
+        var result = planSlots(program);
+        if result.isErr() { return Result.Err("native x64: " + result.unwrapErr()); }
+        planned = result.unwrap();
+        if planned.functions.len() != program.functions.len() { return Result.Err("native x64: incomplete storage plan"); }
+        if canonical == "linux-x64" {
+            var allocated = planRegistersFromSlots(program, planned, true);
+            if allocated.isOk() { registerPlan = allocated.unwrap(); }
+        }
+    }
+    var noneRelocations: Vec<X64Relocation> = Vec.new();
+    var noneImports: Vec<X64Import> = Vec.new();
+    var noneFrames: Vec<X64Frame> = Vec.new();
+    var os = "linux";
+    if canonical == "darwin-x64" { os = "darwin"; }
+    if canonical == "windows-x64" { os = "windows"; }
+    var packedBytes: PackedBuffer? = null;
+    if packedOutput {
+        var created = packedBufferCreate(0);
+        if created.isErr() { return Result.Err("native x64: " + created.unwrapErr()); }
+        packedBytes = created.unwrap();
+    }
+    var emitter = Emitter { bytes: Vec.new(), packedBytes: packedBytes, functions: Vec.new(), fixups: Vec.new(), error: "", convention: convention, os: os, relocations: noneRelocations, imports: noneImports, frames: noneFrames, maxFrame: 0 };
+    var exitNumber = 60;
+    if canonical == "darwin-x64" { exitNumber = 33554433; }
+    if convention == "win64" {
+        emitter.frames.push(X64Frame { functionId: -1, offset: emitterLength(emitter), frameBytes: -1 });
+    }
+    eprintln("phase: x64 emit started functions=" + program.functions.len().toString());
+    appendEntryStub(emitter, entryFunction, exitNumber, programUsesRawArgs(program));
+    if emitter.error != "" { return Result.Err(emitter.error); }
+    var overflowOffset = -1;
+    i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        var layout = FunctionSlots { functionId: -1, values: [], slotCount: 0 };
+        if reuse {
+            layout = planned.functions[i];
+            if layout.functionId != program.functions[i].id { return Result.Err("native x64: storage function order mismatch"); }
+        }
+        var registers = FunctionRegisterPlan { functionId: -1, locations: [], savedRegisters: [], spillCount: 0, rawArgumentsReserved: false, edges: [] };
+        if registerPlan.functions.len() == program.functions.len() { registers = registerPlan.functions[i]; }
+        emitFunction(emitter, program.functions[i], -1, layout, reuse, registers);
+        if emitter.error != "" { return Result.Err(emitter.error); }
+        i = i + 1;
+    }
+    eprintln("phase: x64 functions emitted bytes=" + emitterLength(emitter).toString() + " fixups=" + emitter.fixups.len().toString());
+    overflowOffset = emitterLength(emitter);
+    if convention == "win64" {
+        emitLoadImmediate32(emitter, 1, 1);
+        emitByte(emitter, 255); emitByte(emitter, 21);
+        var overflowDisp = emitterLength(emitter);
+        emitI32(emitter, 0);
+        emitter.relocations.push(X64Relocation { offset: overflowDisp, kind: relocationRipDisp32(), symbol: "ExitProcess" });
+    } else {
+        emitLoadImmediate32(emitter, 7, 1);
+        emitLoadImmediate32(emitter, 0, exitNumber);
+        emitByte(emitter, 15); emitByte(emitter, 5);
+    }
+    if emitter.error != "" { return Result.Err(emitter.error); }
+    eprintln("phase: x64 patching " + emitter.fixups.len().toString() + " fixups overflow=" + overflowOffset.toString());
+    var offsetsByFunctionId = functionOffsets(emitter.functions);
+    i = 0;
+    loop {
+        if i >= emitter.fixups.len() { break; }
+        var fixup = emitter.fixups[i];
+        if fixup.kind == 3 {
+            var targetOffset = idIndexGet(offsetsByFunctionId, fixup.targetFunctionId);
+            if targetOffset < 0 { return Result.Err("native x64: unresolved function call target"); }
+            patchRelative(emitter, fixup, targetOffset);
+        } else if fixup.kind == 2 || fixup.kind == 4 || fixup.kind == 5 || fixup.kind == 6 || fixup.kind == 7 || fixup.kind == 8 || fixup.kind == 9 || fixup.kind == 10 {
+            var targetOffset = fixup.targetOffset;
+            if targetOffset < 0 && (fixup.kind == 4 || fixup.kind == 5 || fixup.kind == 6 || fixup.kind == 7 || fixup.kind == 8 || fixup.kind == 9 || fixup.kind == 10) { targetOffset = overflowOffset; }
+            if targetOffset < 0 { return Result.Err("native x64: unresolved overflow branch target"); }
+            patchRelative(emitter, fixup, targetOffset);
+        }
+        if emitter.error != "" { return Result.Err(emitter.error); }
+        i = i + 1;
+    }
+    eprintln("phase: x64 patches done");
+    return Result.Ok(emitter);
+}
+
+func emitImageVerifiedInternal(program: IRProgram, target: string, reuse: bool): Result<X64Image, string> {
+    var emitted = emitEmitterInternal(program, target, reuse, false);
+    if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
+    var emitter = emitted.unwrap();
+    var canonical = canonicalTarget(target);
+    var convention = "sysv";
+    if canonical == "windows-x64" { convention = "win64"; }
+    var imports = emitter.imports;
+    var stackMetadata = "sysv;frame-pointer;red-zone-unused;exit-syscall=60";
+    if canonical == "windows-x64" {
+        if !emitterHasImport(emitter, "ExitProcess") { imports.push(X64Import { library: "kernel32.dll", symbol: "ExitProcess" }); }
+        stackMetadata = "win64;frame-pointer;shadow=32;exit-import=kernel32.dll!ExitProcess";
+    } else if canonical == "darwin-x64" {
+        stackMetadata = "sysv;frame-pointer;red-zone-unused;exit-syscall=33554433;loader=dyld;dylib=libSystem";
+    }
+    return Result.Ok(X64Image {
+        code: X64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions },
+        target: canonical,
+        convention: convention,
+        relocations: emitter.relocations,
+        imports: imports,
+        frames: emitter.frames,
+        maxFrameBytes: emitter.maxFrame,
+        stackMetadata: stackMetadata,
+    });
+}
+
+func emitImageInternal(program: IRProgram, target: string, reuse: bool): Result<X64Image, string> {
+    var canonical = canonicalTarget(target);
+    var convention = "";
+    if canonical == "linux-x64" || canonical == "darwin-x64" { convention = "sysv"; }
+    if canonical == "windows-x64" { convention = "win64"; }
+    if convention == "" { return Result.Err("native x64: target must be linux-x64, darwin-x64, or windows-x64"); }
+    var verification = verifyProgram(program);
+    if !verification.ok {
+        if verification.errors.len() > 0 { return Result.Err("native x64: invalid IR: " + verification.errors[0]); }
+        return Result.Err("native x64: invalid IR program");
+    }
+    return emitImageVerifiedInternal(program, target, reuse);
+}
+
+func emitProgramInternal(program: IRProgram, target: string, reuse: bool, verified: bool): Result<X64Code, string> {
+    if target != "linux-x64" { return Result.Err("native x64: target must be linux-x64"); }
+    var image: Result<X64Image, string> = Result.Err("not emitted");
+    if verified { image = emitImageVerifiedInternal(program, target, reuse); }
+    else { image = emitImageInternal(program, target, reuse); }
+    if image.isErr() { return Result.Err(image.unwrapErr()); }
+    return Result.Ok(image.unwrap().code);
+}
+
+func emitProgramPackedInternal(program: IRProgram, target: string, reuse: bool, verified: bool): Result<PackedX64Code, string> {
+    if target != "linux-x64" { return Result.Err("native x64: packed emission requires linux-x64"); }
+    if !verified {
+        var verification = verifyProgram(program);
+        if !verification.ok {
+            if verification.errors.len() > 0 { return Result.Err("native x64: invalid IR: " + verification.errors[0]); }
+            return Result.Err("native x64: invalid IR program");
+        }
+    }
+    var emitted = emitEmitterInternal(program, target, reuse, true);
+    if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
+    var emitter = emitted.unwrap();
+    var packed = emitter.packedBytes;
+    if packed != null {
+        var bytes: PackedBuffer = packed;
+        return Result.Ok(PackedX64Code { bytes: bytes, entryOffset: 0, functions: emitter.functions });
+    }
+    return Result.Err("native x64: packed emitter lost its output buffer");
+}
+
+pub func emitProgram(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, false, false);
+}
+
+pub func emitProgramWithReuse(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, true, false);
+}
+
+pub func emitProgramVerified(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, false, true);
+}
+
+pub func emitProgramVerifiedWithReuse(program: IRProgram, target: string): Result<X64Code, string> {
+    return emitProgramInternal(program, target, true, true);
+}
+
+pub func emitProgramPacked(program: IRProgram, target: string): Result<PackedX64Code, string> {
+    return emitProgramPackedInternal(program, target, false, false);
+}
+
+pub func emitProgramPackedWithReuse(program: IRProgram, target: string): Result<PackedX64Code, string> {
+    return emitProgramPackedInternal(program, target, true, false);
+}
+
+pub func emitProgramPackedVerified(program: IRProgram, target: string): Result<PackedX64Code, string> {
+    return emitProgramPackedInternal(program, target, false, true);
+}
+
+pub func emitProgramPackedVerifiedWithReuse(program: IRProgram, target: string): Result<PackedX64Code, string> {
+    return emitProgramPackedInternal(program, target, true, true);
+}
+
+pub func emitImage(program: IRProgram, target: string): Result<X64Image, string> {
+    return emitImageInternal(program, target, false);
+}
+
+pub func emitImageWithReuse(program: IRProgram, target: string): Result<X64Image, string> {
+    return emitImageInternal(program, target, true);
+}

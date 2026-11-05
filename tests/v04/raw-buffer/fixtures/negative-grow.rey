@@ -1,0 +1,6 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(0);
+    buffer.rawBufferGrow(handle, -1);
+}

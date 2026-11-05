@@ -1,0 +1,6 @@
+func main(): void {
+    while true {
+        return;
+    }
+    return;
+}

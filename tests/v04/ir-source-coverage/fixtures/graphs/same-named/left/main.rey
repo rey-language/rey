@@ -1,0 +1,1 @@
+pub func same(value: int): int { return value + 1; }

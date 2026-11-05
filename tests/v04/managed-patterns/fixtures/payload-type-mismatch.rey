@@ -1,0 +1,16 @@
+struct ExpectedPayload {
+    value: int,
+}
+
+struct OtherPayload {
+    value: bool,
+}
+
+func main(): void {
+    var value: Option<ExpectedPayload> = Option::None();
+    match value {
+        Some(payload) => { var other: OtherPayload = payload; },
+        None => { var absent: bool = true; },
+    }
+    return;
+}

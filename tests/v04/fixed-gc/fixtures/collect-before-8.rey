@@ -1,0 +1,41 @@
+import gc::{gcAllocate, gcCollect, gcCreate, gcDestroy, gcRootPop, gcRootPush, gcRootSet};
+import heap::{heapCreate, heapDestroy, heapLiveObjects};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2199); }
+}
+
+func addressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+    var first = gcAllocate(collector, nodeLayout, true);
+    var root = gcRootPush(collector, first);
+    var current = first;
+    var index = 0;
+    while index < 7 {
+        var next = gcAllocate(collector, nodeLayout, true);
+        __reyRawStoreAddress(addressAt(next, 16), current);
+        current = next;
+        gcRootSet(collector, root, current);
+        index = index + 1;
+    }
+    check(gcCollect(collector) == 0);
+    check(heapLiveObjects(heap) == 8);
+    gcRootSet(collector, root, __reyRawNull());
+    check(gcCollect(collector) == 8);
+    check(heapLiveObjects(heap) == 0);
+    gcRootPop(collector, root);
+    gcDestroy(collector);
+    heapDestroy(heap);
+    layoutRegistryRelease(registry);
+}

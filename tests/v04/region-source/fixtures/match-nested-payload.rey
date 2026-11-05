@@ -1,0 +1,20 @@
+pub enum Expr { Call(CallExpr), Literal(int) }
+pub enum Nested { Inner(Expr), Empty }
+pub struct CallExpr { pub value: int }
+func tag(value: Nested): string {
+    match value {
+        Nested::Inner(_) => { return "Inner"; },
+        Nested::Empty => { return "Empty"; },
+    }
+    return "?";
+}
+func readNested(value: Nested): string {
+    match value {
+        Nested::Inner(Expr::Call(call)) => { return tag(value); },
+        Nested::Inner(Expr::Literal(_)) => { return "Literal"; },
+        Nested::Inner(_) => { return "Other"; },
+        Nested::Empty => { return "Empty"; },
+    }
+    return "?";
+}
+func main(): void { if readNested(Nested::Inner(Expr::Call(CallExpr { value: 1 }))) != "Inner" { exit(1); } }

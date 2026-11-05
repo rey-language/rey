@@ -1,0 +1,50 @@
+struct Temp {
+    pub value: int,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func makeValues(seed: int): Vec<int> {
+    var temp: Temp = Temp { value: seed };
+    var values: Vec<int> = [seed, temp.value + 1];
+    values.push(temp.value + 2);
+    return values;
+}
+
+func makeCounts(seed: int): HashMap<string, int> {
+    var temp: Temp = Temp { value: seed };
+    var counts: HashMap<string, int> = {"seed": temp.value};
+    counts.set("next", seed + 1);
+    return counts;
+}
+
+func retain(seed: int): int {
+    var values: Vec<int> = makeValues(seed);
+    var counts: HashMap<string, int> = makeCounts(seed);
+    var alias: Vec<int> = values;
+    alias[0] = seed + 10;
+    sourcecheck(values[0] == seed + 10);
+    sourcecheck(values.len() == 3);
+    sourcecheck(counts["seed"] == seed);
+    sourcecheck(counts["next"] == seed + 1);
+    return values[2] + counts["seed"];
+}
+
+func main(): void {
+    sourcecheck(retain(4) == 10);
+    var index: int = 0;
+    var total: int = 0;
+    while index < 3 {
+        var values: Vec<int> = makeValues(index);
+        total = total + values[2];
+        index = index + 1;
+    }
+    sourcecheck(total == 9);
+    return;
+}

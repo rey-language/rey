@@ -1,0 +1,9 @@
+func main(): void {
+    var value: int? = null;
+    match value {
+        Option::Some(payload) => { var observed: int = payload; },
+        null => { var absent: bool = true; },
+        _ => { var present: bool = true; },
+    }
+    return;
+}

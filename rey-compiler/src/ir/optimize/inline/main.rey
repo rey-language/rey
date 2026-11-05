@@ -1,0 +1,428 @@
+import ir;
+import ir::{BasicBlock, FunctionKey, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, IRType, IRValue, SourceRef, Terminator, TerminatorKind};
+import ir::optimize::shape::{IdPair, copyEffects, copyFunction, copyInstruction, copyKey, copyProgram, copySource, copyTerminator, copyType, copyTypes, copyValues, instructionCount, isPureScalar, mapId, maxBlockId, maxValueId, replaceValueUses, verifyCopy};
+
+func hasPair(pairs: Vec<IdPair>, id: int): bool {
+    var index = 0;
+    loop { if index >= pairs.len() { break; } if pairs[index].fromId == id { return true; } index = index + 1; }
+    return false;
+}
+
+func hasName(names: Vec<string>, name: string): bool {
+    if names.len() == 0 { return true; }
+    var index = 0;
+    loop { if index >= names.len() { break; } if names[index] == name { return true; } index = index + 1; }
+    return false;
+}
+
+func pureLeaf(function: IRFunction): bool {
+    if function.blocks.len() == 0 || function.blocks.len() > 6 || instructionCount(function) > 16 { return false; }
+    if function.blocks[0].params.len() != 0 { return false; }
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var instructions = function.blocks[blockCursor].instructions;
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= instructions.len() { break; }
+            if !isPureScalar(instructions[instructionIndex].kind) { return false; }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return true;
+}
+
+func remapTerm(term: Terminator, values: Vec<IdPair>, blocks: Vec<IdPair>, continuationId: int): Terminator {
+    if term.kind == TerminatorKind::Return {
+        var args: Vec<int> = [];
+        if term.valueId >= 0 { args.push(mapId(values, term.valueId)); }
+        return ir.jump(continuationId, args, copySource(term.source));
+    }
+    var target = mapId(blocks, term.targetBlockId);
+    var trueTarget = mapId(blocks, term.trueTargetBlockId);
+    var falseTarget = mapId(blocks, term.falseTargetBlockId);
+    return Terminator { kind: term.kind, targetBlockId: target, targetArgs: remapIds(values, term.targetArgs), conditionValueId: mapId(values, term.conditionValueId), trueTargetBlockId: trueTarget, trueArgs: remapIds(values, term.trueArgs), falseTargetBlockId: falseTarget, falseArgs: remapIds(values, term.falseArgs), valueId: -1, source: copySource(term.source) };
+}
+
+func remapIds(pairs: Vec<IdPair>, ids: Vec<int>): Vec<int> {
+    var output: Vec<int> = [];
+    var index = 0;
+    loop { if index >= ids.len() { break; } output.push(mapId(pairs, ids[index])); index = index + 1; }
+    return output;
+}
+
+func operandsMapped(values: Vec<IdPair>, ids: Vec<int>): bool {
+    var index = 0;
+    loop {
+        if index >= ids.len() { break; }
+        if ids[index] >= 0 && !hasPair(values, ids[index]) { return false; }
+        index = index + 1;
+    }
+    return true;
+}
+
+func termMapped(values: Vec<IdPair>, term: Terminator): bool {
+    if term.kind == TerminatorKind::Return { return term.valueId < 0 || hasPair(values, term.valueId); }
+    if term.kind == TerminatorKind::Jump { return operandsMapped(values, term.targetArgs); }
+    if term.kind == TerminatorKind::Branch {
+        if term.conditionValueId >= 0 && !hasPair(values, term.conditionValueId) { return false; }
+        return operandsMapped(values, term.trueArgs) && operandsMapped(values, term.falseArgs);
+    }
+    return false;
+}
+
+func canInlineBody(callee: IRFunction, call: Instruction): bool {
+    var sawReturn = false;
+    var index = 0;
+    loop {
+        if index >= callee.blocks.len() { break; }
+        var term = callee.blocks[index].terminator;
+        if term.kind == TerminatorKind::Return {
+            sawReturn = true;
+            if call.resultId < 0 && term.valueId >= 0 { return false; }
+            if call.resultId >= 0 && term.valueId < 0 { return false; }
+        } else if term.kind != TerminatorKind::Jump && term.kind != TerminatorKind::Branch { return false; }
+        index = index + 1;
+    }
+    return sawReturn;
+}
+
+func tryInlineCall(caller: IRFunction, callee: IRFunction, blockCursor: int, callIndex: int): IRFunction {
+    var block = caller.blocks[blockCursor];
+    var call = block.instructions[callIndex];
+    if call.operands.len() != callee.parameters.len() { return caller; }
+    if callee.blocks.len() == 0 || callee.blocks[0].params.len() != 0 { return caller; }
+    if !canInlineBody(callee, call) { return caller; }
+    var values: Vec<IdPair> = [];
+    var index = 0;
+    loop {
+        if index >= callee.parameters.len() { break; }
+        values.push(IdPair { fromId: callee.parameters[index].id, toId: call.operands[index] });
+        index = index + 1;
+    }
+    var nextValue = maxValueId(caller) + 1;
+    if nextValue <= 0 { return caller; }
+    var blockCursorLocal = 0;
+    loop {
+        if blockCursorLocal >= callee.blocks.len() { break; }
+        var params = callee.blocks[blockCursorLocal].params;
+        var paramIndex = 0;
+        loop {
+            if paramIndex >= params.len() { break; }
+            values.push(IdPair { fromId: params[paramIndex].id, toId: nextValue });
+            nextValue = nextValue + 1;
+            paramIndex = paramIndex + 1;
+        }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= callee.blocks[blockCursorLocal].instructions.len() { break; }
+            var resultId = callee.blocks[blockCursorLocal].instructions[instructionIndex].resultId;
+            if resultId >= 0 {
+                values.push(IdPair { fromId: resultId, toId: nextValue });
+                nextValue = nextValue + 1;
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursorLocal = blockCursorLocal + 1;
+    }
+    var blockPairs: Vec<IdPair> = [];
+    var nextBlock = maxBlockId(caller) + 1;
+    blockCursorLocal = 0;
+    loop {
+        if blockCursorLocal >= callee.blocks.len() { break; }
+        blockPairs.push(IdPair { fromId: callee.blocks[blockCursorLocal].id, toId: nextBlock });
+        nextBlock = nextBlock + 1;
+        blockCursorLocal = blockCursorLocal + 1;
+    }
+    var continuationId = nextBlock;
+    var cloned: Vec<BasicBlock> = [];
+    blockCursorLocal = 0;
+    loop {
+        if blockCursorLocal >= callee.blocks.len() { break; }
+        var sourceBlock = callee.blocks[blockCursorLocal];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= sourceBlock.instructions.len() { break; }
+            var instructionValue = copyInstruction(sourceBlock.instructions[instructionIndex]);
+            if !operandsMapped(values, instructionValue.operands) { return caller; }
+            instructionValue.operands = remapIds(values, instructionValue.operands);
+            if instructionValue.resultId >= 0 { instructionValue.resultId = mapId(values, instructionValue.resultId); }
+            instructions.push(instructionValue);
+            instructionIndex = instructionIndex + 1;
+        }
+        var term = sourceBlock.terminator;
+        if !termMapped(values, term) { return caller; }
+        var params: Vec<IRValue> = [];
+        var paramIndex = 0;
+        loop {
+            if paramIndex >= sourceBlock.params.len() { break; }
+            params.push(IRValue { id: mapId(values, sourceBlock.params[paramIndex].id), ty: copyType(sourceBlock.params[paramIndex].ty) });
+            paramIndex = paramIndex + 1;
+        }
+        cloned.push(BasicBlock { id: mapId(blockPairs, sourceBlock.id), params: params, instructions: instructions, terminator: remapTerm(term, values, blockPairs, continuationId) });
+        blockCursorLocal = blockCursorLocal + 1;
+    }
+    var prefix: Vec<Instruction> = [];
+    var suffix: Vec<Instruction> = [];
+    var instructionIndex = 0;
+    loop {
+        if instructionIndex >= block.instructions.len() { break; }
+        if instructionIndex < callIndex { prefix.push(copyInstruction(block.instructions[instructionIndex])); }
+        else if instructionIndex > callIndex { suffix.push(copyInstruction(block.instructions[instructionIndex])); }
+        instructionIndex = instructionIndex + 1;
+    }
+    var continuationParams: Vec<IRValue> = [];
+    if call.resultId >= 0 { continuationParams.push(IRValue { id: call.resultId, ty: copyType(call.ty) }); }
+    var entryId = cloned[0].id;
+    var blocks: Vec<BasicBlock> = [];
+    var copyIndex = 0;
+    loop {
+        if copyIndex >= caller.blocks.len() { break; }
+        if copyIndex == blockCursor {
+            blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: prefix, terminator: ir.jump(entryId, [], copySource(call.source)) });
+        } else { blocks.push(caller.blocks[copyIndex]); }
+        copyIndex = copyIndex + 1;
+    }
+    copyIndex = 0;
+    loop { if copyIndex >= cloned.len() { break; } blocks.push(cloned[copyIndex]); copyIndex = copyIndex + 1; }
+    blocks.push(BasicBlock { id: continuationId, params: continuationParams, instructions: suffix, terminator: copyTerminator(block.terminator) });
+    return IRFunction { id: caller.id, key: copyKey(caller.key), signature: FunctionSignature { parameterTypes: copyTypes(caller.signature.parameterTypes), returnType: copyType(caller.signature.returnType) }, parameters: copyValues(caller.parameters), blocks: blocks, effects: copyEffects(caller.effects) };
+}
+
+func inlineFunction(program: IRProgram, functionIndex: int, names: Vec<string>): IRProgram {
+    var guard = 0;
+    var current = program;
+    loop {
+        if guard >= 32 { break; }
+        var caller = current.functions[functionIndex];
+        if instructionCount(caller) > 400 { break; }
+        var found = false;
+        var blockCursor = 0;
+        var callIndex = 0;
+        var calleeIndex = -1;
+        loop {
+            if blockCursor >= caller.blocks.len() || found { break; }
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= caller.blocks[blockCursor].instructions.len() || found { break; }
+                var instructionValue = caller.blocks[blockCursor].instructions[instructionIndex];
+                if instructionValue.kind == InstructionKind::Call {
+                    var candidate = functionIndexOf(current, instructionValue.functionId);
+                    if candidate >= 0 && candidate != functionIndex && pureLeaf(current.functions[candidate]) && hasName(names, current.functions[candidate].key.name) {
+                        found = true;
+                        callIndex = instructionIndex;
+                        calleeIndex = candidate;
+                    }
+                }
+                if !found { instructionIndex = instructionIndex + 1; }
+            }
+            if !found { blockCursor = blockCursor + 1; }
+        }
+        if !found { break; }
+        var updated = tryInlineCall(caller, current.functions[calleeIndex], blockCursor, callIndex);
+        var functions: Vec<IRFunction> = [];
+        var index = 0;
+        loop {
+            if index >= current.functions.len() { break; }
+            if index == functionIndex { functions.push(updated); }
+            else { functions.push(current.functions[index]); }
+            index = index + 1;
+        }
+        current = IRProgram { entryFunctionId: current.entryFunctionId, functions: functions };
+        if updated.blocks.len() == caller.blocks.len() { break; }
+        guard = guard + 1;
+    }
+    return current;
+}
+
+func functionIndexOf(program: IRProgram, functionId: int): int {
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id == functionId { return index; } index = index + 1; }
+    return -1;
+}
+
+pub func deleteUnreferenced(program: IRProgram): IRProgram {
+    var used: Vec<int> = [program.entryFunctionId];
+    var index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= program.functions[index].blocks.len() { break; }
+            var instructionIndex = 0;
+            var instructions = program.functions[index].blocks[blockCursor].instructions;
+            loop {
+                if instructionIndex >= instructions.len() { break; }
+                if instructions[instructionIndex].kind == InstructionKind::Call { pushId(used, instructions[instructionIndex].functionId); }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockCursor = blockCursor + 1;
+        }
+        index = index + 1;
+    }
+    var functions: Vec<IRFunction> = [];
+    index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        if containsId(used, program.functions[index].id) { functions.push(program.functions[index]); }
+        index = index + 1;
+    }
+    return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+}
+
+func pushId(ids: Vec<int>, id: int) {
+    if !containsId(ids, id) { ids.push(id); }
+}
+
+func containsId(ids: Vec<int>, id: int): bool {
+    var index = 0;
+    loop { if index >= ids.len() { break; } if ids[index] == id { return true; } index = index + 1; }
+    return false;
+}
+
+pub func inlineCallees(program: IRProgram, names: Vec<string>): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "inline input");
+    if verified.isErr() { return verified; }
+    var current = copyProgram(program);
+    var index = 0;
+    loop {
+        if index >= current.functions.len() { break; }
+        current = inlineFunction(current, index, names);
+        index = index + 1;
+    }
+    current = deleteUnreferenced(current);
+    return verifyCopy(current, "inline output");
+}
+
+pub func inlineSmallFunctions(program: IRProgram): Result<IRProgram, string> {
+    var names: Vec<string> = [];
+    return inlineCallees(program, names);
+}
+
+func singleBlockPure(function: IRFunction): bool {
+    return function.blocks.len() == 1 && pureLeaf(function) && !function.key.name.contains("#");
+}
+
+func specializeCall(program: IRProgram, callerIndex: int, blockCursor: int, callIndex: int, calleeIndex: int, argumentIndex: int): IRProgram {
+    var caller = program.functions[callerIndex];
+    var callee = program.functions[calleeIndex];
+    var call = caller.blocks[blockCursor].instructions[callIndex];
+    var argumentId = call.operands[argumentIndex];
+    var constant = findConstant(caller, argumentId);
+    if constant.kind == InstructionKind::ConstI64 || constant.kind == InstructionKind::ConstBool {
+        var nextFunction = maxFunctionId(program) + 1;
+        if nextFunction <= 0 { return program; }
+        var clone = copyFunction(callee);
+        var fresh = maxValueId(clone) + 1;
+        var entry = clone.blocks[0];
+        var instructions: Vec<Instruction> = [];
+        if constant.kind == InstructionKind::ConstBool { instructions.push(ir.constBool(fresh, constant.immediate != 0, copySource(constant.source))); }
+        else { instructions.push(ir.constI64(fresh, constant.immediate, copySource(constant.source))); }
+        var instructionIndex = 0;
+        loop { if instructionIndex >= entry.instructions.len() { break; } instructions.push(entry.instructions[instructionIndex]); instructionIndex = instructionIndex + 1; }
+        var blocks: Vec<BasicBlock> = [BasicBlock { id: entry.id, params: entry.params, instructions: instructions, terminator: entry.terminator }];
+        var specialized = IRFunction { id: nextFunction, key: FunctionKey { module: clone.key.module, owner: clone.key.owner, name: clone.key.name + "#spec" }, signature: clone.signature, parameters: clone.parameters, blocks: blocks, effects: copyEffects(clone.effects) };
+        specialized = replaceValueUses(specialized, callee.parameters[argumentIndex].id, fresh);
+        var functions: Vec<IRFunction> = [];
+        var index = 0;
+        loop {
+            if index >= program.functions.len() { break; }
+            if index == callerIndex {
+                var callerBlocks: Vec<BasicBlock> = [];
+                var callerBlock = 0;
+                loop {
+                    if callerBlock >= caller.blocks.len() { break; }
+                    if callerBlock == blockCursor {
+                        var callerInstructions: Vec<Instruction> = [];
+                        var callerInstruction = 0;
+                        loop {
+                            if callerInstruction >= caller.blocks[callerBlock].instructions.len() { break; }
+                            var instructionValue = copyInstruction(caller.blocks[callerBlock].instructions[callerInstruction]);
+                            if callerInstruction == callIndex { instructionValue.functionId = nextFunction; }
+                            callerInstructions.push(instructionValue);
+                            callerInstruction = callerInstruction + 1;
+                        }
+                        callerBlocks.push(BasicBlock { id: caller.blocks[callerBlock].id, params: copyValues(caller.blocks[callerBlock].params), instructions: callerInstructions, terminator: copyTerminator(caller.blocks[callerBlock].terminator) });
+                    } else { callerBlocks.push(caller.blocks[callerBlock]); }
+                    callerBlock = callerBlock + 1;
+                }
+                functions.push(IRFunction { id: caller.id, key: copyKey(caller.key), signature: caller.signature, parameters: caller.parameters, blocks: callerBlocks, effects: caller.effects });
+            } else { functions.push(program.functions[index]); }
+            index = index + 1;
+        }
+        functions.push(specialized);
+        return IRProgram { entryFunctionId: program.entryFunctionId, functions: functions };
+    }
+    return program;
+}
+
+func findConstant(function: IRFunction, valueId: int): Instruction {
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= function.blocks[blockCursor].instructions.len() { break; }
+            var instructionValue = function.blocks[blockCursor].instructions[instructionIndex];
+            if instructionValue.resultId == valueId && (instructionValue.kind == InstructionKind::ConstI64 || instructionValue.kind == InstructionKind::ConstBool) { return instructionValue; }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return ir.constI64(-1, 0, SourceRef { unitId: "spec", start: 0, end: 1 });
+}
+
+func maxFunctionId(program: IRProgram): int {
+    var maxId = -1;
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } if program.functions[index].id > maxId { maxId = program.functions[index].id; } index = index + 1; }
+    return maxId;
+}
+
+pub func specializeConstants(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "specialization input");
+    if verified.isErr() { return verified; }
+    var current = copyProgram(program);
+    var guard = 0;
+    loop {
+        if guard >= 8 { break; }
+        var callerIndex = 0;
+        var did = false;
+        loop {
+            if callerIndex >= current.functions.len() || did { break; }
+            var blockCursor = 0;
+            loop {
+                if blockCursor >= current.functions[callerIndex].blocks.len() || did { break; }
+                var callIndex = 0;
+                loop {
+                    if callIndex >= current.functions[callerIndex].blocks[blockCursor].instructions.len() || did { break; }
+                    var instructionValue = current.functions[callerIndex].blocks[blockCursor].instructions[callIndex];
+                    if instructionValue.kind == InstructionKind::Call {
+                        var calleeIndex = functionIndexOf(current, instructionValue.functionId);
+                        if calleeIndex >= 0 && singleBlockPure(current.functions[calleeIndex]) {
+                            var argumentIndex = 0;
+                            loop {
+                                if argumentIndex >= instructionValue.operands.len() || did { break; }
+                                var constant = findConstant(current.functions[callerIndex], instructionValue.operands[argumentIndex]);
+                                if constant.resultId == instructionValue.operands[argumentIndex] {
+                                    current = specializeCall(current, callerIndex, blockCursor, callIndex, calleeIndex, argumentIndex);
+                                    did = true;
+                                }
+                                argumentIndex = argumentIndex + 1;
+                            }
+                        }
+                    }
+                    callIndex = callIndex + 1;
+                }
+                blockCursor = blockCursor + 1;
+            }
+            callerIndex = callerIndex + 1;
+        }
+        if !did { break; }
+        guard = guard + 1;
+    }
+    current = deleteUnreferenced(current);
+    return verifyCopy(current, "specialization output");
+}

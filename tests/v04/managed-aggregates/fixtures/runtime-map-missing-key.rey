@@ -1,0 +1,5 @@
+func main(): void {
+    var values: HashMap<string, int> = HashMap.new();
+    var missing: int = values.get("missing");
+    return;
+}

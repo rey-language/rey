@@ -1,4 +1,4 @@
-struct Payload { value: int }
+struct Payload { pub value: int }
 enum Leaf { Value(value: Payload) }
 enum Node { Leaf(value: Leaf), Empty }
 

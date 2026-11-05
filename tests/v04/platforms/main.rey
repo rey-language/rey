@@ -1,0 +1,185 @@
+import ir;
+import ir::{IRProgram};
+import native::arm64::{emitArm64};
+import native::bytes::{byteString};
+import native::image::{buildElfArm64, buildMachOArm64};
+import native::image::elf::{buildElfObjectX64};
+import native::image::pe::{buildPeX64};
+import native::image::x64::{buildElfX64, buildMachOX64};
+import native::x64::{emitImage, emitProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func containsText(bytes: Vec<int>, text: string): bool {
+    if text.len() == 0 || bytes.len() < text.len() { return false; }
+    var i = 0;
+    while i + text.len() <= bytes.len() {
+        var matched = true;
+        var j = 0;
+        while j < text.len() {
+            if bytes[i + j] != int(text[j]) { matched = false; }
+            j = j + 1;
+        }
+        if matched { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func readU16(bytes: Vec<int>, offset: int): int {
+    return bytes[offset] + bytes[offset + 1] * 256;
+}
+
+func readU32(bytes: Vec<int>, offset: int): int {
+    return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536 + bytes[offset + 3] * 16777216;
+}
+
+func sectionFileOffset(bytes: Vec<int>, rva: int): int {
+    var peOffset = readU32(bytes, 60);
+    var sectionCount = readU16(bytes, peOffset + 6);
+    var optionalSize = readU16(bytes, peOffset + 20);
+    var sectionOffset = peOffset + 24 + optionalSize;
+    var sectionIndex = 0;
+    while sectionIndex < sectionCount {
+        var header = sectionOffset + sectionIndex * 40;
+        var virtualAddress = readU32(bytes, header + 12);
+        var virtualSize = readU32(bytes, header + 8);
+        if rva >= virtualAddress && rva < virtualAddress + virtualSize {
+            return readU32(bytes, header + 20) + (rva - virtualAddress);
+        }
+        sectionIndex = sectionIndex + 1;
+    }
+    return -1;
+}
+
+func entryUnwindIsStub(bytes: Vec<int>): bool {
+    if bytes.len() < 512 { return false; }
+    var peOffset = readU32(bytes, 60);
+    var optional = peOffset + 24;
+    var entryRva = readU32(bytes, optional + 16);
+    var exceptionRva = readU32(bytes, optional + 136);
+    var exceptionSize = readU32(bytes, optional + 140);
+    if exceptionSize < 12 || exceptionSize % 12 != 0 { return false; }
+    var table = sectionFileOffset(bytes, exceptionRva);
+    if table < 0 { return false; }
+    var covered = false;
+    var unwindRva = -1;
+    var record = 0;
+    var count = exceptionSize / 12;
+    while record < count {
+        var begin = readU32(bytes, table + record * 12);
+        var end = readU32(bytes, table + record * 12 + 4);
+        if begin <= entryRva && entryRva < end {
+            covered = true;
+            unwindRva = readU32(bytes, table + record * 12 + 8);
+        }
+        record = record + 1;
+    }
+    if !covered || unwindRva < 0 { return false; }
+    var unwind = sectionFileOffset(bytes, unwindRva);
+    if unwind < 0 || unwind + 8 > bytes.len() { return false; }
+    return bytes[unwind] == 1 && bytes[unwind + 1] == 4 && bytes[unwind + 2] == 1
+        && bytes[unwind + 3] == 0 && bytes[unwind + 4] == 4 && bytes[unwind + 5] == 66;
+}
+
+func exitProgram(): IRProgram {
+    var instructions = [ir.constI64(1, 42, ir.sourceRef("platform.rey", 1, 1))];
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(1, ir.sourceRef("platform.rey", 1, 1)));
+    var function = ir.irFunction(0, ir.functionKey("platform", "", "main"), ir.functionSignature([], ir.irI64()), [], [block], ir.noEffects());
+    return ir.irProgram(0, [function]);
+}
+
+func writeBytes(path: string, bytes: Vec<int>): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), path + " encoding failed");
+    var text = encoded.unwrap();
+    writeFile(path, text);
+    require(fileExists(path) && readFile(path) == text, path + " write check failed");
+}
+
+func program(): IRProgram {
+    var block = ir.basicBlock(0, [], [], ir.returnVoid(ir.sourceRef("platform.rey", 0, 1)));
+    var blocks = [block];
+    var function = ir.irFunction(0, ir.functionKey("platform", "", "main"), ir.functionSignature([], ir.irVoid()), [], blocks, ir.noEffects());
+    return ir.irProgram(0, [function]);
+}
+
+func main(): void {
+    var source = program();
+    var linux = emitImage(source, "linux-x64");
+    var linuxCode = emitProgram(source, "linux-x64");
+    require(linux.isOk() && linuxCode.isOk(), "linux-x64 emission succeeds");
+    var image = linux.unwrap();
+    require(image.target == "linux-x64" && image.convention == "sysv" && image.imports.len() == 0, "linux metadata stays SysV without imports");
+    require(image.stackMetadata == "sysv;frame-pointer;red-zone-unused;exit-syscall=60", "linux stack metadata names the syscall");
+    var code = linuxCode.unwrap();
+    require(code.bytes.len() == image.code.bytes.len(), "emitProgram and emitImage share the linux instruction stream");
+    var index = 0;
+    while index < code.bytes.len() {
+        require(code.bytes[index] == image.code.bytes[index], "linux instruction bytes are unchanged between the two entry points");
+        index = index + 1;
+    }
+    var elf = buildElfX64(code);
+    require(elf.isOk(), "existing ELF executable writer still accepts linux code");
+    var elfBytes = elf.unwrap();
+    require(elfBytes.len() > 20 && elfBytes[0] == 127 && elfBytes[1] == 69 && elfBytes[2] == 76 && elfBytes[3] == 70, "ELF magic");
+    require(elfBytes[18] == 62 && elfBytes[19] == 0, "ELF machine is x86-64");
+    var object = buildElfObjectX64(image);
+    require(object.isOk(), "relocatable ELF object is produced");
+    var objectBytes = object.unwrap();
+    require(objectBytes[16] == 1 && objectBytes[18] == 62, "object file is a relocatable x86-64 ELF");
+
+    var windows = emitImage(source, "windows-x64");
+    require(windows.isOk(), "windows-x64 cross output is produced");
+    require(emitProgram(source, "windows-x64").isErr(), "emitProgram does not accept windows code as a linux executable");
+    var win = windows.unwrap();
+    require(win.convention == "win64" && win.imports.len() == 1 && win.relocations.len() == 2, "windows exit and overflow use ExitProcess relocations");
+    var pe = buildPeX64(win);
+    require(pe.isOk(), "PE image is produced");
+    var peBytes = pe.unwrap();
+    require(peBytes[0] == 77 && peBytes[1] == 90 && peBytes[128] == 80 && peBytes[129] == 69, "PE magic");
+    require(peBytes[132] == 100 && peBytes[133] == 134, "PE machine is x86-64");
+    require(containsText(peBytes, "kernel32.dll") && containsText(peBytes, "ExitProcess"), "PE imports ExitProcess from kernel32");
+    require(entryUnwindIsStub(peBytes), "PE .pdata covers the entry stub with the 40-byte alloc unwind");
+    require(buildPeX64(image).isErr(), "a linux image is not written as PE");
+
+    var darwin = emitImage(source, "macos-x64");
+    require(darwin.isOk(), "macos-x64 emission succeeds");
+    var darwinImage = darwin.unwrap();
+    require(darwinImage.target == "darwin-x64", "macos-x64 is the darwin-x64 alias");
+    require(darwinImage.imports.len() == 0, "darwin scalar exit uses a syscall, not an import");
+    var macho = buildMachOX64(darwinImage.code);
+    require(macho.isOk(), "Mach-O x64 image is produced");
+    var machoBytes = macho.unwrap();
+    require(machoBytes[0] == 207 && machoBytes[1] == 250 && machoBytes[2] == 237 && machoBytes[3] == 254, "Mach-O 64-bit magic");
+    require(machoBytes[4] == 7 && machoBytes[5] == 0 && machoBytes[6] == 0 && machoBytes[7] == 1, "Mach-O CPU type is x86-64");
+    require(containsText(machoBytes, "/usr/lib/dyld") && containsText(machoBytes, "/usr/lib/libSystem.B.dylib"), "Mach-O requests dyld and libSystem");
+    var encoded = byteString(machoBytes);
+    require(encoded.isOk() && encoded.unwrap().len() == machoBytes.len(), "Mach-O bytes survive exact encoding");
+    var argv = args();
+    if argv.len() == 2 {
+        var directory = argv[1];
+        var exiting = exitProgram();
+        var linuxExit = emitImage(exiting, "linux-x64");
+        var darwinExit = emitImage(exiting, "darwin-x64");
+        var windowsExit = emitImage(exiting, "windows-x64");
+        var linuxArm = emitArm64(exiting, "linux");
+        var darwinArm = emitArm64(exiting, "darwin");
+        require(linuxExit.isOk() && darwinExit.isOk() && windowsExit.isOk() && linuxArm.isOk() && darwinArm.isOk(), "exit-42 emission succeeds");
+        var linuxElf = buildElfX64(linuxExit.unwrap().code);
+        var darwinMach = buildMachOX64(darwinExit.unwrap().code);
+        var windowsPe = buildPeX64(windowsExit.unwrap());
+        var linuxArmElf = buildElfArm64(linuxArm.unwrap());
+        var darwinArmMach = buildMachOArm64(darwinArm.unwrap());
+        require(linuxElf.isOk() && darwinMach.isOk() && windowsPe.isOk() && linuxArmElf.isOk() && darwinArmMach.isOk(), "exit-42 images are produced");
+        require(entryUnwindIsStub(windowsPe.unwrap()), "exit-42 PE also covers its entry stub");
+        writeBytes(directory + "/exit42-linux-x64", linuxElf.unwrap());
+        writeBytes(directory + "/exit42-darwin-x64", darwinMach.unwrap());
+        writeBytes(directory + "/exit42-windows-x64", windowsPe.unwrap());
+        writeBytes(directory + "/exit42-linux-arm64", linuxArmElf.unwrap());
+        writeBytes(directory + "/exit42-darwin-arm64", darwinArmMach.unwrap());
+    }
+    println("v0.4 platform image fixtures passed");
+}

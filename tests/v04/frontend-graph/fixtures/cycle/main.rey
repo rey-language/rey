@@ -1,0 +1,5 @@
+import first::{one};
+
+func main(): void {
+    var value: int = one();
+}

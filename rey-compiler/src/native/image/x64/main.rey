@@ -1,0 +1,290 @@
+import native::x64::{X64Code, X64FunctionOffset};
+import native::bytes::{appendU32Be, appendU32Le, appendU64Le, sha256};
+
+func zeros(bytes: Vec<int>, count: int) {
+    var i = 0;
+    while i < count { bytes.push(0); i += 1; }
+}
+
+func u16(bytes: Vec<int>, value: int) {
+    bytes.push(value % 256);
+    bytes.push(value / 256);
+}
+
+func u32(bytes: Vec<int>, value: int): bool { return appendU32Le(bytes, value).isOk(); }
+func u64(bytes: Vec<int>, value: int): bool { return appendU64Le(bytes, value).isOk(); }
+
+func functionIdUseDense(maximumId: int, count: int): bool {
+    return maximumId >= 0 && maximumId <= 1048575 && maximumId / 8 < count;
+}
+
+func hasDuplicateFunctionIds(functions: Vec<X64FunctionOffset>, maximumId: int): bool {
+    var i = 0;
+    if functionIdUseDense(maximumId, functions.len()) {
+        var seen: Vec<int> = [];
+        while i <= maximumId { seen.push(0); i += 1; }
+        i = 0;
+        while i < functions.len() {
+            var id = functions[i].functionId;
+            if seen[id] != 0 { return true; }
+            seen.set(id, 1);
+            i += 1;
+        }
+        return false;
+    }
+    var seenSparse: HashMap<string, bool> = HashMap.new();
+    while i < functions.len() {
+        var key = functions[i].functionId.toString();
+        if seenSparse.has(key) { return true; }
+        seenSparse.set(key, true);
+        i += 1;
+    }
+    return false;
+}
+
+func buildElfX64Header(code: X64Code): Result<Vec<int>, string> {
+    if code.bytes.len() == 0 { return Result.Err("x64 ELF: instruction stream is empty"); }
+    if code.entryOffset < 0 || code.entryOffset >= code.bytes.len() {
+        return Result.Err("x64 ELF: entry offset is outside instruction stream");
+    }
+    var i = 0;
+    while i < code.bytes.len() {
+        if code.bytes[i] < 0 || code.bytes[i] > 255 { return Result.Err("x64 ELF: invalid code byte"); }
+        i += 1;
+    }
+    return buildElfX64HeaderForLength(code.bytes.len(), code.entryOffset, code.functions);
+}
+
+pub func buildElfX64HeaderForLength(codeLength: int, entryOffset: int, functions: Vec<X64FunctionOffset>): Result<Vec<int>, string> {
+    if codeLength <= 0 { return Result.Err("x64 ELF: instruction stream is empty"); }
+    if entryOffset < 0 || entryOffset >= codeLength { return Result.Err("x64 ELF: entry offset is outside instruction stream"); }
+    var i = 0;
+    var maximumId = -1;
+    while i < functions.len() {
+        var function = functions[i];
+        if function.functionId < 0 || function.offset < 0 || function.offset >= codeLength {
+            return Result.Err("x64 ELF: invalid function metadata");
+        }
+        if function.functionId > maximumId { maximumId = function.functionId; }
+        i += 1;
+    }
+    if hasDuplicateFunctionIds(functions, maximumId) { return Result.Err("x64 ELF: duplicate function id"); }
+    var codeOffset = 4096;
+    var base = 4194304;
+    if codeLength > 9223372036854775807 - base - codeOffset {
+        return Result.Err("x64 ELF: image size overflow");
+    }
+    var size = codeOffset + codeLength;
+    var image: Vec<int> = [127, 69, 76, 70, 2, 1, 1];
+    zeros(image, 9);
+    u16(image, 2);
+    u16(image, 62);
+    if !u32(image, 1) || !u64(image, base + codeOffset + entryOffset)
+        || !u64(image, 64) || !u64(image, 0) || !u32(image, 0) {
+        return Result.Err("x64 ELF: header encoding failed");
+    }
+    u16(image, 64);
+    u16(image, 56);
+    u16(image, 2);
+    u16(image, 0);
+    u16(image, 0);
+    u16(image, 0);
+    if !u32(image, 1) || !u32(image, 5) || !u64(image, 0)
+        || !u64(image, base) || !u64(image, base) || !u64(image, size)
+        || !u64(image, size) || !u64(image, 4096) {
+        return Result.Err("x64 ELF: load segment encoding failed");
+    }
+    // explicit non-executable read/write stack
+    if !u32(image, 1685382481) || !u32(image, 6) || !u64(image, 0)
+        || !u64(image, 0) || !u64(image, 0) || !u64(image, 0)
+        || !u64(image, 0) || !u64(image, 16) {
+        return Result.Err("x64 ELF: stack segment encoding failed");
+    }
+    if image.len() != 176 { return Result.Err("x64 ELF: header size mismatch"); }
+    zeros(image, codeOffset - image.len());
+    return Result.Ok(image);
+}
+
+pub func buildElfX64(code: X64Code): Result<Vec<int>, string> {
+    var header = buildElfX64Header(code);
+    if header.isErr() { return Result.Err(header.unwrapErr()); }
+    var image = header.unwrap();
+    var i = 0;
+    while i < code.bytes.len() { image.push(code.bytes[i]); i += 1; }
+    return Result.Ok(image);
+}
+
+// Consumes the instruction buffer; callers must not reuse its code bytes.
+pub func buildElfX64Owned(code: X64Code): Result<Vec<int>, string> {
+    var header = buildElfX64Header(code);
+    if header.isErr() { return Result.Err(header.unwrapErr()); }
+    var prefix = header.unwrap();
+    var codeLength = code.bytes.len();
+    var i = 0;
+    while i < prefix.len() { code.bytes.push(0); i += 1; }
+    i = codeLength;
+    while i > 0 {
+        i -= 1;
+        code.bytes.set(i + prefix.len(), code.bytes[i]);
+    }
+    i = 0;
+    while i < prefix.len() { code.bytes.set(i, prefix[i]); i += 1; }
+    return Result.Ok(code.bytes);
+}
+
+func alignPage(value: int): int {
+    var remainder = value % 4096;
+    if remainder == 0 { return value; }
+    return value + 4096 - remainder;
+}
+
+func appendFixed(bytes: Vec<int>, name: string): bool {
+    if name.len() > 16 { return false; }
+    var i = 0;
+    while i < name.len() { bytes.push(int(name[i])); i += 1; }
+    zeros(bytes, 16 - name.len());
+    return true;
+}
+
+func appendMachSegment(bytes: Vec<int>, name: string, vmaddr: int, vmsize: int, fileoff: int, filesize: int, maxprot: int, initprot: int): bool {
+    if !u32(bytes, 25) || !u32(bytes, 72) || !appendFixed(bytes, name) { return false; }
+    return u64(bytes, vmaddr) && u64(bytes, vmsize) && u64(bytes, fileoff) && u64(bytes, filesize)
+        && u32(bytes, maxprot) && u32(bytes, initprot) && u32(bytes, 0) && u32(bytes, 0);
+}
+
+func appendMachText(bytes: Vec<int>, vmaddr: int, vmsize: int, codeFileOffset: int, codeSize: int): bool {
+    if !u32(bytes, 25) || !u32(bytes, 152) || !appendFixed(bytes, "__TEXT") { return false; }
+    if !u64(bytes, vmaddr) || !u64(bytes, vmsize) || !u64(bytes, 0) || !u64(bytes, vmsize) { return false; }
+    if !u32(bytes, 5) || !u32(bytes, 5) || !u32(bytes, 1) || !u32(bytes, 0) { return false; }
+    return appendFixed(bytes, "__text") && appendFixed(bytes, "__TEXT")
+        && u64(bytes, vmaddr + codeFileOffset) && u64(bytes, codeSize)
+        && u32(bytes, codeFileOffset) && u32(bytes, 2) && u32(bytes, 0) && u32(bytes, 0)
+        && u32(bytes, 2147484672) && u32(bytes, 0) && u32(bytes, 0) && u32(bytes, 0);
+}
+
+func appendMachPath(bytes: Vec<int>, command: int, size: int, pathOffset: int, path: string): bool {
+    if !u32(bytes, command) || !u32(bytes, size) || !u32(bytes, pathOffset) { return false; }
+    var i = 0;
+    while i < path.len() { bytes.push(int(path[i])); i += 1; }
+    bytes.push(0);
+    zeros(bytes, size - pathOffset - path.len() - 1);
+    return bytes.len() > 0;
+}
+
+func appendBe32(bytes: Vec<int>, value: int): bool { return appendU32Be(bytes, value).isOk(); }
+
+func appendBe64(bytes: Vec<int>, value: int): bool {
+    if value < 0 { return false; }
+    var field: Vec<int> = Vec.new();
+    var remaining = value;
+    var i = 0;
+    while i < 8 { field.push(remaining % 256); remaining = remaining / 256; i += 1; }
+    i = 7;
+    while i >= 0 { bytes.push(field[i]); i = i - 1; }
+    return true;
+}
+
+func machoDirectory(text: Vec<int>, textSize: int, executableLimit: int, pageCount: int): Result<Vec<int>, string> {
+    var hashOffset = 99;
+    var directoryLength = hashOffset + pageCount * 32;
+    var directory: Vec<int> = Vec.new();
+    if !appendBe32(directory, 4208856066) || !appendBe32(directory, directoryLength)
+        || !appendBe32(directory, 132096) || !appendBe32(directory, 131074)
+        || !appendBe32(directory, hashOffset) || !appendBe32(directory, 88)
+        || !appendBe32(directory, 0) || !appendBe32(directory, pageCount)
+        || !appendBe32(directory, textSize) { return Result.Err("CodeDirectory header"); }
+    directory.push(32); directory.push(2); directory.push(0); directory.push(12);
+    if !appendBe32(directory, 0) || !appendBe32(directory, 0) || !appendBe32(directory, 0) || !appendBe32(directory, 0)
+        || !appendBe64(directory, 0) || !appendBe64(directory, 0) || !appendBe64(directory, executableLimit) || !appendBe64(directory, 1) {
+        return Result.Err("CodeDirectory fields");
+    }
+    var id = "rey-native";
+    var idIndex = 0;
+    while idIndex < id.len() { directory.push(int(id[idIndex])); idIndex += 1; }
+    directory.push(0);
+    var page = 0;
+    while page < pageCount {
+        var pageBytes: Vec<int> = Vec.new();
+        var offset = page * 4096;
+        var count = 0;
+        while count < 4096 { pageBytes.push(text[offset + count]); count += 1; }
+        var digest = sha256(pageBytes);
+        if digest.isErr() || digest.unwrap().len() != 32 { return Result.Err("page hash"); }
+        var hashed = digest.unwrap();
+        var b = 0;
+        while b < 32 { directory.push(hashed[b]); b += 1; }
+        page += 1;
+    }
+    if directory.len() != directoryLength { return Result.Err("CodeDirectory length"); }
+    return Result.Ok(directory);
+}
+
+pub func buildMachOX64(code: X64Code): Result<Vec<int>, string> {
+    if code.bytes.len() == 0 { return Result.Err("mach-o x64: instruction stream is empty"); }
+    if code.entryOffset < 0 || code.entryOffset >= code.bytes.len() { return Result.Err("mach-o x64: entry offset is outside the instruction stream"); }
+    var i = 0;
+    while i < code.bytes.len() {
+        if code.bytes[i] < 0 || code.bytes[i] > 255 { return Result.Err("mach-o x64: invalid code byte"); }
+        i += 1;
+    }
+    var codeFileOffset = 4096;
+    var textSize = alignPage(codeFileOffset + code.bytes.len());
+    if textSize > 4294967295 { return Result.Err("mach-o x64: text exceeds the CodeDirectory limit"); }
+    var pageCount = textSize / 4096;
+    var signatureSize = 119 + pageCount * 32;
+    var commands: Vec<int> = Vec.new();
+    if !appendMachSegment(commands, "__PAGEZERO", 0, 4294967296, 0, 0, 0, 0) { return Result.Err("mach-o x64: pagezero"); }
+    if !appendMachText(commands, 4294967296, textSize, codeFileOffset, code.bytes.len()) { return Result.Err("mach-o x64: text"); }
+    if !appendMachSegment(commands, "__LINKEDIT", 4294967296 + textSize, alignPage(signatureSize), textSize, signatureSize, 1, 1) {
+        return Result.Err("mach-o x64: linkedit");
+    }
+    var digest = sha256(code.bytes);
+    if digest.isErr() || digest.unwrap().len() != 32 || !u32(commands, 27) || !u32(commands, 24) { return Result.Err("mach-o x64: uuid"); }
+    var uuid = digest.unwrap();
+    var u = 0;
+    while u < 16 { commands.push(uuid[u]); u += 1; }
+    if !appendMachPath(commands, 14, 32, 12, "/usr/lib/dyld") { return Result.Err("mach-o x64: dyld"); }
+    if !u32(commands, 12) || !u32(commands, 56) || !u32(commands, 24) || !u32(commands, 0) || !u32(commands, 0) || !u32(commands, 0) {
+        return Result.Err("mach-o x64: libSystem");
+    }
+    var library = "/usr/lib/libSystem.B.dylib";
+    var n = 0;
+    while n < library.len() { commands.push(int(library[n])); n += 1; }
+    commands.push(0);
+    zeros(commands, 56 - 24 - library.len() - 1);
+    if !u32(commands, 2147483688) || !u32(commands, 24) || !u64(commands, codeFileOffset + code.entryOffset) || !u64(commands, 0) {
+        return Result.Err("mach-o x64: entry");
+    }
+    if !u32(commands, 50) || !u32(commands, 24) || !u32(commands, 1) || !u32(commands, 720896) || !u32(commands, 720896) || !u32(commands, 0) {
+        return Result.Err("mach-o x64: build version");
+    }
+    if !u32(commands, 29) || !u32(commands, 16) || !u32(commands, textSize) || !u32(commands, signatureSize) {
+        return Result.Err("mach-o x64: signature command");
+    }
+    if commands.len() != 472 { return Result.Err("mach-o x64: load-command size mismatch"); }
+    var text: Vec<int> = Vec.new();
+    if !u32(text, 4277009103) || !u32(text, 16777223) || !u32(text, 3) || !u32(text, 2)
+        || !u32(text, 9) || !u32(text, commands.len()) || !u32(text, 2097157) || !u32(text, 0) {
+        return Result.Err("mach-o x64: header");
+    }
+    i = 0;
+    while i < commands.len() { text.push(commands[i]); i += 1; }
+    zeros(text, codeFileOffset - text.len());
+    i = 0;
+    while i < code.bytes.len() { text.push(code.bytes[i]); i += 1; }
+    zeros(text, textSize - text.len());
+    var directory = machoDirectory(text, textSize, codeFileOffset + code.bytes.len(), pageCount);
+    if directory.isErr() { return Result.Err("mach-o x64: " + directory.unwrapErr()); }
+    var signature: Vec<int> = Vec.new();
+    var directoryBytes = directory.unwrap();
+    if !appendBe32(signature, 4208856256) || !appendBe32(signature, 20 + directoryBytes.len())
+        || !appendBe32(signature, 1) || !appendBe32(signature, 0) || !appendBe32(signature, 20) {
+        return Result.Err("mach-o x64: superblob");
+    }
+    i = 0;
+    while i < directoryBytes.len() { signature.push(directoryBytes[i]); i += 1; }
+    if signature.len() != signatureSize { return Result.Err("mach-o x64: signature size mismatch"); }
+    i = 0;
+    while i < signature.len() { text.push(signature[i]); i += 1; }
+    return Result.Ok(text);
+}

@@ -1,0 +1,9 @@
+import left;
+import right;
+
+func main(): void {
+    if left.value(4) + right.value(5) != 14 {
+        var failure = 1 / 0;
+    }
+    return;
+}

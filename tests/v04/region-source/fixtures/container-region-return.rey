@@ -1,0 +1,60 @@
+struct Temp {
+    pub value: int,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func makeWithTemp(seed: int): Vec<int> {
+    var temp: Temp = Temp { value: seed };
+    var values: Vec<int> = [seed, seed + 1];
+    values.push(temp.value + 1);
+    return values;
+}
+
+func makeMapWithTemp(seed: int): HashMap<string, int> {
+    var temp: Temp = Temp { value: seed };
+    var values: HashMap<string, int> = {"seed": temp.value};
+    values.set("next", seed + 1);
+    return values;
+}
+
+func outer(seed: int): Vec<int> {
+    var temp: Temp = Temp { value: seed };
+    var values: Vec<int> = makeWithTemp(temp.value);
+    values.push(99);
+    return values;
+}
+
+func main(): void {
+    var values: Vec<int> = makeWithTemp(7);
+    sourcecheck(values.len() == 3);
+    sourcecheck(values[0] == 7);
+    sourcecheck(values[1] == 8);
+    sourcecheck(values[2] == 8);
+    values.push(10);
+    sourcecheck(values.len() == 4);
+    var alias: Vec<int> = values;
+    alias[0] = 70;
+    sourcecheck(values[0] == 70);
+
+    var map: HashMap<string, int> = makeMapWithTemp(3);
+    sourcecheck(map.len() == 2);
+    sourcecheck(map["seed"] == 3);
+    sourcecheck(map["next"] == 4);
+    map.set("extra", 5);
+    sourcecheck(map["extra"] == 5);
+
+    var nested: Vec<int> = outer(11);
+    sourcecheck(nested.len() == 4);
+    sourcecheck(nested[0] == 11);
+    sourcecheck(nested[1] == 12);
+    sourcecheck(nested[2] == 12);
+    sourcecheck(nested[3] == 99);
+    return;
+}

@@ -1,0 +1,2 @@
+func remainder(value: int): int { return value % -1; }
+func main(): void { var result = remainder(-9223372036854775808); }

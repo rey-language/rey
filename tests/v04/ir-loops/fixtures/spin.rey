@@ -1,0 +1,6 @@
+func main(): void { return; }
+func spin(): int {
+    var count: int = 0;
+    while true { count += 1; }
+    return count;
+}

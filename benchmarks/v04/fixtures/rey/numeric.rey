@@ -1,0 +1,16 @@
+func main(): void {
+    var values = args();
+    if values.len() != 2 { exit(2); }
+    var size = values[1].toInt();
+    if size < 0 || size > 10000000 { exit(2); }
+    var state = 1;
+    var checksum = 0;
+    var i = 0;
+    loop {
+        if i >= size { break; }
+        state = (state * 48271) % 2147483647;
+        checksum += state % 1024;
+        i += 1;
+    }
+    println("checksum=" + checksum.toString() + " processed=" + size.toString());
+}

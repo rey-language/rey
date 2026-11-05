@@ -1,0 +1,33 @@
+import layout::{layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedCurrentRegion, managedDependencyCount, managedDestroy, managedLiveObjects, managedProgramRegion, managedPromoteReference, managedPromotionCount, managedRegionCreate, managedRegionEnd, managedRegionObjectCount};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+
+    var promoted = managedPromoteReference(context, __reyRawNull(), __reyRawNull());
+    check(__reyRawEqual(promoted, __reyRawNull()));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    check(managedLiveObjects(context) == 0);
+
+    var child = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), child));
+    var promotedChild = managedPromoteReference(context, __reyRawNull(), child);
+    check(__reyRawEqual(promotedChild, __reyRawNull()));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    check(managedLiveObjects(context) == 0);
+    check(managedRegionObjectCount(context) == 0);
+
+    managedRegionEnd(context, child);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(managedLiveObjects(context) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

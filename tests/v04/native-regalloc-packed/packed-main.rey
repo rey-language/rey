@@ -1,0 +1,11 @@
+import native::output::{writeCompilerOutputBytes};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func main(): void {
+    var result = writeCompilerOutputBytes("@@OUTPUT_PATH@@", [0, 1, 127, 128, 255, 0]);
+    require(result.isOk() && result.unwrap(), "packed compiler output write failed");
+    println("v0.4 packed output fixture passed");
+}

@@ -1,0 +1,122 @@
+func rawBufferAddressAt(handle: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(handle, offset);
+}
+
+func rawBufferValidate(handle: __rey_raw_address): void {
+    if __reyRawEqual(handle, __reyRawNull()) {
+        __reyRawFail(2);
+        return;
+    }
+    if __reyRawLoadI64(rawBufferAddressAt(handle, 0)) != 1380276546 {
+        __reyRawFail(2);
+        return;
+    }
+    var length = __reyRawLoadI64(rawBufferAddressAt(handle, 8));
+    var capacity = __reyRawLoadI64(rawBufferAddressAt(handle, 16));
+    if length < 0 || capacity < 0 || length > capacity {
+        __reyRawFail(2);
+        return;
+    }
+    var data = __reyRawLoadAddress(rawBufferAddressAt(handle, 24));
+    if capacity == 0 && !__reyRawEqual(data, __reyRawNull()) {
+        __reyRawFail(2);
+        return;
+    }
+    if capacity > 0 && __reyRawEqual(data, __reyRawNull()) {
+        __reyRawFail(2);
+        return;
+    }
+    var reservedOffset = 32;
+    while reservedOffset < 64 {
+        if __reyRawLoadByte(rawBufferAddressAt(handle, reservedOffset)) != 0 {
+            __reyRawFail(2);
+            return;
+        }
+        reservedOffset = reservedOffset + 1;
+    }
+}
+
+func rawBufferCopyBytes(source: __rey_raw_address, destination: __rey_raw_address, count: int): void {
+    var index = 0;
+    while index < count {
+        var sourceByte = __reyRawLoadByte(__reyRawOffset(source, index));
+        __reyRawStoreByte(__reyRawOffset(destination, index), sourceByte);
+        index = index + 1;
+    }
+}
+
+pub func rawBufferCreate(capacity: int): __rey_raw_address {
+    if capacity < 0 {
+        __reyRawFail(1);
+        return __reyRawNull();
+    }
+    var handle = __reyRawMap(64);
+    var data = __reyRawNull();
+    if capacity > 0 { data = __reyRawMap(capacity); }
+    __reyRawStoreI64(rawBufferAddressAt(handle, 0), 1380276546);
+    __reyRawStoreI64(rawBufferAddressAt(handle, 8), 0);
+    __reyRawStoreI64(rawBufferAddressAt(handle, 16), capacity);
+    __reyRawStoreAddress(rawBufferAddressAt(handle, 24), data);
+    return handle;
+}
+
+pub func rawBufferLength(handle: __rey_raw_address): int {
+    rawBufferValidate(handle);
+    return __reyRawLoadI64(rawBufferAddressAt(handle, 8));
+}
+
+pub func rawBufferCapacity(handle: __rey_raw_address): int {
+    rawBufferValidate(handle);
+    return __reyRawLoadI64(rawBufferAddressAt(handle, 16));
+}
+
+pub func rawBufferData(handle: __rey_raw_address): __rey_raw_address {
+    rawBufferValidate(handle);
+    return __reyRawLoadAddress(rawBufferAddressAt(handle, 24));
+}
+
+pub func rawBufferSetLength(handle: __rey_raw_address, length: int): void {
+    rawBufferValidate(handle);
+    var capacity = __reyRawLoadI64(rawBufferAddressAt(handle, 16));
+    if length < 0 || length > capacity {
+        __reyRawFail(3);
+        return;
+    }
+    __reyRawStoreI64(rawBufferAddressAt(handle, 8), length);
+}
+
+pub func rawBufferGrow(handle: __rey_raw_address, minimumCapacity: int): void {
+    rawBufferValidate(handle);
+    if minimumCapacity < 0 {
+        __reyRawFail(1);
+        return;
+    }
+    var oldCapacity = __reyRawLoadI64(rawBufferAddressAt(handle, 16));
+    if oldCapacity >= minimumCapacity { return; }
+    var length = __reyRawLoadI64(rawBufferAddressAt(handle, 8));
+    var oldData = __reyRawLoadAddress(rawBufferAddressAt(handle, 24));
+    var newCapacity = oldCapacity;
+    if newCapacity < 8 { newCapacity = 8; }
+    var maximum = 9223372036854775807;
+    while newCapacity < minimumCapacity {
+        if newCapacity > maximum / 2 {
+            newCapacity = minimumCapacity;
+        } else {
+            newCapacity = newCapacity * 2;
+        }
+    }
+    var newData = __reyRawMap(newCapacity);
+    rawBufferCopyBytes(oldData, newData, length);
+    __reyRawStoreAddress(rawBufferAddressAt(handle, 24), newData);
+    __reyRawStoreI64(rawBufferAddressAt(handle, 16), newCapacity);
+    if oldCapacity > 0 { __reyRawUnmap(oldData, oldCapacity); }
+}
+
+pub func rawBufferRelease(handle: __rey_raw_address): void {
+    rawBufferValidate(handle);
+    var capacity = __reyRawLoadI64(rawBufferAddressAt(handle, 16));
+    var data = __reyRawLoadAddress(rawBufferAddressAt(handle, 24));
+    __reyRawStoreI64(rawBufferAddressAt(handle, 0), 0);
+    if capacity > 0 { __reyRawUnmap(data, capacity); }
+    __reyRawUnmap(handle, 64);
+}

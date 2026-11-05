@@ -1,0 +1,125 @@
+import frontend::graph::{checkSourceFileGraph, checkSourceFileGraphWithRuntime};
+import ir;
+import ir::{Fact, IRFunction, IRProgram, IRType, Instruction, SourceRef};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64, Arm64Code};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("raw-fail.rey", 10, 25); }
+
+func writeImage(path: string, bytes: Vec<int>, label: string): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), label + ": byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), label + ": image write failed");
+}
+
+func malformedProgram(mode: int): IRProgram {
+    var first: Instruction = ir.constI64(0, 17, source());
+    if mode == 2 { first = ir.constBool(0, true, source()); }
+    var failure = ir.rawFail(0, source());
+    if mode == 1 { failure.operands.push(0); }
+    if mode == 3 { failure.ty = ir.irI64(); }
+    if mode == 4 { failure.resultId = 3; }
+    if mode == 5 { failure.immediate = 1; }
+    if mode == 6 { failure.comparison = ir.compareNe(); }
+    if mode == 7 { failure.functionId = 99; }
+    if mode == 8 { failure.operands = [99]; }
+    if mode == 9 { failure.operands = []; }
+    var instructions: Vec<Instruction> = [first, failure];
+    var entry = ir.irFunction(0, ir.functionKey("raw-fail-ir", "", "main"), ir.functionSignature([], ir.irVoid()), [], [ir.basicBlock(0, [], instructions, ir.returnVoid(source()))], ir.noEffects());
+    return ir.irProgram(0, [entry]);
+}
+
+func checkMalformedIR(): void {
+    var mode = 1;
+    loop {
+        if mode > 9 { break; }
+        var result = verifyProgram(malformedProgram(mode));
+        require(!result.ok && result.errors.len() > 0, "malformed raw.fail IR mode " + mode.toString() + " is rejected");
+        mode = mode + 1;
+    }
+    require(verifyProgram(malformedProgram(0)).ok, "canonical raw.fail IR verifies");
+}
+
+func checkAuthorizedAndSpoofRejected(sourceDirectory: string): void {
+    var entryPath = sourceDirectory + "/main.rey";
+    writeFile(entryPath, "func main(): void \x7B __reyRawFail(17); \x7D");
+    var ordinary = checkSourceFileGraph(entryPath, "");
+    require(ordinary.isErr(), "ordinary source checking does not authorize RawFail");
+
+    writeFile(entryPath, "func __reyRawFail(code: int): void \x7B \x7D func main(): void \x7B \x7D");
+    var spoof = checkSourceFileGraphWithRuntime(entryPath, "", [entryPath]);
+    require(spoof.isErr() && spoof.unwrapErr().contains("reserved raw intrinsic name"), "authorized source cannot spoof RawFail");
+}
+
+func exercise(sourceDirectory: string, outputDirectory: string, name: string, programSource: string, expectedStatus: int, expectedCode: string): void {
+    var entryPath = sourceDirectory + "/main.rey";
+    writeFile(entryPath, programSource);
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", [entryPath]);
+    if checked.isErr() { eprintln(name + ": authorized check failed: " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(name + ": lowering failed: " + lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(name + ": IR verification failed: " + verified.errors.join("\n")); exit(1); }
+
+    var analyzed = inferEffects(program);
+    var entryIndex = 0;
+    loop {
+        if entryIndex >= analyzed.functions.len() { break; }
+        if analyzed.functions[entryIndex].id == analyzed.entryFunctionId { break; }
+        entryIndex = entryIndex + 1;
+    }
+    require(entryIndex < analyzed.functions.len(), name + ": entry function retained through effects analysis");
+    var effects = analyzed.functions[entryIndex].effects;
+    require(effects.readsMemory == Fact::No && effects.writesMemory == Fact::No && effects.allocates == Fact::No, name + ": RawFail has known no memory effects");
+
+    var evaluated = evaluateProgram(analyzed, 1000, 16);
+    if expectedStatus == 0 {
+        require(evaluated.ok && evaluated.isVoid, name + ": skipped failure returns normally");
+    } else {
+        require(!evaluated.ok, name + ": RawFail returns an evaluator failure");
+        require(evaluated.error.contains("trusted runtime failure code " + expectedCode), name + ": evaluator preserves diagnostic code " + expectedCode);
+        require(evaluated.error.contains("main.rey"), name + ": evaluator preserves source span");
+    }
+
+    var darwin: Result<Arm64Code, string> = emitArm64(analyzed, "darwin");
+    if darwin.isErr() { eprintln(name + ": Darwin ARM64 emission failed: " + darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(name + ": Mach-O build failed: " + macho.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/darwin-" + name, macho.unwrap(), name + " Darwin");
+
+    var linux: Result<Arm64Code, string> = emitArm64(analyzed, "linux");
+    if linux.isErr() { eprintln(name + ": Linux ARM64 emission failed: " + linux.unwrapErr()); exit(1); }
+    var elf = buildElfArm64(linux.unwrap());
+    if elf.isErr() { eprintln(name + ": ELF build failed: " + elf.unwrapErr()); exit(1); }
+    writeImage(outputDirectory + "/linux-" + name, elf.unwrap(), name + " Linux");
+    println("raw-fail-case " + name + " " + expectedStatus.toString());
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "RawFail fixture expects an output directory");
+    var outputDirectory = argv[1];
+    var sourceDirectory = outputDirectory + "/source";
+    mkdir(sourceDirectory);
+    checkMalformedIR();
+    checkAuthorizedAndSpoofRejected(sourceDirectory);
+
+    exercise(sourceDirectory, outputDirectory, "fail-zero", "func main(): void \x7B __reyRawFail(0); \x7D", 1, "0");
+    exercise(sourceDirectory, outputDirectory, "fail-17", "func main(): void \x7B __reyRawFail(17); \x7D", 1, "17");
+    exercise(sourceDirectory, outputDirectory, "fail-negative", "func main(): void \x7B __reyRawFail(-3); \x7D", 1, "-3");
+    exercise(sourceDirectory, outputDirectory, "fail-max", "func main(): void \x7B __reyRawFail(9223372036854775807); \x7D", 1, "9223372036854775807");
+    exercise(sourceDirectory, outputDirectory, "fail-before-99", "func main(): void \x7B __reyRawFail(17); __reyRawFail(99); \x7D", 1, "17");
+    exercise(sourceDirectory, outputDirectory, "conditional-skip", "func main(): void \x7B if false \x7B __reyRawFail(17); \x7D \x7D", 0, "");
+    println("raw fail source, IR, evaluator, and ARM64 fixtures passed");
+}

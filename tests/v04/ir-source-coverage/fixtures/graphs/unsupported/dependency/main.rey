@@ -1,0 +1,2 @@
+var hidden: int = 1;
+pub func value(): int { return hidden; }

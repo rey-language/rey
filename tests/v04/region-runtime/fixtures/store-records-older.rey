@@ -1,0 +1,41 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDependencyCount, managedDestroy, managedPromotionCount, managedRegionAllocate, managedRegionCreate, managedStoreReference};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var node = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry);
+    var outer = managedRegionCreate(context);
+    var inner = managedRegionCreate(context);
+    var older = managedRegionAllocate(context, outer, node, 1);
+    var younger = managedRegionAllocate(context, inner, node, 1);
+    managedStoreReference(context, younger, 0, __reyRawNull());
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(younger, 16)), __reyRawNull()));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    managedStoreReference(context, younger, 0, older);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(younger, 16)), older));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 88)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 56)) == 1);
+    var edge = __reyRawLoadAddress(__reyRawOffset(inner, 80));
+    check(__reyRawEqual(__reyRawLoadAddress(edge), inner));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(edge, 8)), outer));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(edge, 16)), __reyRawNull()));
+    check(__reyRawLoadI64(__reyRawOffset(edge, 24)) == 1380272225);
+    managedStoreReference(context, younger, 0, older);
+    check(managedDependencyCount(context) == 1);
+    check(managedPromotionCount(context) == 0);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(inner, 80)), edge));
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

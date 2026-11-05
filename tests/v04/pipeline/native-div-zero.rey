@@ -1,0 +1,2 @@
+func divide(value: int): int { return 17 / value; }
+func main(): void { var result = divide(0); }

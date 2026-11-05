@@ -1,0 +1,8 @@
+func main(): void {
+    var value: Option<int> = Option::Some(7);
+    match value {
+        Some(number) => { if number != 7 { var zero: int = 0; var fail: int = 1 / zero; } },
+        None => { var zero: int = 0; var fail: int = 1 / zero; },
+    }
+    return;
+}

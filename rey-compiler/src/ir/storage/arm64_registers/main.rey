@@ -1,0 +1,126 @@
+import ir::{IRProgram, InstructionKind};
+import ir::storage::{FunctionSlots, ProgramSlots, planSlots};
+
+pub struct Arm64ValueLocation {
+    pub valueId: int,
+    pub registerId: int,
+    pub spillIndex: int,
+}
+
+pub struct Arm64FunctionRegisterPlan {
+    pub functionId: int,
+    pub values: Vec<Arm64ValueLocation>,
+    pub savedRegisters: Vec<int>,
+    pub spillCount: int,
+    pub rawArgumentsReserved: bool,
+}
+
+pub struct Arm64ProgramRegisterPlan {
+    pub functions: Vec<Arm64FunctionRegisterPlan>,
+}
+
+func usesRawArguments(program: IRProgram): bool {
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var blockIndex = 0;
+        loop {
+            if blockIndex >= program.functions[functionIndex].blocks.len() { break; }
+            var instructions = program.functions[functionIndex].blocks[blockIndex].instructions;
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= instructions.len() { break; }
+                var kind = instructions[instructionIndex].kind;
+                if kind == InstructionKind::RawArg || kind == InstructionKind::RawArgCount { return true; }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockIndex = blockIndex + 1;
+        }
+        functionIndex = functionIndex + 1;
+    }
+    return false;
+}
+
+func availableRegisters(rawArgumentsReserved: bool): Vec<int> {
+    var registers: Vec<int> = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28];
+    if rawArgumentsReserved { registers = [21, 22, 23, 24, 25, 26, 27, 28]; }
+    return registers;
+}
+
+func hasRegister(registers: Vec<int>, registerId: int): bool {
+    var i = 0;
+    loop {
+        if i >= registers.len() { break; }
+        if registers[i] == registerId { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func planFunction(layout: FunctionSlots, registers: Vec<int>, rawArgumentsReserved: bool): Result<Arm64FunctionRegisterPlan, string> {
+    if layout.functionId < 0 || layout.slotCount < 0 {
+        return Result.Err("arm64 registers: invalid storage function layout");
+    }
+    var values: Vec<Arm64ValueLocation> = [];
+    var seenValues: HashMap<string, bool> = HashMap.new();
+    var savedRegisters: Vec<int> = [];
+    var valueIndex = 0;
+    loop {
+        if valueIndex >= layout.values.len() { break; }
+        var value = layout.values[valueIndex];
+        if value.valueId < 0 || value.index < 0 || value.index >= layout.slotCount {
+            return Result.Err("arm64 registers: storage plan contains an invalid value slot");
+        }
+        var key = value.valueId.toString();
+        if seenValues.has(key) { return Result.Err("arm64 registers: storage plan contains a duplicate value ID"); }
+        seenValues.set(key, true);
+        var registerId = -1;
+        var spillIndex = value.index;
+        if value.index < registers.len() {
+            registerId = registers[value.index];
+            spillIndex = -1;
+            if !hasRegister(savedRegisters, registerId) { savedRegisters.push(registerId); }
+        } else {
+            spillIndex = value.index - registers.len();
+        }
+        values.push(Arm64ValueLocation { valueId: value.valueId, registerId: registerId, spillIndex: spillIndex });
+        valueIndex = valueIndex + 1;
+    }
+    var spillCount = layout.slotCount - registers.len();
+    if spillCount < 0 { spillCount = 0; }
+    return Result.Ok(Arm64FunctionRegisterPlan {
+        functionId: layout.functionId,
+        values: values,
+        savedRegisters: savedRegisters,
+        spillCount: spillCount,
+        rawArgumentsReserved: rawArgumentsReserved,
+    });
+}
+
+pub func planArm64RegistersFromSlots(program: IRProgram, storage: ProgramSlots): Result<Arm64ProgramRegisterPlan, string> {
+    if storage.functions.len() != program.functions.len() {
+        return Result.Err("arm64 registers: storage plan does not match the verified program");
+    }
+    var rawArgumentsReserved = usesRawArguments(program);
+    var registers = availableRegisters(rawArgumentsReserved);
+    var functions: Vec<Arm64FunctionRegisterPlan> = [];
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= program.functions.len() { break; }
+        var layout = storage.functions[functionIndex];
+        if layout.functionId != program.functions[functionIndex].id {
+            return Result.Err("arm64 registers: storage function order does not match the IR program");
+        }
+        var plan = planFunction(layout, registers, rawArgumentsReserved);
+        if plan.isErr() { return Result.Err(plan.unwrapErr()); }
+        functions.push(plan.unwrap());
+        functionIndex = functionIndex + 1;
+    }
+    return Result.Ok(Arm64ProgramRegisterPlan { functions: functions });
+}
+
+pub func planArm64Registers(program: IRProgram): Result<Arm64ProgramRegisterPlan, string> {
+    var storage = planSlots(program);
+    if storage.isErr() { return Result.Err(storage.unwrapErr()); }
+    return planArm64RegistersFromSlots(program, storage.unwrap());
+}

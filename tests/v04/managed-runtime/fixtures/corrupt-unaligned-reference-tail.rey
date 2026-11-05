@@ -1,0 +1,10 @@
+import layout::{layoutCount, layoutRegisterVariable, layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    layoutRegisterVariable(registry, 16, __reyRawNull(), 0, 2);
+    var descriptor = __reyRawLoadAddress(__reyRawOffset(registry, 64));
+    __reyRawStoreI64(__reyRawOffset(descriptor, 0), 17);
+    __reyRawStoreI64(__reyRawOffset(descriptor, 24), 17);
+    layoutCount(registry);
+}

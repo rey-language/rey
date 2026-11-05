@@ -1,0 +1,65 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram};
+import ir::managed::lifetime::{regionAllocationNeedsHeapFallback, verifyManagedRegionPlan};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("returned-region-fallback-verifier.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } escapes.push(Escape::Unknown); index += 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var term = ir.returnVoid(source());
+    if returnId >= 0 { term = ir.returnValue(returnId, source()); }
+    return ir.irFunction(id, ir.functionKey("returned-region-fallback", "", name), ir.functionSignature(parameterTypes, returnType), parameters, [ir.basicBlock(0, [], instructions, term)], effects(parameterTypes.len()));
+}
+
+func unknownCallModule(): ManagedProgram {
+    var main = makeFunction(10, "main", [], ir.irVoid(), [], [], -1);
+    var unknownUse = makeFunction(11, "unknownUse", [], ir.irVoid(), [], [ir.constI64(0, 8, source()), ir.call(1, ir.irRawAddress(), 20, [0], source()), ir.call(-1, ir.irVoid(), 99, [1], source())], -1);
+    var allocate = makeFunction(20, "allocate", [ir.irI64()], ir.irRawAddress(), [ir.irValue(30, ir.irI64())], [ir.rawNull(0, source())], 0);
+    var store = makeFunction(21, "store", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), [ir.irValue(31, ir.irRawAddress()), ir.irValue(32, ir.irI64()), ir.irValue(33, ir.irRawAddress())], [], -1);
+    var collect = makeFunction(22, "collect", [], ir.irVoid(), [], [], -1);
+    var user = makeFunction(99, "unknownCallee", [ir.irRawAddress()], ir.irVoid(), [ir.irValue(40, ir.irRawAddress())], [], -1);
+    var fields: Vec<ManagedField> = [];
+    var functions: Vec<IRFunction> = [main, unknownUse, allocate, store, collect, user];
+    var managed: Vec<ManagedFunction> = [ManagedFunction { functionId: 10, referenceValues: [], parameterLayouts: [], returnLayout: 0 }, ManagedFunction { functionId: 11, referenceValues: [1], parameterLayouts: [], returnLayout: 0 }];
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 11, blockId: 0, resultId: 1, layoutId: 1 }];
+    return ManagedProgram { program: ir.irProgram(10, functions), layouts: [ManagedLayout { id: 1, key: "fallback::Cell", payloadBytes: 8, fields: fields }], functions: managed, allocations: allocations, derived: [], allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: [] };
+}
+
+func budgetExhaustionModule(): ManagedProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, source()), ir.call(0, ir.irRawAddress(), 20, [1], source())];
+    var valueId = 1000;
+    loop {
+        if valueId >= 201000 { break; }
+        instructions.push(ir.constI64(valueId, valueId, source()));
+        valueId += 1;
+    }
+    var returned = makeFunction(11, "budgetReturned", [], ir.irRawAddress(), [], instructions, 0);
+    var managed: Vec<ManagedFunction> = [ManagedFunction { functionId: 11, referenceValues: [0], parameterLayouts: [], returnLayout: 0 }];
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 11, blockId: 0, resultId: 0, layoutId: 1 }];
+    return ManagedProgram { program: ir.irProgram(11, [returned]), layouts: [], functions: managed, allocations: allocations, derived: [], allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: [] };
+}
+
+func main(): void {
+    var module = unknownCallModule();
+    var placement = ManagedPlacement { allocations: [ManagedAllocationPlacement { functionId: 11, resultId: 1, storage: ManagedStorage::Region }], calls: [], regionFunctions: [11] };
+    require(!regionAllocationNeedsHeapFallback(module, placement, module.allocations[0]), "unknown calls do not receive the returned-region heap fallback");
+    var verification = verifyManagedRegionPlan(module, placement);
+    require(verification.isErr() && verification.unwrapErr().contains("unknown call"), "unknown-call region plans remain rejected");
+
+    var exhausted = budgetExhaustionModule();
+    var exhaustedPlacement = ManagedPlacement { allocations: [ManagedAllocationPlacement { functionId: 11, resultId: 0, storage: ManagedStorage::Region }], calls: [], regionFunctions: [11] };
+    require(!regionAllocationNeedsHeapFallback(exhausted, exhaustedPlacement, exhausted.allocations[0]), "promotion-analysis budget exhaustion cannot authorize a heap fallback");
+    print("returned region fallback verifier: all fixtures passed");
+}

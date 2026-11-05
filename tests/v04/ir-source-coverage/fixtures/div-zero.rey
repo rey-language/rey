@@ -1,0 +1,2 @@
+func main(): void { return; }
+func divideByZero(): int { return 7 / 0; }

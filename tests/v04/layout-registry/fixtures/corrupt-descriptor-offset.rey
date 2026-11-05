@@ -1,0 +1,11 @@
+import layout;
+
+func main(): void {
+    var registry = layout.layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    layout.layoutRegisterFixed(registry, 8, offsets, 1);
+    var descriptor = __reyRawLoadAddress(__reyRawOffset(registry, 64));
+    __reyRawStoreI64(__reyRawOffset(descriptor, 32), 1);
+    layout.layoutCount(registry);
+}

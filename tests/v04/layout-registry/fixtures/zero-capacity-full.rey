@@ -1,0 +1,6 @@
+import layout;
+
+func main(): void {
+    var registry = layout.layoutRegistryCreate(0);
+    layout.layoutRegisterFixed(registry, 0, __reyRawNull(), 0);
+}

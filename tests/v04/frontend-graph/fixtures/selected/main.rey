@@ -1,0 +1,5 @@
+import math::{identity};
+
+func main(): void {
+    var result: int = identity(4);
+}

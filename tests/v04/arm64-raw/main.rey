@@ -1,0 +1,333 @@
+import ir;
+import ir::{IRType, IRValue, IRFunction, BasicBlock, Instruction, EffectSummary, IRProgram, TerminatorKind, Escape, SourceRef};
+import ir::eval::{evaluateProgram};
+import native::arm64::{emitArm64, Arm64Code};
+import native::image::{buildMachOArm64, buildElfArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("arm64-raw.rey", 0, 0); }
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeUnknown());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeUnknown());
+}
+
+func function(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("arm64-raw", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func writeImage(path: string, bytes: Vec<int>, name: string): void {
+    var encoded = byteString(bytes);
+    if encoded.isErr() { eprintln(name + ": image byte conversion failed: " + encoded.unwrapErr()); exit(1); }
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), name + ": image write failed");
+}
+
+func emitTarget(directory: string, name: string, program: IRProgram, targetOS: string): void {
+    var emitted: Result<Arm64Code, string> = emitArm64(program, targetOS);
+    if emitted.isErr() { eprintln(name + " " + targetOS + ": ARM64 emission failed: " + emitted.unwrapErr()); exit(1); }
+    if targetOS == "darwin" {
+        var image = buildMachOArm64(emitted.unwrap());
+        if image.isErr() { eprintln(name + ": Mach-O emission failed: " + image.unwrapErr()); exit(1); }
+        writeImage(directory + "/darwin-" + name, image.unwrap(), name + " darwin");
+    } else {
+        var image = buildElfArm64(emitted.unwrap());
+        if image.isErr() { eprintln(name + ": ELF emission failed: " + image.unwrapErr()); exit(1); }
+        writeImage(directory + "/linux-" + name, image.unwrap(), name + " linux");
+    }
+}
+
+func maxValueId(function: IRFunction): int {
+    var maximum = -1;
+    var i = 0;
+    loop {
+        if i >= function.parameters.len() { break; }
+        if function.parameters[i].id > maximum { maximum = function.parameters[i].id; }
+        i = i + 1;
+    }
+    i = 0;
+    loop {
+        if i >= function.blocks.len() { break; }
+        var block = function.blocks[i];
+        var j = 0;
+        loop {
+            if j >= block.params.len() { break; }
+            if block.params[j].id > maximum { maximum = block.params[j].id; }
+            j = j + 1;
+        }
+        j = 0;
+        loop {
+            if j >= block.instructions.len() { break; }
+            if block.instructions[j].resultId > maximum { maximum = block.instructions[j].resultId; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return maximum;
+}
+
+func assertedResult(program: IRProgram, expected: int): IRProgram {
+    var functions: Vec<IRFunction> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= program.functions.len() { break; }
+        var function = program.functions[i];
+        if function.id == program.entryFunctionId {
+            var blocks: Vec<BasicBlock> = Vec.new();
+            var maxBlock = -1;
+            var j = 0;
+            loop {
+                if j >= function.blocks.len() { break; }
+                if function.blocks[j].id > maxBlock { maxBlock = function.blocks[j].id; }
+                j = j + 1;
+            }
+            var nextBlock = maxBlock + 1;
+            var nextValue = maxValueId(function) + 1;
+            j = 0;
+            loop {
+                if j >= function.blocks.len() { break; }
+                var block = function.blocks[j];
+                if block.terminator.kind == TerminatorKind::Return {
+                    var instructions = block.instructions;
+                    var expectedId = nextValue;
+                    var comparisonId = nextValue + 1;
+                    var trueValueId = nextValue + 2;
+                    var falseValueId = nextValue + 3;
+                    var trueBlock = nextBlock;
+                    var falseBlock = nextBlock + 1;
+                    instructions.push(ir.constI64(expectedId, expected, source()));
+                    instructions.push(ir.compareI64(comparisonId, ir.compareEq(), block.terminator.valueId, expectedId, source()));
+                    block.instructions = instructions;
+                    block.terminator = ir.branch(comparisonId, trueBlock, [], falseBlock, [], source());
+                    blocks.push(block);
+                    blocks.push(ir.basicBlock(trueBlock, [], [ir.constI64(trueValueId, 2, source())], ir.returnValue(trueValueId, source())));
+                    blocks.push(ir.basicBlock(falseBlock, [], [ir.constI64(falseValueId, 0, source())], ir.returnValue(falseValueId, source())));
+                    nextBlock = nextBlock + 2;
+                    nextValue = nextValue + 4;
+                } else {
+                    blocks.push(block);
+                }
+                j = j + 1;
+            }
+            function.blocks = blocks;
+        }
+        functions.push(function);
+        i = i + 1;
+    }
+    return ir.irProgram(program.entryFunctionId, functions);
+}
+
+func saveCase(directory: string, name: string, program: IRProgram, expected: int, traps: bool): void {
+    var evaluated = evaluateProgram(program, 10000, 32);
+    if traps {
+        require(!evaluated.ok, name + ": evaluator accepted a raw-memory trap case");
+    } else {
+        require(evaluated.ok, name + ": evaluator rejected valid raw-memory case: " + evaluated.error);
+        require(evaluated.value == expected, name + ": evaluator returned " + evaluated.value.toString() + ", expected " + expected.toString());
+        program = assertedResult(program, expected);
+        var asserted = evaluateProgram(program, 10000, 32);
+        require(asserted.ok && asserted.value == 2, name + ": full-width result assertion did not return success status 2");
+    }
+    emitTarget(directory, name, program, "darwin");
+    emitTarget(directory, name, program, "linux");
+    var expectedStatus = 1;
+    if !traps { expectedStatus = 2; }
+    println("native-raw-case " + name + " " + expectedStatus.toString());
+}
+
+func i64Memory(value: int): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 8, source()),
+        ir.rawMap(1, 0, source()),
+        ir.constI64(2, value, source()),
+        ir.rawStoreI64(1, 2, source()),
+        ir.rawLoadI64(3, 1, source()),
+        ir.rawUnmap(1, 0, source())
+    ];
+    var entry = function(0, "i64-memory", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(3, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func byteMemory(value: int): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 1, source()),
+        ir.rawMap(1, 0, source()),
+        ir.constI64(2, value, source()),
+        ir.rawStoreByte(1, 2, source()),
+        ir.rawLoadByte(3, 1, source()),
+        ir.rawUnmap(1, 0, source())
+    ];
+    var entry = function(0, "byte-memory", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(3, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func zeroInitialized(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.rawLoadI64(2, 1, source()), ir.rawUnmap(1, 0, source())];
+    var entry = function(0, "zero-initialized", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(2, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func offsetMemory(value: int, offset: int): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 32, source()),
+        ir.rawMap(1, 0, source()),
+        ir.constI64(2, offset, source()),
+        ir.constI64(3, value, source()),
+        ir.rawOffset(4, 1, 2, source()),
+        ir.rawStoreI64(4, 3, source()),
+        ir.rawLoadI64(5, 4, source()),
+        ir.rawUnmap(1, 0, source())
+    ];
+    var entry = function(0, "offset-memory", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(5, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func boolResult(name: string, instructions: Vec<Instruction>, conditionId: int): IRProgram {
+    var blocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], instructions, ir.branch(conditionId, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [ir.constI64(900, 2, source())], ir.returnValue(900, source())),
+        ir.basicBlock(2, [], [ir.constI64(901, 0, source())], ir.returnValue(901, source()))
+    ];
+    var entry = function(0, name, [], [], ir.irI64(), blocks);
+    return ir.irProgram(0, [entry]);
+}
+
+func nullEqual(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.rawNull(0, source()), ir.rawNull(1, source()), ir.rawEqual(2, 0, 1, source())];
+    return boolResult("null-equal", instructions, 2);
+}
+
+func nullNotMappingEqual(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.rawNull(0, source()), ir.constI64(1, 8, source()), ir.rawMap(2, 1, source()), ir.rawEqual(3, 0, 2, source()), ir.rawUnmap(2, 1, source())];
+    return boolResult("null-not-mapping-equal", instructions, 3);
+}
+
+func sameMappingEqual(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.rawEqual(2, 1, 1, source()), ir.rawUnmap(1, 0, source())];
+    return boolResult("same-mapping-equal", instructions, 2);
+}
+
+func addressCellNull(): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 8, source()),
+        ir.rawMap(1, 0, source()),
+        ir.rawNull(2, source()),
+        ir.rawLoadAddress(3, 1, source()),
+        ir.rawEqual(4, 3, 2, source()),
+        ir.rawUnmap(1, 0, source())
+    ];
+    return boolResult("address-cell-null", instructions, 4);
+}
+
+func addressCellRoundTrip(): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 8, source()),
+        ir.rawMap(1, 0, source()),
+        ir.rawMap(2, 0, source()),
+        ir.rawStoreAddress(1, 2, source()),
+        ir.rawLoadAddress(3, 1, source()),
+        ir.rawEqual(4, 3, 2, source()),
+        ir.rawUnmap(1, 0, source()),
+        ir.rawUnmap(2, 0, source())
+    ];
+    return boolResult("address-cell-roundtrip", instructions, 4);
+}
+
+func separateMappings(): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, 8, source()),
+        ir.rawMap(1, 0, source()),
+        ir.rawMap(2, 0, source()),
+        ir.constI64(3, 11, source()),
+        ir.constI64(4, 22, source()),
+        ir.rawStoreI64(1, 3, source()),
+        ir.rawStoreI64(2, 4, source()),
+        ir.rawLoadI64(5, 1, source()),
+        ir.rawLoadI64(6, 2, source()),
+        ir.addCheckedI64(7, 5, 6, source()),
+        ir.rawUnmap(1, 0, source()),
+        ir.rawUnmap(2, 0, source())
+    ];
+    var entry = function(0, "separate-mappings", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(7, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func distinctMappingsNotEqual(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.rawMap(2, 0, source()), ir.rawEqual(3, 1, 2, source()), ir.rawUnmap(1, 0, source()), ir.rawUnmap(2, 0, source())];
+    return boolResult("distinct-mappings-not-equal", instructions, 3);
+}
+
+func rawCallAndBlockParam(): IRProgram {
+    var workerParameters: Vec<IRValue> = [ir.irValue(100, ir.irRawAddress()), ir.irValue(101, ir.irI64()), ir.irValue(102, ir.irI64())];
+    var workerTypes: Vec<IRType> = [ir.irRawAddress(), ir.irI64(), ir.irI64()];
+    var workerInstructions: Vec<Instruction> = [ir.rawOffset(103, 100, 101, source()), ir.rawStoreI64(103, 102, source())];
+    var worker = function(41, "raw-worker", workerParameters, workerTypes, ir.irRawAddress(), [ir.basicBlock(0, [], workerInstructions, ir.returnValue(103, source()))]);
+    var entryInstructions: Vec<Instruction> = [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 8, source()), ir.constI64(3, 9223372036854775807, source())];
+    var entryBlocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], entryInstructions, ir.jump(1, [1, 2, 3, 0], source())),
+        ir.basicBlock(1, [ir.irValue(10, ir.irRawAddress()), ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irI64()), ir.irValue(13, ir.irI64())], [ir.call(14, ir.irRawAddress(), 41, [10, 11, 12], source()), ir.rawLoadI64(15, 14, source()), ir.rawUnmap(10, 13, source())], ir.returnValue(15, source()))
+    ];
+    var entry = function(42, "raw-call-block-entry", [], [], ir.irI64(), entryBlocks);
+    return ir.irProgram(42, [entry, worker]);
+}
+
+func trapProgram(name: string, instructions: Vec<Instruction>): IRProgram {
+    var withReturn: Vec<Instruction> = instructions;
+    withReturn.push(ir.constI64(900, 0, source()));
+    var entry = function(0, name, [], [], ir.irI64(), [ir.basicBlock(0, [], withReturn, ir.returnValue(900, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "ARM64 raw-memory fixture needs an output directory");
+    var out = argv[1];
+    var maximum = 9223372036854775807;
+
+    saveCase(out, "zero-initialized", zeroInitialized(), 0, false);
+    saveCase(out, "i64-min", i64Memory(-9223372036854775807 - 1), -9223372036854775807 - 1, false);
+    saveCase(out, "i64-max", i64Memory(maximum), maximum, false);
+    saveCase(out, "byte-zero", byteMemory(0), 0, false);
+    saveCase(out, "byte-127", byteMemory(127), 127, false);
+    saveCase(out, "byte-128", byteMemory(128), 128, false);
+    saveCase(out, "byte-255", byteMemory(255), 255, false);
+    saveCase(out, "offset-access", offsetMemory(4660, 8), 4660, false);
+    saveCase(out, "null-equal", nullEqual(), 2, false);
+    saveCase(out, "null-not-mapping-equal", nullNotMappingEqual(), 0, false);
+    saveCase(out, "same-mapping-equal", sameMappingEqual(), 2, false);
+    saveCase(out, "distinct-mappings-not-equal", distinctMappingsNotEqual(), 0, false);
+    saveCase(out, "separate-mappings", separateMappings(), 33, false);
+    saveCase(out, "raw-call-block-param", rawCallAndBlockParam(), maximum, false);
+    saveCase(out, "address-cell-null", addressCellNull(), 2, false);
+    saveCase(out, "address-cell-roundtrip", addressCellRoundTrip(), 2, false);
+
+    var rawEntry = function(99, "raw-entry", [], [], ir.irRawAddress(), [ir.basicBlock(0, [], [ir.rawNull(0, source())], ir.returnValue(0, source()))]);
+    var rejectedEntry = emitArm64(ir.irProgram(99, [rawEntry]), "darwin");
+    require(rejectedEntry.isErr(), "raw-address entry results are rejected");
+
+    saveCase(out, "map-size-zero", trapProgram("map-size-zero", [ir.constI64(0, 0, source()), ir.rawMap(1, 0, source())]), 0, true);
+    saveCase(out, "map-size-negative", trapProgram("map-size-negative", [ir.constI64(0, -1, source()), ir.rawMap(1, 0, source())]), 0, true);
+    saveCase(out, "map-size-too-large", trapProgram("map-size-too-large", [ir.constI64(0, maximum, source()), ir.rawMap(1, 0, source())]), 0, true);
+    saveCase(out, "offset-null", trapProgram("offset-null", [ir.rawNull(0, source()), ir.constI64(1, 0, source()), ir.rawOffset(2, 0, 1, source())]), 0, true);
+    saveCase(out, "offset-negative", trapProgram("offset-negative", [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.constI64(2, -1, source()), ir.rawOffset(3, 1, 2, source())]), 0, true);
+    saveCase(out, "offset-overflow", trapProgram("offset-overflow", [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.constI64(2, maximum, source()), ir.rawOffset(3, 1, 2, source())]), 0, true);
+    saveCase(out, "load-i64-unaligned", trapProgram("load-i64-unaligned", [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 1, source()), ir.rawOffset(3, 1, 2, source()), ir.rawLoadI64(4, 3, source())]), 0, true);
+    saveCase(out, "store-i64-unaligned", trapProgram("store-i64-unaligned", [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 1, source()), ir.rawOffset(3, 1, 2, source()), ir.constI64(4, 9, source()), ir.rawStoreI64(3, 4, source())]), 0, true);
+    saveCase(out, "store-byte-negative", trapProgram("store-byte-negative", [ir.constI64(0, 1, source()), ir.rawMap(1, 0, source()), ir.constI64(2, -1, source()), ir.rawStoreByte(1, 2, source())]), 0, true);
+    saveCase(out, "store-byte-overflow", trapProgram("store-byte-overflow", [ir.constI64(0, 1, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 256, source()), ir.rawStoreByte(1, 2, source())]), 0, true);
+    saveCase(out, "load-address-unaligned", trapProgram("load-address-unaligned", [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 1, source()), ir.rawOffset(3, 1, 2, source()), ir.rawLoadAddress(4, 3, source())]), 0, true);
+    saveCase(out, "store-address-unaligned", trapProgram("store-address-unaligned", [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 1, source()), ir.rawOffset(3, 1, 2, source()), ir.rawNull(4, source()), ir.rawStoreAddress(3, 4, source())]), 0, true);
+    saveCase(out, "unmap-size-zero", trapProgram("unmap-size-zero", [ir.constI64(0, 8, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 0, source()), ir.rawUnmap(1, 2, source())]), 0, true);
+    saveCase(out, "unmap-syscall-failure", trapProgram("unmap-syscall-failure", [ir.constI64(0, 16, source()), ir.rawMap(1, 0, source()), ir.constI64(2, 1, source()), ir.rawOffset(3, 1, 2, source()), ir.rawUnmap(3, 0, source())]), 0, true);
+    println("ARM64 raw-memory Mach-O and Linux ELF images ready");
+}

@@ -1,0 +1,12 @@
+pub struct Cell {
+    pub value: int,
+}
+
+pub func makeCell(): Cell {
+    return Cell { value: 3 };
+}
+
+pub func bumpCell(cell: Cell): Cell {
+    cell.value = cell.value + 1;
+    return cell;
+}

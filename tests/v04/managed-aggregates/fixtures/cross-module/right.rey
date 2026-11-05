@@ -1,0 +1,7 @@
+pub struct Cell {
+    pub value: bool,
+}
+
+pub func makeOtherCell(): Cell {
+    return Cell { value: true };
+}

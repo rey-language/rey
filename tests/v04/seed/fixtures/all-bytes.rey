@@ -1,0 +1,12 @@
+func main(): void {
+    var output = "";
+    var value = 0;
+    loop {
+        if value >= 256 { break; }
+        var byte = char(value);
+        assert(int(byte) == value, "char byte round trip changed value");
+        output = output + byte.toString();
+        value = value + 1;
+    }
+    writeFile("all-bytes.bin", output);
+}

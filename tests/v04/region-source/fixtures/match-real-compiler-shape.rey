@@ -1,0 +1,62 @@
+pub struct Span { pub start: int, pub end: int }
+pub struct CallExpr { pub callee: Expr, pub args: Vec<Expr>, pub span: Span }
+pub struct LiteralExpr { pub value: int, pub span: Span }
+pub enum Expr {
+    Call(CallExpr), Literal(LiteralExpr), Name(string), Unary(int), Binary(int), Array(int), Index(int), Member(int), Assign(int), If(int), While(int), Function(int), Return(int), Block(int), Group(int), Null, Other
+}
+pub struct Context { pub marker: int }
+pub struct Env { pub marker: int }
+func spanName(span: Span): string { return (span.start).toString(); }
+func originalName(original: Expr): string {
+    match original {
+        Expr::Call(_) => { return "Call"; },
+        Expr::Literal(_) => { return "Literal"; },
+        Expr::Name(_) => { return "Name"; },
+        Expr::Unary(_) => { return "Unary"; },
+        Expr::Binary(_) => { return "Binary"; },
+        Expr::Array(_) => { return "Array"; },
+        Expr::Index(_) => { return "Index"; },
+        Expr::Member(_) => { return "Member"; },
+        Expr::Assign(_) => { return "Assign"; },
+        Expr::If(_) => { return "If"; },
+        Expr::While(_) => { return "While"; },
+        Expr::Function(_) => { return "Function"; },
+        Expr::Return(_) => { return "Return"; },
+        Expr::Block(_) => { return "Block"; },
+        Expr::Group(_) => { return "Group"; },
+        Expr::Null => { return "Null"; },
+        Expr::Other => { return "Other"; },
+    }
+    return "?";
+}
+func inferCall(ctx: Context, env: Env, call: CallExpr, expr: Expr): string {
+    return originalName(expr) + ":" + spanName(call.span);
+}
+func inferExpr(ctx: Context, env: Env, expr: Expr): string {
+    match expr {
+        Expr::Call(call) => { return inferCall(ctx, env, call, expr); },
+        Expr::Literal(literal) => { return originalName(expr); },
+        Expr::Name(name) => { return name; },
+        Expr::Unary(value) => { return "Unary"; },
+        Expr::Binary(value) => { return "Binary"; },
+        Expr::Array(value) => { return "Array"; },
+        Expr::Index(value) => { return "Index"; },
+        Expr::Member(value) => { return "Member"; },
+        Expr::Assign(value) => { return "Assign"; },
+        Expr::If(value) => { return "If"; },
+        Expr::While(value) => { return "While"; },
+        Expr::Function(value) => { return "Function"; },
+        Expr::Return(value) => { return "Return"; },
+        Expr::Block(value) => { return "Block"; },
+        Expr::Group(value) => { return "Group"; },
+        Expr::Null => { return "Null"; },
+        Expr::Other => { return "Other"; },
+    }
+    return "?";
+}
+func main(): void {
+    var ctx = Context { marker: 1 };
+    var env = Env { marker: 2 };
+    var expr = Expr::Call(CallExpr { callee: Expr::Name("run"), args: [Expr::Literal(LiteralExpr { value: 5, span: Span { start: 4, end: 5 } })], span: Span { start: 17, end: 25 } });
+    if inferExpr(ctx, env, expr) != "Call:17" { exit(1); }
+}

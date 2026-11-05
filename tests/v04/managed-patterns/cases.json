@@ -1,0 +1,42 @@
+{
+  "option-result-patterns.rey": {
+    "expect": "ok",
+    "native_only": true,
+    "reason": "Exhaustive Option/Result pattern fixture reached the 1000000-step IR evaluator limit in aggregate-5 heap mode; native executions passed. Small interpreted enum, Option and Result match twins remain mandatory."
+  },
+  "option-non-exhaustive.rey": {
+    "expect": "check-error",
+    "diagnostic": "non-exhaustive Option match"
+  },
+  "result-non-exhaustive.rey": {
+    "expect": "check-error",
+    "diagnostic": "non-exhaustive Result match"
+  },
+  "option-wrong-variant.rey": {
+    "expect": "check-error",
+    "diagnostic": "unknown Option variant"
+  },
+  "option-duplicate-variant.rey": {
+    "expect": "check-error",
+    "diagnostic": "duplicate enum match arm"
+  },
+  "option-payload-arity.rey": {
+    "expect": "check-error",
+    "diagnostic": "expects at most 1 payload pattern"
+  },
+  "nullable-is-not-option.rey": {
+    "expect": "check-error",
+    "diagnostic": "built-in sum pattern does not match scrutinee type"
+  },
+  "payload-type-mismatch.rey": {
+    "expect": "check-error",
+    "diagnostic": "initializer type mismatch"
+  },
+  "nominal-identity/positive.rey": {
+    "expect": "ok"
+  },
+  "nominal-identity/negative.rey": {
+    "expect": "check-error",
+    "diagnostic": "argument 1 type mismatch"
+  }
+}

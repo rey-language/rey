@@ -1,0 +1,14 @@
+import layout::{layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy};
+import containers::{managedStringFromInt, managedStringToInt, managedStringByte};
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var context = managedCreate(registry, false);
+    var value = managedStringFromInt(context, stringLayout, 9223372036854775807);
+    __reyRawStoreByte(__reyRawOffset(value, 24 + 18), managedStringByte(context, value, 18) + 1);
+    managedStringToInt(context, value);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

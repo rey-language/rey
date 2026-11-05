@@ -1,0 +1,140 @@
+import ir::{IRProgram};
+import ir::optimize::cleanup::{eliminateBoundsChecks, eliminateDeadValues, eliminateRedundantLoads, eliminateRedundantZeroes, simplifyLoops};
+import ir::optimize::inline::{inlineSmallFunctions, specializeConstants};
+import ir::optimize::propagate::{propagateConstants, propagateCopies};
+import ir::optimize::range::{foldRanges};
+import ir::optimize::scalar::{foldConstants};
+import ir::optimize::shape::{verifyCopy};
+import ir::optimize::stream::{fuseStreams};
+
+pub struct OptimizeFlags {
+    pub fold: bool,
+    pub propagate: bool,
+    pub copy: bool,
+    pub dead: bool,
+    pub range: bool,
+    pub inline: bool,
+    pub specialize: bool,
+    pub loops: bool,
+    pub bounds: bool,
+    pub loads: bool,
+    pub zero: bool,
+    pub fuse: bool,
+}
+
+pub func flagsNone(): OptimizeFlags {
+    return OptimizeFlags { fold: false, propagate: false, copy: false, dead: false, range: false, inline: false, specialize: false, loops: false, bounds: false, loads: false, zero: false, fuse: false };
+}
+
+pub func flagsAll(): OptimizeFlags {
+    return OptimizeFlags { fold: true, propagate: true, copy: true, dead: true, range: true, inline: true, specialize: true, loops: true, bounds: true, loads: true, zero: true, fuse: true };
+}
+
+func flagsFromName(flags: OptimizeFlags, name: string): OptimizeFlags {
+    if name == "fold" { flags.fold = true; }
+    else if name == "propagate" { flags.propagate = true; }
+    else if name == "copy" { flags.copy = true; }
+    else if name == "dead" { flags.dead = true; }
+    else if name == "range" { flags.range = true; }
+    else if name == "inline" { flags.inline = true; }
+    else if name == "specialize" { flags.specialize = true; }
+    else if name == "loops" { flags.loops = true; }
+    else if name == "bounds" { flags.bounds = true; }
+    else if name == "loads" { flags.loads = true; }
+    else if name == "zero" { flags.zero = true; }
+    else if name == "fuse" { flags.fuse = true; }
+    return flags;
+}
+
+pub func parseFlags(text: string): Result<OptimizeFlags, string> {
+    if text == "" || text == "off" { return Result.Ok(flagsNone()); }
+    if text == "all" { return Result.Ok(flagsAll()); }
+    var flags = flagsNone();
+    var start = 0;
+    var index = 0;
+    loop {
+        if index > text.len() { break; }
+        if index == text.len() || text[index] == ',' {
+            if index == start { return Result.Err("empty optimization pass name"); }
+            var name = text.slice(start, index);
+            var known = name == "fold" || name == "propagate" || name == "copy" || name == "dead" || name == "range" || name == "inline" || name == "specialize" || name == "loops" || name == "bounds" || name == "loads" || name == "zero" || name == "fuse";
+            if !known { return Result.Err("unknown optimization pass: " + name); }
+            flags = flagsFromName(flags, name);
+            start = index + 1;
+        }
+        index = index + 1;
+    }
+    return Result.Ok(flags);
+}
+
+pub func optimizeProgram(program: IRProgram, flags: OptimizeFlags): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "optimizer input");
+    if verified.isErr() { return verified; }
+    var current = program;
+    if flags.fold {
+        var folded = foldConstants(current);
+        if folded.isErr() { return folded; }
+        current = folded.unwrap();
+    }
+    if flags.propagate {
+        var propagated = propagateConstants(current);
+        if propagated.isErr() { return propagated; }
+        current = propagated.unwrap();
+    }
+    if flags.specialize {
+        var specialized = specializeConstants(current);
+        if specialized.isErr() { return specialized; }
+        current = specialized.unwrap();
+    }
+    if flags.propagate {
+        var propagatedAgain = propagateConstants(current);
+        if propagatedAgain.isErr() { return propagatedAgain; }
+        current = propagatedAgain.unwrap();
+    }
+    if flags.inline {
+        var inlined = inlineSmallFunctions(current);
+        if inlined.isErr() { return inlined; }
+        current = inlined.unwrap();
+    }
+    if flags.fuse {
+        var fused = fuseStreams(current);
+        if fused.isErr() { return fused; }
+        current = fused.unwrap();
+    }
+    if flags.copy {
+        var copied = propagateCopies(current);
+        if copied.isErr() { return copied; }
+        current = copied.unwrap();
+    }
+    if flags.loads {
+        var loaded = eliminateRedundantLoads(current);
+        if loaded.isErr() { return loaded; }
+        current = loaded.unwrap();
+    }
+    if flags.zero {
+        var zeroed = eliminateRedundantZeroes(current);
+        if zeroed.isErr() { return zeroed; }
+        current = zeroed.unwrap();
+    }
+    if flags.range {
+        var ranged = foldRanges(current);
+        if ranged.isErr() { return ranged; }
+        current = ranged.unwrap();
+    }
+    if flags.bounds {
+        var bounded = eliminateBoundsChecks(current);
+        if bounded.isErr() { return bounded; }
+        current = bounded.unwrap();
+    }
+    if flags.loops {
+        var simplified = simplifyLoops(current);
+        if simplified.isErr() { return simplified; }
+        current = simplified.unwrap();
+    }
+    if flags.dead {
+        var eliminated = eliminateDeadValues(current);
+        if eliminated.isErr() { return eliminated; }
+        current = eliminated.unwrap();
+    }
+    return verifyCopy(current, "optimizer output");
+}

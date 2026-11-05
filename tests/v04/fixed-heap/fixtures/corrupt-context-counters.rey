@@ -1,0 +1,31 @@
+import layout;
+import heap;
+
+func expect(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func at(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func registryFor(payloadBytes: int, first: int, second: int, third: int, referenceCount: int): __rey_raw_address {
+    var registry = layout.layoutRegistryCreate(1);
+    var offsets = __reyRawNull();
+    if referenceCount > 0 {
+        offsets = __reyRawMap(referenceCount * 8);
+        __reyRawStoreI64(offsets, first);
+        if referenceCount > 1 { __reyRawStoreI64(at(offsets, 8), second); }
+        if referenceCount > 2 { __reyRawStoreI64(at(offsets, 16), third); }
+    }
+    layout.layoutRegisterFixed(registry, payloadBytes, offsets, referenceCount);
+    if referenceCount > 0 { __reyRawUnmap(offsets, referenceCount * 8); }
+    return registry;
+}
+
+func main(): void {
+var registry = registryFor(0, 0, 0, 0, 0);
+var value = heap.heapCreate(registry);
+__reyRawStoreI64(at(value, 24), -1);
+heap.heapLivePayloadBytes(value);
+}

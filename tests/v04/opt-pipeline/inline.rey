@@ -1,0 +1,8 @@
+func addOne(value: int): int {
+    return value + 1;
+}
+
+func main(): void {
+    var total = addOne(41);
+    if total != 42 { var failure = 1 / 0; }
+}

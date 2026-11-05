@@ -1,0 +1,31 @@
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateSized, managedCollect, managedCreate, managedDestroy, managedLiveObjects, managedRootPop, managedRootPush, managedRootSet, managedStoreReference};
+
+func require(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(2);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 8);
+    var ownerLayout = layoutRegisterVariable(registry, 16, offsets, 1, 2);
+    var childLayout = layoutRegisterFixed(registry, 0, __reyRawNull(), 0);
+    __reyRawUnmap(offsets, 8);
+
+    var context = managedCreate(registry, false);
+    var owner = managedAllocateSized(context, ownerLayout, 24);
+    var fixedChild = managedAllocateSized(context, childLayout, 0);
+    var tailChild = managedAllocateSized(context, childLayout, 0);
+    managedStoreReference(context, owner, 8, fixedChild);
+    managedStoreReference(context, owner, 16, tailChild);
+    require(__reyRawLoadI64(__reyRawOffset(owner, 16)) == 1);
+
+    var ownerSlot = managedRootPush(context);
+    managedRootSet(context, ownerSlot, owner);
+    managedCollect(context);
+    require(managedLiveObjects(context) == 3);
+    managedRootPop(context, ownerSlot);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

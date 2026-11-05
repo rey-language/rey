@@ -1,0 +1,60 @@
+import containers::{managedStringFromCString, managedVecCreate, managedVecPushI64, managedWritePackedSegments};
+import host::{hostArg, hostArgCount, hostArgRelease, hostTestSetWriteMode};
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate};
+import managed::{managedAllocateSized, managedCreate, managedStoreReference};
+
+func check(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func main(): void {
+    check(hostArgCount() == 3, 2290);
+    var registry = layoutRegistryCreate(4);
+    var referenceOffset = __reyRawMap(8);
+    __reyRawStoreI64(referenceOffset, 0);
+    var vectorLayout = layoutRegisterFixed(registry, 8, referenceOffset, 1);
+    var dataLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var bodyLayout = layoutRegisterFixed(registry, 24, referenceOffset, 1);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var context = managedCreate(registry);
+
+    var pathArgument = hostArg(1);
+    var path = managedStringFromCString(context, stringLayout, pathArgument);
+    hostArgRelease(pathArgument);
+
+    var modeArgument = hostArg(2);
+    var modeByte = __reyRawLoadByte(modeArgument);
+    hostArgRelease(modeArgument);
+    if modeByte == 101 { hostTestSetWriteMode(1); }
+    else if modeByte == 102 { hostTestSetWriteMode(2); }
+    else { __reyRawFail(2291); }
+
+    var header = managedVecCreate(context, vectorLayout, dataLayout, 4);
+    managedVecPushI64(context, header, dataLayout, 0);
+    managedVecPushI64(context, header, dataLayout, 128);
+    managedVecPushI64(context, header, dataLayout, 255);
+    managedVecPushI64(context, header, dataLayout, 65);
+
+    var length = 5003;
+    var lanes = managedVecCreate(context, vectorLayout, dataLayout, (length + 6) / 7);
+    var at = 0;
+    while at < length {
+        var lane = 0;
+        var factor = 1;
+        var byteAt = 0;
+        while byteAt < 7 && at < length {
+            lane = lane + ((at * 131 + 17) % 256) * factor;
+            factor = factor * 256;
+            byteAt = byteAt + 1;
+            at = at + 1;
+        }
+        managedVecPushI64(context, lanes, dataLayout, lane);
+    }
+
+    var body = managedAllocateSized(context, bodyLayout, 24);
+    managedStoreReference(context, body, 0, lanes);
+    __reyRawStoreI64(__reyRawOffset(body, 24), length);
+    __reyRawStoreI64(__reyRawOffset(body, 32), 1346458188);
+    var written = managedWritePackedSegments(context, path, header, body, bodyLayout, dataLayout);
+    check(written && modeByte == 101, 2292);
+}

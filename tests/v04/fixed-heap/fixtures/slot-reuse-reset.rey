@@ -1,0 +1,51 @@
+import layout;
+import heap;
+
+func expect(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func at(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func registryFor(payloadBytes: int, first: int, second: int, third: int, referenceCount: int): __rey_raw_address {
+    var registry = layout.layoutRegistryCreate(1);
+    var offsets = __reyRawNull();
+    if referenceCount > 0 {
+        offsets = __reyRawMap(referenceCount * 8);
+        __reyRawStoreI64(offsets, first);
+        if referenceCount > 1 { __reyRawStoreI64(at(offsets, 8), second); }
+        if referenceCount > 2 { __reyRawStoreI64(at(offsets, 16), third); }
+    }
+    layout.layoutRegisterFixed(registry, payloadBytes, offsets, referenceCount);
+    if referenceCount > 0 { __reyRawUnmap(offsets, referenceCount * 8); }
+    return registry;
+}
+
+func main(): void {
+var registry = registryFor(24, 0, 16, 0, 2);
+var value = heap.heapCreate(registry);
+var survivor = heap.heapAllocate(value, 1);
+var released = heap.heapAllocate(value, 1);
+__reyRawStoreAddress(at(released, 16), survivor);
+__reyRawStoreAddress(at(released, 32), released);
+__reyRawStoreByte(at(survivor, 24), 91);
+__reyRawStoreByte(at(released, 24), 73);
+expect(heap.heapMark(value, survivor), 1001);
+expect(heap.heapSweep(value) == 1, 1002);
+expect(heap.heapLiveObjects(value) == 1 && heap.heapLastReclaimedObjects(value) == 1, 1003);
+var reused = heap.heapAllocate(value, 1);
+expect(__reyRawEqual(reused, released), 1004);
+var index = 0;
+while index < 24 {
+    expect(__reyRawLoadByte(at(reused, 16 + index)) == 0, 1005);
+    index = index + 1;
+}
+expect(__reyRawEqual(__reyRawLoadAddress(at(reused, 16)), __reyRawNull()), 1006);
+expect(__reyRawEqual(__reyRawLoadAddress(at(reused, 32)), __reyRawNull()), 1007);
+expect(__reyRawLoadByte(at(survivor, 24)) == 91, 1008);
+expect(heap.heapLiveObjects(value) == 2 && heap.heapLivePayloadBytes(value) == 48, 1009);
+heap.heapDestroy(value);
+layout.layoutRegistryRelease(registry);
+}

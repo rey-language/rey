@@ -1,0 +1,3 @@
+import dependency;
+
+func main(): void { return; }

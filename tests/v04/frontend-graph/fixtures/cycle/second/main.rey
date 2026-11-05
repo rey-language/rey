@@ -1,0 +1,5 @@
+import first::{one};
+
+pub func two(): int {
+    return one();
+}

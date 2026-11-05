@@ -1,0 +1,52 @@
+func main(): void { return; }
+
+func countingSum(): int {
+    var i: int = 0;
+    var total: int = 0;
+    while i < 5 {
+        if i < 3 { total += i; } else { total += 2; }
+        i += 1;
+    }
+    return total;
+}
+
+func zeroIterations(): int {
+    var value: int = 17;
+    while false { value = 99; }
+    return value;
+}
+
+func branchOneReturns(): int {
+    var value: int = 4;
+    if false { return 2; } else { value += 3; }
+    return value;
+}
+
+func shadowing(): int {
+    var value: int = 5;
+    { var value: int = 10; value += 1; }
+    return value;
+}
+
+func nestedLoops(): int {
+    var i: int = 0;
+    var total: int = 0;
+    while i < 3 {
+        var j: int = 0;
+        while j < 2 { total += 1; j += 1; }
+        i += 1;
+    }
+    return total;
+}
+
+func loopControl(): int {
+    var i: int = 0;
+    var total: int = 0;
+    while i < 10 {
+        i += 1;
+        if i == 3 { continue; }
+        if i == 7 { break; }
+        total += i;
+    }
+    return total;
+}

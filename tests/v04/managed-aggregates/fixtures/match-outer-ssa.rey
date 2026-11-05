@@ -1,0 +1,57 @@
+struct Node {
+    pub value: int,
+    pub next: Node?,
+}
+
+enum Route {
+    Cold,
+    Warm,
+    Return(value: Node),
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func verifyPair(value: Node, count: int): bool {
+    var allocationNoise: Node = Node { value: count + 1, next: value };
+    return value.value == count && allocationNoise.next == value;
+}
+
+func update(route: Route, seed: Node): Node {
+    var count: int = 0;
+    var current: Node = seed;
+    match route {
+        Route::Cold => {
+            count = 11;
+            current = Node { value: 11, next: seed };
+        },
+        Route::Warm => {
+            count = 22;
+            current = Node { value: 22, next: seed };
+        },
+        Route::Return(value) => { return value; },
+    }
+    sourcecheck(count == current.value);
+    sourcecheck(current.next == seed);
+    sourcecheck(verifyPair(current, count));
+    return current;
+}
+
+func main(): void {
+    var seed: Node = Node { value: 5, next: null };
+    var cold: Node = update(Route::Cold, seed);
+    sourcecheck(cold.value == 11);
+    sourcecheck(cold.next == seed);
+    var warm: Node = update(Route::Warm, seed);
+    sourcecheck(warm.value == 22);
+    sourcecheck(warm.next == seed);
+    var returned: Node = update(Route::Return(seed), seed);
+    sourcecheck(returned == seed);
+    sourcecheck(seed.value == 5);
+    return;
+}

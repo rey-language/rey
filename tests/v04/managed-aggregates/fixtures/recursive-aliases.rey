@@ -1,0 +1,81 @@
+struct Node {
+    pub value: int,
+    pub enabled: bool,
+    pub next: Node?,
+}
+
+struct Empty {
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func echo(value: Node): Node {
+    return value;
+}
+
+func echoNullable(value: Node?): Node? {
+    return value;
+}
+
+func echoEmpty(value: Empty): Empty {
+    return value;
+}
+
+func descend(value: Node?, count: int): Node? {
+    if count == 0 {
+        return value;
+    }
+    if value == null {
+        return null;
+    } else {
+        return descend(value.next, count - 1);
+    }
+}
+
+func chooseEight(a: Node, b: Node, c: Node, d: Node, e: Node, f: Node, g: Node, h: Node): Node {
+    return h;
+}
+
+func main(): void {
+    var child: Node = Node { value: 2, enabled: false, next: null };
+    var node: Node = Node { value: 1, enabled: true, next: child };
+    var alias: Node = echo(node);
+    alias.value = 9;
+    alias.enabled = false;
+    alias.next = node;
+    var chosen: Node = chooseEight(node, node, node, node, node, node, node, alias);
+    var same: bool = node == chosen;
+    var different: bool = node != child;
+    var nullable: Node? = echoNullable(node);
+    var found: Node? = descend(nullable, 1);
+    if found != null {
+        found.value = found.value + 1;
+    }
+    var empty: Empty = Empty { };
+    var anotherEmpty: Empty = Empty { };
+    sourcecheck(same);
+    sourcecheck(different);
+    sourcecheck(chosen == alias);
+    sourcecheck(node.value == 10);
+    sourcecheck(!node.enabled);
+    sourcecheck(alias.value == 10);
+    sourcecheck(!alias.enabled);
+    sourcecheck(alias.next == node);
+    sourcecheck(nullable == node);
+    sourcecheck(found != null);
+    if found != null {
+        sourcecheck(found.value == 10);
+    } else {
+        sourcecheck(false);
+    }
+    sourcecheck(descend(child, 2) == null);
+    sourcecheck(empty == echoEmpty(empty));
+    sourcecheck(empty != anotherEmpty);
+    return;
+}

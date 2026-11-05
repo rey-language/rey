@@ -1,0 +1,33 @@
+import managed::{managedCreate, managedDestroy, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes};
+import gc::{gcRequestedRangeMetadataBytes};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry, false);
+    var region = managedRegionCreate(context);
+    var index = 0;
+    while index < 300 {
+        managedRegionAllocate(context, region, nodeLayout);
+        index = index + 1;
+    }
+    check(managedRegionObjectCount(context) == 300);
+    check(managedRegionRequestedBytes(context) == 73984);
+    check(managedRegionUsedBytes(context) == 33600);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 32);
+    managedRegionEnd(context, region);
+    check(managedRegionObjectCount(context) == 0);
+    check(managedRegionRequestedBytes(context) == 0);
+    check(managedRegionUsedBytes(context) == 0);
+    check(gcRequestedRangeMetadataBytes(__reyRawLoadAddress(__reyRawOffset(context, 24))) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

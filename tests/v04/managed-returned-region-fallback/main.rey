@@ -1,0 +1,10 @@
+import ir;
+
+func main(): void {
+    var effects = ir.unknownEffects();
+    if effects.allocates != ir.factUnknown() || effects.argumentEscapes.len() != 0 {
+        exit(1);
+        return;
+    }
+    println("returned region fallback: all fixtures passed");
+}

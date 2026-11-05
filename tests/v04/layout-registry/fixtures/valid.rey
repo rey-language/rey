@@ -1,0 +1,67 @@
+import layout;
+
+func expect(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func exerciseLayouts(): void {
+    var emptyRegistry = layout.layoutRegistryCreate(0);
+    expect(layout.layoutCount(emptyRegistry) == 0, 900);
+    layout.layoutRegistryRelease(emptyRegistry);
+
+    var registry = layout.layoutRegistryCreate(4);
+    expect(__reyRawLoadI64(registry) == 1380273234, 930);
+    expect(__reyRawLoadI64(__reyRawOffset(registry, 8)) == 4, 931);
+    expect(__reyRawLoadI64(__reyRawOffset(registry, 24)) == 96, 932);
+    expect(layout.layoutCount(registry) == 0, 901);
+    var noReferences = layout.layoutRegisterFixed(registry, 3, __reyRawNull(), 0);
+    expect(noReferences == 1, 902);
+    expect(layout.layoutPayloadBytes(registry, noReferences) == 3, 903);
+    expect(layout.layoutReferenceCount(registry, noReferences) == 0, 904);
+
+    var offsets = __reyRawMap(24);
+    __reyRawStoreI64(offsets, 0);
+    __reyRawStoreI64(__reyRawOffset(offsets, 8), 8);
+    __reyRawStoreI64(__reyRawOffset(offsets, 16), 24);
+    var copied = layout.layoutRegisterFixed(registry, 32, offsets, 3);
+    expect(copied == 2, 905);
+    var descriptor = __reyRawLoadAddress(__reyRawOffset(registry, 72));
+    expect(__reyRawLoadI64(descriptor) == 32, 933);
+    expect(__reyRawLoadI64(__reyRawOffset(descriptor, 8)) == 3, 934);
+    expect(__reyRawLoadI64(__reyRawOffset(descriptor, 16)) == 0, 935);
+    expect(__reyRawLoadI64(__reyRawOffset(descriptor, 24)) == 0, 936);
+    __reyRawStoreI64(__reyRawOffset(offsets, 8), 16);
+    expect(layout.layoutReferenceCount(registry, copied) == 3, 906);
+    expect(layout.layoutReferenceOffset(registry, copied, 0) == 0, 907);
+    expect(layout.layoutReferenceOffset(registry, copied, 1) == 8, 908);
+    expect(layout.layoutReferenceOffset(registry, copied, 2) == 24, 909);
+    __reyRawUnmap(offsets, 24);
+
+    var oneOffset = __reyRawMap(8);
+    __reyRawStoreI64(oneOffset, 8);
+    var oddPayload = layout.layoutRegisterFixed(registry, 17, oneOffset, 1);
+    expect(oddPayload == 3, 910);
+    var duplicateLayout = layout.layoutRegisterFixed(registry, 17, oneOffset, 1);
+    expect(duplicateLayout == 4, 937);
+    expect(!__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(registry, 80)), __reyRawLoadAddress(__reyRawOffset(registry, 88))), 938);
+    expect(layout.layoutPayloadBytes(registry, oddPayload) == 17, 911);
+    expect(layout.layoutReferenceOffset(registry, oddPayload, 0) == 8, 912);
+    __reyRawUnmap(oneOffset, 8);
+    layout.layoutRegistryRelease(registry);
+}
+
+func exerciseRepeatedOwnership(): void {
+    var iteration = 0;
+    while iteration < 300 {
+        var registry = layout.layoutRegistryCreate(1);
+        var id = layout.layoutRegisterFixed(registry, 0, __reyRawNull(), 0);
+        expect(id == 1, 920);
+        layout.layoutRegistryRelease(registry);
+        iteration = iteration + 1;
+    }
+}
+
+func main(): void {
+    exerciseLayouts();
+    exerciseRepeatedOwnership();
+}

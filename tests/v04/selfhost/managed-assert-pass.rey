@@ -1,0 +1,12 @@
+var calls: int = 0;
+
+func message(): string {
+    calls = calls + 1;
+    return "ready";
+}
+
+func main(): void {
+    assert(true, message());
+    if calls != 1 { exit(1); }
+    println('A');
+}

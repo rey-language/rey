@@ -1,0 +1,121 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRType, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram};
+import ir::managed::completion::{CohortSite, MemoryCompletion, verifyMemoryCompletion};
+import ir::managed::lifetime::{verifyManagedRegionPlan};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("managed-lifetime-safety.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } escapes.push(Escape::Unknown); index = index + 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("managed-lifetime-safety", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func straight(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, instructions: Vec<Instruction>, returnId: int): IRFunction {
+    var terminator = ir.returnVoid(source());
+    if returnId >= 0 { terminator = ir.returnValue(returnId, source()); }
+    return makeFunction(id, name, parameterTypes, returnType, parameters, [ir.basicBlock(0, [], instructions, terminator)]);
+}
+
+func allocationHook(): IRFunction {
+    return straight(20, "allocate", [ir.irI64()], ir.irRawAddress(), [ir.irValue(10, ir.irI64())], [ir.rawNull(0, source())], 0);
+}
+
+func storeHook(): IRFunction {
+    var parameters = [ir.irValue(10, ir.irRawAddress()), ir.irValue(11, ir.irI64()), ir.irValue(12, ir.irRawAddress())];
+    return straight(21, "store", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), parameters, [], -1);
+}
+
+func layout(): ManagedLayout {
+    var fields: Vec<ManagedField> = [];
+    return ManagedLayout { id: 1, key: "fixture::Cell", payloadBytes: 8, fields: fields };
+}
+
+func rawToIntModule(derived: bool): ManagedProgram {
+    var mainInstructions: Vec<Instruction> = [ir.call(-1, ir.irVoid(), 11, [], source())];
+    var main = straight(10, "main", [], ir.irVoid(), [], mainInstructions, -1);
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())];
+    var derivedValues: Vec<ManagedDerived> = [];
+    if derived {
+        instructions.push(ir.constI64(2, 0, source()));
+        instructions.push(ir.rawOffset(3, 1, 2, source()));
+        instructions.push(ir.rawToInt(4, 3, source()));
+        derivedValues.push(ManagedDerived { functionId: 11, valueId: 3, ownerId: 1 });
+    } else {
+        instructions.push(ir.rawToInt(2, 1, source()));
+    }
+    var user = straight(11, "rawAddressUse", [], ir.irVoid(), [], instructions, -1);
+    var metadata: Vec<ManagedFunction> = [ManagedFunction { functionId: 11, referenceValues: [1], parameterLayouts: [], returnLayout: 0 }];
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 11, blockId: 0, resultId: 1, layoutId: 1 }];
+    var functions: Vec<IRFunction> = [main, user, allocationHook(), storeHook()];
+    return ManagedProgram { program: ir.irProgram(10, functions), layouts: [layout()], functions: metadata, allocations: allocations, derived: derivedValues, allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: [] };
+}
+
+func regionPlacement(): ManagedPlacement {
+    var allocations: Vec<ManagedAllocationPlacement> = [ManagedAllocationPlacement { functionId: 11, resultId: 1, storage: ManagedStorage::Region }];
+    return ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [11] };
+}
+
+func requireRawToIntRejected(derived: bool, label: string): void {
+    var result = verifyManagedRegionPlan(rawToIntModule(derived), regionPlacement());
+    require(result.isErr(), label + " must reject non-heap address-to-integer conversion");
+    require(result.unwrapErr().contains("non-heap managed address is converted to an integer"), label + " must report the unsafe conversion");
+}
+
+func cohortModule(withAmbientHook: bool): ManagedProgram {
+    var main = straight(10, "main", [], ir.irVoid(), [], [ir.call(-1, ir.irVoid(), 11, [], source())], -1);
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 20, [0], source())];
+    var runtimeHooks: Vec<ManagedHook> = [];
+    var functions: Vec<IRFunction> = [main];
+    if withAmbientHook {
+        instructions.push(ir.call(2, ir.irRawAddress(), 30, [], source()));
+        functions.push(straight(30, "managedReadFile", [], ir.irRawAddress(), [], [ir.rawNull(0, source())], 0));
+        runtimeHooks.push(ManagedHook { functionId: 30, runtimeName: "managedReadFile", mayCollect: true });
+    }
+    var first = ir.basicBlock(0, [], instructions, ir.jump(1, [], source()));
+    var second = ir.basicBlock(1, [], [], ir.returnVoid(source()));
+    var user = makeFunction(11, "phaseAllocation", [], ir.irVoid(), [], [first, second]);
+    var metadata: Vec<ManagedFunction> = [ManagedFunction { functionId: 11, referenceValues: [1], parameterLayouts: [], returnLayout: 0 }];
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 11, blockId: 0, resultId: 1, layoutId: 1 }];
+    functions.push(user);
+    functions.push(allocationHook());
+    functions.push(storeHook());
+    return ManagedProgram { program: ir.irProgram(10, functions), layouts: [layout()], functions: metadata, allocations: allocations, derived: [], allocateFunctionId: 20, storeReferenceFunctionId: 21, collectFunctionId: 22, variableLayouts: [], hooks: runtimeHooks };
+}
+
+func cohortCompletion(siteBlock: int, budget: int): MemoryCompletion {
+    var allocations: Vec<ManagedAllocationPlacement> = [ManagedAllocationPlacement { functionId: 11, resultId: 1, storage: ManagedStorage::Heap }];
+    var placement = ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [] };
+    var cohorts: Vec<CohortSite> = [CohortSite { functionId: 11, blockId: siteBlock, resultId: 1, kind: 2, scratchBudget: budget, reason: "fixture" }];
+    return MemoryCompletion { placement: placement, stack: [], cohorts: cohorts, retentions: [], deadFields: [], scalars: [], destinations: [], containerRetained: [] };
+}
+
+func requireCompletionRejected(module: ManagedProgram, completion: MemoryCompletion, diagnostic: string, label: string): void {
+    var result = verifyMemoryCompletion(module, completion);
+    require(result.isErr(), label + " must be rejected");
+    require(result.unwrapErr().contains(diagnostic), label + " must report " + diagnostic);
+}
+
+func main(): void {
+    requireRawToIntRejected(false, "direct raw.to.int");
+    requireRawToIntRejected(true, "derived raw.to.int");
+
+    var plain = cohortModule(false);
+    requireCompletionRejected(plain, cohortCompletion(1, 8), "cohort block does not match its allocation", "cohort block mismatch");
+    requireCompletionRejected(plain, cohortCompletion(0, 7), "cohort scratch budget is outside its bound", "undersized cohort budget");
+
+    var ambient = cohortModule(true);
+    requireCompletionRejected(ambient, cohortCompletion(0, 8), "block has unbounded ambient effects", "managed ambient hook in cohort block");
+    print("managed lifetime safety: all fixtures passed");
+}

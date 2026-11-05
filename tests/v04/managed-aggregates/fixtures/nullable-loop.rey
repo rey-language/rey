@@ -1,0 +1,47 @@
+struct Chain {
+    pub value: int,
+    pub next: Chain?,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func echoChain(value: Chain): Chain {
+    return value;
+}
+
+func main(): void {
+    var first: Chain = Chain { value: 1, next: null };
+    var second: Chain = Chain { value: 2, next: first };
+    var firstRef: Chain? = first;
+    var secondRef: Chain? = echoChain(second);
+    var cursor: Chain? = second;
+    var step: int = 0;
+    var total: int = 0;
+    while step < 3 {
+        var next: Chain? = null;
+        if cursor != null {
+            total = total + cursor.value;
+            next = cursor.next;
+        }
+        cursor = next;
+        step = step + 1;
+    }
+    var same: bool = echoChain(second) == second;
+    sourcecheck(total == 3);
+    sourcecheck(cursor == null);
+    sourcecheck(firstRef != null);
+    sourcecheck(secondRef != null);
+    sourcecheck(same);
+    if secondRef != null {
+        sourcecheck(secondRef.next == first);
+    } else {
+        sourcecheck(false);
+    }
+    return;
+}

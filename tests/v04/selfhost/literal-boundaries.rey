@@ -1,0 +1,12 @@
+func main(): void {
+    var values: Vec<string> = ["", "a", "abcdefg", "abcdefg\x80", "1234567\xc3\xa9", "abcdefghijklmno", "abcdefghijklmno\xff", "abcdefghijklmno\xff\x00"];
+    var lengths: Vec<int> = [0, 1, 7, 8, 9, 15, 16, 17];
+    var i = 0;
+    while i < values.len() {
+        if values[i].len() != lengths[i] { exit(1); }
+        i = i + 1;
+    }
+    if int(values[3][7]) != 128 || int(values[4][7]) != 195 || int(values[4][8]) != 169 { exit(1); }
+    if int(values[6][15]) != 255 || int(values[7][16]) != 0 { exit(1); }
+    if values[4] != "1234567\xc3\xa9" { exit(1); }
+}

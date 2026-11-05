@@ -1,0 +1,9 @@
+func main(): void {
+    var index = 0;
+    var total = 0;
+    while index < 10 {
+        total = total + index;
+        index = index + 1;
+    }
+    if total != 45 { var failure = 1 / 0; }
+}

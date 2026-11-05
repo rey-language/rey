@@ -1,0 +1,13 @@
+import gc::{gcCreate, gcDestroy, gcRegisterRootRange};
+import heap::{heapCreate};
+import layout::{layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+    var roots = __reyRawMap(8);
+    __reyRawStoreAddress(roots, __reyRawNull());
+    gcRegisterRootRange(collector, roots, 1);
+    gcDestroy(collector);
+}

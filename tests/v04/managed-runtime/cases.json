@@ -1,0 +1,14 @@
+{
+  "managed-lifetimes": 0,
+  "many-objects": 0,
+  "valid-reference-tail-prefix": 0,
+  "register-unaligned-reference-tail": 1002,
+  "register-reference-tail-count-overlap": 1002,
+  "corrupt-unaligned-reference-tail": 1006,
+  "corrupt-reference-tail-count-overlap": 1006,
+  "heap-to-region": 2203,
+  "shorter-lived-region-value": 2203,
+  "invalid-reference-field": 2203,
+  "ended-region": 2204,
+  "outstanding-root-range": 2105
+}

@@ -1,0 +1,45 @@
+struct Node {
+    pub value: int,
+    pub next: Node?,
+}
+
+enum State {
+    Empty,
+    Enabled(value: bool),
+    Link(value: Node),
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func describe(value: State): int {
+    match value {
+        State::Empty => { return 0; },
+        State::Enabled(enabled) => { if enabled { return 1; } else { return 2; } },
+        State::Link(node) => { return node.value; },
+    }
+}
+
+func main(): void {
+    var node: Node = Node { value: 7, next: null };
+    var enabled: State = State::Enabled(true);
+    var enabledAgain: State = State::Enabled(true);
+    var linked: State = State::Link(node);
+    var empty: State = State::Empty;
+    sourcecheck(describe(enabled) == 1);
+    sourcecheck(describe(linked) == 7);
+    sourcecheck(describe(empty) == 0);
+    sourcecheck(enabled == enabledAgain);
+    sourcecheck(enabled != empty);
+    sourcecheck(linked == linked);
+    var optionalState: State? = enabled;
+    sourcecheck(optionalState == enabled);
+    optionalState = null;
+    sourcecheck(optionalState == null);
+    return;
+}

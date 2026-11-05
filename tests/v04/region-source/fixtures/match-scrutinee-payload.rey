@@ -1,0 +1,28 @@
+pub struct Span { pub start: int, pub end: int, pub line: int, pub column: int }
+pub enum Expr {
+    Call(CallExpr),
+    Literal(LiteralExpr),
+}
+pub struct CallExpr { pub value: int, pub span: Span }
+pub struct LiteralExpr { pub value: int, pub span: Span }
+func exprName(expr: Expr): string {
+    match expr {
+        Expr::Call(_) => { return "Call"; },
+        Expr::Literal(_) => { return "Literal"; },
+    }
+    return "?";
+}
+func inferCall(expr: CallExpr, original: Expr): string {
+    return exprName(original);
+}
+func inferExpr(expr: Expr): string {
+    match expr {
+        Expr::Call(call) => { return inferCall(call, expr); },
+        Expr::Literal(p) => { return "Literal"; },
+    }
+    return "?";
+}
+func main(): void {
+    var call = Expr::Call(CallExpr { value: 1, span: Span { start: 24, end: 40, line: 2, column: 5 } });
+    if inferExpr(call) != "Call" { exit(1); }
+}

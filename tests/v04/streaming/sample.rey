@@ -1,0 +1,23 @@
+func parseCsvField(index: int): int { return index; }
+
+func keepCsvRow(field: int): bool {
+    var divisor = 2;
+    return field % divisor == 0;
+}
+
+func addCsvTotal(total: int, field: int): int { return total + field; }
+
+func sumFilteredCsv(rowCount: int): int {
+    var index = 0;
+    var total = 0;
+    while index < rowCount {
+        var field = parseCsvField(index);
+        if keepCsvRow(field) { total = addCsvTotal(total, field); }
+        index = index + 1;
+    }
+    return total;
+}
+
+func main(): void {
+    if sumFilteredCsv(5) != 6 { var failure = 1 / 0; }
+}

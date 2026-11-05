@@ -1,0 +1,107 @@
+{
+  "recursive-aliases.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory.",
+    "teardown_native_only": true,
+    "teardown_reason": "The instrumented exhaustive fixture reached the 4000000-step teardown interpreter limit in aggregate-5 heap mode. Both instrumented native executions remain required; small interpreted teardown twins cover the same families."
+  },
+  "nullable-loop.rey": {
+    "expect": "ok",
+    "teardown": false,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory."
+  },
+  "cross-module/main.rey": {
+    "expect": "ok",
+    "teardown": false,
+    "native_only": false
+  },
+  "unsupported-enum.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory.",
+    "teardown_native_only": true,
+    "teardown_reason": "The instrumented exhaustive fixture reached the 4000000-step teardown interpreter limit in aggregate-5 heap mode. Both instrumented native executions remain required; small interpreted teardown twins cover the same families."
+  },
+  "unsupported-string.rey": {
+    "expect": "ok",
+    "teardown": false,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory."
+  },
+  "tagged-option-result.rey": {
+    "expect": "ok",
+    "teardown": false,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory."
+  },
+  "tuples-containers.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory.",
+    "teardown_native_only": true,
+    "teardown_reason": "The instrumented exhaustive fixture reached the 4000000-step teardown interpreter limit in aggregate-5 heap mode. Both instrumented native executions remain required; small interpreted teardown twins cover the same families."
+  },
+  "destination-graphs.rey": {
+    "expect": "ok",
+    "teardown": true,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory.",
+    "teardown_native_only": true,
+    "teardown_reason": "The instrumented exhaustive fixture reached the 4000000-step teardown interpreter limit in aggregate-5 heap mode. Both instrumented native executions remain required; small interpreted teardown twins cover the same families."
+  },
+  "match-outer-ssa.rey": {
+    "expect": "ok",
+    "teardown": false,
+    "native_only": true,
+    "reason": "Exhaustive multi-operation source fixture reached the 1000000-step historical-seed IR evaluator limit in aggregate-5 heap mode; native Darwin and Linux execution passed. Small interpreted family twins remain mandatory."
+  },
+  "runtime-empty-pop.rey": {
+    "expect": "runtime-error",
+    "teardown": false,
+    "native_only": false
+  },
+  "runtime-vector-index.rey": {
+    "expect": "runtime-error",
+    "teardown": false,
+    "native_only": false
+  },
+  "runtime-map-missing-key.rey": {
+    "expect": "runtime-error",
+    "teardown": false,
+    "native_only": false
+  },
+  "runtime-option-unwrap.rey": {
+    "expect": "runtime-error",
+    "teardown": false,
+    "native_only": false
+  },
+  "check-nullable-field-read.rey": {
+    "expect": "check-error",
+    "diagnostic": "unknown field",
+    "teardown": false,
+    "native_only": false
+  },
+  "check-nullable-field-store.rey": {
+    "expect": "check-error",
+    "diagnostic": "unknown field",
+    "teardown": false,
+    "native_only": false
+  },
+  "unsupported-float.rey": {
+    "expect": "lower-error",
+    "diagnostic": "managed lowering does not support type family Float",
+    "teardown": false,
+    "native_only": false
+  },
+  "recursive-enum-equality.rey": {
+    "expect": "lower-error",
+    "diagnostic": "managed recursive value equality is unsupported",
+    "teardown": false,
+    "native_only": false
+  }
+}

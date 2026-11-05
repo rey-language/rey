@@ -1,0 +1,178 @@
+// Relocatable ELF64 x86-64 object. This is not an executable image and it is
+// not execution evidence. The Linux executable writer remains buildElfX64.
+import native::x64::{X64Image};
+import native::bytes::{appendU32Le, appendU64Le};
+
+func fail(message: string): Result<Vec<int>, string> { return Result.Err("elf object: " + message); }
+
+func appendU16(bytes: Vec<int>, value: int): bool {
+    if value < 0 || value > 65535 { return false; }
+    bytes.push(value % 256);
+    bytes.push((value / 256) % 256);
+    return true;
+}
+
+func appendU32(bytes: Vec<int>, value: int): bool { return appendU32Le(bytes, value).isOk(); }
+func appendU64(bytes: Vec<int>, value: int): bool { return appendU64Le(bytes, value).isOk(); }
+
+func appendI64(bytes: Vec<int>, value: int): bool {
+    var remaining = value;
+    var i = 0;
+    while i < 8 {
+        var limb = remaining % 256;
+        if limb < 0 { limb = limb + 256; }
+        bytes.push(limb);
+        remaining = (remaining - limb) / 256;
+        i = i + 1;
+    }
+    return true;
+}
+
+func appendName(bytes: Vec<int>, name: string): bool {
+    var i = 0;
+    while i < name.len() {
+        var byte = int(name[i]);
+        if byte <= 0 || byte > 255 { return false; }
+        bytes.push(byte);
+        i = i + 1;
+    }
+    bytes.push(0);
+    return true;
+}
+
+func align(value: int, boundary: int): int {
+    var remainder = value % boundary;
+    if remainder == 0 { return value; }
+    return value + boundary - remainder;
+}
+
+func symbolIndex(names: Vec<string>, symbol: string): int {
+    var i = 0;
+    while i < names.len() {
+        if names[i] == symbol { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+func sectionHeader(bytes: Vec<int>, name: int, kind: int, flags: int, offset: int, size: int, link: int, info: int, alignment: int, entrySize: int): bool {
+    return appendU32(bytes, name) && appendU32(bytes, kind) && appendU64(bytes, flags)
+        && appendU64(bytes, 0) && appendU64(bytes, offset) && appendU64(bytes, size)
+        && appendU32(bytes, link) && appendU32(bytes, info) && appendU64(bytes, alignment)
+        && appendU64(bytes, entrySize);
+}
+
+pub func buildElfObjectX64(image: X64Image): Result<Vec<int>, string> {
+    if image.target != "linux-x64" && image.target != "windows-x64" && image.target != "darwin-x64" {
+        return fail("target is not an x64 image");
+    }
+    if image.code.bytes.len() == 0 { return fail("instruction stream is empty"); }
+    var i = 0;
+    while i < image.code.bytes.len() {
+        if image.code.bytes[i] < 0 || image.code.bytes[i] > 255 { return fail("invalid code byte"); }
+        i = i + 1;
+    }
+    var symbols: Vec<string> = Vec.new();
+    i = 0;
+    while i < image.relocations.len() {
+        var reloc = image.relocations[i];
+        if reloc.kind != 1 { return fail("unsupported relocation kind"); }
+        if reloc.symbol == "" { return fail("relocation symbol is empty"); }
+        if reloc.offset < 0 || reloc.offset > image.code.bytes.len() - 4 { return fail("relocation is outside the instruction stream"); }
+        if symbolIndex(symbols, reloc.symbol) < 0 { symbols.push(reloc.symbol); }
+        i = i + 1;
+    }
+    var text: Vec<int> = Vec.new();
+    i = 0;
+    while i < image.code.bytes.len() { text.push(image.code.bytes[i]); i = i + 1; }
+    var stringTable: Vec<int> = Vec.new();
+    stringTable.push(0);
+    var symbolNames: Vec<int> = Vec.new();
+    i = 0;
+    while i < symbols.len() {
+        symbolNames.push(stringTable.len());
+        if !appendName(stringTable, symbols[i]) { return fail("symbol name is not a byte string"); }
+        i = i + 1;
+    }
+    var rela: Vec<int> = Vec.new();
+    i = 0;
+    while i < image.relocations.len() {
+        var reloc = image.relocations[i];
+        var sym = symbolIndex(symbols, reloc.symbol) + 2;
+        if !appendU64(rela, reloc.offset) || !appendU64(rela, sym * 4294967296 + 2) || !appendI64(rela, -4) {
+            return fail("relocation encoding failed");
+        }
+        i = i + 1;
+    }
+    var symbolTable: Vec<int> = Vec.new();
+    if !appendU32(symbolTable, 0) { return fail("null symbol encoding failed"); }
+    symbolTable.push(0);
+    symbolTable.push(0);
+    if !appendU16(symbolTable, 0) || !appendU64(symbolTable, 0) || !appendU64(symbolTable, 0) { return fail("null symbol encoding failed"); }
+    if symbolTable.len() != 24 { return fail("null symbol size mismatch"); }
+    if !appendU32(symbolTable, 0) { return fail("section symbol encoding failed"); }
+    symbolTable.push(3);
+    symbolTable.push(0);
+    if !appendU16(symbolTable, 1) || !appendU64(symbolTable, 0) || !appendU64(symbolTable, 0) { return fail("section symbol encoding failed"); }
+    i = 0;
+    while i < symbols.len() {
+        if !appendU32(symbolTable, symbolNames[i]) { return fail("undefined symbol encoding failed"); }
+        symbolTable.push(16);
+        symbolTable.push(0);
+        if !appendU16(symbolTable, 0) || !appendU64(symbolTable, 0) || !appendU64(symbolTable, 0) { return fail("undefined symbol encoding failed"); }
+        i = i + 1;
+    }
+    var names: Vec<int> = Vec.new();
+    names.push(0);
+    var textName = names.len();
+    if !appendName(names, ".text") { return fail("section name encoding failed"); }
+    var relaName = names.len();
+    if !appendName(names, ".rela.text") { return fail("section name encoding failed"); }
+    var symName = names.len();
+    if !appendName(names, ".symtab") { return fail("section name encoding failed"); }
+    var strName = names.len();
+    if !appendName(names, ".strtab") { return fail("section name encoding failed"); }
+    var shstrName = names.len();
+    if !appendName(names, ".shstrtab") { return fail("section name encoding failed"); }
+
+    var textOffset = 64;
+    var relaOffset = align(textOffset + text.len(), 8);
+    var symOffset = align(relaOffset + rela.len(), 8);
+    var strOffset = symOffset + symbolTable.len();
+    var shstrOffset = strOffset + stringTable.len();
+    var headerOffset = align(shstrOffset + names.len(), 8);
+    var file: Vec<int> = Vec.new();
+    file.push(127); file.push(69); file.push(76); file.push(70); file.push(2); file.push(1); file.push(1);
+    var pad = 0;
+    while pad < 9 { file.push(0); pad = pad + 1; }
+    if !appendU16(file, 1) || !appendU16(file, 62) || !appendU32(file, 1) || !appendU64(file, 0)
+        || !appendU64(file, 0) || !appendU64(file, headerOffset) || !appendU32(file, 0)
+        || !appendU16(file, 64) || !appendU16(file, 0) || !appendU16(file, 0)
+        || !appendU16(file, 64) || !appendU16(file, 6) || !appendU16(file, 5) {
+        return fail("ELF header encoding failed");
+    }
+    if file.len() != 64 { return fail("ELF header size mismatch"); }
+    while file.len() < textOffset { file.push(0); }
+    i = 0;
+    while i < text.len() { file.push(text[i]); i = i + 1; }
+    while file.len() < relaOffset { file.push(0); }
+    i = 0;
+    while i < rela.len() { file.push(rela[i]); i = i + 1; }
+    while file.len() < symOffset { file.push(0); }
+    i = 0;
+    while i < symbolTable.len() { file.push(symbolTable[i]); i = i + 1; }
+    i = 0;
+    while i < stringTable.len() { file.push(stringTable[i]); i = i + 1; }
+    i = 0;
+    while i < names.len() { file.push(names[i]); i = i + 1; }
+    while file.len() < headerOffset { file.push(0); }
+    var headers = file.len();
+    if !sectionHeader(file, 0, 0, 0, 0, 0, 0, 0, 0, 0) { return fail("null section encoding failed"); }
+    if !sectionHeader(file, textName, 1, 6, textOffset, text.len(), 0, 0, 1, 0) { return fail("text section encoding failed"); }
+    if !sectionHeader(file, relaName, 4, 0, relaOffset, rela.len(), 3, 1, 8, 24) { return fail("relocation section encoding failed"); }
+    if !sectionHeader(file, symName, 2, 0, symOffset, symbolTable.len(), 4, 2, 8, 24) { return fail("symbol section encoding failed"); }
+    if !sectionHeader(file, strName, 3, 0, strOffset, stringTable.len(), 0, 0, 1, 0) { return fail("string section encoding failed"); }
+    if !sectionHeader(file, shstrName, 3, 0, shstrOffset, names.len(), 0, 0, 1, 0) { return fail("section-name encoding failed"); }
+    if file.len() != headers + 384 { return fail("section header size mismatch"); }
+    return Result.Ok(file);
+}

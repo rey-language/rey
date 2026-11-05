@@ -1,0 +1,48 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDependencyCount, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedPromotionCount, managedRegionAllocate, managedRegionCreate, managedRegionRequestedBytes, managedRequestedObjectBytes, managedStoreReference};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var node = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry);
+    var outer = managedRegionCreate(context);
+    var inner = managedRegionCreate(context);
+    var older = managedRegionAllocate(context, outer, node, 1);
+    var younger = managedRegionAllocate(context, inner, node, 1);
+    var alias = younger;
+    var youngerGroup = __reyRawLoadAddress(__reyRawOffset(inner, 40));
+    var youngerData = __reyRawLoadAddress(__reyRawOffset(__reyRawLoadAddress(__reyRawOffset(youngerGroup, 32)), 16));
+    var youngerRecord = __reyRawOffset(youngerData, 8);
+    var requestedBeforeStore = managedRegionRequestedBytes(context);
+    check(requestedBeforeStore > 0);
+    managedStoreReference(context, older, 0, younger);
+    check(__reyRawEqual(alias, younger));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(older, 16)), younger));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(youngerRecord, 16)), younger));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(youngerRecord, 24)), outer));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(youngerGroup, 16)), outer));
+    check(managedPromotionCount(context) == 1);
+    check(managedDependencyCount(context) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 48)) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 56)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 48)) == 0);
+    check(managedLiveObjects(context) == 2);
+    check(managedLivePayloadBytes(context) == 16);
+    check(managedRequestedObjectBytes(context) == 64);
+    check(managedRegionRequestedBytes(context) == requestedBeforeStore);
+    managedStoreReference(context, older, 0, younger);
+    check(managedPromotionCount(context) == 1);
+    check(managedDependencyCount(context) == 1);
+    check(managedRegionRequestedBytes(context) == requestedBeforeStore);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(older, 16)), younger));
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

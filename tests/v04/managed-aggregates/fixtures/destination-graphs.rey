@@ -1,0 +1,107 @@
+struct Node {
+    pub value: int,
+    pub next: Node?,
+}
+
+struct Envelope {
+    pub value: int,
+    pub enabled: bool,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func makeChain(depth: int): Node {
+    if depth == 0 {
+        return Node { value: 0, next: null };
+    }
+    var child: Node = makeChain(depth - 1);
+    return Node { value: depth, next: child };
+}
+
+func echoGraph(value: Node): Node {
+    return value;
+}
+
+func forwardGraph(depth: int): Node {
+    var produced: Node = makeChain(depth);
+    return echoGraph(produced);
+}
+
+func returnGraph(depth: int): Node {
+    return forwardGraph(depth);
+}
+
+func localForward(depth: int): Node {
+    var local: Node = Node { value: depth, next: null };
+    return echoGraph(local);
+}
+
+func loopFactory(value: int): Node {
+    var local: Node = Node { value: value, next: null };
+    return local;
+}
+
+func echoEnvelope(value: Envelope): Envelope {
+    return value;
+}
+
+func makeEnvelope(value: int): Envelope {
+    var local: Envelope = Envelope { value: value, enabled: true };
+    return echoEnvelope(local);
+}
+
+func callerReturn(depth: int): Node {
+    var local: Node = returnGraph(depth);
+    local.value = local.value + 1;
+    return local;
+}
+
+func main(): void {
+    var graph: Node = callerReturn(2);
+    var alias: Node = graph;
+    alias.value = 12;
+    sourcecheck(graph.value == 12);
+    var child: Node? = graph.next;
+    if child != null {
+        sourcecheck(child.value == 1);
+        child.value = 21;
+    } else {
+        sourcecheck(false);
+    }
+
+    var local: Node = localForward(13);
+    local.value = 13;
+    sourcecheck(local.value == 13);
+    sourcecheck(graph.value == 12);
+    if child != null {
+        sourcecheck(child.value == 21);
+    } else {
+        sourcecheck(false);
+    }
+
+    var index: int = 0;
+    var total: int = 0;
+    while index < 3 {
+        var loopGraph: Node = loopFactory(2);
+        total = total + loopGraph.value;
+        index = index + 1;
+    }
+    sourcecheck(total == 6);
+
+    var envelope: Envelope = makeEnvelope(31);
+    sourcecheck(envelope.value == 31);
+    sourcecheck(envelope.enabled);
+    envelope.value = 32;
+    sourcecheck(envelope.value == 32);
+
+    graph.next = graph;
+    sourcecheck(graph.next == graph);
+    sourcecheck(graph.value == 12);
+    return;
+}

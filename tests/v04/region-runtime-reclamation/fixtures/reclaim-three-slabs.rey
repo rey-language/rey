@@ -1,0 +1,27 @@
+import layout::{layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedLiveObjects, managedRegionCreate, managedRegionEnd, managedMappedSlabBytes, managedCachedBlockBytes, managedAllocateSized};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var bytes = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var context = managedCreate(registry);
+    var region = managedRegionCreate(context);
+    var index = 0;
+    while index < 127 {
+        managedAllocateSized(context, bytes, 3992);
+        index = index + 1;
+    }
+    check(managedLiveObjects(context) == 127);
+    check(managedMappedSlabBytes(context) >= 786432);
+
+    managedRegionEnd(context, region);
+    check(managedLiveObjects(context) == 0);
+    check(managedMappedSlabBytes(context) == 524288);
+    check(managedCachedBlockBytes(context) > 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

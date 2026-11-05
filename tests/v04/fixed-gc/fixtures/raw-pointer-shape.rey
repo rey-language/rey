@@ -1,0 +1,30 @@
+import gc::{gcAllocate, gcCollect, gcCreate, gcDestroy, gcRootPop, gcRootPush};
+import heap::{heapCreate, heapDestroy, heapLiveObjects};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2199); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(2);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var nodeLayout = layoutRegisterFixed(registry, 8, offsets, 1);
+    var integerLayout = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    __reyRawUnmap(offsets, 8);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 1);
+    var integerObject = gcAllocate(collector, integerLayout, false);
+    var referencedLookingObject = gcAllocate(collector, nodeLayout, false);
+    __reyRawStoreAddress(__reyRawOffset(integerObject, 16), referencedLookingObject);
+    var root = gcRootPush(collector, integerObject);
+    check(gcCollect(collector) == 1);
+    check(heapLiveObjects(heap) == 1);
+    gcRootPop(collector, root);
+    check(gcCollect(collector) == 1);
+    check(heapLiveObjects(heap) == 0);
+    gcDestroy(collector);
+    heapDestroy(heap);
+    layoutRegistryRelease(registry);
+}

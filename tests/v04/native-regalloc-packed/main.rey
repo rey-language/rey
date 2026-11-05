@@ -1,0 +1,139 @@
+import ir;
+import ir::{Escape, IRFunction, IRProgram, Instruction, SourceRef};
+import ir::liveness::{analyzeProgram};
+import ir::storage::registers::{ProgramRegisterPlan, planRegisters};
+import ir::storage::arm64_registers::{Arm64ProgramRegisterPlan, planArm64Registers};
+import native::x64::{emitProgramWithReuse};
+import native::arm64::{emitArm64WithReuse};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("native-regalloc-packed", 0, 1); }
+
+func function(id: int, name: string, instructions: Vec<Instruction>, resultId: int): IRFunction {
+    var escapes: Vec<Escape> = [];
+    var effects = ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+    return ir.irFunction(id, ir.functionKey("native-regalloc-packed", "", name), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(resultId, source()))], effects);
+}
+
+func pressureProgram(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constI64(0, 0, source())];
+    var valueId = 1;
+    while valueId <= 12 {
+        instructions.push(ir.constI64(valueId, valueId, source()));
+        valueId += 1;
+    }
+    var current = 0;
+    valueId = 1;
+    while valueId <= 12 {
+        var resultId = 20 + valueId;
+        instructions.push(ir.addCheckedI64(resultId, current, valueId, source()));
+        current = resultId;
+        valueId += 1;
+    }
+    return ir.irProgram(0, [function(0, "pressure", instructions, current)]);
+}
+
+func rawArgumentsProgram(): IRProgram {
+    var instructions: Vec<Instruction> = [ir.rawArgCount(0, source())];
+    return ir.irProgram(0, [function(0, "rawArguments", instructions, 0)]);
+}
+
+func savedRegister(registers: Vec<int>, registerId: int): bool {
+    var i = 0;
+    while i < registers.len() {
+        if registers[i] == registerId { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+func arm64LocationKey(plan: Arm64ProgramRegisterPlan, valueId: int): int {
+    var values = plan.functions[0].values;
+    var i = 0;
+    while i < values.len() {
+        var value = values[i];
+        if value.valueId == valueId {
+            if value.registerId >= 0 { return value.registerId; }
+            return 1000000 + value.spillIndex;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+func requireLiveValuesDoNotShareArm64(plan: Arm64ProgramRegisterPlan, liveValues: Vec<int>): void {
+    var i = 0;
+    while i < liveValues.len() {
+        var left = arm64LocationKey(plan, liveValues[i]);
+        require(left >= 0, "ARM64 live value has no register or spill location");
+        var j = i + 1;
+        while j < liveValues.len() {
+            require(left != arm64LocationKey(plan, liveValues[j]), "ARM64 simultaneously live values share a location");
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+func checkX64(program: IRProgram, raw: bool): void {
+    var result = planRegisters(program, true);
+    require(result.isOk(), "x64 register planning failed");
+    var plan = result.unwrap();
+    require(plan.functions.len() == 1, "x64 plan has the wrong function count");
+    var functionPlan = plan.functions[0];
+    require(functionPlan.rawArgumentsReserved == raw, "x64 raw argument reservation flag is wrong");
+    if !raw { require(functionPlan.spillCount > 0, "x64 pressure case did not spill"); }
+    else {
+        var i = 0;
+        while i < functionPlan.savedRegisters.len() {
+            var registerId = functionPlan.savedRegisters[i];
+            require(registerId == 3 || registerId == 14 || registerId == 15, "x64 raw argument register was allocated");
+            i += 1;
+        }
+    }
+}
+
+func checkArm64(program: IRProgram, raw: bool): void {
+    var result = planArm64Registers(program);
+    require(result.isOk(), "ARM64 register planning failed");
+    var plan = result.unwrap();
+    require(plan.functions.len() == 1, "ARM64 plan has the wrong function count");
+    var functionPlan = plan.functions[0];
+    require(functionPlan.rawArgumentsReserved == raw, "ARM64 raw argument reservation flag is wrong");
+    if !raw { require(functionPlan.spillCount > 0, "ARM64 pressure case did not spill"); }
+    else {
+        var i = 0;
+        while i < functionPlan.savedRegisters.len() {
+            var registerId = functionPlan.savedRegisters[i];
+            require(registerId >= 21 && registerId <= 28, "ARM64 raw argument register was allocated");
+            i += 1;
+        }
+    }
+}
+
+func main(): void {
+    var pressure = pressureProgram();
+    var x64Result = planRegisters(pressure, true);
+    var arm64Result = planArm64Registers(pressure);
+    require(x64Result.isOk() && arm64Result.isOk(), "register pressure planning failed");
+    var analyzed = analyzeProgram(pressure);
+    require(analyzed.isOk(), "register pressure liveness analysis failed");
+    var live = analyzed.unwrap().functions[0].blocks[0].instructions[12].liveAfter;
+    require(live.len() >= 12, "pressure snapshot did not retain the expected live values");
+    requireLiveValuesDoNotShareArm64(arm64Result.unwrap(), live);
+    checkX64(pressure, false);
+    checkArm64(pressure, false);
+    var x64Code = emitProgramWithReuse(pressure, "linux-x64");
+    require(x64Code.isOk() && x64Code.unwrap().bytes.len() > 0, "x64 register-allocated emission failed");
+    var arm64Code = emitArm64WithReuse(pressure, "linux");
+    require(arm64Code.isOk() && arm64Code.unwrap().bytes.len() > 0, "ARM64 register-allocated emission failed");
+
+    var raw = rawArgumentsProgram();
+    checkX64(raw, true);
+    checkArm64(raw, true);
+    println("v0.4 native register allocation fixtures passed");
+
+}

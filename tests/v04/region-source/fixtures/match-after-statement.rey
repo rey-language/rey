@@ -1,0 +1,16 @@
+pub enum Expr { Call(int), Literal(int) }
+func tag(expr: Expr): string {
+    match expr {
+        Expr::Call(_) => { return "Call"; },
+        Expr::Literal(_) => { return "Literal"; },
+    }
+    return "?";
+}
+func main(): void {
+    var expr = Expr::Call(3);
+    match expr {
+        Expr::Call(payload) => { if payload != 3 { exit(1); } },
+        Expr::Literal(value) => { println(value); },
+    }
+    if tag(expr) != "Call" { exit(2); }
+}

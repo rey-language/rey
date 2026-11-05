@@ -1,0 +1,14 @@
+# Toolchain package contract. Copy this file to <toolchain>/package.toml.
+# It describes the layout. It is not evidence that a release archive exists.
+
+contract = "rey-package-1"
+rey_package_version = "0.4.0"
+compiler_abi = "rey-ir-cache-1"
+runtime_abi = "rey-region-v0.4"
+runtime = "sources"
+clang_required = false
+
+# bin/rey
+# bin/runtime/main.rey or bin/runtime/runtime-rey/main.rey
+# std/src/
+# Legacy librey_rt.a is not required and must not be renamed to satisfy this contract.

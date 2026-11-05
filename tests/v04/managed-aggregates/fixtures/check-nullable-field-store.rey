@@ -1,0 +1,9 @@
+struct Node {
+    value: int,
+}
+
+func main(): void {
+    var maybe: Node? = null;
+    maybe.value = 1;
+    return;
+}

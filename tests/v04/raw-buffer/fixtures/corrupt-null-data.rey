@@ -1,0 +1,8 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(0);
+    var fakeData = __reyRawMap(8);
+    __reyRawStoreAddress(__reyRawOffset(handle, 24), fakeData);
+    var ignoredLength = buffer.rawBufferLength(handle);
+}

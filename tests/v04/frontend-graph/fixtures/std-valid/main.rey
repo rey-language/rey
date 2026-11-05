@@ -1,0 +1,5 @@
+import std::sample;
+
+func main(): void {
+    var result: int = sample.answer();
+}

@@ -1,0 +1,16 @@
+func first(): int {
+    var failure: int = -9223372036854775807 - 1;
+    var trap: int = failure / -1;
+    return 1;
+}
+
+func later(): int {
+    var trap: int = 7 / 0;
+    return 2;
+}
+
+func main(): void {
+    var firstResult: int = first();
+    var laterResult: int = later();
+    return;
+}

@@ -1,0 +1,264 @@
+import ir::cache;
+import ir::cache::{CacheRequest, FunctionSnapshot, IncrementalResult, IncrementalUnit, KnownEffect, UnitSnapshot};
+import std::fs;
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func functionSnapshot(name: string, body: string, effect: string): FunctionSnapshot {
+    return FunctionSnapshot {
+        name: name, bodyDigest: body, effectDigest: effect, layoutDigest: "layout",
+        inlineDigest: "inline", specializationDigest: "spec",
+    };
+}
+
+func unit(id: string, source: string, deps: Vec<string>, functions: Vec<FunctionSnapshot>, target: string): UnitSnapshot {
+    return UnitSnapshot {
+        unitId: id, sourceDigest: source, dependencyUnitIds: deps, functions: functions,
+        compilerAbi: cache.compilerAbi(), runtimeAbi: cache.runtimeAbi(), target: target,
+        semanticFlags: "default", optimization: "none",
+    };
+}
+
+func requestFor(unitId: string, effect: string): CacheRequest {
+    var keys: Vec<string> = Vec.new();
+    return CacheRequest {
+        kind: "ir", unitId: unitId, sourceDigest: "source", dependencyDigest: "deps",
+        compilerAbi: cache.compilerAbi(), runtimeAbi: cache.runtimeAbi(), target: "linux-x64",
+        semanticFlags: "default", optimization: "none", effectDigest: effect, layoutDigest: "layout",
+        inlineDigest: "inline", specializationDigest: "spec", dependencyKeys: keys,
+    };
+}
+
+func unitWith(id: string, source: string, deps: Vec<string>, functions: Vec<FunctionSnapshot>, abi: string): UnitSnapshot {
+    return UnitSnapshot {
+        unitId: id, sourceDigest: source, dependencyUnitIds: deps, functions: functions,
+        compilerAbi: abi, runtimeAbi: cache.runtimeAbi(), target: "linux-x64",
+        semanticFlags: "default", optimization: "none",
+    };
+}
+
+func staged(snapshot: UnitSnapshot, payload: string): IncrementalUnit {
+    return IncrementalUnit { snapshot: snapshot, freshPayload: payload };
+}
+
+func trio(abi: string, helperSource: string, helperBody: string, helperEffect: string, helperPayload: string, mainPayload: string, otherPayload: string): Vec<IncrementalUnit> {
+    var helperFns: Vec<FunctionSnapshot> = Vec.new();
+    helperFns.push(functionSnapshot("helper", helperBody, helperEffect));
+    var mainFns: Vec<FunctionSnapshot> = Vec.new();
+    mainFns.push(functionSnapshot("main", "body-a", "effect-a"));
+    var otherFns: Vec<FunctionSnapshot> = Vec.new();
+    otherFns.push(functionSnapshot("other", "other-a", "effect-o"));
+    var noDeps: Vec<string> = Vec.new();
+    var mainDeps: Vec<string> = Vec.new();
+    mainDeps.push("helper");
+    var units: Vec<IncrementalUnit> = Vec.new();
+    units.push(staged(unitWith("helper", helperSource, noDeps, helperFns, abi), helperPayload));
+    units.push(staged(unitWith("main", "main-source", mainDeps, mainFns, abi), mainPayload));
+    units.push(staged(unitWith("other", "other-source", noDeps, otherFns, abi), otherPayload));
+    return units;
+}
+
+func mustCompile(root: string, buildId: string, units: Vec<IncrementalUnit>, reportPath: string): IncrementalResult {
+    var result = cache.compileWithCache(root, buildId, 1000000, units, reportPath);
+    if result.isErr() {
+        eprintln(result.unwrapErr());
+        exit(1);
+    }
+    return result.unwrap();
+}
+
+func hasId(ids: Vec<string>, id: string): bool {
+    var i = 0;
+    while i < ids.len() {
+        if ids[i] == id { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func corruptRecords(root: string): int {
+    var objects = fs.join(root, "objects");
+    if !fs.isDir(objects) { return 0; }
+    var count = 0;
+    var prefixes = fs.list(objects);
+    var i = 0;
+    while i < prefixes.len() {
+        var dir = fs.join(objects, prefixes[i]);
+        if fs.isDir(dir) {
+            var names = fs.list(dir);
+            var j = 0;
+            while j < names.len() {
+                var path = fs.join(dir, names[j]);
+                if fs.isFile(path) && path.endsWith(".record") {
+                    fs.write(path, "CORRUPT");
+                    count = count + 1;
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+func runIncrementalBuilds(storeRoot: string): void {
+    var abiA = cache.compilerCacheIdentity("compiler-hash-a");
+    var abiB = cache.compilerCacheIdentity("compiler-hash-b");
+    require(abiA != abiB, "compiler hash changes the cache identity");
+    require(abiA.indexOf("compiler-hash-a") >= 0, "compiler hash is mixed into the compiler abi");
+
+    var editRoot = fs.join(storeRoot, "m7-edit");
+    var editReport = fs.join(editRoot, "rey-cache-report.txt");
+    var first = mustCompile(editRoot, "m7-edit-1", trio(abiA, "helper-source", "helper-a", "effect-h", "payload-v1-helper", "payload-v1-main", "payload-v1-other"), editReport);
+    require(first.kind == "full", "a cold build is a full rebuild");
+    require(first.hitUnits.len() == 0, "a cold build has no cache hits");
+
+    var cleanRoot = fs.join(storeRoot, "m7-clean");
+    var clean = mustCompile(cleanRoot, "m7-clean-1", trio(abiA, "helper-source-b", "helper-b", "effect-h", "payload-v2-helper", "payload-v1-main", "payload-v1-other"), fs.join(cleanRoot, "rey-cache-report.txt"));
+    var edited = mustCompile(editRoot, "m7-edit-2", trio(abiA, "helper-source-b", "helper-b", "effect-h", "payload-v2-helper", "POISON-main", "POISON-other"), editReport);
+    require(edited.kind == "one-function", "one-function edit");
+    require(edited.report.indexOf("\nfunction helper\n") >= 0, "one-function report names the edited function");
+    require(edited.rebuiltUnits.len() == 1 && hasId(edited.rebuiltUnits, "helper"), "one-function edit recompiles only the changed unit");
+    require(hasId(edited.hitUnits, "main") && hasId(edited.hitUnits, "other"), "unchanged units hit the cache");
+    require(edited.relink && !edited.recovered, "a changed unit relinks without a corruption recovery");
+    require(edited.output == clean.output, "one-function edit build output equals clean build");
+    require(edited.output.indexOf("POISON") < 0, "a cache hit does not accept a poisoned payload");
+    require(edited.output.indexOf("payload-v2-helper") >= 0, "the edited unit payload is linked");
+    require(fs.read(editReport) == edited.report, "cache report file matches the result");
+    require(edited.report.indexOf("rey-cache-report 1\n") == 0, "cache report header");
+    require(edited.report.indexOf("established: unit helper rebuilt because") >= 0, "report says why the unit was rebuilt");
+    require(edited.report.indexOf("established: function body changed helper::helper") >= 0, "report records the function body change");
+    require(edited.report.indexOf("established: unit main hit") >= 0, "report says which unit hit");
+    require(edited.report.indexOf("observation: not measured") >= 0, "report does not claim a timing measurement");
+
+    var noop = mustCompile(editRoot, "m7-edit-3", trio(abiA, "helper-source-b", "helper-b", "effect-h", "POISON-helper", "POISON-main", "POISON-other"), editReport);
+    require(noop.kind == "noop", "no-op build");
+    require(noop.rebuiltUnits.len() == 0 && noop.hitUnits.len() == 3, "no-op build hits every unit");
+    require(!noop.relink && !noop.recovered, "no-op build does not relink");
+    require(noop.output == clean.output, "no-op build output equals the previous output");
+    require(noop.output.indexOf("POISON") < 0, "no-op build does not read poisoned payloads");
+    require(noop.report.indexOf("established: cache hit for every unit") >= 0, "no-op report is an entire cache hit");
+
+    var broken = corruptRecords(editRoot);
+    require(broken > 0, "corruption fixture rewrote cache records");
+    var recovered = mustCompile(editRoot, "m7-edit-4", trio(abiA, "helper-source-b", "helper-b", "effect-h", "payload-v2-helper", "payload-v1-main", "payload-v1-other"), editReport);
+    require(recovered.recovered, "corrupt cache falls back to a clean rebuild");
+    require(recovered.kind == "full", "corruption recovery recompiles every unit");
+    require(recovered.output == clean.output, "corruption recovery output equals the clean build");
+    require(recovered.output.indexOf("CORRUPT") < 0, "corrupt bytes are not accepted as output");
+    require(recovered.report.indexOf("established: corrupt cache fell back to a clean rebuild") >= 0, "report records corruption recovery");
+    var after = mustCompile(editRoot, "m7-edit-5", trio(abiA, "helper-source-b", "helper-b", "effect-h", "POISON-helper", "POISON-main", "POISON-other"), editReport);
+    require(after.kind == "noop" && after.output == clean.output, "a recovered cache serves the next no-op build");
+
+    var invRoot = fs.join(storeRoot, "m7-inv");
+    var invReport = fs.join(invRoot, "rey-cache-report.txt");
+    var invFirst = mustCompile(invRoot, "m7-inv-1", trio(abiA, "helper-source", "helper-a", "effect-h", "payload-v1-helper", "payload-v1-main", "payload-v1-other"), invReport);
+    require(invFirst.kind == "full", "invalidation fixture starts from a cold build");
+    var invCleanRoot = fs.join(storeRoot, "m7-inv-clean");
+    var invClean = mustCompile(invCleanRoot, "m7-inv-clean", trio(abiA, "helper-source-b", "helper-b", "effect-b", "payload-v2-helper", "payload-v2-main", "payload-v1-other"), fs.join(invCleanRoot, "rey-cache-report.txt"));
+    var inv = mustCompile(invRoot, "m7-inv-2", trio(abiA, "helper-source-b", "helper-b", "effect-b", "payload-v2-helper", "payload-v2-main", "POISON-other"), invReport);
+    require(hasId(inv.rebuiltUnits, "helper") && hasId(inv.rebuiltUnits, "main"), "a dependency effect change invalidates callers");
+    require(hasId(inv.hitUnits, "other") && !hasId(inv.rebuiltUnits, "other"), "an unrelated unit stays cached");
+    require(inv.output == invClean.output, "invalidated build output equals a clean build");
+    require(inv.output.indexOf("POISON") < 0, "an unrelated cache hit ignores a poisoned payload");
+    require(!inv.recovered, "dependency invalidation is not reported as corruption");
+
+    var hashRoot = fs.join(storeRoot, "m7-hash");
+    var hashReport = fs.join(hashRoot, "rey-cache-report.txt");
+    var hashed = mustCompile(hashRoot, "m7-hash-1", trio(abiA, "helper-source", "helper-a", "effect-h", "payload-a-helper", "payload-a-main", "payload-a-other"), hashReport);
+    require(hashed.output.indexOf("payload-a-helper") >= 0, "compiler hash fixture stored the first payload");
+    var hashCleanRoot = fs.join(storeRoot, "m7-hash-clean");
+    var hashClean = mustCompile(hashCleanRoot, "m7-hash-clean", trio(abiB, "helper-source", "helper-a", "effect-h", "payload-b-helper", "payload-b-main", "payload-b-other"), fs.join(hashCleanRoot, "rey-cache-report.txt"));
+    var rehashed = mustCompile(hashRoot, "m7-hash-2", trio(abiB, "helper-source", "helper-a", "effect-h", "payload-b-helper", "payload-b-main", "payload-b-other"), hashReport);
+    require(rehashed.kind == "full", "compiler hash change is a full rebuild");
+    require(rehashed.hitUnits.len() == 0 && rehashed.rebuiltUnits.len() == 3, "compiler hash change rebuilds every unit");
+    require(!rehashed.recovered, "compiler hash change is invalidation, not corruption");
+    require(rehashed.output == hashClean.output, "compiler hash rebuild output equals a clean build");
+    require(rehashed.output.indexOf("payload-a-helper") < 0, "compiler hash change does not reuse the previous payload");
+    require(rehashed.report.indexOf("abi or settings changed") >= 0, "report explains the compiler hash invalidation");
+}
+
+func main(): void {
+    var previous: Vec<UnitSnapshot> = Vec.new();
+    var current: Vec<UnitSnapshot> = Vec.new();
+    var unchanged = cache.planRebuild(previous, current);
+    require(unchanged.kind == "noop", "empty plans are no-ops");
+
+    var mainFns: Vec<FunctionSnapshot> = Vec.new();
+    mainFns.push(functionSnapshot("main", "body-a", "effect-a"));
+    var helperFns: Vec<FunctionSnapshot> = Vec.new();
+    helperFns.push(functionSnapshot("helper", "helper-a", "effect-h"));
+    var noDeps: Vec<string> = Vec.new();
+    var mainDeps: Vec<string> = Vec.new();
+    mainDeps.push("helper");
+    previous.push(unit("helper", "helper-source", noDeps, helperFns, "linux-x64"));
+    previous.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    current.push(unit("helper", "helper-source", noDeps, helperFns, "linux-x64"));
+    current.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var same = cache.planRebuild(previous, current);
+    require(same.kind == "noop" && same.rebuildUnits.len() == 0, "unchanged fingerprints do not rebuild");
+
+    var editedHelper: Vec<FunctionSnapshot> = Vec.new();
+    editedHelper.push(functionSnapshot("helper", "helper-b", "effect-h"));
+    var edited: Vec<UnitSnapshot> = Vec.new();
+    edited.push(unit("helper", "helper-source-b", noDeps, editedHelper, "linux-x64"));
+    edited.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var one = cache.planRebuild(previous, edited);
+    require(one.kind == "one-function" && one.functionName == "helper" && one.relink, "a single function body edit is classified as one function and still requires a relink");
+    require(one.rebuildUnits.len() == 1 && one.rebuildUnits[0] == "helper", "an unchanged effect, layout, inline, or specialization fingerprint does not rebuild callers");
+
+    var effectHelper: Vec<FunctionSnapshot> = Vec.new();
+    effectHelper.push(functionSnapshot("helper", "helper-b", "effect-b"));
+    var effectEdit: Vec<UnitSnapshot> = Vec.new();
+    effectEdit.push(unit("helper", "helper-source-b", noDeps, effectHelper, "linux-x64"));
+    effectEdit.push(unit("main", "main-source", mainDeps, mainFns, "linux-x64"));
+    var affected = cache.planRebuild(previous, effectEdit);
+    require(affected.kind == "one-function", "an effect change on one function stays a one-function edit");
+    require(affected.rebuildUnits.len() == 2, "callers rebuild when a callee effect fingerprint changes");
+
+    var retargeted: Vec<UnitSnapshot> = Vec.new();
+    retargeted.push(unit("helper", "helper-source", noDeps, helperFns, "windows-x64"));
+    retargeted.push(unit("main", "main-source", mainDeps, mainFns, "windows-x64"));
+    var full = cache.planRebuild(previous, retargeted);
+    require(full.kind == "full", "an ABI target change is a full rebuild");
+
+    var trusted = KnownEffect { functionName: "main", trusted: true, allocates: "no", blocks: "no", path: "main" };
+    var callees: Vec<KnownEffect> = Vec.new();
+    callees.push(KnownEffect { functionName: "foreign", trusted: false, allocates: "no", blocks: "no", path: "main -> foreign" });
+    var unknown = cache.checkNoHeap(trusted, callees);
+    require(!unknown.ok && unknown.status == "unknown", "an untrusted callee is not a successful no-heap proof");
+    var blocking: Vec<KnownEffect> = Vec.new();
+    blocking.push(KnownEffect { functionName: "sleep", trusted: true, allocates: "no", blocks: "yes", path: "main -> sleep" });
+    var blocked = cache.checkNoBlocking(trusted, blocking);
+    require(!blocked.ok && blocked.status == "established" && blocked.path == "main -> sleep", "a known blocking callee names its path");
+
+    var argv = args();
+    require(argv.len() == 2, "cache directory argument required");
+    var opened = cache.openStore(argv[1], "build-1", 1000000);
+    require(opened.isOk(), "store opens");
+    var store = opened.unwrap();
+    var request = requestFor("main", "effect-a");
+    var missed = cache.lookup(store, request);
+    require(!missed.accepted && missed.payload == "" && missed.reason == "absent", "a missing record is not a hit");
+    var stored = cache.commit(store, request, "payload-v1");
+    require(stored.isOk(), "commit publishes a record");
+    var hit = cache.lookup(store, request);
+    require(hit.accepted && hit.reason == "hit" && hit.payload == "payload-v1", "a matching identity reads the stored payload");
+    var stale = cache.lookup(store, requestFor("main", "effect-b"));
+    require(!stale.accepted && stale.payload == "", "a changed effect digest cannot read the old payload");
+    var collision = cache.commit(store, request, "payload-v2");
+    require(collision.isErr(), "a different payload for the same key is rejected");
+    var afterCollision = cache.lookup(store, request);
+    require(!afterCollision.accepted && afterCollision.payload == "", "a rejected collision does not leave the old payload accepted");
+    var again = cache.commit(store, request, "payload-v1");
+    require(again.isOk(), "the original payload can be stored after the collision was discarded");
+    var path = cache.artifactPath(store, again.unwrap());
+    fs.write(path, "not a cache record");
+    var corrupt = cache.lookup(store, request);
+    require(!corrupt.accepted && corrupt.reason == "corrupt" && corrupt.payload == "", "a corrupt record is never returned as output");
+    require(!fs.isFile(path), "corrupt records are removed from the object directory");
+    runIncrementalBuilds(argv[1]);
+    println("v0.4 incremental cache fixtures passed");
+}

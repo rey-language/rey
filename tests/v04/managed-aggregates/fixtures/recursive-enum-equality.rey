@@ -1,0 +1,14 @@
+enum List {
+    Nil,
+    Cons(value: int, next: List?),
+}
+
+func main(): void {
+    var left: List = List::Cons(1, null);
+    var right: List = List::Cons(1, null);
+    var same: bool = left == right;
+    if same {
+        return;
+    }
+    return;
+}

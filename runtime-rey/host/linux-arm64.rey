@@ -1,0 +1,54 @@
+// Linux arm64 host calls use the AArch64 syscall table.
+func hostRawInt(value: int): __rey_raw_address {
+    return __reyRawFromInt(value);
+}
+
+pub func hostArgCount(): int {
+    return __reyRawArgCount();
+}
+
+pub func hostArg(index: int): __rey_raw_address {
+    return __reyRawArg(index);
+}
+
+pub func hostArgRelease(argument: __rey_raw_address): void {
+    return;
+}
+
+pub func hostWrite(fd: int, base: __rey_raw_address, length: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(64, hostRawInt(fd), base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostRead(fd: int, base: __rey_raw_address, length: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(63, hostRawInt(fd), base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostOpen(path: __rey_raw_address, flags: int, mode: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(56, hostRawInt(-100), path, hostRawInt(flags), hostRawInt(mode), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostClose(fd: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(57, hostRawInt(fd), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostLseek(fd: int, offset: int, whence: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(62, hostRawInt(fd), hostRawInt(offset), hostRawInt(whence), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostUnlink(path: __rey_raw_address): int {
+    return __reyRawToInt(__reyRawHostSyscall(35, hostRawInt(-100), path, hostRawInt(0), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostAccess(path: __rey_raw_address, mode: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(48, hostRawInt(-100), path, hostRawInt(mode), hostRawInt(0), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostGetdirentries(fd: int, buffer: __rey_raw_address, count: int, basep: __rey_raw_address): int {
+    return __reyRawToInt(__reyRawHostSyscall(61, hostRawInt(fd), buffer, hostRawInt(count), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostExit(code: int): void {
+    var ignored = __reyRawHostSyscall(93, hostRawInt(code), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    __reyRawFail(2301);
+    return;
+}

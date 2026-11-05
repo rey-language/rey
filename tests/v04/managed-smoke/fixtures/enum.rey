@@ -1,0 +1,9 @@
+enum Value { Number(int), Empty, }
+func main(): void {
+    var value: Value = Value::Number(7);
+    match value {
+        Value::Number(number) => { if number != 7 { var zero: int = 0; var fail: int = 1 / zero; } },
+        Value::Empty => { var zero: int = 0; var fail: int = 1 / zero; },
+    }
+    return;
+}

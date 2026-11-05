@@ -1,0 +1,6 @@
+import layout::{layoutRegisterVariable, layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    layoutRegisterVariable(registry, 9, __reyRawNull(), 0, 2);
+}

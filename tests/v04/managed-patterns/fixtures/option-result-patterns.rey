@@ -1,0 +1,40 @@
+struct Payload {
+    pub value: int,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func checkOption(value: Option<Payload>): void {
+    match value {
+        Some(payload) => { sourcecheck(payload.value == 41); },
+        None => { sourcecheck(true); },
+    }
+    return;
+}
+
+func checkResult(value: Result<Payload, bool>): void {
+    match value {
+        Result::Ok(payload) => { sourcecheck(payload.value == 41); },
+        Result::Err(flag) => { sourcecheck(!flag); },
+    }
+    return;
+}
+
+func main(): void {
+    var payload: Payload = Payload { value: 41 };
+    var some: Option<Payload> = Option::Some(payload);
+    var none: Option<Payload> = Option::None();
+    var ok: Result<Payload, bool> = Result::Ok(payload);
+    var err: Result<Payload, bool> = Result::Err(false);
+    checkOption(some);
+    checkOption(none);
+    checkResult(ok);
+    checkResult(err);
+    return;
+}

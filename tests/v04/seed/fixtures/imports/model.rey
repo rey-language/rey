@@ -1,0 +1,23 @@
+import std::binary;
+
+pub struct Payload {
+    pub code: int,
+    pub bytes: Vec<int>,
+}
+
+pub enum Kind {
+    Empty,
+    Packed(size: int),
+}
+
+pub func makePayload(value: int): Payload {
+    var bytes = binary.packU32Be(value);
+    var kind: Kind = Kind::Packed(bytes.len());
+    match kind {
+        Packed(size) => {
+            if size != 4 { bytes.set(0, 0); }
+        },
+        Empty => { bytes.push(0); },
+    }
+    return Payload { code: value, bytes: bytes };
+}

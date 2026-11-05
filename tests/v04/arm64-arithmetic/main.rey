@@ -1,0 +1,139 @@
+import ir;
+import ir::{IRType, IRValue, IRFunction, BasicBlock, Instruction, EffectSummary, IRProgram, Escape, InstructionKind, SourceRef, CompareI64Predicate};
+import native::arm64::{emitArm64, Arm64Code};
+import native::image::{buildMachOArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln(message); exit(1); }
+}
+
+func source(): SourceRef {
+    return ir.sourceRef("arm64-arithmetic.rey", 0, 0);
+}
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = Vec.new();
+    var i = 0;
+    loop {
+        if i >= count { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func function(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, resultType: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("arm64-arithmetic", "", name), ir.functionSignature(parameterTypes, resultType), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func saveCase(directory: string, name: string, program: IRProgram): void {
+    var emitted: Result<Arm64Code, string> = emitArm64(program, "darwin");
+    if emitted.isErr() { eprintln(name + ": arm64 emission failed: " + emitted.unwrapErr()); exit(1); }
+    var image = buildMachOArm64(emitted.unwrap());
+    if image.isErr() { eprintln(name + ": Mach-O emission failed: " + image.unwrapErr()); exit(1); }
+    var encoded = byteString(image.unwrap());
+    if encoded.isErr() { eprintln(name + ": binary encoding failed: " + encoded.unwrapErr()); exit(1); }
+    var path = directory + "/" + name;
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), name + ": image write failed");
+    println("native-arithmetic-case " + name);
+}
+
+func arithmetic(kind: InstructionKind, left: int, right: int): IRProgram {
+    var instruction: Instruction = ir.addCheckedI64(2, 0, 1, source());
+    if kind == InstructionKind::SubCheckedI64 { instruction = ir.subCheckedI64(2, 0, 1, source()); }
+    if kind == InstructionKind::MulCheckedI64 { instruction = ir.mulCheckedI64(2, 0, 1, source()); }
+    if kind == InstructionKind::DivCheckedI64 { instruction = ir.divCheckedI64(2, 0, 1, source()); }
+    if kind == InstructionKind::RemCheckedI64 { instruction = ir.remCheckedI64(2, 0, 1, source()); }
+    var instructions: Vec<Instruction> = [ir.constI64(0, left, source()), ir.constI64(1, right, source()), instruction];
+    var entry = function(0, "arithmetic", [], [], ir.irI64(), [ir.basicBlock(0, [], instructions, ir.returnValue(2, source()))]);
+    return ir.irProgram(0, [entry]);
+}
+
+func boolComparison(comparison: CompareI64Predicate, left: bool, right: bool): IRProgram {
+    var instructions: Vec<Instruction> = [ir.constBool(0, left, source()), ir.constBool(1, right, source()), ir.compareBool(2, comparison, 0, 1, source())];
+    var blocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], instructions, ir.branch(2, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [ir.constI64(3, 2, source())], ir.returnValue(3, source())),
+        ir.basicBlock(2, [], [ir.constI64(4, 0, source())], ir.returnValue(4, source()))
+    ];
+    var entry = function(0, "bool-comparison", [], [], ir.irI64(), blocks);
+    return ir.irProgram(0, [entry]);
+}
+
+func callChain(): IRProgram {
+    var chainParameters: Vec<IRValue> = [ir.irValue(100, ir.irI64())];
+    var chainTypes: Vec<IRType> = [ir.irI64()];
+    var chainInstructions: Vec<Instruction> = [
+        ir.constI64(101, 6, source()),
+        ir.mulCheckedI64(102, 100, 101, source()),
+        ir.constI64(103, 7, source()),
+        ir.subCheckedI64(104, 102, 103, source()),
+        ir.constI64(105, 3, source()),
+        ir.divCheckedI64(106, 104, 105, source()),
+        ir.constI64(107, 3, source()),
+        ir.remCheckedI64(108, 106, 107, source())
+    ];
+    var chain = function(41, "arithmetic-chain", chainParameters, chainTypes, ir.irI64(), [ir.basicBlock(0, [], chainInstructions, ir.returnValue(108, source()))]);
+    var boolParameters: Vec<IRValue> = [ir.irValue(200, ir.irBool())];
+    var boolTypes: Vec<IRType> = [ir.irBool()];
+    var boolInstructions: Vec<Instruction> = [
+        ir.constBool(201, false, source()),
+        ir.compareBool(202, ir.compareNe(), 200, 201, source()),
+        ir.constBool(203, true, source()),
+        ir.compareBool(204, ir.compareEq(), 202, 203, source())
+    ];
+    var boolCheck = function(42, "bool-chain", boolParameters, boolTypes, ir.irBool(), [ir.basicBlock(0, [], boolInstructions, ir.returnValue(204, source()))]);
+    var entryInstructions: Vec<Instruction> = [
+        ir.constI64(1, 13, source()),
+        ir.call(2, ir.irI64(), 41, [1], source()),
+        ir.constBool(3, true, source()),
+        ir.call(4, ir.irBool(), 42, [3], source())
+    ];
+    var entryBlocks: Vec<BasicBlock> = [
+        ir.basicBlock(0, [], entryInstructions, ir.branch(4, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [], ir.returnValue(2, source())),
+        ir.basicBlock(2, [], [ir.constI64(5, 0, source())], ir.returnValue(5, source()))
+    ];
+    var entry = function(43, "entry", [], [], ir.irI64(), entryBlocks);
+    return ir.irProgram(43, [entry, chain, boolCheck]);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "arm64 arithmetic fixture needs an output directory");
+    var out = argv[1];
+    var minimum = -9223372036854775807 - 1;
+    var maximum = 9223372036854775807;
+
+    saveCase(out, "sub-min-valid", arithmetic(InstructionKind::SubCheckedI64, minimum, minimum));
+    saveCase(out, "sub-max-zero", arithmetic(InstructionKind::SubCheckedI64, maximum, maximum));
+    saveCase(out, "sub-overflow-positive", arithmetic(InstructionKind::SubCheckedI64, maximum, -1));
+    saveCase(out, "sub-overflow-negative", arithmetic(InstructionKind::SubCheckedI64, minimum, 1));
+    saveCase(out, "mul-positive-positive", arithmetic(InstructionKind::MulCheckedI64, 7, 5));
+    saveCase(out, "mul-negative-positive", arithmetic(InstructionKind::MulCheckedI64, -7, 5));
+    saveCase(out, "mul-positive-negative", arithmetic(InstructionKind::MulCheckedI64, 7, -5));
+    saveCase(out, "mul-negative-negative", arithmetic(InstructionKind::MulCheckedI64, -7, -5));
+    saveCase(out, "mul-min-times-negative-one", arithmetic(InstructionKind::MulCheckedI64, minimum, -1));
+    saveCase(out, "mul-large-overflow", arithmetic(InstructionKind::MulCheckedI64, maximum, 2));
+    saveCase(out, "mul-min-times-one", arithmetic(InstructionKind::MulCheckedI64, minimum, 1));
+    saveCase(out, "div-positive", arithmetic(InstructionKind::DivCheckedI64, 17, 5));
+    saveCase(out, "div-negative-numerator", arithmetic(InstructionKind::DivCheckedI64, -17, 5));
+    saveCase(out, "div-negative-denominator", arithmetic(InstructionKind::DivCheckedI64, 17, -5));
+    saveCase(out, "div-negative-both", arithmetic(InstructionKind::DivCheckedI64, -17, -5));
+    saveCase(out, "div-zero", arithmetic(InstructionKind::DivCheckedI64, 17, 0));
+    saveCase(out, "div-min-over-negative-one", arithmetic(InstructionKind::DivCheckedI64, minimum, -1));
+    saveCase(out, "rem-positive", arithmetic(InstructionKind::RemCheckedI64, 17, 5));
+    saveCase(out, "rem-negative-numerator", arithmetic(InstructionKind::RemCheckedI64, -17, 5));
+    saveCase(out, "rem-negative-denominator", arithmetic(InstructionKind::RemCheckedI64, 17, -5));
+    saveCase(out, "rem-negative-both", arithmetic(InstructionKind::RemCheckedI64, -17, -5));
+    saveCase(out, "rem-zero", arithmetic(InstructionKind::RemCheckedI64, 17, 0));
+    saveCase(out, "rem-min-over-negative-one", arithmetic(InstructionKind::RemCheckedI64, minimum, -1));
+    saveCase(out, "bool-eq-true", boolComparison(ir.compareEq(), true, true));
+    saveCase(out, "bool-eq-false", boolComparison(ir.compareEq(), true, false));
+    saveCase(out, "bool-ne-true", boolComparison(ir.compareNe(), true, false));
+    saveCase(out, "bool-ne-false", boolComparison(ir.compareNe(), false, false));
+    saveCase(out, "call-chain", callChain());
+    println("arm64 arithmetic fixture images ready");
+}

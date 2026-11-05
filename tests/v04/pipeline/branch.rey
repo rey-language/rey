@@ -1,0 +1,10 @@
+func choose(value: int): int {
+    if value < 10 { return value + 2; }
+    else { return value + 3; }
+}
+
+func main(): void {
+    var left = choose(7);
+    var right = choose(15);
+    return;
+}

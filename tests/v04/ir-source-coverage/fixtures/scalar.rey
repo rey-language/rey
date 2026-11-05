@@ -1,0 +1,42 @@
+func main(): void { return; }
+
+func subtraction(): int { return 20 - 8; }
+func multiplication(): int { return -6 * 7; }
+func division(): int { return -17 / 5; }
+func remainder(): int { return -17 % 5; }
+
+func compoundArithmetic(): int {
+    var value: int = 60;
+    value -= 8;
+    value *= 3;
+    value /= 10;
+    value %= 4;
+    return value;
+}
+
+func unaryMinimum(): int { return -9223372036854775808; }
+func unaryHexMinimum(): int { return -0x8000000000000000; }
+func negate(value: int): int { return -value; }
+func negativeFive(): int { return negate(5); }
+func negateMinimum(): int { return -(-9223372036854775808); }
+
+func boolLogic(): bool { return !false && true == true && false != true; }
+
+func overflowingBool(): bool {
+    var value: int = 9223372036854775807;
+    value += 1;
+    return true;
+}
+
+func shortAnd(): bool { return false && overflowingBool(); }
+func shortOr(): bool { return true || overflowingBool(); }
+
+func arithmeticInLoop(): int {
+    var i: int = 1;
+    var total: int = 0;
+    while i <= 4 {
+        total += i * i - (i / 2);
+        i += 1;
+    }
+    return total;
+}

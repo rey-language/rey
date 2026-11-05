@@ -1,0 +1,5 @@
+func main(): void {
+    var values: Vec<int> = [1];
+    var missing: int = values[1];
+    return;
+}

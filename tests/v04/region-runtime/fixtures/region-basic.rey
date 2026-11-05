@@ -1,0 +1,104 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocate, managedAllocateProgram, managedAllocateSized, managedCreate, managedCurrentRegion, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedProgramRegion, managedPromotionCount, managedRegionCreateChild, managedRegionEnd, managedRegionGroupCount, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRequestedObjectBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    check(__reyRawLoadI64(context) == 1380272220);
+    check(__reyRawLoadI64(__reyRawOffset(context, 72)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(context, 120)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(context, 32)) == 1);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(__reyRawLoadI64(program) == 1380272221);
+    check(__reyRawLoadI64(__reyRawOffset(program, 24)) == 0);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(program, 32)), __reyRawNull()));
+    check(managedLiveObjects(context) == 0);
+    check(managedRegionRequestedBytes(context) == 0);
+
+    var kept = managedAllocateProgram(context, scalar, 1);
+    check(__reyRawLoadI64(kept) == 8589934592 + scalar);
+    check(__reyRawLoadI64(__reyRawOffset(kept, 8)) == 8);
+    check(__reyRawLoadI64(__reyRawOffset(kept, 16)) == 0);
+    check(managedLiveObjects(context) == 1);
+    check(managedLivePayloadBytes(context) == 8);
+    check(managedRequestedObjectBytes(context) == 32);
+    var programGroup = __reyRawLoadAddress(__reyRawOffset(program, 40));
+    var programChunk = __reyRawLoadAddress(__reyRawOffset(programGroup, 32));
+    var programChunkCapacity = __reyRawLoadI64(__reyRawOffset(programChunk, 24));
+    var programChunkUsed = __reyRawLoadI64(__reyRawOffset(programChunk, 32));
+    var programRequestedBytes = managedRegionRequestedBytes(context);
+    check(__reyRawLoadI64(__reyRawOffset(programGroup, 40)) == 1);
+    check(__reyRawLoadI64(programChunk) == 1380272223);
+    check(programChunkCapacity > 0 && programRequestedBytes == programChunkCapacity);
+    check(managedRegionUsedBytes(context) == 104);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedRegionGroupCount(context) == 1);
+    check(managedPromotionCount(context) == 0);
+
+    var child = managedRegionCreateChild(context, program);
+    check(__reyRawEqual(managedCurrentRegion(context), child));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(child, 32)), program));
+    check(__reyRawLoadI64(__reyRawOffset(child, 24)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(context, 32)) == 2);
+    var temporary = managedAllocate(context, scalar);
+    var sized = managedAllocateSized(context, scalar, 8);
+    check(managedLiveObjects(context) == 3);
+    check(managedLivePayloadBytes(context) == 24);
+    check(managedRequestedObjectBytes(context) == 96);
+    check(managedRegionGroupCount(context) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(child, 56)) == 2);
+    var group = __reyRawLoadAddress(__reyRawOffset(child, 40));
+    check(__reyRawLoadI64(group) == 1380272222);
+    check(__reyRawLoadI64(__reyRawOffset(group, 24)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(group, 40)) == 2);
+    check(__reyRawLoadI64(__reyRawOffset(group, 48)) == 2);
+    var chunk = __reyRawLoadAddress(__reyRawOffset(group, 32));
+    var previousChunk = __reyRawLoadAddress(__reyRawOffset(chunk, 8));
+    check(__reyRawLoadI64(chunk) == 1380272223);
+    check(__reyRawLoadI64(previousChunk) == 1380272223);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(previousChunk, 8)), __reyRawNull()));
+    var chunkCapacity = __reyRawLoadI64(__reyRawOffset(chunk, 24));
+    var previousChunkCapacity = __reyRawLoadI64(__reyRawOffset(previousChunk, 24));
+    var chunkUsed = __reyRawLoadI64(__reyRawOffset(chunk, 32));
+    var previousChunkUsed = __reyRawLoadI64(__reyRawOffset(previousChunk, 32));
+    check(chunkCapacity >= chunkUsed && previousChunkCapacity >= previousChunkUsed);
+    check(managedRegionRequestedBytes(context) == programChunkCapacity + chunkCapacity + previousChunkCapacity);
+    check(managedRegionUsedBytes(context) == programChunkUsed + chunkUsed + previousChunkUsed);
+    var data = __reyRawLoadAddress(__reyRawOffset(chunk, 16));
+    var record = __reyRawOffset(data, 8);
+    check(__reyRawLoadI64(record) == 1380272224);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 8)), group));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 16)), sized));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 24)), child));
+    check(__reyRawLoadI64(__reyRawOffset(record, 32)) == scalar);
+    check(__reyRawLoadI64(__reyRawOffset(record, 40)) == 8);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(data, 72)), record));
+    check(__reyRawEqual(__reyRawOffset(data, 80), sized));
+    var previousData = __reyRawLoadAddress(__reyRawOffset(previousChunk, 16));
+    var previousRecord = __reyRawOffset(previousData, 8);
+    check(__reyRawLoadI64(previousRecord) == 1380272224);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(previousRecord, 8)), group));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(previousRecord, 16)), temporary));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(previousRecord, 24)), child));
+    check(__reyRawEqual(__reyRawOffset(previousData, 80), temporary));
+
+    managedRegionEnd(context, child);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(__reyRawLoadI64(__reyRawOffset(context, 32)) == 1);
+    check(managedLiveObjects(context) == 1);
+    check(managedLivePayloadBytes(context) == 8);
+    check(managedRequestedObjectBytes(context) == 32);
+    check(managedRegionRequestedBytes(context) == programRequestedBytes);
+    check(managedRegionUsedBytes(context) == programChunkUsed);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedRegionGroupCount(context) == 1);
+    check(__reyRawLoadI64(kept) == 8589934592 + scalar);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,7 @@
+import buffer;
+
+func main(): void {
+    var handle = buffer.rawBufferCreate(8);
+    __reyRawStoreByte(__reyRawOffset(handle, 32), 1);
+    var ignoredData = buffer.rawBufferData(handle);
+}

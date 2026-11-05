@@ -1,0 +1,9 @@
+func choose(value: int): int {
+    if value < 10 { return value + 2; }
+    else { return value + 3; }
+}
+func increment(value: int): int { return value + 1; }
+func main(): void {
+    if choose(7) != 9 { var failure = increment(9223372036854775807); }
+    if choose(15) != 18 { var failure = increment(9223372036854775807); }
+}

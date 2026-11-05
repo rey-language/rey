@@ -1,0 +1,430 @@
+import ir::{BasicBlock, IRFunction, IRProgram, IRType, Instruction, InstructionKind, SourceRef, Terminator, TerminatorKind, basicBlock, irFunction};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram, ManagedVariableLayout};
+import ir::verify::{verifyProgram};
+
+func hasInt(values: Vec<int>, value: int): bool {
+    var index = 0;
+    loop { if index >= values.len() { break; } if values[index] == value { return true; } index += 1; }
+    return false;
+}
+
+func copyIds(values: Vec<int>): Vec<int> {
+    var copied: Vec<int> = [];
+    var index = 0;
+    loop { if index >= values.len() { break; } copied.push(values[index]); index = index + 1; }
+    return copied;
+}
+
+func copyInstruction(value: Instruction): Instruction {
+    return Instruction { kind: value.kind, resultId: value.resultId, ty: IRType { kind: value.ty.kind }, operands: copyIds(value.operands), immediate: value.immediate, comparison: value.comparison, functionId: value.functionId, source: SourceRef { unitId: value.source.unitId, start: value.source.start, end: value.source.end } };
+}
+
+func replaceOperand(values: Vec<int>, from: int, to: int): Vec<int> {
+    var copied: Vec<int> = [];
+    var index = 0;
+    loop {
+        if index >= values.len() { break; }
+        var value = values[index];
+        if value == from { value = to; }
+        copied.push(value);
+        index = index + 1;
+    }
+    return copied;
+}
+
+func replaceTerminator(term: Terminator, from: int, to: int): Terminator {
+    var valueId = term.valueId;
+    if valueId == from { valueId = to; }
+    var condition = term.conditionValueId;
+    if condition == from { condition = to; }
+    return Terminator { kind: term.kind, targetBlockId: term.targetBlockId, targetArgs: replaceOperand(term.targetArgs, from, to), conditionValueId: condition, trueTargetBlockId: term.trueTargetBlockId, trueArgs: replaceOperand(term.trueArgs, from, to), falseTargetBlockId: term.falseTargetBlockId, falseArgs: replaceOperand(term.falseArgs, from, to), valueId: valueId, source: SourceRef { unitId: term.source.unitId, start: term.source.start, end: term.source.end } };
+}
+
+func rewriteUses(function: IRFunction, from: int, to: int): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructions: Vec<Instruction> = [];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            instructions.push(Instruction { kind: instruction.kind, resultId: instruction.resultId, ty: IRType { kind: instruction.ty.kind }, operands: replaceOperand(instruction.operands, from, to), immediate: instruction.immediate, comparison: instruction.comparison, functionId: instruction.functionId, source: SourceRef { unitId: instruction.source.unitId, start: instruction.source.start, end: instruction.source.end } });
+            instructionAt = instructionAt + 1;
+        }
+        blocks.push(basicBlock(block.id, block.params, instructions, replaceTerminator(block.terminator, from, to)));
+        blockAt = blockAt + 1;
+    }
+    return irFunction(function.id, function.key, function.signature, function.parameters, blocks, function.effects);
+}
+
+func useCount(function: IRFunction, valueId: int): int {
+    var count = 0;
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var operandAt = 0;
+            loop { if operandAt >= block.instructions[instructionAt].operands.len() { break; } if block.instructions[instructionAt].operands[operandAt] == valueId { count += 1; } operandAt += 1; }
+            instructionAt += 1;
+        }
+        var term = block.terminator;
+        if term.valueId == valueId || term.conditionValueId == valueId { count += 1; }
+        var argAt = 0;
+        loop { if argAt >= term.targetArgs.len() { break; } if term.targetArgs[argAt] == valueId { count += 1; } argAt += 1; }
+        argAt = 0;
+        loop { if argAt >= term.trueArgs.len() { break; } if term.trueArgs[argAt] == valueId { count += 1; } argAt += 1; }
+        argAt = 0;
+        loop { if argAt >= term.falseArgs.len() { break; } if term.falseArgs[argAt] == valueId { count += 1; } argAt += 1; }
+        blockAt += 1;
+    }
+    return count;
+}
+
+func dropResult(function: IRFunction, resultId: int): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructions: Vec<Instruction> = [];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.resultId != resultId || resultId < 0 { instructions.push(copyInstruction(instruction)); }
+            instructionAt = instructionAt + 1;
+        }
+        blocks.push(basicBlock(block.id, block.params, instructions, block.terminator));
+        blockAt = blockAt + 1;
+    }
+    return irFunction(function.id, function.key, function.signature, function.parameters, blocks, function.effects);
+}
+
+func dropStore(function: IRFunction, addressId: int): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructions: Vec<Instruction> = [];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var store = (instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte) && instruction.operands.len() > 0 && instruction.operands[0] == addressId;
+            if !store { instructions.push(copyInstruction(instruction)); }
+            instructionAt = instructionAt + 1;
+        }
+        blocks.push(basicBlock(block.id, block.params, instructions, block.terminator));
+        blockAt = blockAt + 1;
+    }
+    return irFunction(function.id, function.key, function.signature, function.parameters, blocks, function.effects);
+}
+
+func scalarValueKey(functionId: int, valueId: int): string { return functionId.toString() + ":" + valueId.toString(); }
+
+func scalarIndexes(program: IRProgram): HashMap<string, int> {
+    var indices: HashMap<string, int> = HashMap.new();
+    var functionAt = 0;
+    loop {
+        if functionAt >= program.functions.len() { break; }
+        var function = program.functions[functionAt];
+        var blockAt = 0;
+        loop {
+            if blockAt >= function.blocks.len() { break; }
+            var block = function.blocks[blockAt];
+            var blockKey = "block:" + scalarValueKey(function.id, block.id);
+            if !indices.has(blockKey) { indices.set(blockKey, blockAt); }
+            if block.terminator.kind == TerminatorKind::Return && block.terminator.valueId >= 0 { indices.set("observed:" + scalarValueKey(function.id, block.terminator.valueId), 1); }
+            if block.terminator.conditionValueId >= 0 { indices.set("observed:" + scalarValueKey(function.id, block.terminator.conditionValueId), 1); }
+            var argAt = 0;
+            loop { if argAt >= block.terminator.targetArgs.len() { break; } indices.set("observed:" + scalarValueKey(function.id, block.terminator.targetArgs[argAt]), 1); argAt += 1; }
+            argAt = 0;
+            loop { if argAt >= block.terminator.trueArgs.len() { break; } indices.set("observed:" + scalarValueKey(function.id, block.terminator.trueArgs[argAt]), 1); argAt += 1; }
+            argAt = 0;
+            loop { if argAt >= block.terminator.falseArgs.len() { break; } indices.set("observed:" + scalarValueKey(function.id, block.terminator.falseArgs[argAt]), 1); argAt += 1; }
+            var instructionAt = 0;
+            loop {
+                if instructionAt >= block.instructions.len() { break; }
+                var instruction = block.instructions[instructionAt];
+                if instruction.kind == InstructionKind::ConstI64 {
+                    var constKey = "const:" + scalarValueKey(function.id, instruction.resultId);
+                    if !indices.has(constKey) { indices.set(constKey, instruction.immediate); }
+                }
+                var operandAt = 0;
+                loop {
+                    if operandAt >= instruction.operands.len() { break; }
+                    if instruction.kind != InstructionKind::RawOffset || operandAt != 0 { indices.set("observed:" + scalarValueKey(function.id, instruction.operands[operandAt]), 1); }
+                    operandAt += 1;
+                }
+                instructionAt += 1;
+            }
+            blockAt += 1;
+        }
+        functionAt += 1;
+    }
+    return indices;
+}
+
+func findConst(indices: HashMap<string, int>, functionId: int, valueId: int): int {
+    var key = "const:" + scalarValueKey(functionId, valueId);
+    if indices.has(key) { return indices.get(key); }
+    return -1;
+}
+
+func identityObserved(indices: HashMap<string, int>, functionId: int, resultId: int): bool {
+    return indices.has("observed:" + scalarValueKey(functionId, resultId));
+}
+
+func findBlock(indices: HashMap<string, int>, functionId: int, blockId: int): int {
+    var key = "block:" + scalarValueKey(functionId, blockId);
+    if indices.has(key) { return indices.get(key); }
+    return -1;
+}
+
+func buildDerivedOwnerIndex(derived: Vec<ManagedDerived>): HashMap<string, bool> {
+    var owners: HashMap<string, bool> = HashMap.new();
+    var index = 0;
+    loop { if index >= derived.len() { break; } var item = derived[index]; owners.set(scalarValueKey(item.functionId, item.valueId), true); owners.set(scalarValueKey(item.functionId, item.ownerId), true); index += 1; }
+    return owners;
+}
+
+func addressHasOnlyLocalI64Accesses(function: IRFunction, blockIndex: int, addressId: int): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if instruction.operands[operandAt] == addressId {
+                    if blockAt != blockIndex || operandAt != 0 { return false; }
+                    if instruction.kind == InstructionKind::RawLoadI64 && instruction.operands.len() == 1 { }
+                    else if instruction.kind == InstructionKind::RawStoreI64 && instruction.operands.len() == 2 { }
+                    else { return false; }
+                }
+                operandAt += 1;
+            }
+            instructionAt += 1;
+        }
+        var term = block.terminator;
+        if term.valueId == addressId || term.conditionValueId == addressId || hasInt(term.targetArgs, addressId) || hasInt(term.trueArgs, addressId) || hasInt(term.falseArgs, addressId) { return false; }
+        blockAt += 1;
+    }
+    return true;
+}
+
+func allocationBaseHasOnlyOneOffsetUse(function: IRFunction, baseId: int): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            var operandAt = 0;
+            loop {
+                if operandAt >= instruction.operands.len() { break; }
+                if instruction.operands[operandAt] == baseId && (instruction.kind != InstructionKind::RawOffset || operandAt != 0) { return false; }
+                operandAt += 1;
+            }
+            instructionAt += 1;
+        }
+        var term = block.terminator;
+        if term.valueId == baseId || term.conditionValueId == baseId || hasInt(term.targetArgs, baseId) || hasInt(term.trueArgs, baseId) || hasInt(term.falseArgs, baseId) { return false; }
+        blockAt += 1;
+    }
+    return true;
+}
+
+func layoutDefinitionIsPure(function: IRFunction, valueId: int): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.resultId == valueId { return instruction.kind == InstructionKind::ConstI64; }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    return false;
+}
+
+func hasAllocationCall(function: IRFunction, allocateFunctionId: int, resultId: int): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == allocateFunctionId && instruction.resultId == resultId { return true; }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    return false;
+}
+
+func replaceAllocation(function: IRFunction, allocation: ManagedAllocation, allocateFunctionId: int, indices: HashMap<string, int>): IRFunction {
+    if identityObserved(indices, function.id, allocation.resultId) { return function; }
+    var found = findBlock(indices, function.id, allocation.blockId);
+    if found < 0 { return function; }
+    var block = function.blocks[found];
+    var addresses: Vec<int> = [];
+    var ownerOffsetCount = 0;
+    var allocateCallFound = false;
+    var instructionAt = 0;
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var scanBlock = function.blocks[blockAt];
+        instructionAt = 0;
+        loop {
+            if instructionAt >= scanBlock.instructions.len() { break; }
+            var instruction = scanBlock.instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == allocateFunctionId && instruction.resultId == allocation.resultId && instruction.operands.len() == 1 && blockAt == found { allocateCallFound = true; }
+            if instruction.kind == InstructionKind::RawOffset && instruction.operands.len() == 2 && instruction.operands[0] == allocation.resultId {
+                ownerOffsetCount += 1;
+                if instruction.resultId >= 0 && blockAt == found && findConst(indices, function.id, instruction.operands[1]) >= 0 { addresses.push(instruction.resultId); }
+            }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    if !allocateCallFound || ownerOffsetCount != 1 || addresses.len() != 1 || !allocationBaseHasOnlyOneOffsetUse(function, allocation.resultId) { return function; }
+    var current = function;
+    var addressAt = 0;
+    loop {
+        if addressAt >= addresses.len() { break; }
+        var address = addresses[addressAt];
+        var storeValue = -1;
+        var stores = 0;
+        var loads: Vec<int> = [];
+        var loadPositions: Vec<int> = [];
+        var storePosition = -1;
+        var unsupportedStore = false;
+        var inner = 0;
+        loop {
+            if inner >= current.blocks[found].instructions.len() { break; }
+            var instruction = current.blocks[found].instructions[inner];
+            if instruction.operands.len() > 0 && instruction.operands[0] == address && instruction.kind == InstructionKind::RawStoreI64 {
+                stores = stores + 1;
+                storePosition = inner;
+                if instruction.operands.len() > 1 { storeValue = instruction.operands[1]; }
+            }
+            if instruction.operands.len() > 0 && instruction.operands[0] == address && instruction.kind == InstructionKind::RawStoreByte { unsupportedStore = true; }
+            if instruction.kind == InstructionKind::RawLoadI64 && instruction.operands.len() == 1 && instruction.operands[0] == address && instruction.resultId >= 0 { loads.push(instruction.resultId); loadPositions.push(inner); }
+            inner = inner + 1;
+        }
+        var localAccesses = addressHasOnlyLocalI64Accesses(current, found, address);
+        var loadsFollowStore = stores == 1 && storePosition >= 0;
+        inner = 0;
+        loop { if inner >= loadPositions.len() { break; } if loadPositions[inner] <= storePosition { loadsFollowStore = false; } inner += 1; }
+        if localAccesses && !unsupportedStore && loadsFollowStore && storeValue >= 0 {
+            var loadAt = 0;
+            loop { if loadAt >= loads.len() { break; } if loads[loadAt] != storeValue { current = rewriteUses(current, loads[loadAt], storeValue); current = dropResult(current, loads[loadAt]); } loadAt = loadAt + 1; }
+        }
+        if localAccesses && !unsupportedStore && useCount(current, address) == stores {
+            current = dropStore(current, address);
+            if useCount(current, address) == 0 { current = dropResult(current, address); }
+        }
+        addressAt = addressAt + 1;
+    }
+    if useCount(current, allocation.resultId) == 0 {
+        var layoutOperand = -1;
+        var definitionFound = false;
+        instructionAt = 0;
+        loop { if instructionAt >= current.blocks[found].instructions.len() { break; } if current.blocks[found].instructions[instructionAt].kind == InstructionKind::Call && current.blocks[found].instructions[instructionAt].functionId == allocateFunctionId && current.blocks[found].instructions[instructionAt].resultId == allocation.resultId && current.blocks[found].instructions[instructionAt].operands.len() == 1 { layoutOperand = current.blocks[found].instructions[instructionAt].operands[0]; definitionFound = true; } instructionAt = instructionAt + 1; }
+        current = dropResult(current, allocation.resultId);
+        if definitionFound && layoutOperand >= 0 && layoutDefinitionIsPure(current, layoutOperand) && useCount(current, layoutOperand) == 0 { current = dropResult(current, layoutOperand); }
+    }
+    return current;
+}
+
+func copyLayouts(layouts: Vec<ManagedLayout>): Vec<ManagedLayout> {
+    var copied: Vec<ManagedLayout> = [];
+    var index = 0;
+    loop {
+        if index >= layouts.len() { break; }
+        var fields: Vec<ManagedField> = [];
+        var fieldAt = 0;
+        loop { if fieldAt >= layouts[index].fields.len() { break; } var field = layouts[index].fields[fieldAt]; fields.push(ManagedField { name: field.name, offset: field.offset, kind: field.kind, layoutId: field.layoutId }); fieldAt = fieldAt + 1; }
+        copied.push(ManagedLayout { id: layouts[index].id, key: layouts[index].key, payloadBytes: layouts[index].payloadBytes, fields: fields });
+        index = index + 1;
+    }
+    return copied;
+}
+
+func copyModule(module: ManagedProgram, program: IRProgram, allocations: Vec<ManagedAllocation>): ManagedProgram {
+    var functions: Vec<ManagedFunction> = [];
+    var index = 0;
+    loop { if index >= module.functions.len() { break; } functions.push(module.functions[index]); index = index + 1; }
+    var derived: Vec<ManagedDerived> = [];
+    index = 0;
+    loop { if index >= module.derived.len() { break; } derived.push(module.derived[index]); index = index + 1; }
+    var variables: Vec<ManagedVariableLayout> = [];
+    index = 0;
+    loop { if index >= module.variableLayouts.len() { break; } variables.push(module.variableLayouts[index]); index = index + 1; }
+    var hooks: Vec<ManagedHook> = [];
+    index = 0;
+    loop { if index >= module.hooks.len() { break; } hooks.push(module.hooks[index]); index = index + 1; }
+    return ManagedProgram { program: program, layouts: copyLayouts(module.layouts), functions: functions, allocations: allocations, derived: derived, allocateFunctionId: module.allocateFunctionId, storeReferenceFunctionId: module.storeReferenceFunctionId, collectFunctionId: module.collectFunctionId, variableLayouts: variables, hooks: hooks };
+}
+
+func applyScalarReplacementInternal(module: ManagedProgram, verifyOutput: bool): Result<ManagedProgram, string> {
+    var functions: Vec<IRFunction> = [];
+    var functionIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop { if index >= module.program.functions.len() { break; } var function = module.program.functions[index]; functions.push(function); var functionKey = function.id.toString(); if !functionIndices.has(functionKey) { functionIndices.set(functionKey, index); } index = index + 1; }
+    var derivedOwners = buildDerivedOwnerIndex(module.derived);
+    var indices = scalarIndexes(module.program);
+    var removed: HashMap<string, bool> = HashMap.new();
+    index = 0;
+    loop {
+        if index >= module.allocations.len() { break; }
+        var allocation = module.allocations[index];
+        if !derivedOwners.has(scalarValueKey(allocation.functionId, allocation.resultId)) {
+            var functionKey = allocation.functionId.toString();
+            if functionIndices.has(functionKey) {
+                var functionAt = functionIndices.get(functionKey);
+                var replaced = replaceAllocation(functions[functionAt], allocation, module.allocateFunctionId, indices);
+                if useCount(replaced, allocation.resultId) == 0 && !hasAllocationCall(replaced, module.allocateFunctionId, allocation.resultId) { removed.set(index.toString(), true); }
+                functions.set(functionAt, replaced);
+            }
+        }
+        index = index + 1;
+    }
+    var allocations: Vec<ManagedAllocation> = [];
+    index = 0;
+    loop { if index >= module.allocations.len() { break; } if !removed.has(index.toString()) { allocations.push(module.allocations[index]); } index = index + 1; }
+    var program = IRProgram { entryFunctionId: module.program.entryFunctionId, functions: functions };
+    if verifyOutput {
+        var verified = verifyProgram(program);
+        if !verified.ok { return Result.Err("scalar replacement: " + verified.errors.join("\n")); }
+    }
+    return Result.Ok(copyModule(module, program, allocations));
+}
+
+pub func applyScalarReplacement(module: ManagedProgram): Result<ManagedProgram, string> {
+    return applyScalarReplacementInternal(module, true);
+}
+
+// Compiler calls still verify small modules; larger modules rely on final region-output verification.
+pub func applyScalarReplacementForCompilerFast(module: ManagedProgram): Result<ManagedProgram, string> {
+    return applyScalarReplacementInternal(module, module.program.functions.len() <= 512);
+}

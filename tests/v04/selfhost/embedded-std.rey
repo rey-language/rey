@@ -1,0 +1,6 @@
+import std::binary::{packU16Le};
+
+func main(): void {
+    var bytes = packU16Le(4660);
+    if bytes.len() != 2 || bytes[0] != 52 || bytes[1] != 18 { exit(1); }
+}

@@ -1,0 +1,7 @@
+{
+  "reclaim-three-slabs": 0,
+  "direct-mapping-metrics": 0,
+  "opaque-handle-reuse": 0,
+  "active-context-destroy": 0,
+  "teardown-many-direct-chunks": 0
+}

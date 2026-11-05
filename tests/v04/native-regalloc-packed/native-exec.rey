@@ -1,0 +1,19 @@
+func sumSeven(a: int, b: int, c: int, d: int, e: int, f: int, g: int): int {
+    return a + b + c + d + e + f + g;
+}
+
+func main(): void {
+    var total = 0;
+    var i = 0;
+    while i < 6 {
+        if i < 3 { total = total + i + 1; }
+        else { total = total + i * 2; }
+        i = i + 1;
+    }
+    var liveAcrossCall = total + 100;
+    var seven = sumSeven(1, 2, 3, 4, 5, 6, 7);
+    var combined = liveAcrossCall + seven;
+    println(total);
+    println(liveAcrossCall);
+    println(combined);
+}

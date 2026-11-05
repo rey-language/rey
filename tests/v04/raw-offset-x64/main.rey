@@ -1,0 +1,118 @@
+import ir;
+import ir::{BasicBlock, Escape, EffectSummary, IRFunction, IRProgram, Instruction, SourceRef};
+import ir::eval::{evaluateProgram};
+import native::bytes::{byteString};
+import native::image::x64::{buildElfX64};
+import native::packed::{packedBufferLength, packedBufferReadBytes};
+import native::x64::{PackedX64Code, X64Code, emitProgram, emitProgramPacked, emitProgramPackedWithReuse, emitProgramPackedVerified, emitProgramPackedVerifiedWithReuse, emitProgramVerified, emitProgramVerifiedWithReuse, emitProgramWithReuse};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("raw-offset-x64", 0, 1); }
+
+func functionEffects(): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func rawOffsetProgram(base: int, offset: int): IRProgram {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(0, base, source()),
+        ir.rawFromInt(1, 0, source()),
+        ir.constI64(2, offset, source()),
+        ir.rawOffset(3, 1, 2, source()),
+        ir.rawToInt(4, 3, source())
+    ];
+    var entry = ir.irFunction(0, ir.functionKey("raw-offset-x64", "", "entry"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(4, source()))], functionEffects());
+    return ir.irProgram(0, [entry]);
+}
+
+func compareCode(left: X64Code, right: X64Code, label: string): void {
+    require(left.entryOffset == right.entryOffset && left.bytes.len() == right.bytes.len(), label + ": code shape differs");
+    require(left.functions.len() == right.functions.len(), label + ": function count differs");
+    var index = 0;
+    while index < left.bytes.len() {
+        require(left.bytes[index] == right.bytes[index], label + ": byte mismatch at " + index.toString());
+        index = index + 1;
+    }
+    index = 0;
+    while index < left.functions.len() {
+        require(left.functions[index].functionId == right.functions[index].functionId && left.functions[index].offset == right.functions[index].offset, label + ": function map differs");
+        index = index + 1;
+    }
+}
+
+func comparePacked(plain: X64Code, packed: PackedX64Code, label: string): void {
+    require(plain.entryOffset == packed.entryOffset && plain.functions.len() == packed.functions.len(), label + ": packed metadata differs");
+    var length = packedBufferLength(packed.bytes);
+    require(length.isOk() && length.unwrap() == plain.bytes.len(), label + ": packed length differs");
+    var packedBytes = packedBufferReadBytes(packed.bytes, 0, length.unwrap());
+    require(packedBytes.isOk() && packedBytes.unwrap().len() == plain.bytes.len(), label + ": packed read failed");
+    var bytes = packedBytes.unwrap();
+    var index = 0;
+    while index < plain.bytes.len() {
+        require(int(bytes[index]) == plain.bytes[index], label + ": packed byte mismatch at " + index.toString());
+        index = index + 1;
+    }
+    index = 0;
+    while index < plain.functions.len() {
+        require(plain.functions[index].functionId == packed.functions[index].functionId && plain.functions[index].offset == packed.functions[index].offset, label + ": packed function map differs");
+        index = index + 1;
+    }
+}
+
+func emitCase(directory: string, name: string, base: int, offset: int, traps: bool, expected: int): void {
+    var program = rawOffsetProgram(base, offset);
+    var evaluated = evaluateProgram(program, 10000, 32);
+    if traps {
+        require(!evaluated.ok, name + ": evaluator must reject this raw offset");
+    } else {
+        require(evaluated.ok && evaluated.value == expected, name + ": evaluator returned an unexpected result");
+    }
+
+    var ordinary = emitProgram(program, "linux-x64");
+    var ordinaryPacked = emitProgramPacked(program, "linux-x64");
+    var reused = emitProgramWithReuse(program, "linux-x64");
+    var reusedPacked = emitProgramPackedWithReuse(program, "linux-x64");
+    var verified = emitProgramVerified(program, "linux-x64");
+    var verifiedPacked = emitProgramPackedVerified(program, "linux-x64");
+    var verifiedReuse = emitProgramVerifiedWithReuse(program, "linux-x64");
+    var verifiedReusePacked = emitProgramPackedVerifiedWithReuse(program, "linux-x64");
+    require(ordinary.isOk(), name + ": normal emission failed");
+    require(ordinaryPacked.isOk(), name + ": packed emission failed");
+    require(reused.isOk(), name + ": reuse emission failed");
+    require(reusedPacked.isOk(), name + ": packed reuse emission failed");
+    require(verified.isOk(), name + ": verified emission failed");
+    require(verifiedPacked.isOk(), name + ": verified packed emission failed");
+    require(verifiedReuse.isOk(), name + ": verified reuse emission failed");
+    require(verifiedReusePacked.isOk(), name + ": verified packed reuse emission failed");
+
+    comparePacked(ordinary.unwrap(), ordinaryPacked.unwrap(), name + " normal");
+    comparePacked(reused.unwrap(), reusedPacked.unwrap(), name + " reuse");
+    comparePacked(verified.unwrap(), verifiedPacked.unwrap(), name + " verified");
+    comparePacked(verifiedReuse.unwrap(), verifiedReusePacked.unwrap(), name + " verified reuse");
+    compareCode(ordinary.unwrap(), verified.unwrap(), name + " normal/verified");
+    compareCode(reused.unwrap(), verifiedReuse.unwrap(), name + " reuse/verified reuse");
+
+    var image = buildElfX64(ordinary.unwrap());
+    require(image.isOk(), name + ": ELF construction failed");
+    var encoded = byteString(image.unwrap());
+    require(encoded.isOk(), name + ": ELF encoding failed");
+    var path = directory + "/" + name + ".elf";
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path) && readFile(path) == encoded.unwrap(), name + ": ELF output write failed");
+    println("raw-offset-case " + name);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "raw offset fixture expects an output directory");
+    emitCase(argv[1], "valid", 100, 3, false, 103);
+    emitCase(argv[1], "negative-base", -1, 0, true, 0);
+    emitCase(argv[1], "negative-offset", 100, -50, true, 0);
+    emitCase(argv[1], "overflow", 9223372036854775807, 1, true, 0);
+    emitCase(argv[1], "null-base", 0, 0, true, 0);
+    println("raw offset x64 contract fixtures passed");
+}

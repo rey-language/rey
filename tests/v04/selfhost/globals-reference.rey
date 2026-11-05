@@ -1,0 +1,11 @@
+var message: string = "start";
+
+func replaceMessage(): void {
+    var value = "new" + " value";
+    message = value;
+}
+
+func main(): void {
+    replaceMessage();
+    if message != "new value" { exit(1); }
+}

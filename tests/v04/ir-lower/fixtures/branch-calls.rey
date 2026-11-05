@@ -1,0 +1,12 @@
+func main(): void {
+    var result: int = choose(1);
+    return;
+}
+
+func choose(value: int): int {
+    if value > 0 {
+        return value + 2;
+    } else {
+        return value + 3;
+    }
+}

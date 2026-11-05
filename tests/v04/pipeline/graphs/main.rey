@@ -1,0 +1,12 @@
+import left;
+import right;
+
+func require(ok: bool): void {
+    if !ok { var maximum = 9223372036854775807; var failure = maximum + 1; }
+}
+
+func main(): void {
+    require(left.same(5) == 6);
+    require(right.same(5) == 7);
+    require(left.observed(1) + right.observed(2) == 320);
+}

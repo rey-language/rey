@@ -1,0 +1,87 @@
+import native::arm64::{Arm64Code, NativeFunctionOffset};
+import native::bytes::{byteString};
+import native::image::{buildElfArm64, buildMachOArm64};
+
+func require(ok: bool, label: string) {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func sameBytes(left: Vec<int>, right: Vec<int>): bool {
+    if left.len() != right.len() { return false; }
+    var i = 0;
+    loop {
+        if i >= left.len() { break; }
+        if left[i] != right[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+func save(path: string, bytes: Vec<int>) {
+    var textResult: Result<string, string> = byteString(bytes);
+    require(textResult.isOk(), "binary image converts to byte string");
+    writeFile(path, textResult.unwrap());
+}
+
+func main(): void {
+    var darwinBytes: Vec<int> = [64, 5, 128, 210, 48, 0, 128, 210, 1, 16, 0, 212];
+    var linuxBytes: Vec<int> = [64, 5, 128, 210, 168, 11, 128, 210, 1, 0, 0, 212];
+    var darwinCode = Arm64Code {
+        bytes: darwinBytes,
+        entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: 1, offset: 0 }],
+    };
+    var linuxCode = Arm64Code {
+        bytes: linuxBytes,
+        entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: 1, offset: 0 }],
+    };
+
+    var machoResult: Result<Vec<int>, string> = buildMachOArm64(darwinCode);
+    if machoResult.isErr() { println("FAIL Mach-O image builds: " + machoResult.unwrapErr()); exit(1); }
+    var macho = machoResult.unwrap();
+    var machoAgain: Result<Vec<int>, string> = buildMachOArm64(darwinCode);
+    require(machoAgain.isOk() && sameBytes(macho, machoAgain.unwrap()), "Mach-O output is deterministic");
+
+    var elfResult: Result<Vec<int>, string> = buildElfArm64(linuxCode);
+    if elfResult.isErr() { println("FAIL ELF image builds: " + elfResult.unwrapErr()); exit(1); }
+    var elf = elfResult.unwrap();
+    var elfAgain: Result<Vec<int>, string> = buildElfArm64(linuxCode);
+    require(elfAgain.isOk() && sameBytes(elf, elfAgain.unwrap()), "ELF output is deterministic");
+
+    var empty: Arm64Code = Arm64Code { bytes: [], entryOffset: 0, functions: [] };
+    require(buildMachOArm64(empty).isErr() && buildElfArm64(empty).isErr(), "both writers reject empty code");
+    var short: Arm64Code = Arm64Code { bytes: [0, 0, 0], entryOffset: 0, functions: [] };
+    require(buildMachOArm64(short).isErr() && buildElfArm64(short).isErr(), "both writers reject unaligned stream length");
+    var badEntry: Arm64Code = Arm64Code { bytes: [0, 0, 0, 0], entryOffset: 2, functions: [] };
+    require(buildMachOArm64(badEntry).isErr() && buildElfArm64(badEntry).isErr(), "both writers reject unaligned entry");
+    var outsideEntry: Arm64Code = Arm64Code { bytes: [0, 0, 0, 0], entryOffset: 4, functions: [] };
+    require(buildMachOArm64(outsideEntry).isErr() && buildElfArm64(outsideEntry).isErr(), "both writers reject out-of-range entry");
+    var invalidByte: Arm64Code = Arm64Code { bytes: [0, 0, 256, 0], entryOffset: 0, functions: [] };
+    require(buildMachOArm64(invalidByte).isErr() && buildElfArm64(invalidByte).isErr(), "both writers reject non-byte code values");
+    var badFunction: Arm64Code = Arm64Code {
+        bytes: [0, 0, 0, 0], entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: 1, offset: 2 }],
+    };
+    require(buildMachOArm64(badFunction).isErr() && buildElfArm64(badFunction).isErr(), "both writers reject unaligned function offsets");
+    var outsideFunction: Arm64Code = Arm64Code {
+        bytes: [0, 0, 0, 0], entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: 1, offset: 4 }],
+    };
+    require(buildMachOArm64(outsideFunction).isErr() && buildElfArm64(outsideFunction).isErr(), "both writers reject out-of-range function offsets");
+    var negativeFunctionId: Arm64Code = Arm64Code {
+        bytes: [0, 0, 0, 0], entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: -1, offset: 0 }],
+    };
+    require(buildMachOArm64(negativeFunctionId).isErr() && buildElfArm64(negativeFunctionId).isErr(), "both writers reject negative function ids");
+    var duplicateFunctionIds: Arm64Code = Arm64Code {
+        bytes: [0, 0, 0, 0], entryOffset: 0,
+        functions: [NativeFunctionOffset { functionId: 1, offset: 0 }, NativeFunctionOffset { functionId: 1, offset: 0 }],
+    };
+    require(buildMachOArm64(duplicateFunctionIds).isErr() && buildElfArm64(duplicateFunctionIds).isErr(), "both writers reject duplicate function ids");
+
+    mkdir("build/v04/native-image");
+    save("build/v04/native-image/return42-uuid.macho", macho);
+    save("build/v04/native-image/return42-uuid.elf", elf);
+    println("native image ok");
+}

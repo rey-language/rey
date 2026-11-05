@@ -1,0 +1,9 @@
+import layout;
+
+func main(): void {
+    var registry = layout.layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var id = layout.layoutRegisterFixed(registry, 8, offsets, 1);
+    layout.layoutReferenceOffset(registry, id, -1);
+}

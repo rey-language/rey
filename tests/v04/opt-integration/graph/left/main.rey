@@ -1,0 +1,5 @@
+import "../common.rey";
+
+pub func value(input: int): int {
+    return common.bump(input) + 1;
+}

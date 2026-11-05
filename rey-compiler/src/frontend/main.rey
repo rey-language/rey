@@ -1,0 +1,71 @@
+// The first v0.4 adapter deliberately accepts one checked source unit. Import
+// graphs continue through the production frontend until graph integration lands.
+import lexer;
+import parser;
+import parser::ast::{Stmt, stmtSpan};
+import typecheck::{CheckedProgram, typecheckAt};
+import diagnostics::{Diagnostic, Severity, newBag, pushDiagnostic, spanFromOffsets, formatDiagnostics};
+
+func frontendError(path: string, source: string, start: int, end: int, message: string): string {
+    var bag = newBag();
+    pushDiagnostic(bag, Diagnostic {
+        severity: Severity::Error, code: "V04-FRONTEND", message: message,
+        filePath: path, span: spanFromOffsets(source, start, end)
+    });
+    return formatDiagnostics(bag);
+}
+
+pub func checkSingleSource(source: string, path: string): Result<CheckedProgram, string> {
+    var lexed = lexer.tokenize(source, path);
+    var errors = "";
+    var i = 0;
+    while i < lexed.errors.len() {
+        var error = lexed.errors[i];
+        if i > 0 { errors = errors + "\n"; }
+        errors = errors + frontendError(path, source, error.span.start, error.span.end, error.message);
+        i = i + 1;
+    }
+    if errors.len() > 0 { return Result.Err(errors); }
+    var parsed = parser.parse(lexed.tokens, path);
+    i = 0;
+    while i < parsed.errors.len() {
+        var error = parsed.errors[i];
+        if i > 0 { errors = errors + "\n"; }
+        errors = errors + frontendError(path, source, error.span.start, error.span.end, error.message);
+        i = i + 1;
+    }
+    if errors.len() > 0 { return Result.Err(errors); }
+    i = 0;
+    while i < parsed.program.statements.len() {
+        var statement = parsed.program.statements[i];
+        match statement {
+            Stmt::Import(payload) => {
+                var span = stmtSpan(statement);
+                return Result.Err(frontendError(path, source, span.start, span.end,
+                    "the v0.4 scalar driver currently accepts one source unit; imports require graph lowering"));
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    var checked = typecheckAt(parsed.program, path, source);
+    i = 0;
+    while i < checked.errors.len() {
+        var error = checked.errors[i];
+        if i > 0 { errors = errors + "\n"; }
+        errors = errors + frontendError(path, source, error.span, error.span, error.message);
+        i = i + 1;
+    }
+    if !checked.ok {
+        if errors.len() == 0 {
+            errors = frontendError(path, source, 0, 0, "typechecker failed without a diagnostic");
+        }
+        return Result.Err(errors);
+    }
+    var program = checked.checkedProgram;
+    if program == null {
+        return Result.Err(frontendError(path, source, 0, 0, "typechecker returned no checked program"));
+    } else {
+        return Result.Ok(program);
+    }
+}

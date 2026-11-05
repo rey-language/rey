@@ -1,0 +1,69 @@
+struct Node {
+    pub value: int,
+    pub next: Node?,
+}
+
+func sourcecheck(ok: bool): void {
+    if !ok {
+        var zero: int = 0;
+        var trap: int = 1 / zero;
+    }
+    return;
+}
+
+func main(): void {
+    var tuple: (int, bool, string) = (8, true, "tuple");
+    var equalTuple: (int, bool, string) = (8, true, "tuple");
+    var changedTuple: (int, bool, string) = (8, false, "tuple");
+    sourcecheck(tuple.0 == 8);
+    sourcecheck(tuple.1);
+    sourcecheck(tuple.2 == "tuple");
+    sourcecheck(tuple == equalTuple);
+    sourcecheck(tuple != changedTuple);
+
+    var first: Node = Node { value: 1, next: null };
+    var second: Node = Node { value: 2, next: first };
+    var nodes: Vec<Node> = [first];
+    nodes.push(second);
+    sourcecheck(nodes.len() == 2);
+    sourcecheck(nodes.get(0) == first);
+    sourcecheck(nodes[1] == second);
+    var removed: Node = nodes.pop();
+    sourcecheck(removed == second);
+    sourcecheck(nodes.len() == 1);
+
+    var emptyNodes: Vec<Node> = [];
+    emptyNodes.push(second);
+    sourcecheck(emptyNodes.get(0) == second);
+    var emptyInts: Vec<int> = Vec.new();
+    emptyInts.push(4);
+    emptyInts[0] = 6;
+    sourcecheck(emptyInts.get(0) == 6);
+    sourcecheck(emptyInts.pop() == 6);
+
+    var counts: HashMap<string, int> = {"one": 1};
+    counts.set("two", 2);
+    counts["one"] = 3;
+    sourcecheck(counts.len() == 2);
+    sourcecheck(counts.has("one"));
+    sourcecheck(counts["one"] == 3);
+    var nulKey: string = "a\x00b";
+    counts[nulKey] = 5;
+    sourcecheck(counts.get(nulKey) == 5);
+    counts.delete("two");
+    sourcecheck(!counts.has("two"));
+
+    var flags: HashMap<string, bool> = HashMap.new();
+    flags.set("ready", true);
+    sourcecheck(flags.get("ready"));
+    sourcecheck(flags.len() == 1);
+    var otherFlags: HashMap<string, bool> = HashMap.new();
+    otherFlags.set("ready", true);
+    sourcecheck(flags != otherFlags);
+
+    var valuesA: Vec<int> = [1, 2];
+    var valuesB: Vec<int> = [1, 2];
+    sourcecheck(valuesA != valuesB);
+    sourcecheck(first != Node { value: 1, next: null });
+    return;
+}

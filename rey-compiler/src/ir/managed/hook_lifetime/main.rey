@@ -1,0 +1,268 @@
+// Bounded candidates for invocation regions around isolated, nonescaping
+// container construction. Completion must recompute this set before lowering.
+import ir::{IRFunction, IRTypeKind, InstructionKind, TerminatorKind};
+import ir::managed::{ManagedProgram};
+import ir::managed::lifetime::{managedBlockInCycle};
+import ir::managed::placement::{resolvedContainerEffect};
+
+func charge(budget: Vec<int>): bool {
+    if budget[0] <= 0 { budget.set(0, -1); return false; }
+    budget.set(0, budget[0] - 1);
+    return true;
+}
+
+func emptyCandidates(): HashMap<string, bool> {
+    var result: HashMap<string, bool> = HashMap.new();
+    return result;
+}
+
+func freshContainerOrStringHook(name: string): bool {
+    return name == "managedVecCreate" || name == "managedMapCreate" || name == "managedVecJoin" || name == "managedMapKeys" || name == "managedReadFile" || name == "managedListDir" || name == "managedArgsCreate" || name == "managedStringFromCString" || name == "managedStringSlice" || name == "managedStringConcat" || name == "managedStringFromInt" || name == "managedStringCase" || name == "managedStringTrim" || name == "managedStringRepeat" || name == "managedStringReplace" || name == "managedStringPad";
+}
+
+func safeReadCopyHook(name: string): bool {
+    return name == "managedVecLength" || name == "managedVecCapacity" || name == "managedVecGetI64" || name == "managedStringLength" || name == "managedStringByte" || name == "managedStringEqual" || name == "managedStringCompare" || name == "managedStringHash" || name == "managedStringIndexOf" || name == "managedStringContains" || name == "managedStringStartsWith" || name == "managedStringEndsWith" || name == "managedMapLength" || name == "managedMapHas" || name == "managedMapGetI64" || name == "managedVecContainsI64" || name == "managedVecContainsReference" || name == "managedVecContainsString";
+}
+
+func safeReadReturnKind(name: string): IRTypeKind {
+    if name == "managedStringEqual" || name == "managedStringStartsWith" || name == "managedStringEndsWith" || name == "managedStringContains" || name == "managedMapHas" || name == "managedVecContainsI64" || name == "managedVecContainsReference" || name == "managedVecContainsString" { return IRTypeKind::Bool; }
+    if name == "managedVecLength" || name == "managedVecCapacity" || name == "managedVecGetI64" || name == "managedStringLength" || name == "managedStringByte" || name == "managedStringCompare" || name == "managedStringHash" || name == "managedStringIndexOf" || name == "managedMapLength" || name == "managedMapGetI64" { return IRTypeKind::I64; }
+    return IRTypeKind::Void;
+}
+
+func typeKindCode(kind: IRTypeKind): int {
+    if kind == IRTypeKind::I64 { return 1; }
+    if kind == IRTypeKind::Bool { return 2; }
+    if kind == IRTypeKind::RawAddress { return 3; }
+    return 4;
+}
+
+func codeTypeKind(code: int): IRTypeKind {
+    if code == 1 { return IRTypeKind::I64; }
+    if code == 2 { return IRTypeKind::Bool; }
+    if code == 3 { return IRTypeKind::RawAddress; }
+    return IRTypeKind::Void;
+}
+
+func addValueKind(values: HashMap<string, int>, valueId: int, kind: IRTypeKind): bool {
+    if valueId < 0 { return false; }
+    var key = valueId.toString();
+    if values.has(key) { return false; }
+    values.set(key, typeKindCode(kind));
+    return true;
+}
+
+func functionValueKind(values: HashMap<string, int>, valueId: int): IRTypeKind {
+    var key = valueId.toString();
+    if !values.has(key) { return IRTypeKind::Void; }
+    return codeTypeKind(values.get(key));
+}
+
+func operandKindsMatch(values: HashMap<string, int>, operands: Vec<int>, leftKind: IRTypeKind, rightKind: IRTypeKind, budget: Vec<int>): bool {
+    if operands.len() != 2 || !charge(budget) { return false; }
+    if functionValueKind(values, operands[0]) != leftKind { return false; }
+    if !charge(budget) || functionValueKind(values, operands[1]) != rightKind { return false; }
+    return true;
+}
+
+func functionBlockIndex(function: IRFunction, blockId: int): int {
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } if function.blocks[index].id == blockId { return index; } index += 1; }
+    return -1;
+}
+
+func blockArgumentsMatch(function: IRFunction, values: HashMap<string, int>, targetBlockId: int, arguments: Vec<int>, budget: Vec<int>): bool {
+    var targetAt = functionBlockIndex(function, targetBlockId);
+    if targetAt < 0 || function.blocks[targetAt].params.len() != arguments.len() { return false; }
+    var index = 0;
+    loop {
+        if index >= arguments.len() { break; }
+        if !charge(budget) || functionValueKind(values, arguments[index]) != function.blocks[targetAt].params[index].ty.kind { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+func indexValueKinds(function: IRFunction, values: HashMap<string, int>, budget: Vec<int>): bool {
+    var index = 0;
+    loop {
+        if index >= function.parameters.len() { break; }
+        if !charge(budget) || !addValueKind(values, function.parameters[index].id, function.parameters[index].ty.kind) { return false; }
+        index += 1;
+    }
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var paramAt = 0;
+        loop {
+            if paramAt >= block.params.len() { break; }
+            if !charge(budget) || !addValueKind(values, block.params[paramAt].id, block.params[paramAt].ty.kind) { return false; }
+            paramAt += 1;
+        }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.resultId >= 0 && (!charge(budget) || !addValueKind(values, instruction.resultId, instruction.ty.kind)) { return false; }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    return true;
+}
+
+func hookLifetimeFunctionRejection(module: ManagedProgram, function: IRFunction, programIndices: HashMap<string, int>, hookIndices: HashMap<string, int>, managedIds: HashMap<string, bool>, budget: Vec<int>): string {
+    if function.signature.returnType.kind == IRTypeKind::RawAddress { return "function returns a raw address"; }
+    if function.blocks.len() == 0 || function.blocks.len() > 32 || function.parameters.len() > 128 { return "function size is outside the proof bound"; }
+    var blockIds: HashMap<string, bool> = HashMap.new();
+    var uniqueAt = 0;
+    loop {
+        if uniqueAt >= function.blocks.len() { break; }
+        var key = function.blocks[uniqueAt].id.toString();
+        if blockIds.has(key) { return "function has duplicate block IDs"; }
+        blockIds.set(key, true);
+        uniqueAt += 1;
+    }
+    var valueKinds: HashMap<string, int> = HashMap.new();
+    if !indexValueKinds(function, valueKinds, budget) { return "SSA value index is invalid or the proof budget is exhausted"; }
+    var instructionCount = 0;
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        if !charge(budget) { return "proof budget exhausted"; }
+        var block = function.blocks[blockAt];
+        if block.params.len() > 128 || block.instructions.len() > 512 - instructionCount { return "function size is outside the proof bound"; }
+        instructionCount += block.instructions.len();
+        blockAt += 1;
+    }
+
+    var sawFresh = false;
+    var hookCalls = 0;
+    blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var block = function.blocks[blockAt];
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= block.instructions.len() { break; }
+            if !charge(budget) { return "proof budget exhausted"; }
+            var instruction = block.instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call {
+                hookCalls += 1;
+                if hookCalls > 64 { return "hook call count is outside the proof bound"; }
+                // A call in a cycle may allocate indirectly, even when its direct
+                // escape summary describes only a read result.
+                if managedBlockInCycle(function, block.id) { return "hook call executes in a control-flow cycle"; }
+                var hookKey = instruction.functionId.toString();
+                if !hookIndices.has(hookKey) || managedIds.has(hookKey) { return "function calls a user or unknown function"; }
+                var hook = module.hooks[hookIndices.get(hookKey)];
+                var effect = resolvedContainerEffect(hook.runtimeName);
+                // mayCollect is legacy tracing-root metadata; this plan is used only by region lowering.
+                if !effect.known || effect.receiverEscapes || effect.argumentEscapes || effect.argumentEscapesToReceiver { return "hook effect is not a nonescaping read or fresh copy"; }
+                if !programIndices.has(hookKey) { return "hook function is missing"; }
+                var hookFunction = module.program.functions[programIndices.get(hookKey)];
+                if hookFunction.key.name != hook.runtimeName || hookFunction.signature.returnType.kind != instruction.ty.kind || hookFunction.parameters.len() != instruction.operands.len() || instruction.operands.len() > 128 || (instruction.ty.kind == IRTypeKind::Void && instruction.resultId >= 0) || (instruction.ty.kind != IRTypeKind::Void && instruction.resultId < 0) { return "hook signature does not match its call"; }
+                var operandAt = 0;
+                loop {
+                    if operandAt >= instruction.operands.len() { break; }
+                    if !charge(budget) { return "proof budget exhausted"; }
+                    if functionValueKind(valueKinds, instruction.operands[operandAt]) != hookFunction.parameters[operandAt].ty.kind { return "hook argument type does not match its signature"; }
+                    operandAt += 1;
+                }
+                var freshHook = freshContainerOrStringHook(hook.runtimeName);
+                if freshHook {
+                    if !effect.freshResult || instruction.ty.kind != IRTypeKind::RawAddress || instruction.resultId < 0 || hookFunction.signature.returnType.kind != IRTypeKind::RawAddress { return "fresh hook does not return a fresh reference"; }
+                    sawFresh = true;
+                } else {
+                    if !safeReadCopyHook(hook.runtimeName) || effect.freshResult { return "hook is outside the fresh and read-only allowlists"; }
+                    var resultKind = safeReadReturnKind(hook.runtimeName);
+                    if resultKind == IRTypeKind::Void || instruction.ty.kind != resultKind || instruction.resultId < 0 { return "read hook return type is not whitelisted"; }
+                }
+            } else if instruction.kind == InstructionKind::RawNull {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::RawAddress || instruction.operands.len() != 0 { return "invalid raw null instruction"; }
+            } else if instruction.kind == InstructionKind::RawEqual {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::Bool || !operandKindsMatch(valueKinds, instruction.operands, IRTypeKind::RawAddress, IRTypeKind::RawAddress, budget) { return "invalid raw equality instruction"; }
+            } else if instruction.kind == InstructionKind::ConstI64 {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::I64 || instruction.operands.len() != 0 { return "invalid scalar integer instruction"; }
+            } else if instruction.kind == InstructionKind::ConstBool {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::Bool || instruction.operands.len() != 0 { return "invalid scalar boolean instruction"; }
+            } else if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::I64 || !operandKindsMatch(valueKinds, instruction.operands, IRTypeKind::I64, IRTypeKind::I64, budget) { return "invalid scalar integer instruction"; }
+            } else if instruction.kind == InstructionKind::CompareI64 {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::Bool || !operandKindsMatch(valueKinds, instruction.operands, IRTypeKind::I64, IRTypeKind::I64, budget) { return "invalid scalar comparison instruction"; }
+            } else if instruction.kind == InstructionKind::CompareBool {
+                if instruction.resultId < 0 || instruction.ty.kind != IRTypeKind::Bool || !operandKindsMatch(valueKinds, instruction.operands, IRTypeKind::Bool, IRTypeKind::Bool, budget) { return "invalid scalar comparison instruction"; }
+            } else {
+                return "function contains an instruction outside the scalar and raw-equality allowlist";
+            }
+            instructionAt += 1;
+        }
+        var term = block.terminator;
+        if term.kind != TerminatorKind::Return && term.kind != TerminatorKind::Jump && term.kind != TerminatorKind::Branch { return "function has an invalid terminator"; }
+        if term.kind == TerminatorKind::Return {
+            if (function.signature.returnType.kind == IRTypeKind::Void && term.valueId >= 0) || (function.signature.returnType.kind != IRTypeKind::Void && term.valueId < 0) { return "function return does not match its signature"; }
+            if term.valueId >= 0 && functionValueKind(valueKinds, term.valueId) != function.signature.returnType.kind { return "function return does not match its signature"; }
+        } else if term.kind == TerminatorKind::Jump {
+            if !blockArgumentsMatch(function, valueKinds, term.targetBlockId, term.targetArgs, budget) { return "jump arguments do not match the target block"; }
+        } else {
+            if functionValueKind(valueKinds, term.conditionValueId) != IRTypeKind::Bool || !blockArgumentsMatch(function, valueKinds, term.trueTargetBlockId, term.trueArgs, budget) || !blockArgumentsMatch(function, valueKinds, term.falseTargetBlockId, term.falseArgs, budget) { return "branch condition or arguments do not match"; }
+        }
+        if budget[0] < 0 { return "proof budget exhausted"; }
+        blockAt += 1;
+    }
+    if !sawFresh { return "function has no fresh container or string hook"; }
+    return "";
+}
+
+// Completion recomputes this set before accepting hook-only invocation regions.
+pub func hookLifetimeCandidates(module: ManagedProgram): HashMap<string, bool> {
+    var candidates: HashMap<string, bool> = HashMap.new();
+    if module.functions.len() > 10000 || module.program.functions.len() > 20000 || module.hooks.len() > 8192 { return candidates; }
+    var budget: Vec<int> = [2000000];
+    var programIndices: HashMap<string, int> = HashMap.new();
+    var index = 0;
+    loop {
+        if index >= module.program.functions.len() { break; }
+        if !charge(budget) { return emptyCandidates(); }
+        var key = module.program.functions[index].id.toString();
+        if programIndices.has(key) { return emptyCandidates(); }
+        programIndices.set(key, index);
+        index += 1;
+    }
+    var hookIndices: HashMap<string, int> = HashMap.new();
+    index = 0;
+    loop {
+        if index >= module.hooks.len() { break; }
+        if !charge(budget) { return emptyCandidates(); }
+        var key = module.hooks[index].functionId.toString();
+        if module.hooks[index].functionId < 0 || module.hooks[index].functionId == module.allocateFunctionId || module.hooks[index].functionId == module.storeReferenceFunctionId || module.hooks[index].functionId == module.collectFunctionId || module.hooks[index].runtimeName == "" || hookIndices.has(key) { return emptyCandidates(); }
+        hookIndices.set(key, index);
+        index += 1;
+    }
+    var managedIds: HashMap<string, bool> = HashMap.new();
+    index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        if !charge(budget) { return emptyCandidates(); }
+        var managed = module.functions[index];
+        var key = managed.functionId.toString();
+        if managedIds.has(key) || !programIndices.has(key) { return emptyCandidates(); }
+        managedIds.set(key, true);
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= module.functions.len() { break; }
+        if !charge(budget) { return emptyCandidates(); }
+        var managed = module.functions[index];
+        var key = managed.functionId.toString();
+        if hookIndices.has(key) { return emptyCandidates(); }
+        var function = module.program.functions[programIndices.get(key)];
+        var rejection = hookLifetimeFunctionRejection(module, function, programIndices, hookIndices, managedIds, budget);
+        if budget[0] < 0 { return emptyCandidates(); }
+        if rejection == "" { candidates.set(key, true); }
+        index += 1;
+    }
+    return candidates;
+}

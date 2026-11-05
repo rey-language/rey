@@ -1,0 +1,233 @@
+import containers::{managedMapCreate, managedMapSetI64, managedStringFromInt, managedVecCreate, managedVecPushReference};
+import host::{hostWrite};
+import layout::{layoutRegisterFixed, layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionGroupCount, managedRegionRequestedBytes, managedStoreReference};
+
+func putByte(buffer: __rey_raw_address, length: int, value: int): int {
+    __reyRawStoreByte(__reyRawOffset(buffer, length), value);
+    return length + 1;
+}
+
+func putInt(buffer: __rey_raw_address, length: int, value: int): int {
+    if value < 0 {
+        length = putByte(buffer, length, 45);
+        value = 0 - value;
+    }
+    if value == 0 { return putByte(buffer, length, 48); }
+    var digits = __reyRawMap(24);
+    var count = 0;
+    while value > 0 {
+        __reyRawStoreByte(__reyRawOffset(digits, count), value % 10 + 48);
+        count = count + 1;
+        value = value / 10;
+    }
+    while count > 0 {
+        count = count - 1;
+        length = putByte(buffer, length, __reyRawLoadByte(__reyRawOffset(digits, count)));
+    }
+    __reyRawUnmap(digits, 24);
+    return length;
+}
+
+func unixMicros(): int {
+    var buffer = __reyRawMap(16);
+    var result = __reyRawToInt(__reyRawSyscall(116, buffer, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+    var seconds = __reyRawLoadI64(buffer);
+    var usec = __reyRawLoadI64(__reyRawOffset(buffer, 8));
+    __reyRawUnmap(buffer, 16);
+    if result < 0 || seconds < 0 || usec < 0 || usec >= 1000000 { return -1; }
+    return seconds * 1000000 + usec;
+}
+
+func emitLine(kind: int, mode: int, count: int, live: int, payload: int, groups: int, requested: int, micros: int): void {
+    var buffer = __reyRawMap(256);
+    var length = 0;
+    length = putByte(buffer, length, 107);
+    length = putByte(buffer, length, 105);
+    length = putByte(buffer, length, 110);
+    length = putByte(buffer, length, 100);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, kind);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 109);
+    length = putByte(buffer, length, 111);
+    length = putByte(buffer, length, 100);
+    length = putByte(buffer, length, 101);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, mode);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 110);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, count);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 108);
+    length = putByte(buffer, length, 105);
+    length = putByte(buffer, length, 118);
+    length = putByte(buffer, length, 101);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, live);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 112);
+    length = putByte(buffer, length, 97);
+    length = putByte(buffer, length, 121);
+    length = putByte(buffer, length, 108);
+    length = putByte(buffer, length, 111);
+    length = putByte(buffer, length, 97);
+    length = putByte(buffer, length, 100);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, payload);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 103);
+    length = putByte(buffer, length, 114);
+    length = putByte(buffer, length, 111);
+    length = putByte(buffer, length, 117);
+    length = putByte(buffer, length, 112);
+    length = putByte(buffer, length, 115);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, groups);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 114);
+    length = putByte(buffer, length, 101);
+    length = putByte(buffer, length, 113);
+    length = putByte(buffer, length, 117);
+    length = putByte(buffer, length, 101);
+    length = putByte(buffer, length, 115);
+    length = putByte(buffer, length, 116);
+    length = putByte(buffer, length, 101);
+    length = putByte(buffer, length, 100);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, requested);
+    length = putByte(buffer, length, 32);
+    length = putByte(buffer, length, 117);
+    length = putByte(buffer, length, 115);
+    length = putByte(buffer, length, 61);
+    length = putInt(buffer, length, micros);
+    length = putByte(buffer, length, 10);
+    var written = hostWrite(1, buffer, length);
+    __reyRawUnmap(buffer, 256);
+    if written != length { __reyRawFail(2299); }
+}
+
+func pauseForSample(): void {
+    var started = unixMicros();
+    var now = started;
+    while started >= 0 && now >= 0 && now < started + 2000000 { now = unixMicros(); }
+}
+
+func runPromo(context: __rey_raw_address, scalar: int, node: int, scratchGroups: int): void {
+    var outer = managedRegionCreate(context);
+    var anchor = managedRegionAllocate(context, outer, node, 1);
+    var inner = managedRegionCreate(context);
+    var index = 0;
+    while index < scratchGroups {
+        managedRegionAllocate(context, inner, scalar, index + 2);
+        index = index + 1;
+    }
+    var escaping = managedRegionAllocate(context, inner, node, 1);
+    var started = unixMicros();
+    managedStoreReference(context, anchor, 0, escaping);
+    managedRegionEnd(context, inner);
+    var elapsed = -1;
+    var finished = unixMicros();
+    if started >= 0 && finished >= started { elapsed = finished - started; }
+    var live = managedLiveObjects(context);
+    var payload = managedLivePayloadBytes(context);
+    var groups = managedRegionGroupCount(context);
+    var requested = managedRegionRequestedBytes(context);
+    emitLine(1, scratchGroups, scratchGroups, live, payload, groups, requested, elapsed);
+    pauseForSample();
+}
+
+func runList(context: __rey_raw_address, node: int, count: int): void {
+    var region = managedRegionCreate(context);
+    var head = __reyRawNull();
+    var index = 0;
+    var started = unixMicros();
+    while index < count {
+        var item = managedRegionAllocate(context, region, node, 1);
+        if !__reyRawEqual(head, __reyRawNull()) { managedStoreReference(context, item, 0, head); }
+        head = item;
+        index = index + 1;
+    }
+    var elapsed = -1;
+    var finished = unixMicros();
+    if started >= 0 && finished >= started { elapsed = finished - started; }
+    var live = managedLiveObjects(context);
+    var payload = managedLivePayloadBytes(context);
+    emitLine(2, 0, count, live, payload, 0, 0, elapsed);
+    if __reyRawEqual(head, __reyRawNull()) && count > 0 { __reyRawFail(2299); }
+    pauseForSample();
+}
+
+func runVector(context: __rey_raw_address, scalar: int, headerLayout: int, dataLayout: int, count: int): void {
+    var region = managedRegionCreate(context);
+    var vector = managedVecCreate(context, headerLayout, dataLayout, count);
+    var index = 0;
+    var started = unixMicros();
+    while index < count {
+        var item = managedRegionAllocate(context, region, scalar, 1);
+        managedVecPushReference(context, vector, dataLayout, item);
+        index = index + 1;
+    }
+    var elapsed = -1;
+    var finished = unixMicros();
+    if started >= 0 && finished >= started { elapsed = finished - started; }
+    var live = managedLiveObjects(context);
+    var payload = managedLivePayloadBytes(context);
+    emitLine(3, 0, count, live, payload, 0, 0, elapsed);
+    pauseForSample();
+}
+
+func runMap(context: __rey_raw_address, stringLayout: int, mapLayout: int, bucketsLayout: int, nodeLayout: int, count: int): void {
+    var region = managedRegionCreate(context);
+    var map = managedMapCreate(context, mapLayout, bucketsLayout);
+    var index = 0;
+    var started = unixMicros();
+    while index < count {
+        var key = managedStringFromInt(context, stringLayout, index + 1);
+        managedMapSetI64(context, map, nodeLayout, key, index);
+        index = index + 1;
+    }
+    var elapsed = -1;
+    var finished = unixMicros();
+    if started >= 0 && finished >= started { elapsed = finished - started; }
+    var live = managedLiveObjects(context);
+    var payload = managedLivePayloadBytes(context);
+    emitLine(4, 0, count, live, payload, 0, 0, elapsed);
+    if __reyRawEqual(region, __reyRawNull()) || __reyRawEqual(map, __reyRawNull()) { __reyRawFail(2299); }
+    pauseForSample();
+}
+
+func main(): void {
+    var benchKind: int = 1;
+    var benchCount: int = 8;
+    var registry = layoutRegistryCreate(8);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var nodeOffsets = __reyRawMap(8);
+    __reyRawStoreI64(nodeOffsets, 0);
+    var node = layoutRegisterFixed(registry, 8, nodeOffsets, 1);
+    __reyRawUnmap(nodeOffsets, 8);
+    var headerOffsets = __reyRawMap(8);
+    __reyRawStoreI64(headerOffsets, 0);
+    var headerLayout = layoutRegisterFixed(registry, 8, headerOffsets, 1);
+    __reyRawUnmap(headerOffsets, 8);
+    var dataLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var stringLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 1);
+    var mapOffsets = __reyRawMap(8);
+    __reyRawStoreI64(mapOffsets, 0);
+    var mapLayout = layoutRegisterFixed(registry, 16, mapOffsets, 1);
+    __reyRawUnmap(mapOffsets, 8);
+    var bucketsLayout = layoutRegisterVariable(registry, 8, __reyRawNull(), 0, 2);
+    var scalarOffsets = __reyRawMap(16);
+    __reyRawStoreI64(scalarOffsets, 0);
+    __reyRawStoreI64(__reyRawOffset(scalarOffsets, 8), 16);
+    var mapNode = layoutRegisterFixed(registry, 24, scalarOffsets, 2);
+    __reyRawUnmap(scalarOffsets, 16);
+    var context = managedCreate(registry);
+    if benchKind == 1 { runPromo(context, scalar, node, benchCount); }
+    if benchKind == 2 { runList(context, node, benchCount); }
+    if benchKind == 3 { runVector(context, scalar, headerLayout, dataLayout, benchCount); }
+    if benchKind == 4 { runMap(context, stringLayout, mapLayout, bucketsLayout, mapNode, benchCount); }
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

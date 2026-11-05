@@ -1,0 +1,22 @@
+import "imports/model.rey";
+import std::binary;
+
+func main(): void {
+    var payload = model.makePayload(305419896);
+    var little = binary.packU32Le(payload.code);
+    var big = binary.packU32Be(payload.code);
+    var output = "";
+    var index = 0;
+    loop {
+        if index >= little.len() { break; }
+        output = output + char(little.get(index)).toString();
+        index = index + 1;
+    }
+    index = 0;
+    loop {
+        if index >= big.len() { break; }
+        output = output + char(big.get(index)).toString();
+        index = index + 1;
+    }
+    writeFile("typed-ir.bin", output);
+}

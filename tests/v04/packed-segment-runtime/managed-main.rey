@@ -1,0 +1,26 @@
+import native::packed::{packedBufferCreate, packedBufferTryAppendByte};
+import native::output::{writeCompilerOutputPackedSegments};
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 3 { exit(2); return; }
+    var made = packedBufferCreate(0);
+    if made.isErr() { exit(3); return; }
+    var body = made.unwrap();
+    var i = 0;
+    while i < 5003 {
+        if !packedBufferTryAppendByte(body, (i * 131 + 7) % 256) { exit(4); return; }
+        i += 1;
+    }
+    var header: Vec<int> = [0, 127, 128, 255];
+    if argv[2] == "header" { header.set(1, 256); }
+    if argv[2] == "lane" { body.lanes.set(0, 72057594037927936); }
+    if argv[2] == "tail" {
+        var last = body.lanes.len() - 1;
+        body.lanes.set(last, body.lanes[last] + 1099511627776);
+    }
+    var written = writeCompilerOutputPackedSegments(argv[1], header, body);
+    if argv[2] == "valid" {
+        if written.isErr() { exit(5); return; }
+    } else if written.isOk() { exit(6); return; }
+}

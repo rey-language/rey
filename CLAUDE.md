@@ -2,6 +2,26 @@
 
 **Rey** is an experimental programming language focused on language design, interpreters, and execution models. It's designed to be simple and easy to learn.
 
+## Current performance work — 2026-11-03
+
+- The `codex-v0.4` worktree contains region reclamation, lifetime, native register allocation, embedded runtime/stdlib, and compiler output changes. Focused Linux x64 checks pass. The compact x64 `RawOffset` check rejects negative bases and offsets before checked addition; it is independently reviewed, passes the Linux seed native fixture, and saves 18 bytes and two fixups per offset versus the initial correctness fix in focused cases. Context destruction uses one region/group/chunk validation walk to link direct chunks, then releases mappings from that list; five native reclamation fixtures and malformed-metadata rejection pass. Slab validation still has other passes.
+- Earlier adaptive-cache S1-to-S2/S2-to-S3 builds used opt-in fast exit and produced byte-identical images, but that mode bypasses normal context teardown. A later corrected-source S2-to-S3 attempt was stopped at 11:48 before output as the source improved, so it did not establish a fixed point. Compact-source H-to-S1 exited successfully; S1-to-S2 with trusted fast exit is running, and focused packed/promotion S1 checks are in progress. Full current-source bootstrap and clean normal teardown remain unverified. Output-path guards also cannot detect relative/absolute aliases, symlinks, hard links, imported user sources, or explicit runtime sources, so an aliased input may be overwritten.
+- Full regression verification remains open. The experimental escape summary is off by default, Windows managed builds remain disabled, and broad performance and correctness have not been established. See [v0.4 performance work](docs/V0.4-PERFORMANCE-WORK.md) and `primer.md` before continuing.
+
+## Current compiler work — 2026-10-21
+
+- **Region-only correction (current):** Production managed memory now uses compiler-inferred invocation/program regions and address-preserving allocation-group promotion; the tracing collector, GC roots/safepoints, and reference counting are not on the production path. Final region source matrix passes 967 checks with 124 Darwin and 124 Linux ARM64 images; direct runtime 17/17; compiler static 21; frontend candidate 70/70; scalar/native 240; raw 444; optimization/reuse 396; historical fixed heap/GC 402; x64 structural 8; seed conformance 154/154, E2E 11/11, probes 2/2. Container methods and unknown callees conservatively place containers in the program region, so caller-region retention is not claimed; no RSS/timing or release claim. See [region validation](docs/V0.4-REGION-VALIDATION.md).
+- **Historical managed-root batch (superseded):** The managed-memory batch implements compiler-generated precise roots, fixed and variable aggregate layouts, managed strings/vectors/maps, tagged values and match statements, inferred regions and caller-destination construction. Final source acceptance passes 1,429 checks with 370 native images; supplemental generics pass 534 with 160 images. Managed runtime passes 191 per slot mode, fixed heap/collector 402 per mode, and raw/layout 444. See [managed validation](docs/V0.4-MANAGED-VALIDATION.md) for frozen evidence and bounded interpreter omissions. All three workers finished implementation and fixtures before the global test barrier opened. Production runtime/backend source remains Rey; the historical seed builds harnesses. Regions use conservative heap fallback; moving aliased graphs and recursive immutable equality remain unsupported. This remains experimental ARM64 work, with self-hosting, release and speed/RSS gates ahead.
+- The fixed-layout heap and explicit-root collector now pass 402 coordinator checks per mode across 54 fixtures, with 54 generated executions per ARM64 OS in default/reuse modes (216 total). One 128-allocation forced-collection case is explicitly native-only after the historical interpreter exceeded its bounds; both native images pass in both modes. `--reuse-slots` is opt-in: 396 source checks and 69 direct-IR checks pass, with the chain's actual ARM64 frame shrinking 336 to 16 bytes. Existing 240-check scalar/native regression passes. Balanced pure Rey binary encoding avoids the seed's quadratic join. These are trusted runtime APIs, not compiler-generated roots or inferred regions. QEMU host crashes were independently confirmed; native x64 remains unverified. See the parallel ledger and fixed-heap/stack-slot contracts.
+- Released v0.3.1 uses the native Rey frontend/backend under `rey-compiler/` with its historical LLVM/Clang route. `compiler/v1` is the Rust reference/bring-up interpreter.
+- The `codex-v0.4` contributor branch contains an experimental direct ARM64 backend and Mach-O/ELF writer written in Rey. `rey-compiler/ir-main.rey` checks/dumps/evaluates scalar IR; `native-main.rey` emits native images. See `docs/V0.4-PARALLEL-PHASES.md` and `docs/V0.4-NATIVE-CONTRACT.md`.
+- The arithmetic/module-graph gate passes 238 coordinator checks, including 59 real macOS arm64 executions and source builds with compiler tools absent from PATH. A separate Python arithmetic oracle passes 55 generated programs and 227 process records; nine emitted ELF programs pass 31 Linux arm64 VM checks. macOS startup uses dyld/libSystem; images import no Rey C runtime. This is a scalar bring-up slice, not a completed v0.4 or self-hosted runtime.
+- User authorized narrowly scoped GPT-6 Luna medium workers, three at a time, writing their entire assigned code/fixtures before testing. Coordinator owns shared interfaces, integration and Git. Current branch differs from the divergent historical `codex` branch deliberately; preserve both.
+- The new `linux-x64` scalar target and ELF64 writer pass 64 source and two direct-IR executions under x64 emulation in the ARM64 Linux VM. Native x64 hardware, Windows and macOS Intel remain gates. Raw-memory work is a separate next wave, not a collector claim.
+- Trusted raw checking/IR/ARM64 primitives now pass 145 integration checks and 32 executions each on Darwin/Linux arm64. Ordinary compilation has no raw authority. Typed address cells support runtime metadata without integer casts; evaluator provenance checks remain distinct from native trusted-code preconditions. An owned raw byte-buffer module is the next runtime sector.
+- The owned raw byte buffer and explicit runtime failure extension pass 261 checks and 47 executions per ARM64 OS. The frontend-only baseline/candidate comparison retains identical 62/70 expected results with no regressions; eight mismatches remain. Tracing-layout metadata, liveness and scalar folding are the next scoped sectors. No automatic collector or inferred-region result is claimed.
+- The earlier `2330ddb` checkpoint implemented fixed tracing-layout metadata, semantic SSA liveness and opt-in `--fold-constants` on the experimental drivers. Its runtime integration passes 444 checks and 77 executions per ARM64 OS; folding integration passes 367 checks with 26 Darwin and 24 executions per Linux target (x64 emulated). The 150-case arithmetic oracle and existing 240-check scalar/native regression also pass. The heap/explicit-root collector extension is recorded above; precise compiler roots, regions and source aggregate coverage remain pending.
+
 ## Core Rules
 
 1. Variables are declared using `var`
@@ -36,7 +56,7 @@ rey-lang/
 
 ## Build & Run
 
-The compiler is written in Rust. Build and run using Cargo:
+Build the Rust reference interpreter using Cargo:
 
 ```bash
 cd compiler/v1
@@ -65,6 +85,13 @@ From the codebase and CONTRIBUTING.md:
 - This file describes repo structure and conventions for assistants/contributors.
 - The Rust reference interpreter lives at `compiler/v1`.
 - The experimental bootstrap compiler (Rey → LLVM IR → native) lives at `rey-compiler/`.
+
+## Forward v0.4 architecture — 2026-10-21
+
+- The implementation proposal is [docs/V0.4-EXECUTION-PLAN.md](docs/V0.4-EXECUTION-PLAN.md). It supersedes the old v0.4 LLVM/C architecture; it does not claim implementation or amend SPEC.md by itself.
+- The goal is a compiler, optimizer, native backend, executable writer/linker, and runtime implemented in Rey. Clang/LLVM and the historical C runtime belong only to recorded bootstrap history, not the production dependency closure.
+- Implement in gated slices: baseline, typed IR, direct native backend/runtime, correct reclamation, native self-hosting, inferred memory optimizations, pipeline optimization, incremental builds, platform ports, and release validation.
+- Preserve shared identity, aliases, specified errors, and arithmetic semantics. Performance goals require workload-specific measurements; allocator nanoseconds do not establish compilation or application runtime.
 
 ## v0.1.0 snapshot
 

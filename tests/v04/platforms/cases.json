@@ -1,0 +1,14 @@
+{
+  "fixture": "tests/v04/platforms/main.rey",
+  "execution": "not claimed",
+  "covers": [
+    "linux-x64 emitProgram bytes match emitImage and the existing ELF writer",
+    "relocatable ELF64 x86-64 object header",
+    "windows-x64 PE32+ ExitProcess import",
+    "darwin-x64 Mach-O header, dyld, and libSystem",
+    "emitProgram still rejects windows-x64",
+    "native driver emits linux-x64, windows-x64, darwin-x64, and macos-x64 aliases",
+    "windows entry stub is inside .pdata with UWOP_ALLOC_SMALL for 40 bytes",
+    "exit-42 images are written when an output directory is passed"
+  ]
+}

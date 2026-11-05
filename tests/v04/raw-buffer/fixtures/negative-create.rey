@@ -1,0 +1,5 @@
+import buffer;
+
+func main(): void {
+    var invalid = buffer.rawBufferCreate(-1);
+}

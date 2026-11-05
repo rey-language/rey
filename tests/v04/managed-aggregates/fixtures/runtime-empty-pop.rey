@@ -1,0 +1,5 @@
+func main(): void {
+    var values: Vec<int> = [];
+    var removed: int = values.pop();
+    return;
+}

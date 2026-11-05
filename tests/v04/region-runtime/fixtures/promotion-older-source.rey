@@ -1,0 +1,64 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateProgram, managedCreate, managedCurrentRegion, managedDependencyCount, managedDestroy, managedLiveObjects, managedLivePayloadBytes, managedProgramRegion, managedPromoteReference, managedPromotionCount, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes, managedRequestedObjectBytes, managedStoreReference};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var node = layoutRegisterFixed(registry, 16, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    var object = managedAllocateProgram(context, node, 1);
+    var programRequestedBytes = managedRegionRequestedBytes(context);
+    check(programRequestedBytes > 0);
+    var alias = object;
+    __reyRawStoreI64(__reyRawOffset(object, 24), 41);
+    var child = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), child));
+    var promoted = managedPromoteReference(context, object, child);
+    check(__reyRawEqual(promoted, object) && __reyRawEqual(alias, object));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    check(__reyRawLoadI64(object) == 8589934592 + node);
+    check(__reyRawLoadI64(__reyRawOffset(object, 24)) == 41);
+    var group = __reyRawLoadAddress(__reyRawOffset(program, 40));
+    var chunk = __reyRawLoadAddress(__reyRawOffset(group, 32));
+    var data = __reyRawLoadAddress(__reyRawOffset(chunk, 16));
+    var record = __reyRawOffset(data, 8);
+    check(__reyRawLoadI64(__reyRawOffset(group, 24)) == 1);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(group, 16)), program));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 16)), object));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 24)), program));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(chunk, 16)), data));
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(program, 48)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(child, 56)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(child, 48)) == 0);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(child, 40)), __reyRawNull()));
+    managedRegionEnd(context, child);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    managedStoreReference(context, object, 0, object);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(object, 16)), object));
+    check(__reyRawLoadI64(__reyRawOffset(object, 24)) == 41);
+    check(__reyRawLoadI64(object) == 8589934592 + node);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(record, 24)), program));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(group, 16)), program));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(chunk, 16)), data));
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 0);
+    check(managedLiveObjects(context) == 1);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedLivePayloadBytes(context) == 16);
+    check(managedRequestedObjectBytes(context) == 32);
+    check(managedRegionRequestedBytes(context) == programRequestedBytes);
+    check(managedRegionUsedBytes(context) == 120);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(program, 64)) == programRequestedBytes);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

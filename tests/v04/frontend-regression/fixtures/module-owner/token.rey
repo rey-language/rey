@@ -1,0 +1,3 @@
+pub struct Token { pub n: int }
+
+pub func id(token: Token): Token { return token; }

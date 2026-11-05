@@ -1,0 +1,54 @@
+import frontend::graph::{checkSourceFileGraph};
+
+func helpText(): string {
+    return "Usage: rey-frontend check <file> [--std-root <root>]\n       rey-frontend --help\n\nChecks the source import graph without lowering or code generation.";
+}
+
+func usageError(message: string) {
+    if message.len() > 0 { eprintln(message); }
+    eprintln(helpText());
+    exit(2);
+}
+
+func main(): void {
+    var argv = args();
+    // args() includes the executable path at index zero.
+    if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "help") {
+        println(helpText());
+        return;
+    }
+    if argv.len() < 2 || argv[1] != "check" {
+        usageError("unsupported or missing command");
+        return;
+    }
+    if argv.len() == 3 && argv[2] == "--help" {
+        println(helpText());
+        return;
+    }
+    if argv.len() < 3 { usageError("check requires a source file"); return; }
+    var filePath = argv[2];
+    if filePath.len() == 0 { usageError("source file path cannot be empty"); return; }
+    var stdRoot = "";
+    var sawStdRoot = false;
+    var i = 3;
+    while i < argv.len() {
+        var argument = argv[i];
+        if argument == "--std-root" {
+            if sawStdRoot { usageError("--std-root may be specified only once"); return; }
+            if i + 1 >= argv.len() { usageError("--std-root requires a directory"); return; }
+            stdRoot = argv[i + 1];
+            if stdRoot.len() == 0 { usageError("--std-root requires a directory"); return; }
+            sawStdRoot = true;
+            i = i + 2;
+        } else {
+            usageError("unknown argument: " + argument);
+            return;
+        }
+    }
+    var checked = checkSourceFileGraph(filePath, stdRoot);
+    if checked.isErr() {
+        eprintln(checked.unwrapErr());
+        exit(1);
+        return;
+    }
+}

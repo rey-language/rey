@@ -1,0 +1,40 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateProgram, managedCreate, managedCurrentRegion, managedDestroy, managedLiveObjects, managedProgramRegion, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(__reyRawLoadI64(__reyRawOffset(program, 24)) == 0);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(program, 32)), __reyRawNull()));
+    check(__reyRawLoadI64(__reyRawOffset(program, 72)) == 0);
+    var kept = managedAllocateProgram(context, scalar, 1);
+    var programRequestedBytes = managedRegionRequestedBytes(context);
+    check(programRequestedBytes > 0);
+    var child = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), child));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(child, 32)), program));
+    var temporary = managedRegionAllocate(context, child, scalar, 1);
+    var retainedRequestedBytes = managedRegionRequestedBytes(context);
+    check(!__reyRawEqual(temporary, kept));
+    check(managedLiveObjects(context) == 2);
+    check(managedRegionObjectCount(context) == 2);
+    check(retainedRequestedBytes > programRequestedBytes);
+    managedRegionEnd(context, child);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    check(managedLiveObjects(context) == 1);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedRegionRequestedBytes(context) == programRequestedBytes);
+    check(managedRegionUsedBytes(context) == 104);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(kept) == 8589934592 + scalar);
+    check(__reyRawLoadI64(__reyRawOffset(kept, 16)) == 0);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,11 @@
+var base: int = 40;
+
+func main(): void {
+    if base != 40 {
+        var failure = 9223372036854775807 + 1;
+    }
+    base = 42;
+    if base != 42 {
+        var failure = 9223372036854775807 + 1;
+    }
+}

@@ -1,4 +1,4 @@
-struct Box { value: int }
+struct Box { pub value: int }
 
 func twice(value: int): int {
     return value + value;

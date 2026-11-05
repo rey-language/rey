@@ -1,0 +1,7 @@
+func main(): void {
+    var value: (int, bool) = (7, true);
+    if value.0 != 7 || !value.1 {
+        var zero: int = 0; var fail: int = 1 / zero;
+    }
+    return;
+}

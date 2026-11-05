@@ -1,0 +1,9 @@
+// Historical visibility probe; packed fields are public for managed lowering.
+import native::packed::{packedBufferCreate};
+
+func main(): void {
+    var buffer = packedBufferCreate(0).unwrap();
+    buffer.lanes = Vec.new();
+    buffer.length = 0;
+    buffer.magic = 0;
+}

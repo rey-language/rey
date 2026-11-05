@@ -1,0 +1,143 @@
+import frontend::graph::{checkSourceFileGraph};
+import ir;
+import ir::lower;
+import ir::verify;
+import ir::eval;
+import typecheck::{CheckedProgram};
+import ir::{IRProgram};
+import ir::eval::{EvalResult};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func checkedFixture(path: string): CheckedProgram {
+    var checked = checkSourceFileGraph(path, "");
+    if checked.isErr() {
+        println("FAIL graph frontend " + path + ": " + checked.unwrapErr());
+        exit(1);
+    }
+    return checked.unwrap();
+}
+
+func loweredFixture(path: string): IRProgram {
+    var checked = checkedFixture(path);
+    var lowered = lower.lowerProgram(checked);
+    if lowered.isErr() {
+        println("FAIL lowering " + path + ": " + lowered.unwrapErr());
+        exit(1);
+    }
+    return lowered.unwrap();
+}
+
+func functionId(program: IRProgram, name: string): int {
+    var i = 0;
+    while i < program.functions.len() {
+        if program.functions[i].key.name == name { return program.functions[i].id; }
+        i += 1;
+    }
+    return -1;
+}
+
+func evaluateNamed(program: IRProgram, name: string, maxSteps: int): EvalResult {
+    var id = functionId(program, name);
+    if id < 0 {
+        println("FAIL missing helper " + name);
+        exit(1);
+    }
+    return eval.evaluateProgram(ir.irProgram(id, program.functions), maxSteps, 32);
+}
+
+func requireInt(program: IRProgram, name: string, expected: int, label: string): void {
+    var result = evaluateNamed(program, name, 2000);
+    require(result.ok && !result.isBool && !result.isVoid && result.value == expected, label);
+}
+
+func requireBool(program: IRProgram, name: string, expected: bool, label: string): void {
+    var result = evaluateNamed(program, name, 2000);
+    var expectedValue = 0;
+    if expected { expectedValue = 1; }
+    require(result.ok && result.isBool && result.value == expectedValue, label);
+}
+
+func requireTrap(program: IRProgram, name: string, expected: string, pathSuffix: string, label: string): void {
+    var result = evaluateNamed(program, name, 2000);
+    require(!result.ok && result.error.contains(expected) && result.error.contains(pathSuffix), label);
+}
+
+func requireLowerFailure(path: string, expected: string, label: string): void {
+    var checked = checkedFixture(path);
+    var lowered = lower.lowerProgram(checked);
+    require(lowered.isErr(), label + " is rejected");
+    require(lowered.unwrapErr().contains(path + ":") && lowered.unwrapErr().contains(expected), label + " reports source path, offset, and reason");
+}
+
+func requireVerified(program: IRProgram, label: string): void {
+    var result = verify.verifyProgram(program);
+    if !result.ok {
+        var i = 0;
+        while i < result.errors.len() {
+            println("VERIFY " + result.errors[i]);
+            i += 1;
+        }
+    }
+    require(result.ok, label + " passes IR verification");
+}
+
+func main(): void {
+    var argv = args();
+    var fixtureRoot = "build/v04/ir-source-coverage/fixtures";
+    if argv.len() > 1 { fixtureRoot = argv[1]; }
+    var scalarPath = fixtureRoot + "/scalar.rey";
+    var scalar = loweredFixture(scalarPath);
+    requireVerified(scalar, "signed scalar program");
+    requireInt(scalar, "subtraction", 12, "checked subtraction returns 12");
+    requireInt(scalar, "multiplication", -42, "checked multiplication returns -42");
+    requireInt(scalar, "division", -3, "signed division truncates toward zero");
+    requireInt(scalar, "remainder", -2, "signed remainder keeps the dividend sign");
+    requireInt(scalar, "compoundArithmetic", 3, "all checked compound assignments lower");
+    requireInt(scalar, "unaryMinimum", -9223372036854775807 - 1, "unary decimal literal lowers to INT64_MIN");
+    requireInt(scalar, "unaryHexMinimum", -9223372036854775807 - 1, "unary hexadecimal literal lowers to INT64_MIN");
+    requireInt(scalar, "negativeFive", -5, "unary negation lowers for a nonliteral value");
+    requireInt(scalar, "arithmeticInLoop", 26, "checked arithmetic lowers inside loop-carried SSA");
+    requireBool(scalar, "boolLogic", true, "boolean not, equality, and logical operators lower");
+    requireBool(scalar, "shortAnd", false, "false && skips a trapping call");
+    requireBool(scalar, "shortOr", true, "true || skips a trapping call");
+
+    var divZeroPath = fixtureRoot + "/div-zero.rey";
+    var divZero = loweredFixture(divZeroPath);
+    requireVerified(divZero, "division by zero source");
+    requireTrap(divZero, "divideByZero", "division by zero", "div-zero.rey", "source division by zero traps with source context");
+
+    var remZeroPath = fixtureRoot + "/rem-zero.rey";
+    var remZero = loweredFixture(remZeroPath);
+    requireVerified(remZero, "remainder by zero source");
+    requireTrap(remZero, "remainderByZero", "remainder by zero", "rem-zero.rey", "source remainder by zero traps with source context");
+
+    var divOverflowPath = fixtureRoot + "/div-min-overflow.rey";
+    var divOverflow = loweredFixture(divOverflowPath);
+    requireTrap(divOverflow, "divideMinimumByNegativeOne", "overflow", "div-min-overflow.rey", "INT64_MIN / -1 traps");
+    var remOverflowPath = fixtureRoot + "/rem-min-overflow.rey";
+    var remOverflow = loweredFixture(remOverflowPath);
+    requireTrap(remOverflow, "remainderMinimumByNegativeOne", "overflow", "rem-min-overflow.rey", "INT64_MIN % -1 traps");
+
+    requireLowerFailure(fixtureRoot + "/underflow.rey", "signed i64 range", "negative literal below INT64_MIN");
+    requireLowerFailure(fixtureRoot + "/positive-overflow.rey", "signed i64 range", "positive literal above INT64_MAX");
+    requireTrap(scalar, "negateMinimum", "overflow", "scalar.rey", "checked unary negation of INT64_MIN traps");
+
+    var diamond = loweredFixture(fixtureRoot + "/graphs/diamond/main.rey");
+    requireVerified(diamond, "diamond source graph");
+    require(diamond.functions.len() == 5, "diamond graph lowers each unit once");
+    requireInt(diamond, "observed", 320, "dependency-first diamond calls use resolved qualified symbols");
+
+    var sameNamed = loweredFixture(fixtureRoot + "/graphs/same-named/main.rey");
+    requireVerified(sameNamed, "same-named source graph");
+    require(sameNamed.functions.len() == 4, "same-named graph lowers both units");
+    requireInt(sameNamed, "observed", 607, "same source function names resolve to distinct unit-qualified IDs");
+
+    var unsupportedGraph = checkedFixture(fixtureRoot + "/graphs/unsupported/main.rey");
+    var unsupportedResult = lower.lowerProgram(unsupportedGraph);
+    require(unsupportedResult.isErr(), "dependency globals are rejected during graph lowering");
+    require(unsupportedResult.unwrapErr().contains("dependency/main.rey:") && unsupportedResult.unwrapErr().contains("top-level variable declarations are unsupported"), "dependency rejection retains unit path, offset, and reason");
+    println("v04 ir source coverage ok");
+}

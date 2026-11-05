@@ -1,0 +1,383 @@
+import ir;
+import ir::analysis::{inferEffects};
+import ir::eval::{EvalResult, evaluateProgram};
+import ir::verify::{VerifyResult, verifyProgram};
+import ir::{BasicBlock, CompareI64Predicate, EffectSummary, Escape, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef};
+
+func source(start: int, end: int): SourceRef {
+    return ir.sourceRef("raw-ir.rey", start, end);
+}
+
+func cleanEffects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var i = 0;
+    loop {
+        if i >= parameterCount { break; }
+        escapes.push(ir.escapeNoEscape());
+        i = i + 1;
+    }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("raw-ir-test", "", name), ir.functionSignature(parameterTypes, returnType), parameters, blocks, cleanEffects(parameterTypes.len()));
+}
+
+func singleBlockProgram(name: string, instructions: Vec<Instruction>, returnType: IRType, returnValueId: int): IRProgram {
+    var terminator = ir.returnValue(returnValueId, source(90, 96));
+    if returnType.kind == IRTypeKind::Void { terminator = ir.returnVoid(source(90, 96)); }
+    var block = ir.basicBlock(0, [], instructions, terminator);
+    var function = makeFunction(0, name, [], returnType, [], [block]);
+    return ir.irProgram(0, [function]);
+}
+
+func requireResult(program: IRProgram, expected: int, label: string): void {
+    var verification = verifyProgram(program);
+    assert(verification.ok, label + " must pass IR verification");
+    var result = evaluateProgram(program, 10000, 16);
+    assert(result.ok && result.value == expected, label + " must return the expected evaluator value");
+}
+
+func requireFailure(program: IRProgram, message: string, label: string): void {
+    var result = evaluateProgram(program, 10000, 16);
+    assert(!result.ok && result.error.contains(message), label + " must fail with the expected evaluator error");
+    assert(result.error.contains("@raw-ir.rey:"), label + " must preserve the raw instruction source span");
+}
+
+func zeroFillProgram(): IRProgram {
+    var instructions = [
+        ir.constI64(0, 8, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.rawLoadI64(2, 1, source(5, 6)),
+        ir.rawUnmap(1, 0, source(7, 8))
+    ];
+    return singleBlockProgram("zero-fill", instructions, ir.irI64(), 2);
+}
+
+func i64RoundTripProgram(value: int): IRProgram {
+    var instructions = [
+        ir.constI64(0, 8, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.constI64(2, value, source(5, 6)),
+        ir.rawStoreI64(1, 2, source(7, 8)),
+        ir.rawLoadI64(3, 1, source(9, 10)),
+        ir.rawUnmap(1, 0, source(11, 12))
+    ];
+    return singleBlockProgram("i64-round-trip", instructions, ir.irI64(), 3);
+}
+
+func i64ByteProgram(value: int, offset: int): IRProgram {
+    var instructions = [
+        ir.constI64(0, 8, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.constI64(2, value, source(5, 6)),
+        ir.rawStoreI64(1, 2, source(7, 8)),
+        ir.constI64(3, offset, source(9, 10)),
+        ir.rawOffset(4, 1, 3, source(11, 12)),
+        ir.rawLoadByte(5, 4, source(13, 14)),
+        ir.rawUnmap(1, 0, source(15, 16))
+    ];
+    return singleBlockProgram("i64-byte-order", instructions, ir.irI64(), 5);
+}
+
+func byteRoundTripProgram(value: int): IRProgram {
+    var instructions = [
+        ir.constI64(0, 1, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.constI64(2, value, source(5, 6)),
+        ir.rawStoreByte(1, 2, source(7, 8)),
+        ir.rawLoadByte(3, 1, source(9, 10)),
+        ir.rawUnmap(1, 0, source(11, 12))
+    ];
+    return singleBlockProgram("byte-round-trip", instructions, ir.irI64(), 3);
+}
+
+func rawInstructionForVerify(kind: InstructionKind): Instruction {
+    if kind == InstructionKind::RawNull { return ir.rawNull(4, source(20, 21)); }
+    if kind == InstructionKind::RawMap { return ir.rawMap(4, 1, source(20, 21)); }
+    if kind == InstructionKind::RawUnmap { return ir.rawUnmap(0, 1, source(20, 21)); }
+    if kind == InstructionKind::RawOffset { return ir.rawOffset(4, 0, 1, source(20, 21)); }
+    if kind == InstructionKind::RawLoadI64 { return ir.rawLoadI64(4, 0, source(20, 21)); }
+    if kind == InstructionKind::RawStoreI64 { return ir.rawStoreI64(0, 1, source(20, 21)); }
+    if kind == InstructionKind::RawLoadByte { return ir.rawLoadByte(4, 0, source(20, 21)); }
+    if kind == InstructionKind::RawStoreByte { return ir.rawStoreByte(0, 1, source(20, 21)); }
+    if kind == InstructionKind::RawLoadAddress { return ir.rawLoadAddress(4, 0, source(20, 21)); }
+    if kind == InstructionKind::RawStoreAddress { return ir.rawStoreAddress(0, 2, source(20, 21)); }
+    return ir.rawEqual(4, 0, 2, source(20, 21));
+}
+
+func verifyRawInstruction(instruction: Instruction): VerifyResult {
+    var instructions = [
+        ir.rawNull(0, source(1, 2)),
+        ir.constI64(1, 8, source(3, 4)),
+        ir.rawMap(2, 1, source(5, 6)),
+        ir.constBool(3, true, source(7, 8)),
+        instruction
+    ];
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(1, source(30, 31)));
+    var function = makeFunction(0, "verify-raw-instruction", [], ir.irI64(), [], [block]);
+    return verifyProgram(ir.irProgram(0, [function]));
+}
+
+func malformedRawOperand(instruction: Instruction): Instruction {
+    if instruction.kind == InstructionKind::RawMap { instruction.operands = [0]; }
+    else if instruction.kind == InstructionKind::RawUnmap { instruction.operands = [1, 1]; }
+    else if instruction.kind == InstructionKind::RawOffset { instruction.operands = [0, 2]; }
+    else if instruction.kind == InstructionKind::RawLoadI64 || instruction.kind == InstructionKind::RawLoadByte { instruction.operands = [1]; }
+    else if instruction.kind == InstructionKind::RawStoreI64 || instruction.kind == InstructionKind::RawStoreByte { instruction.operands = [1, 1]; }
+    else if instruction.kind == InstructionKind::RawLoadAddress { instruction.operands = [1]; }
+    else if instruction.kind == InstructionKind::RawStoreAddress { instruction.operands = [0, 1]; }
+    else if instruction.kind == InstructionKind::RawEqual { instruction.operands = [0, 1]; }
+    return instruction;
+}
+
+func requireRuntimeFailures(): void {
+    var instructions = [ir.constI64(0, 0, source(1, 2)), ir.rawMap(1, 0, source(3, 4))];
+    requireFailure(singleBlockProgram("zero-size-map", instructions, ir.irVoid(), -1), "size must be positive", "zero-size mapping");
+
+    instructions = [ir.constI64(0, -1, source(1, 2)), ir.rawMap(1, 0, source(3, 4))];
+    requireFailure(singleBlockProgram("negative-size-map", instructions, ir.irVoid(), -1), "size must be positive", "negative-size mapping");
+
+    instructions = [ir.constI64(0, 1048577, source(1, 2)), ir.rawMap(1, 0, source(3, 4))];
+    requireFailure(singleBlockProgram("oversize-map", instructions, ir.irVoid(), -1), "byte limit exceeded", "mapping over the byte cap");
+
+    instructions = [ir.constI64(0, 600000, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 448577, source(5, 6)), ir.rawMap(3, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("total-byte-cap", instructions, ir.irVoid(), -1), "byte limit exceeded", "total live mapping byte cap");
+
+    var manyMaps: Vec<Instruction> = [];
+    manyMaps.push(ir.constI64(0, 1, source(1, 2)));
+    var mapIndex = 0;
+    loop {
+        if mapIndex >= 257 { break; }
+        manyMaps.push(ir.rawMap(mapIndex + 1, 0, source(3, 4)));
+        mapIndex = mapIndex + 1;
+    }
+    requireFailure(singleBlockProgram("mapping-count-cap", manyMaps, ir.irVoid(), -1), "mapping limit exceeded", "more than 256 live mappings");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 7, source(5, 6)), ir.rawUnmap(1, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("mismatched-unmap", instructions, ir.irVoid(), -1), "exactly match", "unmap size mismatch");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawUnmap(1, 0, source(5, 6)), ir.rawUnmap(1, 0, source(7, 8))];
+    requireFailure(singleBlockProgram("double-unmap", instructions, ir.irVoid(), -1), "live mapping base", "double unmap");
+
+    instructions = [ir.constI64(0, 16, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 1, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8)), ir.rawLoadI64(4, 3, source(9, 10))];
+    requireFailure(singleBlockProgram("unaligned-load", instructions, ir.irI64(), 4), "8-byte aligned", "unaligned i64 load");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 8, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8)), ir.rawLoadByte(4, 3, source(9, 10))];
+    requireFailure(singleBlockProgram("out-of-range-load", instructions, ir.irI64(), 4), "outside a live mapping", "byte load at mapping end");
+
+    instructions = [ir.constI64(0, 1, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 256, source(5, 6)), ir.rawStoreByte(1, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("byte-too-large", instructions, ir.irVoid(), -1), "0..255", "byte value 256");
+
+    instructions = [ir.constI64(0, 1, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, -1, source(5, 6)), ir.rawStoreByte(1, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("byte-negative", instructions, ir.irVoid(), -1), "0..255", "negative byte value");
+
+    instructions = [ir.rawNull(0, source(1, 2)), ir.constI64(1, 0, source(3, 4)), ir.rawOffset(2, 0, 1, source(5, 6))];
+    requireFailure(singleBlockProgram("offset-null", instructions, ir.irVoid(), -1), "non-null", "offset from null");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, -1, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("offset-negative", instructions, ir.irVoid(), -1), "nonnegative", "negative offset");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 9223372036854775807, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8))];
+    requireFailure(singleBlockProgram("offset-overflow", instructions, ir.irVoid(), -1), "address overflow", "offset addition overflow");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 0, source(5, 6)), ir.rawStoreI64(1, 2, source(7, 8)), ir.rawLoadAddress(3, 1, source(9, 10))];
+    requireFailure(singleBlockProgram("integer-forged-address", instructions, ir.irVoid(), -1), "fresh zero slot or an intact address store", "integer bits cannot forge a raw address");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 0, source(5, 6)), ir.rawStoreByte(1, 2, source(7, 8)), ir.rawLoadAddress(3, 1, source(9, 10))];
+    requireFailure(singleBlockProgram("byte-forged-address", instructions, ir.irVoid(), -1), "fresh zero slot or an intact address store", "partial byte writes cannot forge a raw address");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.rawStoreAddress(1, 2, source(7, 8)), ir.constI64(3, 1, source(9, 10)), ir.rawOffset(4, 1, 3, source(11, 12)), ir.constI64(5, 0, source(13, 14)), ir.rawStoreByte(4, 5, source(15, 16)), ir.rawLoadAddress(6, 1, source(17, 18))];
+    requireFailure(singleBlockProgram("overwritten-address-cell", instructions, ir.irVoid(), -1), "fresh zero slot or an intact address store", "overlapping byte writes invalidate stored address provenance");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.rawStoreAddress(1, 2, source(7, 8)), ir.constI64(3, 0, source(9, 10)), ir.rawStoreI64(1, 3, source(11, 12)), ir.rawLoadAddress(4, 1, source(13, 14))];
+    requireFailure(singleBlockProgram("integer-overwritten-address-cell", instructions, ir.irVoid(), -1), "fresh zero slot or an intact address store", "overlapping i64 writes invalidate stored address provenance");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 1, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8)), ir.rawLoadAddress(4, 3, source(9, 10))];
+    requireFailure(singleBlockProgram("unaligned-address-load", instructions, ir.irVoid(), -1), "8-byte aligned", "unaligned raw address load");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.constI64(2, 8, source(5, 6)), ir.rawOffset(3, 1, 2, source(7, 8)), ir.rawLoadAddress(4, 3, source(9, 10))];
+    requireFailure(singleBlockProgram("out-of-range-address-load", instructions, ir.irVoid(), -1), "outside a live mapping", "raw address load at mapping end");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawNull(2, source(5, 6)), ir.constI64(3, 1, source(7, 8)), ir.rawOffset(4, 1, 3, source(9, 10)), ir.rawStoreAddress(4, 2, source(11, 12))];
+    requireFailure(singleBlockProgram("unaligned-address-store", instructions, ir.irVoid(), -1), "8-byte aligned", "unaligned raw address store");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawNull(2, source(5, 6)), ir.constI64(3, 8, source(7, 8)), ir.rawOffset(4, 1, 3, source(9, 10)), ir.rawStoreAddress(4, 2, source(11, 12))];
+    requireFailure(singleBlockProgram("out-of-range-address-store", instructions, ir.irVoid(), -1), "outside a live mapping", "raw address store at mapping end");
+
+    instructions = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.rawStoreAddress(1, 2, source(7, 8)), ir.rawUnmap(2, 0, source(9, 10)), ir.rawLoadAddress(3, 1, source(11, 12)), ir.rawLoadByte(4, 3, source(13, 14))];
+    requireFailure(singleBlockProgram("freed-address-target", instructions, ir.irVoid(), -1), "outside a live mapping", "a loaded pointer to freed storage cannot be dereferenced");
+}
+
+func main(): void {
+    var rawKinds = [
+        InstructionKind::RawNull,
+        InstructionKind::RawMap,
+        InstructionKind::RawUnmap,
+        InstructionKind::RawOffset,
+        InstructionKind::RawLoadI64,
+        InstructionKind::RawStoreI64,
+        InstructionKind::RawLoadByte,
+        InstructionKind::RawStoreByte,
+        InstructionKind::RawEqual,
+        InstructionKind::RawLoadAddress,
+        InstructionKind::RawStoreAddress
+    ];
+    var kindIndex = 0;
+    loop {
+        if kindIndex >= rawKinds.len() { break; }
+        var instruction = rawInstructionForVerify(rawKinds[kindIndex]);
+        assert(verifyRawInstruction(instruction).ok, "each raw instruction must verify in its exact valid shape");
+
+        var bad = rawInstructionForVerify(rawKinds[kindIndex]);
+        if bad.kind == InstructionKind::RawNull { bad.operands = [0]; }
+        else { bad.operands = []; }
+        assert(!verifyRawInstruction(bad).ok, "each raw instruction must reject wrong arity");
+
+        bad = rawInstructionForVerify(rawKinds[kindIndex]);
+        bad.immediate = 1;
+        assert(!verifyRawInstruction(bad).ok, "each raw instruction must reject a populated immediate field");
+        bad = rawInstructionForVerify(rawKinds[kindIndex]);
+        bad.comparison = ir.compareNe();
+        assert(!verifyRawInstruction(bad).ok, "each raw instruction must reject a populated comparison field");
+        bad = rawInstructionForVerify(rawKinds[kindIndex]);
+        bad.functionId = 0;
+        assert(!verifyRawInstruction(bad).ok, "each raw instruction must reject a populated function field");
+
+        bad = malformedRawOperand(rawInstructionForVerify(rawKinds[kindIndex]));
+        if bad.kind != InstructionKind::RawNull { assert(!verifyRawInstruction(bad).ok, "each raw operand category must reject mismatched IR types"); }
+
+        bad = rawInstructionForVerify(rawKinds[kindIndex]);
+        if bad.ty.kind == IRTypeKind::Void { bad.resultId = 4; }
+        else { bad.resultId = -1; }
+        assert(!verifyRawInstruction(bad).ok, "raw instructions must enforce result IDs including the void sentinel");
+        kindIndex = kindIndex + 1;
+    }
+
+    var addressArithmetic = [ir.rawNull(0, source(1, 2)), ir.constI64(1, 4, source(3, 4)), ir.addCheckedI64(2, 0, 1, source(5, 6))];
+    assert(!verifyProgram(singleBlockProgram("address-as-integer", addressArithmetic, ir.irI64(), 2)).ok, "scalar integer arithmetic must reject raw addresses");
+
+    var addressComparison = [ir.rawNull(0, source(1, 2)), ir.constI64(1, 4, source(3, 4)), ir.compareI64(2, ir.compareEq(), 0, 1, source(5, 6))];
+    assert(!verifyProgram(singleBlockProgram("address-as-number", addressComparison, ir.irBool(), 2)).ok, "integer comparisons must reject raw addresses");
+
+    var rawIdentity = makeFunction(0, "raw-identity", [ir.irRawAddress()], ir.irRawAddress(), [ir.irValue(0, ir.irRawAddress())], [ir.basicBlock(0, [], [], ir.returnValue(0, source(1, 2)))]);
+    var callInstructions = [ir.rawNull(0, source(3, 4)), ir.call(1, ir.irRawAddress(), 0, [0], source(5, 6)), ir.rawEqual(2, 0, 1, source(7, 8))];
+    var callEntry = makeFunction(1, "raw-call-entry", [], ir.irBool(), [], [ir.basicBlock(0, [], callInstructions, ir.returnValue(2, source(9, 10))) ]);
+    var callProgram = ir.irProgram(1, [rawIdentity, callEntry]);
+    assert(verifyProgram(callProgram).ok, "raw addresses may cross internal call parameter and result signatures");
+    var callResult = evaluateProgram(callProgram, 100, 4);
+    assert(callResult.ok && callResult.isBool && callResult.value == 1, "raw addresses must retain their value across calls");
+
+    var rawWriter = makeFunction(0, "raw-writer", [ir.irRawAddress()], ir.irI64(), [ir.irValue(0, ir.irRawAddress())], [ir.basicBlock(0, [], [ir.constI64(1, 33, source(1, 2)), ir.rawStoreI64(0, 1, source(3, 4)), ir.rawLoadI64(2, 0, source(5, 6))], ir.returnValue(2, source(7, 8)))]);
+    var rawWriterEntry = makeFunction(1, "raw-writer-entry", [], ir.irI64(), [], [ir.basicBlock(0, [], [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.call(2, ir.irI64(), 0, [1], source(5, 6)), ir.rawUnmap(1, 0, source(7, 8))], ir.returnValue(2, source(9, 10)))]);
+    var rawWriterResult = evaluateProgram(ir.irProgram(1, [rawWriter, rawWriterEntry]), 100, 4);
+    assert(rawWriterResult.ok && rawWriterResult.value == 33, "mapped bytes must remain shared across raw-address calls");
+
+    var blockInstructions = [ir.rawNull(0, source(1, 2)), ir.constBool(1, true, source(3, 4))];
+    var blockEntry = ir.basicBlock(0, [], blockInstructions, ir.branch(1, 1, [0], 2, [0], source(5, 6)));
+    var trueBlock = ir.basicBlock(1, [ir.irValue(2, ir.irRawAddress())], [ir.rawEqual(4, 2, 0, source(7, 8))], ir.returnValue(4, source(9, 10)));
+    var falseBlock = ir.basicBlock(2, [ir.irValue(3, ir.irRawAddress())], [ir.rawEqual(5, 3, 0, source(11, 12))], ir.returnValue(5, source(13, 14)));
+    var blockFunction = makeFunction(0, "raw-block-parameter", [], ir.irBool(), [], [blockEntry, trueBlock, falseBlock]);
+    var blockProgram = ir.irProgram(0, [blockFunction]);
+    assert(verifyProgram(blockProgram).ok, "raw addresses may be block parameters");
+    var blockResult = evaluateProgram(blockProgram, 100, 4);
+    assert(blockResult.ok && blockResult.isBool && blockResult.value == 1, "raw block parameters must preserve the synthetic address");
+
+    var rawEntry = makeFunction(0, "raw-entry", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], [ir.rawNull(0, source(1, 2))], ir.returnValue(0, source(3, 4)))]);
+    assert(!verifyProgram(ir.irProgram(0, [rawEntry])).ok, "program entry results must remain scalar or void");
+
+    var nullProgram = singleBlockProgram("null-equality", [ir.rawNull(0, source(1, 2)), ir.rawNull(1, source(3, 4)), ir.rawEqual(2, 0, 1, source(5, 6))], ir.irBool(), 2);
+    var nullResult = evaluateProgram(nullProgram, 30, 4);
+    assert(nullResult.ok && nullResult.isBool && nullResult.value == 1, "raw null equality must compare exact addresses");
+
+    var freshPointerCell = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawLoadAddress(2, 1, source(5, 6)), ir.rawNull(3, source(7, 8)), ir.rawEqual(4, 2, 3, source(9, 10)), ir.rawUnmap(1, 0, source(11, 12))];
+    var freshPointerResult = evaluateProgram(singleBlockProgram("fresh-pointer-cell", freshPointerCell, ir.irBool(), 4), 100, 4);
+    assert(freshPointerResult.ok && freshPointerResult.isBool && freshPointerResult.value == 1, "never-written zeroed address cells must load as null");
+
+    var storedPointer = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.rawStoreAddress(1, 2, source(7, 8)), ir.rawLoadAddress(3, 1, source(9, 10)), ir.rawEqual(4, 2, 3, source(11, 12)), ir.rawUnmap(1, 0, source(13, 14)), ir.rawUnmap(2, 0, source(15, 16))];
+    var storedPointerResult = evaluateProgram(singleBlockProgram("stored-pointer-cell", storedPointer, ir.irBool(), 4), 100, 4);
+    assert(storedPointerResult.ok && storedPointerResult.isBool && storedPointerResult.value == 1, "address cells must round-trip an explicitly stored pointer");
+
+    var pointerCellWriter = makeFunction(0, "pointer-cell-writer", [ir.irRawAddress(), ir.irRawAddress()], ir.irVoid(), [ir.irValue(0, ir.irRawAddress()), ir.irValue(1, ir.irRawAddress())], [ir.basicBlock(0, [], [ir.rawStoreAddress(0, 1, source(1, 2))], ir.returnVoid(source(3, 4)))]);
+    var pointerCallEntry = makeFunction(1, "pointer-cell-call-entry", [], ir.irBool(), [], [ir.basicBlock(0, [], [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.call(-1, ir.irVoid(), 0, [1, 2], source(7, 8)), ir.rawLoadAddress(3, 1, source(9, 10)), ir.rawEqual(4, 3, 2, source(11, 12)), ir.rawUnmap(1, 0, source(13, 14)), ir.rawUnmap(2, 0, source(15, 16))], ir.returnValue(4, source(17, 18)))]);
+    var pointerCallResult = evaluateProgram(ir.irProgram(1, [pointerCellWriter, pointerCallEntry]), 100, 4);
+    assert(pointerCallResult.ok && pointerCallResult.isBool && pointerCallResult.value == 1, "address-cell provenance must survive a store through a function call");
+
+    var nullStoreEntry = makeFunction(1, "null-store-entry", [], ir.irBool(), [], [ir.basicBlock(0, [], [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawNull(2, source(5, 6)), ir.call(-1, ir.irVoid(), 0, [1, 2], source(7, 8)), ir.rawLoadAddress(3, 1, source(9, 10)), ir.rawEqual(4, 3, 2, source(11, 12)), ir.rawUnmap(1, 0, source(13, 14))], ir.returnValue(4, source(15, 16)))]);
+    var nullStoreResult = evaluateProgram(ir.irProgram(1, [pointerCellWriter, nullStoreEntry]), 100, 4);
+    assert(nullStoreResult.ok && nullStoreResult.isBool && nullStoreResult.value == 1, "explicitly stored null pointers must retain valid address provenance across calls");
+
+    var restoredPointer = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawMap(2, 0, source(5, 6)), ir.rawStoreAddress(1, 2, source(7, 8)), ir.constI64(3, 0, source(9, 10)), ir.rawStoreI64(1, 3, source(11, 12)), ir.rawStoreAddress(1, 2, source(13, 14)), ir.rawLoadAddress(4, 1, source(15, 16)), ir.rawEqual(5, 2, 4, source(17, 18)), ir.rawUnmap(1, 0, source(19, 20)), ir.rawUnmap(2, 0, source(21, 22))];
+    var restoredPointerResult = evaluateProgram(singleBlockProgram("restored-pointer-cell", restoredPointer, ir.irBool(), 5), 100, 4);
+    assert(restoredPointerResult.ok && restoredPointerResult.isBool && restoredPointerResult.value == 1, "a fresh full address store must restore invalidated cell provenance");
+
+    var selfPointer = [ir.constI64(0, 8, source(1, 2)), ir.rawMap(1, 0, source(3, 4)), ir.rawStoreAddress(1, 1, source(5, 6)), ir.rawLoadAddress(2, 1, source(7, 8)), ir.rawEqual(3, 1, 2, source(9, 10)), ir.rawUnmap(1, 0, source(11, 12))];
+    var selfPointerResult = evaluateProgram(singleBlockProgram("self-pointer-cell", selfPointer, ir.irBool(), 3), 100, 4);
+    assert(selfPointerResult.ok && selfPointerResult.value == 1, "address cells may contain their own mapping address");
+
+    requireResult(zeroFillProgram(), 0, "new mapping zero fill");
+    var minimum = -9223372036854775807 - 1;
+    var maximum = 9223372036854775807;
+    requireResult(i64RoundTripProgram(minimum), minimum, "i64 minimum round trip");
+    requireResult(i64RoundTripProgram(maximum), maximum, "i64 maximum round trip");
+    requireResult(i64RoundTripProgram(-72623859790382856), -72623859790382856, "negative i64 byte pattern round trip");
+    requireResult(i64ByteProgram(72623859790382856, 0), 8, "little endian least significant byte");
+    requireResult(i64ByteProgram(72623859790382856, 7), 1, "little endian most significant byte");
+
+    var byteValue = 0;
+    loop {
+        if byteValue > 255 { break; }
+        requireResult(byteRoundTripProgram(byteValue), byteValue, "byte round trip " + byteValue.toString());
+        byteValue = byteValue + 1;
+    }
+
+    var separate = [
+        ir.constI64(0, 8, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.rawMap(2, 0, source(5, 6)),
+        ir.constI64(3, 11, source(7, 8)),
+        ir.rawStoreI64(1, 3, source(9, 10)),
+        ir.constI64(4, 22, source(11, 12)),
+        ir.rawStoreI64(2, 4, source(13, 14)),
+        ir.rawEqual(5, 1, 2, source(15, 16)),
+        ir.rawUnmap(1, 0, source(17, 18)),
+        ir.rawLoadI64(6, 2, source(19, 20)),
+        ir.rawUnmap(2, 0, source(21, 22))
+    ];
+    var separateProgram = singleBlockProgram("separate-mappings", separate, ir.irI64(), 6);
+    requireResult(separateProgram, 22, "mapping ownership is independent");
+
+    var reuse = [
+        ir.constI64(0, 1, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.rawUnmap(1, 0, source(5, 6)),
+        ir.rawMap(2, 0, source(7, 8)),
+        ir.rawEqual(3, 1, 2, source(9, 10))
+    ];
+    var reuseResult = evaluateProgram(singleBlockProgram("nonreused-address", reuse, ir.irBool(), 3), 100, 4);
+    assert(reuseResult.ok && reuseResult.isBool && reuseResult.value == 0, "unmapped synthetic addresses must not alias later mappings");
+
+    requireRuntimeFailures();
+
+    var effectsInstructions = [
+        ir.constI64(0, 8, source(1, 2)),
+        ir.rawMap(1, 0, source(3, 4)),
+        ir.constI64(2, 12, source(5, 6)),
+        ir.rawStoreI64(1, 2, source(7, 8)),
+        ir.rawLoadI64(3, 1, source(9, 10)),
+        ir.rawNull(4, source(10, 11)),
+        ir.rawStoreAddress(1, 4, source(11, 12)),
+        ir.rawLoadAddress(5, 1, source(12, 13)),
+        ir.rawUnmap(1, 0, source(11, 12))
+    ];
+    var effectsProgram = inferEffects(singleBlockProgram("raw-effects", effectsInstructions, ir.irI64(), 3));
+    var effects = effectsProgram.functions[0].effects;
+    assert(effects.readsMemory == ir.factYes() && effects.writesMemory == ir.factYes(), "raw loads and stores must contribute read/write effects");
+    assert(effects.allocates == ir.factYes() && effects.mayBlock == ir.factYes(), "raw map/unmap must conservatively allocate, write, and may-block");
+    assert(effects.unresolvedCallees == ir.factNo(), "known raw primitives must not become unresolved calls");
+
+    var rawIdentityEffects = inferEffects(ir.irProgram(1, [rawIdentity, callEntry]));
+    assert(rawIdentityEffects.functions[0].effects.readsMemory == ir.factNo() && rawIdentityEffects.functions[0].effects.writesMemory == ir.factNo(), "raw-address signatures alone must not make memory effects unknown");
+    assert(rawIdentityEffects.functions[0].effects.argumentEscapes[0] == Escape::Unknown && rawIdentityEffects.functions[0].effects.resultEscape == Escape::Unknown, "raw-address escape facts must remain conservative");
+    print("v04 raw IR verifier, evaluator, and effects passed");
+}

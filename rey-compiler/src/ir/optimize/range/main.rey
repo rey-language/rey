@@ -1,0 +1,302 @@
+import ir::{BasicBlock, CompareI64Predicate, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, TerminatorKind, constBool};
+import ir::optimize::shape::{copyEffects, copyFunction, copyInstruction, copyKey, copyTerminator, copyTypes, copyValues, foldChecked, i64Maximum, i64Minimum, isCheckedArithmetic, verifyCopy};
+
+struct RangeFact {
+    pub id: int,
+    pub lo: int,
+    pub hi: int,
+    pub known: bool,
+}
+
+func unknownRange(): RangeFact { return RangeFact { id: -1, lo: 0, hi: 0, known: false }; }
+
+func lookupRange(facts: Vec<RangeFact>, id: int): RangeFact {
+    var index = 0;
+    loop { if index >= facts.len() { break; } if facts[index].id == id { return facts[index]; } index = index + 1; }
+    return unknownRange();
+}
+
+func writeRange(facts: Vec<RangeFact>, fact: RangeFact) {
+    if fact.id < 0 { return; }
+    var index = 0;
+    loop {
+        if index >= facts.len() { break; }
+        if facts[index].id == fact.id { facts.set(index, fact); return; }
+        index = index + 1;
+    }
+    facts.push(fact);
+}
+
+func reaches(function: IRFunction, fromIndex: int, targetIndex: int): bool {
+    var seen: Vec<int> = [];
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } seen.push(0); index = index + 1; }
+    var queue: Vec<int> = [fromIndex];
+    var guard = 0;
+    var exhausted = false;
+    loop {
+        if queue.len() == 0 { break; }
+        if guard > function.blocks.len() * function.blocks.len() { exhausted = true; break; }
+        var current = queue[0];
+        var rest: Vec<int> = [];
+        var queueIndex = 1;
+        loop { if queueIndex >= queue.len() { break; } rest.push(queue[queueIndex]); queueIndex = queueIndex + 1; }
+        queue = rest;
+        if current >= 0 && current < seen.len() && seen[current] == 0 {
+            seen.set(current, 1);
+            if current == targetIndex { return true; }
+            var term = function.blocks[current].terminator;
+            var targets: Vec<int> = [];
+            if term.kind == TerminatorKind::Jump { targets.push(term.targetBlockId); }
+            if term.kind == TerminatorKind::Branch { targets.push(term.trueTargetBlockId); targets.push(term.falseTargetBlockId); }
+            var targetCursor = 0;
+            loop {
+                if targetCursor >= targets.len() { break; }
+                var found = 0;
+                loop { if found >= function.blocks.len() { break; } if function.blocks[found].id == targets[targetCursor] { queue.push(found); break; } found = found + 1; }
+                targetCursor = targetCursor + 1;
+            }
+        }
+        guard = guard + 1;
+    }
+    if exhausted { return true; }
+    return false;
+}
+
+func inCycle(function: IRFunction, blockIndex: int): bool {
+    var term = function.blocks[blockIndex].terminator;
+    var targets: Vec<int> = [];
+    if term.kind == TerminatorKind::Jump { targets.push(term.targetBlockId); }
+    if term.kind == TerminatorKind::Branch { targets.push(term.trueTargetBlockId); targets.push(term.falseTargetBlockId); }
+    var index = 0;
+    loop {
+        if index >= targets.len() { break; }
+        var found = 0;
+        loop {
+            if found >= function.blocks.len() { break; }
+            if function.blocks[found].id == targets[index] && reaches(function, found, blockIndex) { return true; }
+            found = found + 1;
+        }
+        index = index + 1;
+    }
+    return false;
+}
+
+func unionFacts(left: RangeFact, right: RangeFact): RangeFact {
+    if !left.known || !right.known { return unknownRange(); }
+    var lo = left.lo;
+    var hi = left.hi;
+    if right.lo < lo { lo = right.lo; }
+    if right.hi > hi { hi = right.hi; }
+    return RangeFact { id: left.id, lo: lo, hi: hi, known: true };
+}
+
+func assignRange(facts: Vec<RangeFact>, fact: RangeFact): bool {
+    if fact.id < 0 { return false; }
+    var previous = lookupRange(facts, fact.id);
+    var same = previous.id == fact.id && previous.known == fact.known && (!fact.known || (previous.lo == fact.lo && previous.hi == fact.hi));
+    writeRange(facts, fact);
+    return !same;
+}
+
+func seedConstants(function: IRFunction, facts: Vec<RangeFact>): bool {
+    var changed = false;
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var instructions = function.blocks[blockCursor].instructions;
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= instructions.len() { break; }
+            var instructionValue = instructions[instructionIndex];
+            if instructionValue.kind == InstructionKind::ConstI64 {
+                if assignRange(facts, RangeFact { id: instructionValue.resultId, lo: instructionValue.immediate, hi: instructionValue.immediate, known: true }) { changed = true; }
+            }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return changed;
+}
+
+func edgeArgs(function: IRFunction, blockId: int): Vec<Vec<int>> {
+    var edges: Vec<Vec<int>> = [];
+    var index = 0;
+    loop {
+        if index >= function.blocks.len() { break; }
+        var term = function.blocks[index].terminator;
+        if term.kind == TerminatorKind::Jump && term.targetBlockId == blockId { edges.push(term.targetArgs); }
+        if term.kind == TerminatorKind::Branch && term.trueTargetBlockId == blockId { edges.push(term.trueArgs); }
+        if term.kind == TerminatorKind::Branch && term.falseTargetBlockId == blockId { edges.push(term.falseArgs); }
+        index = index + 1;
+    }
+    return edges;
+}
+
+func transferArithmetic(instructionValue: Instruction, facts: Vec<RangeFact>): bool {
+    if !isCheckedArithmetic(instructionValue.kind) || instructionValue.operands.len() != 2 { return false; }
+    var unknown = RangeFact { id: instructionValue.resultId, lo: 0, hi: 0, known: false };
+    var left = lookupRange(facts, instructionValue.operands[0]);
+    var right = lookupRange(facts, instructionValue.operands[1]);
+    if !left.known || !right.known { return assignRange(facts, unknown); }
+    if instructionValue.kind == InstructionKind::MulCheckedI64 || instructionValue.kind == InstructionKind::DivCheckedI64 || instructionValue.kind == InstructionKind::RemCheckedI64 {
+        if left.lo == left.hi && right.lo == right.hi {
+            var folded = foldChecked(instructionValue.kind, left.lo, right.lo);
+            if folded.folded && !folded.traps { return assignRange(facts, RangeFact { id: instructionValue.resultId, lo: folded.value, hi: folded.value, known: true }); }
+        }
+        return assignRange(facts, unknown);
+    }
+    if instructionValue.kind != InstructionKind::AddCheckedI64 && instructionValue.kind != InstructionKind::SubCheckedI64 { return assignRange(facts, unknown); }
+    var lows: Vec<int> = [left.lo, left.hi];
+    var highs: Vec<int> = [right.lo, right.hi];
+    var lo = 0;
+    var hi = 0;
+    var seen = false;
+    var leftIndex = 0;
+    loop {
+        if leftIndex >= lows.len() { break; }
+        var rightIndex = 0;
+        loop {
+            if rightIndex >= highs.len() { break; }
+            var folded = foldChecked(instructionValue.kind, lows[leftIndex], highs[rightIndex]);
+            if !folded.folded || folded.traps { return assignRange(facts, unknown); }
+            if !seen || folded.value < lo { lo = folded.value; }
+            if !seen || folded.value > hi { hi = folded.value; }
+            seen = true;
+            rightIndex = rightIndex + 1;
+        }
+        leftIndex = leftIndex + 1;
+    }
+    if !seen { return assignRange(facts, unknown); }
+    return assignRange(facts, RangeFact { id: instructionValue.resultId, lo: lo, hi: hi, known: true });
+}
+
+func solveRanges(function: IRFunction): Vec<RangeFact> {
+    var facts: Vec<RangeFact> = [];
+    var round = 0;
+    var stable = false;
+    loop {
+        if round >= 16 { break; }
+        var changed = seedConstants(function, facts);
+        var blockCursor = 1;
+        loop {
+            if blockCursor >= function.blocks.len() { break; }
+            var block = function.blocks[blockCursor];
+            var edges = edgeArgs(function, block.id);
+            var cyclic = inCycle(function, blockCursor);
+            var paramIndex = 0;
+            loop {
+                if paramIndex >= block.params.len() { break; }
+                var paramId = block.params[paramIndex].id;
+                var unknown = RangeFact { id: paramId, lo: 0, hi: 0, known: false };
+                if cyclic {
+                    if assignRange(facts, unknown) { changed = true; }
+                } else {
+                    var joined = unknownRange();
+                    var started = false;
+                    var failed = edges.len() == 0;
+                    var edgeIndex = 0;
+                    loop {
+                        if edgeIndex >= edges.len() || failed { break; }
+                        var args = edges[edgeIndex];
+                        if paramIndex >= args.len() { failed = true; }
+                        else {
+                            var incoming = lookupRange(facts, args[paramIndex]);
+                            if !incoming.known { failed = true; }
+                            else if !started { joined = RangeFact { id: paramId, lo: incoming.lo, hi: incoming.hi, known: true }; started = true; }
+                            else { joined = unionFacts(joined, RangeFact { id: paramId, lo: incoming.lo, hi: incoming.hi, known: true }); joined.id = paramId; }
+                        }
+                        edgeIndex = edgeIndex + 1;
+                    }
+                    if failed || !started { if assignRange(facts, unknown) { changed = true; } }
+                    else if assignRange(facts, joined) { changed = true; }
+                }
+                paramIndex = paramIndex + 1;
+            }
+            blockCursor = blockCursor + 1;
+        }
+        blockCursor = 0;
+        loop {
+            if blockCursor >= function.blocks.len() { break; }
+            var instructions = function.blocks[blockCursor].instructions;
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= instructions.len() { break; }
+                if transferArithmetic(instructions[instructionIndex], facts) { changed = true; }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockCursor = blockCursor + 1;
+        }
+        if !changed { stable = true; break; }
+        round = round + 1;
+    }
+    if !stable {
+        facts = [];
+        seedConstants(function, facts);
+    }
+    return facts;
+}
+
+func provedBool(predicate: CompareI64Predicate, left: RangeFact, right: RangeFact): RangeFact {
+    if !left.known || !right.known { return unknownRange(); }
+    var answer = -1;
+    if predicate == CompareI64Predicate::Slt {
+        if left.hi < right.lo { answer = 1; }
+        else if left.lo >= right.hi { answer = 0; }
+    } else if predicate == CompareI64Predicate::Sle {
+        if left.hi <= right.lo { answer = 1; }
+        else if left.lo > right.hi { answer = 0; }
+    } else if predicate == CompareI64Predicate::Sgt {
+        if left.lo > right.hi { answer = 1; }
+        else if left.hi <= right.lo { answer = 0; }
+    } else if predicate == CompareI64Predicate::Sge {
+        if left.lo >= right.hi { answer = 1; }
+        else if left.hi < right.lo { answer = 0; }
+    } else if predicate == CompareI64Predicate::Eq {
+        if left.lo == left.hi && right.lo == right.hi && left.lo == right.lo { answer = 1; }
+        else if left.hi < right.lo || right.hi < left.lo { answer = 0; }
+    } else if predicate == CompareI64Predicate::Ne {
+        if left.hi < right.lo || right.hi < left.lo { answer = 1; }
+        else if left.lo == left.hi && right.lo == right.hi && left.lo == right.lo { answer = 0; }
+    }
+    if answer < 0 { return unknownRange(); }
+    return RangeFact { id: 0, lo: answer, hi: answer, known: true };
+}
+
+func applyRanges(function: IRFunction): IRFunction {
+    if function.blocks.len() > 24 { return function; }
+    var facts = solveRanges(function);
+    var blocks: Vec<BasicBlock> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = copyInstruction(block.instructions[instructionIndex]);
+            if instructionValue.kind == InstructionKind::CompareI64 && instructionValue.operands.len() == 2 {
+                var proved = provedBool(instructionValue.comparison, lookupRange(facts, instructionValue.operands[0]), lookupRange(facts, instructionValue.operands[1]));
+                if proved.known { instructionValue = constBool(instructionValue.resultId, proved.lo != 0, instructionValue.source); }
+            }
+            instructions.push(instructionValue);
+            instructionIndex = instructionIndex + 1;
+        }
+        blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: copyTerminator(block.terminator) });
+        blockCursor = blockCursor + 1;
+    }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: function.signature.returnType }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+pub func foldRanges(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "range analysis input");
+    if verified.isErr() { return verified; }
+    var minimum = i64Minimum();
+    var maximum = i64Maximum();
+    if minimum >= maximum { return Result.Err("range analysis lost signed bounds"); }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop { if index >= program.functions.len() { break; } functions.push(applyRanges(copyFunction(program.functions[index]))); index = index + 1; }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "range analysis output");
+}

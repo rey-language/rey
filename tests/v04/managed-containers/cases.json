@@ -1,0 +1,12 @@
+{
+  "core-strings": 0,
+  "refvec-gc": 0,
+  "map-cycles": 0,
+  "reject-region-value": 2203,
+  "missing-map-key": 2205,
+  "malformed-string-to-int": 2205,
+  "out-of-range-string-to-int": 2205,
+  "intmax-string-to-int": 2205,
+  "refvec-gc-small": 0,
+  "map-cycles-small": 0
+}

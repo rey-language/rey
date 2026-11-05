@@ -1,0 +1,52 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDependencyCount, managedDestroy, managedPromoteReference, managedPromotionCount, managedRegionAllocate, managedRegionCreate, managedRegionObjectCount, managedRegionRequestedBytes, managedStoreReference};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var node = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var context = managedCreate(registry);
+    var regionA = managedRegionCreate(context);
+    var regionB = managedRegionCreate(context);
+    var regionC = managedRegionCreate(context);
+    var objectA = managedRegionAllocate(context, regionA, node, 1);
+    var objectB = managedRegionAllocate(context, regionB, node, 1);
+    var objectC = managedRegionAllocate(context, regionC, node, 1);
+    var aliasA = objectA;
+    var aliasB = objectB;
+    var aliasC = objectC;
+    var requestedBeforePromotion = managedRegionRequestedBytes(context);
+    check(requestedBeforePromotion > 0);
+    managedStoreReference(context, objectB, 0, objectA);
+    managedStoreReference(context, objectC, 0, objectB);
+    check(managedPromotionCount(context) == 0);
+    check(managedDependencyCount(context) == 2);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectB, 16)), objectA));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectC, 16)), objectB));
+    var promoted = managedPromoteReference(context, objectC, regionA);
+    check(__reyRawEqual(promoted, objectC));
+    check(__reyRawEqual(aliasA, objectA) && __reyRawEqual(aliasB, objectB) && __reyRawEqual(aliasC, objectC));
+    check(managedPromotionCount(context) == 2);
+    check(managedDependencyCount(context) == 3);
+    check(__reyRawLoadI64(__reyRawOffset(regionA, 56)) == 3);
+    check(__reyRawLoadI64(__reyRawOffset(regionA, 48)) == 3);
+    check(__reyRawLoadI64(__reyRawOffset(regionB, 56)) == 0);
+    check(__reyRawLoadI64(__reyRawOffset(regionC, 56)) == 0);
+    check(managedRegionObjectCount(context) == 3);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectB, 16)), objectA));
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(objectC, 16)), objectB));
+    var again = managedPromoteReference(context, objectC, regionA);
+    check(__reyRawEqual(again, objectC));
+    check(managedPromotionCount(context) == 2);
+    check(managedDependencyCount(context) == 3);
+    check(managedRegionRequestedBytes(context) == requestedBeforePromotion);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

@@ -1,0 +1,3 @@
+import "../common.rey";
+pub func same(value: int): int { return value + 2; }
+pub func observed(value: int): int { return common.base(value) * 100; }

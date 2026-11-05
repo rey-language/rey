@@ -1,0 +1,261 @@
+import ir::{BasicBlock, CompareI64Predicate, FunctionSignature, Instruction, InstructionKind, IRFunction, IRProgram, IRTypeKind, TerminatorKind, constBool, constI64};
+import ir::optimize::shape::{FoldedNumber, copyEffects, copyFunction, copyKey, copySource, copyTypes, copyValues, foldChecked, identityOperand, replaceValueUses, verifyCopy};
+
+struct KnownFact {
+    pub id: int,
+    pub kind: IRTypeKind,
+    pub value: int,
+}
+
+func lookupFact(facts: Vec<KnownFact>, id: int): KnownFact {
+    var index = 0;
+    loop {
+        if index >= facts.len() { break; }
+        if facts[index].id == id { return facts[index]; }
+        index = index + 1;
+    }
+    return KnownFact { id: -1, kind: IRTypeKind::Void, value: 0 };
+}
+
+func rememberFact(facts: Vec<KnownFact>, id: int, kind: IRTypeKind, value: int) {
+    if id < 0 { return; }
+    var index = 0;
+    loop {
+        if index >= facts.len() { break; }
+        if facts[index].id == id {
+            facts.set(index, KnownFact { id: id, kind: kind, value: value });
+            return;
+        }
+        index = index + 1;
+    }
+    facts.push(KnownFact { id: id, kind: kind, value: value });
+}
+
+func compareValues(predicate: CompareI64Predicate, left: int, right: int, boolOperands: bool): int {
+    var answer = false;
+    if boolOperands {
+        if predicate == CompareI64Predicate::Eq { answer = left == right; }
+        else { answer = left != right; }
+    } else if predicate == CompareI64Predicate::Eq { answer = left == right; }
+    else if predicate == CompareI64Predicate::Ne { answer = left != right; }
+    else if predicate == CompareI64Predicate::Slt { answer = left < right; }
+    else if predicate == CompareI64Predicate::Sle { answer = left <= right; }
+    else if predicate == CompareI64Predicate::Sgt { answer = left > right; }
+    else { answer = left >= right; }
+    if answer { return 1; }
+    return 0;
+}
+
+func edgeArguments(function: IRFunction, blockId: int): Vec<Vec<int>> {
+    var edges: Vec<Vec<int>> = [];
+    var index = 0;
+    loop {
+        if index >= function.blocks.len() { break; }
+        var term = function.blocks[index].terminator;
+        if term.kind == TerminatorKind::Jump && term.targetBlockId == blockId { edges.push(term.targetArgs); }
+        if term.kind == TerminatorKind::Branch && term.trueTargetBlockId == blockId { edges.push(term.trueArgs); }
+        if term.kind == TerminatorKind::Branch && term.falseTargetBlockId == blockId { edges.push(term.falseArgs); }
+        index = index + 1;
+    }
+    return edges;
+}
+
+func seedConstants(function: IRFunction, facts: Vec<KnownFact>) {
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var instructions = function.blocks[blockCursor].instructions;
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= instructions.len() { break; }
+            var instructionValue = instructions[instructionIndex];
+            if instructionValue.kind == InstructionKind::ConstI64 { rememberFact(facts, instructionValue.resultId, IRTypeKind::I64, instructionValue.immediate); }
+            if instructionValue.kind == InstructionKind::ConstBool { rememberFact(facts, instructionValue.resultId, IRTypeKind::Bool, instructionValue.immediate); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blockCursor = blockCursor + 1;
+    }
+}
+
+func refreshParams(function: IRFunction, facts: Vec<KnownFact>): bool {
+    var changed = false;
+    var blockCursor = 1;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var edges = edgeArguments(function, block.id);
+        if edges.len() > 0 {
+            var paramIndex = 0;
+            loop {
+                if paramIndex >= block.params.len() { break; }
+                var agreed = true;
+                var kind = IRTypeKind::Void;
+                var value = 0;
+                var edgeIndex = 0;
+                loop {
+                    if edgeIndex >= edges.len() { break; }
+                    var args = edges[edgeIndex];
+                    if paramIndex >= args.len() { agreed = false; }
+                    else {
+                        var fact = lookupFact(facts, args[paramIndex]);
+                        if fact.id < 0 { agreed = false; }
+                        else if edgeIndex == 0 { kind = fact.kind; value = fact.value; }
+                        else if fact.kind != kind || fact.value != value { agreed = false; }
+                    }
+                    edgeIndex = edgeIndex + 1;
+                }
+                var current = lookupFact(facts, block.params[paramIndex].id);
+                if agreed && kind != IRTypeKind::Void {
+                    if current.id < 0 || current.value != value || current.kind != kind {
+                        rememberFact(facts, block.params[paramIndex].id, kind, value);
+                        changed = true;
+                    }
+                }
+                paramIndex = paramIndex + 1;
+            }
+        }
+        blockCursor = blockCursor + 1;
+    }
+    return changed;
+}
+
+func foldOne(instructionValue: Instruction, facts: Vec<KnownFact>): FoldedNumber {
+    if instructionValue.operands.len() != 2 { return FoldedNumber { folded: false, traps: false, value: 0 }; }
+    var left = lookupFact(facts, instructionValue.operands[0]);
+    var right = lookupFact(facts, instructionValue.operands[1]);
+    if left.id < 0 || right.id < 0 { return FoldedNumber { folded: false, traps: false, value: 0 }; }
+    if instructionValue.kind == InstructionKind::CompareI64 && left.kind == IRTypeKind::I64 && right.kind == IRTypeKind::I64 {
+        return FoldedNumber { folded: true, traps: false, value: compareValues(instructionValue.comparison, left.value, right.value, false) };
+    }
+    if instructionValue.kind == InstructionKind::CompareBool && left.kind == IRTypeKind::Bool && right.kind == IRTypeKind::Bool && (instructionValue.comparison == CompareI64Predicate::Eq || instructionValue.comparison == CompareI64Predicate::Ne) {
+        return FoldedNumber { folded: true, traps: false, value: compareValues(instructionValue.comparison, left.value, right.value, true) };
+    }
+    if left.kind == IRTypeKind::I64 && right.kind == IRTypeKind::I64 {
+        var folded = foldChecked(instructionValue.kind, left.value, right.value);
+        if folded.folded && !folded.traps { return folded; }
+    }
+    return FoldedNumber { folded: false, traps: false, value: 0 };
+}
+
+func propagateFunction(function: IRFunction): IRFunction {
+    var facts: Vec<KnownFact> = [];
+    seedConstants(function, facts);
+    var round = 0;
+    var limit = function.blocks.len() + instructionCountOf(function) + 2;
+    if limit < 4 { limit = 4; }
+    if limit > 64 { limit = 64; }
+    loop {
+        if round >= limit { break; }
+        var changed = refreshParams(function, facts);
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= function.blocks.len() { break; }
+            var instructions = function.blocks[blockCursor].instructions;
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= instructions.len() { break; }
+                var instructionValue = instructions[instructionIndex];
+                if instructionValue.kind != InstructionKind::ConstI64 && instructionValue.kind != InstructionKind::ConstBool {
+                    var folded = foldOne(instructionValue, facts);
+                    if folded.folded {
+                        var kind = IRTypeKind::I64;
+                        if instructionValue.ty.kind == IRTypeKind::Bool { kind = IRTypeKind::Bool; }
+                        var current = lookupFact(facts, instructionValue.resultId);
+                        if current.id < 0 || current.value != folded.value || current.kind != kind {
+                            rememberFact(facts, instructionValue.resultId, kind, folded.value);
+                            changed = true;
+                        }
+                    }
+                }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockCursor = blockCursor + 1;
+        }
+        if !changed { break; }
+        round = round + 1;
+    }
+    var blocks: Vec<BasicBlock> = [];
+    var blockCursor = 0;
+    loop {
+        if blockCursor >= function.blocks.len() { break; }
+        var block = function.blocks[blockCursor];
+        var instructions: Vec<Instruction> = [];
+        var instructionIndex = 0;
+        loop {
+            if instructionIndex >= block.instructions.len() { break; }
+            var instructionValue = block.instructions[instructionIndex];
+            var fact = lookupFact(facts, instructionValue.resultId);
+            if fact.id >= 0 && instructionValue.kind != InstructionKind::ConstI64 && instructionValue.kind != InstructionKind::ConstBool && instructionValue.kind != InstructionKind::Call && fact.kind == instructionValue.ty.kind {
+                if fact.kind == IRTypeKind::Bool { instructions.push(constBool(instructionValue.resultId, fact.value != 0, copySource(instructionValue.source))); }
+                else if fact.kind == IRTypeKind::I64 { instructions.push(constI64(instructionValue.resultId, fact.value, copySource(instructionValue.source))); }
+                else { instructions.push(instructionValue); }
+            } else { instructions.push(instructionValue); }
+            instructionIndex = instructionIndex + 1;
+        }
+        blocks.push(BasicBlock { id: block.id, params: copyValues(block.params), instructions: instructions, terminator: block.terminator });
+        blockCursor = blockCursor + 1;
+    }
+    return IRFunction { id: function.id, key: copyKey(function.key), signature: FunctionSignature { parameterTypes: copyTypes(function.signature.parameterTypes), returnType: function.signature.returnType }, parameters: copyValues(function.parameters), blocks: blocks, effects: copyEffects(function.effects) };
+}
+
+func instructionCountOf(function: IRFunction): int {
+    var total = 0;
+    var index = 0;
+    loop { if index >= function.blocks.len() { break; } total = total + function.blocks[index].instructions.len(); index = index + 1; }
+    return total;
+}
+
+pub func propagateConstants(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "constant propagation input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        functions.push(propagateFunction(copyFunction(program.functions[index])));
+        index = index + 1;
+    }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "constant propagation output");
+}
+
+func copyFunctionOnce(function: IRFunction): IRFunction {
+    var current = function;
+    var guard = 0;
+    loop {
+        if guard >= 32 { break; }
+        var replaced = false;
+        var blockCursor = 0;
+        loop {
+            if blockCursor >= current.blocks.len() || replaced { break; }
+            var instructions = current.blocks[blockCursor].instructions;
+            var instructionIndex = 0;
+            loop {
+                if instructionIndex >= instructions.len() || replaced { break; }
+                var instructionValue = instructions[instructionIndex];
+                var operand = identityOperand(current, instructionValue);
+                if operand >= 0 && operand != instructionValue.resultId {
+                    current = replaceValueUses(current, instructionValue.resultId, operand);
+                    replaced = true;
+                }
+                instructionIndex = instructionIndex + 1;
+            }
+            blockCursor = blockCursor + 1;
+        }
+        if !replaced { break; }
+        guard = guard + 1;
+    }
+    return current;
+}
+
+pub func propagateCopies(program: IRProgram): Result<IRProgram, string> {
+    var verified = verifyCopy(program, "copy propagation input");
+    if verified.isErr() { return verified; }
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    loop {
+        if index >= program.functions.len() { break; }
+        functions.push(copyFunctionOnce(copyFunction(program.functions[index])));
+        index = index + 1;
+    }
+    return verifyCopy(IRProgram { entryFunctionId: program.entryFunctionId, functions: functions }, "copy propagation output");
+}

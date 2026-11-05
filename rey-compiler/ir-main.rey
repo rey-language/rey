@@ -1,0 +1,226 @@
+// Experimental v0.4 scalar pipeline. check/dump/eval stay interpretive.
+// emit writes a Rey image for one of the five native targets. The seed still
+// builds this driver; that is not a native bootstrap.
+import frontend::graph::{EmbeddedSource, checkSourceFileGraphWithEmbedded};
+import frontend::embedded_stdlib::{embeddedStdRoot, embeddedStdSources};
+import ir::{printIR};
+import ir::{IRProgram};
+import ir::lower::{lowerProgram, setLowerTargetOS};
+import ir::managed::link::{requiresManagedLowering, buildManagedProgram, buildRegionProgram, buildCompletedRegionProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+import ir::optimize::scalar::{foldConstants};
+import native::arm64::{emitArm64};
+import native::bytes::{byteString};
+import native::image::{buildElfArm64, buildMachOArm64};
+import native::image::pe::{buildPeX64};
+import native::image::x64::{buildElfX64, buildMachOX64};
+import native::x64::{emitImage};
+
+func emitNativeImage(program: IRProgram, targetName: string): Result<Vec<int>, string> {
+    var target = targetName;
+    var os = "";
+    if target == "darwin-arm64" { os = "darwin"; }
+    else if target == "linux-arm64" { os = "linux"; }
+    else if target == "linux-x64" { os = "linux"; }
+    else if target == "windows-x64" { os = "windows"; }
+    else if target == "darwin-x64" || target == "macos-x64" { os = "darwin"; target = "darwin-x64"; }
+    else { return Result.Err("unsupported native target: " + targetName); }
+    if target == "linux-x64" || target == "windows-x64" || target == "darwin-x64" {
+        var x64 = emitImage(program, target);
+        if x64.isErr() { return Result.Err(x64.unwrapErr()); }
+        var x64Image = x64.unwrap();
+        if target == "linux-x64" { return buildElfX64(x64Image.code); }
+        if target == "windows-x64" { return buildPeX64(x64Image); }
+        return buildMachOX64(x64Image.code);
+    }
+    var code = emitArm64(program, os);
+    if code.isErr() { return Result.Err(code.unwrapErr()); }
+    if os == "darwin" { return buildMachOArm64(code.unwrap()); }
+    return buildElfArm64(code.unwrap());
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() == 2 && (argv[1] == "--help" || argv[1] == "-h") {
+        println("Usage: rey-ir <check|dump|eval|emit> <source.rey> [--std-root <directory>] [--fold-constants] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        println("       rey-ir emit <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [the same options]");
+        return;
+    }
+    if argv.len() < 3 {
+        eprintln("Usage: rey-ir <check|dump|eval|emit> <source.rey> [--std-root <directory>] [--fold-constants] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        eprintln("       rey-ir emit <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64> [the same options]");
+        exit(2);
+        return;
+    }
+    var command = argv[1];
+    var stdRoot = "";
+    var hasStdRoot = false;
+    var folding = false;
+    var forceManaged = false;
+    var runtimeRoot = "";
+    var hasRuntimeRoot = false;
+    var gcStress = false;
+    var promotionStress = false;
+    var regionFlag = 0;
+    var emitOutput = "";
+    var hasEmitOutput = false;
+    var emitTarget = "";
+    var hasEmitTarget = false;
+    var optionIndex = 3;
+    while optionIndex < argv.len() {
+        if argv[optionIndex] == "--std-root" && !hasStdRoot {
+            if optionIndex + 1 >= argv.len() { eprintln("expected --std-root <directory>"); exit(2); return; }
+            if argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") { eprintln("expected --std-root <directory>"); exit(2); return; }
+            stdRoot = argv[optionIndex + 1];
+            hasStdRoot = true;
+            optionIndex = optionIndex + 2;
+        } else if argv[optionIndex] == "--fold-constants" && !folding {
+            folding = true;
+            optionIndex = optionIndex + 1;
+        } else if argv[optionIndex] == "--managed" && !forceManaged {
+            forceManaged = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--runtime-root" && !hasRuntimeRoot {
+            if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
+                eprintln("expected --runtime-root <directory>"); exit(2); return;
+            }
+            runtimeRoot = argv[optionIndex + 1];
+            hasRuntimeRoot = true;
+            optionIndex += 2;
+        } else if argv[optionIndex] == "--gc-stress" && !gcStress {
+            gcStress = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--promotion-stress" && !promotionStress {
+            promotionStress = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--regions" && regionFlag == 0 {
+            regionFlag = 1;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--no-regions" && regionFlag == 0 {
+            regionFlag = 2;
+            optionIndex += 1;
+        } else if command == "emit" && argv[optionIndex] == "-o" && !hasEmitOutput {
+            if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
+                eprintln("expected -o <output>"); exit(2); return;
+            }
+            emitOutput = argv[optionIndex + 1];
+            hasEmitOutput = true;
+            optionIndex += 2;
+        } else if command == "emit" && argv[optionIndex] == "--target" && !hasEmitTarget {
+            if optionIndex + 1 >= argv.len() || argv[optionIndex + 1] == "" || argv[optionIndex + 1].startsWith("--") {
+                eprintln("expected --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64>"); exit(2); return;
+            }
+            emitTarget = argv[optionIndex + 1];
+            hasEmitTarget = true;
+            optionIndex += 2;
+        } else {
+            eprintln("unknown or duplicate option: " + argv[optionIndex]); exit(2); return;
+        }
+    }
+    var regions = regionFlag != 2;
+    if regions && gcStress {
+        eprintln("--gc-stress is not available on the region path; pass --no-regions to use the legacy collector experiment");
+        exit(2);
+        return;
+    }
+    if !regions && promotionStress {
+        eprintln("--promotion-stress requires the region managed path");
+        exit(2);
+        return;
+    }
+    if command != "check" && command != "dump" && command != "eval" && command != "emit" {
+        eprintln("Usage: rey-ir <check|dump|eval|emit> <source.rey> [--std-root <directory>] [--fold-constants] [--managed] [--runtime-root <directory>] [--regions] [--no-regions] [--promotion-stress] [--gc-stress]");
+        eprintln("unknown scalar IR command: " + command);
+        exit(2);
+        return;
+    }
+    if command == "emit" && (!hasEmitOutput || !hasEmitTarget) {
+        eprintln("Usage: rey-ir emit <source.rey> -o <output> --target <darwin-arm64|linux-arm64|linux-x64|darwin-x64|windows-x64>");
+        exit(2);
+        return;
+    }
+    if command == "emit" {
+        var os = "";
+        if emitTarget == "darwin-arm64" { os = "darwin"; }
+        else if emitTarget == "linux-arm64" { os = "linux"; }
+        else if emitTarget == "linux-x64" { os = "linux"; }
+        else if emitTarget == "windows-x64" { os = "windows"; }
+        else if emitTarget == "darwin-x64" || emitTarget == "macos-x64" { os = "darwin"; emitTarget = "darwin-x64"; }
+        else { eprintln("unsupported native target: " + emitTarget); exit(2); return; }
+        setLowerTargetOS(emitTarget);
+    }
+    if hasStdRoot && stdRoot == embeddedStdRoot() { eprintln("--std-root uses a reserved embedded source path"); exit(2); return; }
+    var path = argv[2];
+    if !fileExists(path) {
+        eprintln(path + ": error: source file not found");
+        exit(1);
+        return;
+    }
+    var embeddedStd: Vec<EmbeddedSource> = [];
+    if !hasStdRoot { stdRoot = embeddedStdRoot(); embeddedStd = embeddedStdSources(); }
+    var checked = checkSourceFileGraphWithEmbedded(path, stdRoot, [], embeddedStd);
+    if checked.isErr() {
+        eprintln(checked.unwrapErr());
+        exit(1);
+        return;
+    }
+    var lowered: Result<IRProgram, string> = Result.Err("not lowered");
+    if forceManaged || gcStress || promotionStress || requiresManagedLowering(checked.unwrap()) {
+        if regions { lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress); }
+        else { lowered = buildManagedProgram(checked.unwrap(), runtimeRoot, stdRoot, gcStress, false); }
+    } else {
+        lowered = lowerProgram(checked.unwrap());
+    }
+    if lowered.isErr() {
+        eprintln(lowered.unwrapErr());
+        exit(1);
+        return;
+    }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok {
+        eprintln(verified.errors.join("\n"));
+        exit(1);
+        return;
+    }
+    program = inferEffects(program);
+    if folding {
+        var folded = foldConstants(program);
+        if folded.isErr() { eprintln(folded.unwrapErr()); exit(1); return; }
+        program = folded.unwrap();
+    }
+    var analyzed = verifyProgram(program);
+    if !analyzed.ok {
+        eprintln(analyzed.errors.join("\n"));
+        exit(1);
+        return;
+    }
+    if command == "check" { return; }
+    if command == "emit" {
+        var image = emitNativeImage(program, emitTarget);
+        if image.isErr() { eprintln(image.unwrapErr()); exit(1); return; }
+        var encoded = byteString(image.unwrap());
+        if encoded.isErr() { eprintln(encoded.unwrapErr()); exit(1); return; }
+        var bytes = encoded.unwrap();
+        writeFile(emitOutput, bytes);
+        if !fileExists(emitOutput) || readFile(emitOutput) != bytes {
+            eprintln(emitOutput + ": error: native image write verification failed");
+            exit(1);
+            return;
+        }
+        println(emitOutput);
+        return;
+    }
+    if command == "dump" { print(printIR(program)); return; }
+    var evaluated = evaluateProgram(program, 1000000, 128);
+    if !evaluated.ok {
+        eprintln(evaluated.error);
+        exit(1);
+        return;
+    }
+    if evaluated.isVoid { println("void"); }
+    else if evaluated.isBool { println((evaluated.value != 0).toString()); }
+    else { println(evaluated.value.toString()); }
+}

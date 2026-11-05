@@ -1,0 +1,92 @@
+import frontend::graph::{checkSourceFileGraph};
+import typecheck::{CheckedProgram};
+
+func require(ok: bool, label: string): void {
+    if !ok { println("FAIL " + label); exit(1); }
+}
+
+func requireUnit(program: CheckedProgram, suffix: string): bool {
+    var i = 0;
+    loop {
+        if i >= program.units.len() { break; }
+        if program.units[i].sourcePath.endsWith(suffix) && program.units[i].moduleId == program.units[i].sourcePath { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func requireSymbolOwner(program: CheckedProgram, suffix: string): bool {
+    var i = 0;
+    loop {
+        if i >= program.symbols.len() { break; }
+        var symbol = program.symbols[i];
+        if symbol.kind == "Function" && symbol.sourceName == "same" && symbol.sourcePath.endsWith(suffix) && symbol.moduleId == symbol.sourcePath { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+func main(): void {
+    var argv = args();
+    var fixtureRoot = "build/v04/frontend-graph/fixtures";
+    if argv.len() > 1 { fixtureRoot = argv[1]; }
+    var stdRoot = fixtureRoot + "/stdroot";
+    var diamond = checkSourceFileGraph(fixtureRoot + "/diamond/main.rey", stdRoot);
+    require(diamond.isOk(), "diamond graph checks");
+    var diamondProgram = diamond.unwrap();
+    require(diamondProgram.units.len() == 4, "diamond units deduplicate shared dependency");
+    require(diamondProgram.edges.len() == 4, "diamond import edges are retained");
+    require(requireUnit(diamondProgram, "/common.rey"), "source path and module identity are retained");
+
+    var sameNames = checkSourceFileGraph(fixtureRoot + "/same-named/main.rey", stdRoot);
+    require(sameNames.isOk(), "same-named functions in different modules check");
+    require(sameNames.unwrap().units.len() == 3, "same-named module units remain distinct");
+    require(requireSymbolOwner(sameNames.unwrap(), "/left/main.rey"), "left function keeps unit-qualified symbol metadata");
+    require(requireSymbolOwner(sameNames.unwrap(), "/right/main.rey"), "right function keeps unit-qualified symbol metadata");
+
+    var selected = checkSourceFileGraph(fixtureRoot + "/selected/main.rey", stdRoot);
+    require(selected.isOk(), "selected symbol import checks");
+    require(selected.unwrap().edges.len() == 1, "selected symbol import edge is retained");
+
+    var namespace = checkSourceFileGraph(fixtureRoot + "/namespace/main.rey", stdRoot);
+    require(namespace.isOk(), "nested namespace import checks");
+    require(requireUnit(namespace.unwrap(), "/alpha/beta/main.rey"), "nested directory main module resolves");
+
+    var precedence = checkSourceFileGraph(fixtureRoot + "/module-precedence/main.rey", stdRoot);
+    require(precedence.isOk(), "directory module precedence fixture checks");
+    require(requireUnit(precedence.unwrap(), "/lib/main.rey"), "directory main file wins over sibling module file");
+
+    var stdImport = checkSourceFileGraph(fixtureRoot + "/std-valid/main.rey", stdRoot);
+    require(stdImport.isOk(), "standard module uses explicit source root");
+
+    var privateImport = checkSourceFileGraph(fixtureRoot + "/private-import/main.rey", stdRoot);
+    require(privateImport.isErr(), "private selected import is rejected");
+    require(privateImport.unwrapErr().contains("private_mod/main.rey"), "private import diagnostic includes source path");
+
+    var byteOffset = checkSourceFileGraph(fixtureRoot + "/byte-offset/main.rey", stdRoot);
+    require(byteOffset.isErr(), "private import after multibyte source prefix is rejected");
+    require(byteOffset.unwrapErr().contains("byte-offset/main.rey:2:1"), "source byte offsets map to the import line and column");
+
+    var collision = checkSourceFileGraph(fixtureRoot + "/collision/main.rey", stdRoot);
+    require(collision.isErr(), "selected import name collision is rejected");
+    require(collision.unwrapErr().contains("collision/main.rey:"), "collision diagnostic includes importer and source location");
+
+    var missing = checkSourceFileGraph(fixtureRoot + "/missing-import/main.rey", stdRoot);
+    require(missing.isErr(), "missing import is rejected");
+    require(missing.unwrapErr().contains("missing-import/main.rey:"), "missing import points to importing source");
+    require(missing.unwrapErr().contains("missing/main.rey"), "missing import reports resolved target");
+
+    var cycle = checkSourceFileGraph(fixtureRoot + "/cycle/main.rey", stdRoot);
+    require(cycle.isErr(), "import cycle is reported");
+    require(cycle.unwrapErr().contains("Circular import detected"), "cycle has a stable diagnostic");
+
+    var invalidStd = checkSourceFileGraph(fixtureRoot + "/std-invalid/main.rey", fixtureRoot + "/no-std-root");
+    require(invalidStd.isErr(), "invalid explicit standard root is rejected");
+    require(invalidStd.unwrapErr().contains("no-std-root/sample/main.rey"), "standard root failure retains explicit path");
+
+    var importAfterExec = checkSourceFileGraph(fixtureRoot + "/import-after-exec/main.rey", stdRoot);
+    require(importAfterExec.isErr(), "imports after executable top-level statements are rejected");
+    require(importAfterExec.unwrapErr().contains("imports must appear before executable top-level statements"), "import ordering uses checker diagnostic");
+
+    println("v04 frontend graph ok");
+}

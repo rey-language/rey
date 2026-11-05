@@ -1,0 +1,62 @@
+import frontend;
+import ir;
+import ir::lower;
+import typecheck::{CheckedProgram};
+
+func require(ok: bool, label: string): void {
+    if !ok {
+        println("FAIL " + label);
+        exit(1);
+    }
+}
+
+func checkedSource(source: string, path: string): CheckedProgram {
+    var checked = frontend.checkSingleSource(source, path);
+    if checked.isErr() {
+        println("FAIL frontend " + path + ": " + checked.unwrapErr());
+        exit(1);
+    }
+    return checked.unwrap();
+}
+
+func requireLowerFailure(source: string, path: string, expected: string): void {
+    var checked = checkedSource(source, path);
+    var lowered = lower.lowerProgram(checked);
+    require(lowered.isErr(), path + " rejected");
+    var message = lowered.unwrapErr();
+    require(message.contains(path + ":"), path + " includes path and offset");
+    require(message.contains(expected), path + " explains unsupported syntax");
+}
+
+func main(): void {
+    var checked = checkedSource("func main(): void \x7B var result: int = choose(1); return; \x7D func choose(value: int): int \x7B if value > 0 \x7B return value + 2; \x7D else \x7B return value + 3; \x7D \x7D", "branch-calls.rey");
+    var lowered = lower.lowerProgram(checked);
+    require(lowered.isOk(), "branch and forward-call lowering succeeds");
+    var program = lowered.unwrap();
+    require(program.entryFunctionId == 0, "main is the scalar entry function");
+    require(program.functions.len() == 2, "all source functions are lowered");
+    require(program.functions[0].blocks[0].instructions[1].functionId == 1, "forward call resolves to the preassigned function ID");
+    require(program.functions[1].effects.argumentEscapes.len() == 1, "effect escape summary matches formal count");
+    var printed = ir.printIR(program);
+    require(printed.contains("add.checked.i64"), "checked integer addition is lowered");
+    require(printed.contains("compare.i64 sgt"), "i64 comparison is lowered");
+    require(printed.contains("branch "), "if/else creates a branch terminator");
+    require(printed.contains("call %f1"), "call uses the resolved function ID");
+    require(printed.contains("args=[unknown]"), "unknown effects remain conservative");
+    require(printed.contains("@branch-calls.rey:"), "instructions and terminators retain source offsets");
+
+    var reassignment = lower.lowerProgram(checkedSource("func main(): void \x7B var value: int = 1; value = 2; return; \x7D", "reassignment.rey"));
+    require(reassignment.isOk(), "scalar reassignment now lowers through SSA bindings");
+    var whileLoop = lower.lowerProgram(checkedSource("func main(): void \x7B while true \x7B return; \x7D return; \x7D", "while.rey"));
+    require(whileLoop.isOk(), "while loops now lower through header and exit blocks");
+    requireLowerFailure("func main(): void \x7B var text: string = \"unsupported\"; return; \x7D", "string-local.rey", "unsupported type");
+    requireLowerFailure("func main(): void \x7B var value: int = 9223372036854775808; return; \x7D", "decimal-overflow.rey", "integer literal exceeds signed i64 range");
+    requireLowerFailure("func main(): void \x7B var value: int = 0x8000000000000000; return; \x7D", "hex-overflow.rey", "integer literal exceeds signed i64 range");
+
+    var globalChecked = checkedSource("var value: int = 1; func main(): void \x7B return; \x7D", "global.rey");
+    var globalResult = lower.lowerProgram(globalChecked);
+    require(globalResult.isErr(), "top-level scalar globals are explicitly rejected");
+    require(globalResult.unwrapErr().contains("global.rey:"), "top-level rejection retains source path and offset");
+    require(globalResult.unwrapErr().contains("top-level variable declarations are unsupported"), "top-level rejection explains unsupported syntax");
+    println("v04 ir-lower ok");
+}

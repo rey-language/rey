@@ -1,0 +1,11 @@
+import gc::{gcCreate, gcRootCount};
+import heap::{heapCreate};
+import layout::{layoutRegistryCreate};
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var heap = heapCreate(registry);
+    var collector = gcCreate(heap, 0);
+    __reyRawStoreI64(collector, 0);
+    gcRootCount(collector);
+}

@@ -56,7 +56,6 @@ struct EnumDef {
 
 struct GlobalVarDef {
     pub name: string,
-    pub declaration: any,
     pub declarationKey: string,
     pub sourcePath: string,
     pub moduleId: string,
@@ -740,7 +739,6 @@ func cgBuildGlobalDefs(ctx: CodegenContext) {
                         var sourceType = cgCheckedTypeName(ctx, binding.ty);
                         ctx.globalDefs.set(key, GlobalVarDef {
                             name: binding.name,
-                            declaration: binding.declaration,
                             declarationKey: binding.declarationKey,
                             sourcePath: binding.sourcePath,
                             moduleId: binding.moduleId,

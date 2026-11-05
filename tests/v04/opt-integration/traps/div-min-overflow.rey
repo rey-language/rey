@@ -1,0 +1,5 @@
+func main(): void {
+    var minimum: int = -9223372036854775807 - 1;
+    var failure: int = minimum / -1;
+    return;
+}

@@ -1,0 +1,11 @@
+pub struct Cell {
+    pub value: int,
+}
+
+pub func makeCellOption(): Option<Cell> {
+    return Option::Some(Cell { value: 17 });
+}
+
+pub func acceptCell(value: Cell): bool {
+    return value.value == 17;
+}

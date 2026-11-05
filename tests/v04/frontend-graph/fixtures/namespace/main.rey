@@ -1,0 +1,5 @@
+import alpha::beta;
+
+func main(): void {
+    var result: int = beta.answer();
+}

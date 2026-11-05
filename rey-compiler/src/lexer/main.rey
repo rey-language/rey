@@ -117,6 +117,13 @@ struct Lexer {
     pub startColumn: int,
     pub tokens: Vec<Token>,
     pub errors: Vec<LexError>,
+    pub byteCacheValue: int,
+    pub byteCacheString: string,
+    pub byteCacheValid: bool,
+    pub byteCacheMisses: int,
+    pub byteCacheSlots: Vec<int>,
+    pub byteCacheStrings: Vec<string>,
+    pub byteCacheTableInitialized: bool,
 }
 
 pub struct LexerResult {
@@ -179,11 +186,56 @@ func markStart(lexer: Lexer) {
     lexer.startColumn = lexer.column;
 }
 
+func initializeByteCacheTable(lexer: Lexer) {
+    var byteIndex = 0;
+    loop {
+        if byteIndex >= 256 { break; }
+        lexer.byteCacheSlots.push(-1);
+        byteIndex = byteIndex + 1;
+    }
+    lexer.byteCacheTableInitialized = true;
+}
+
+func lexByteStringAt(lexer: Lexer, index: int): string {
+    var sourceChar = lexer.source[index];
+    var byte = int(sourceChar);
+    if lexer.byteCacheValid && lexer.byteCacheValue == byte {
+        return lexer.byteCacheString;
+    }
+    if lexer.byteCacheMisses < 128 {
+        lexer.byteCacheMisses = lexer.byteCacheMisses + 1;
+    }
+    var c = lexer.byteCacheString;
+    if byte < 0 || byte >= 256 {
+        c = string(sourceChar);
+    } else {
+        if !lexer.byteCacheTableInitialized && lexer.source.len() >= 1024 && lexer.byteCacheMisses >= 128 {
+            initializeByteCacheTable(lexer);
+        }
+        if lexer.byteCacheTableInitialized {
+            var cachedStringIndex = lexer.byteCacheSlots[byte];
+            if cachedStringIndex >= 0 {
+                c = lexer.byteCacheStrings[cachedStringIndex];
+            } else {
+                c = string(sourceChar);
+                lexer.byteCacheStrings.push(c);
+                lexer.byteCacheSlots[byte] = lexer.byteCacheStrings.len() - 1;
+            }
+        } else {
+            c = string(sourceChar);
+        }
+    }
+    lexer.byteCacheValue = byte;
+    lexer.byteCacheString = c;
+    lexer.byteCacheValid = true;
+    return c;
+}
+
 func lexAdvance(lexer: Lexer): string {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
-    var c = lexer.source[lexer.pos].toString();
+    var c = lexByteStringAt(lexer, lexer.pos);
     lexer.pos = lexer.pos + 1;
     if c == "\n" {
         lexer.line = lexer.line + 1;
@@ -198,14 +250,14 @@ func lexPeekAt(lexer: Lexer, offset: int): string {
     if lexer.pos + offset >= lexer.source.len() {
         return "";
     }
-    return lexer.source[lexer.pos + offset].toString();
+    return lexByteStringAt(lexer, lexer.pos + offset);
 }
 
 func lexPeek(lexer: Lexer): string {
     if lexer.pos >= lexer.source.len() {
         return "";
     }
-    return lexer.source[lexer.pos].toString();
+    return lexByteStringAt(lexer, lexer.pos);
 }
 
 func lexPeekNext(lexer: Lexer): string {
@@ -331,7 +383,7 @@ func scanEscape(lexer: Lexer, quote: string): string {
             return "";
         }
         // The Rust oracle has char(int); native lowering must preserve this byte conversion.
-        return char(hi * 16 + lo).toString();
+        return string(char(hi * 16 + lo));
     }
     addError(lexer, "InvalidEscape", "Unknown escape sequence");
     return "";
@@ -766,7 +818,14 @@ pub func newLexer(source: string): Lexer {
         startLine: 1,
         startColumn: 1,
         tokens: [],
-        errors: []
+        errors: [],
+        byteCacheValue: 0,
+        byteCacheString: "",
+        byteCacheValid: false,
+        byteCacheMisses: 0,
+        byteCacheSlots: [],
+        byteCacheStrings: [],
+        byteCacheTableInitialized: false
     };
 }
 

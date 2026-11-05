@@ -1,0 +1,62 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedAllocateDestination, managedCreate, managedCurrentRegion, managedDestroy, managedLiveObjects, managedProgramRegion, managedRegionAllocate, managedRegionCreate, managedRegionEnd, managedRegionObjectCount, managedRegionRequestedBytes, managedRegionUsedBytes};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var scalar = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    var program = managedProgramRegion(context);
+    var outer = managedRegionCreate(context);
+    var inner = managedRegionCreate(context);
+    check(__reyRawEqual(managedCurrentRegion(context), inner));
+    var escaped = managedAllocateDestination(context, __reyRawNull(), scalar, 1);
+    var built = managedAllocateDestination(context, outer, scalar, 2);
+    var temporary = managedRegionAllocate(context, inner, scalar, 3);
+    var alias = built;
+    check(!__reyRawEqual(escaped, built) && !__reyRawEqual(built, temporary));
+    check(managedLiveObjects(context) == 3);
+    check(managedRegionObjectCount(context) == 3);
+    var programGroup = __reyRawLoadAddress(__reyRawOffset(program, 40));
+    var outerGroup = __reyRawLoadAddress(__reyRawOffset(outer, 40));
+    var innerGroup = __reyRawLoadAddress(__reyRawOffset(inner, 40));
+    var programChunk = __reyRawLoadAddress(__reyRawOffset(programGroup, 32));
+    var outerChunk = __reyRawLoadAddress(__reyRawOffset(outerGroup, 32));
+    var innerChunk = __reyRawLoadAddress(__reyRawOffset(innerGroup, 32));
+    var programCapacity = __reyRawLoadI64(__reyRawOffset(programChunk, 24));
+    var outerCapacity = __reyRawLoadI64(__reyRawOffset(outerChunk, 24));
+    var innerCapacity = __reyRawLoadI64(__reyRawOffset(innerChunk, 24));
+    var programUsed = __reyRawLoadI64(__reyRawOffset(programChunk, 32));
+    var outerUsed = __reyRawLoadI64(__reyRawOffset(outerChunk, 32));
+    var innerUsed = __reyRawLoadI64(__reyRawOffset(innerChunk, 32));
+    check(programCapacity >= programUsed && outerCapacity >= outerUsed && innerCapacity >= innerUsed);
+    check(managedRegionRequestedBytes(context) == programCapacity + outerCapacity + innerCapacity);
+    check(managedRegionUsedBytes(context) == programUsed + outerUsed + innerUsed);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(inner, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(programGroup, 24)) == 1);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(programGroup, 16)), program));
+    check(__reyRawLoadI64(__reyRawOffset(outerGroup, 24)) == 2);
+    check(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(outerGroup, 16)), outer));
+    managedRegionEnd(context, inner);
+    check(__reyRawEqual(alias, built));
+    check(__reyRawLoadI64(built) == 8589934592 + scalar);
+    check(managedLiveObjects(context) == 2);
+    check(managedRegionRequestedBytes(context) == programCapacity + outerCapacity);
+    check(managedRegionUsedBytes(context) == programUsed + outerUsed);
+    check(__reyRawLoadI64(__reyRawOffset(program, 56)) == 1);
+    check(__reyRawLoadI64(__reyRawOffset(outer, 56)) == 1);
+    managedRegionEnd(context, outer);
+    check(managedLiveObjects(context) == 1);
+    check(managedRegionObjectCount(context) == 1);
+    check(managedRegionRequestedBytes(context) == programCapacity);
+    check(managedRegionUsedBytes(context) == programUsed);
+    check(__reyRawLoadI64(escaped) == 8589934592 + scalar);
+    check(__reyRawEqual(managedCurrentRegion(context), program));
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+}

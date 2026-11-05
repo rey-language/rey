@@ -1,0 +1,98 @@
+// OS and ABI facts used by generated programs. This module does not map memory,
+// install a collector, or claim that a target has been executed.
+
+pub struct OsTarget {
+    pub name: string,
+    pub arch: string,
+    pub objectFormat: string,
+    pub convention: string,
+    pub pointerBytes: int,
+    pub stackAlign: int,
+    pub shadowBytes: int,
+    pub redZoneBytes: int,
+    pub registerArguments: int,
+    pub exitMechanism: string,
+    pub exitSyscall: int,
+    pub exitLibrary: string,
+    pub exitSymbol: string,
+    pub loader: string,
+    pub executionEvidence: string,
+}
+
+// abi linux-x64 syscall-exit 60 convention sysv shadow 0 stack-align 16 red-zone 128 loader none
+// abi windows-x64 syscall-exit -1 convention win64 shadow 32 stack-align 16 red-zone 0 loader kernel32.dll symbol ExitProcess
+// abi darwin-x64 syscall-exit 33554433 convention sysv shadow 0 stack-align 16 red-zone 128 loader /usr/lib/dyld symbol direct-syscall
+// abi linux-arm64 syscall-exit 93 convention sysv shadow 0 stack-align 16 red-zone 0 loader none
+// abi darwin-arm64 syscall-exit 1 convention darwin-arm64 shadow 0 stack-align 16 red-zone 0 loader /usr/lib/dyld symbol direct-syscall
+
+pub func linuxX64(): OsTarget {
+    return OsTarget {
+        name: "linux-x64", arch: "x86-64", objectFormat: "elf", convention: "sysv",
+        pointerBytes: 8, stackAlign: 16, shadowBytes: 0, redZoneBytes: 128, registerArguments: 6,
+        exitMechanism: "direct-syscall", exitSyscall: 60, exitLibrary: "", exitSymbol: "",
+        loader: "", executionEvidence: "emulated-linux-vm-only",
+    };
+}
+
+pub func windowsX64(): OsTarget {
+    return OsTarget {
+        name: "windows-x64", arch: "x86-64", objectFormat: "pe", convention: "win64",
+        pointerBytes: 8, stackAlign: 16, shadowBytes: 32, redZoneBytes: 0, registerArguments: 4,
+        exitMechanism: "import", exitSyscall: -1, exitLibrary: "kernel32.dll", exitSymbol: "ExitProcess",
+        loader: "kernel32.dll", executionEvidence: "none",
+    };
+}
+
+pub func darwinX64(): OsTarget {
+    return OsTarget {
+        name: "darwin-x64", arch: "x86-64", objectFormat: "macho", convention: "sysv",
+        pointerBytes: 8, stackAlign: 16, shadowBytes: 0, redZoneBytes: 128, registerArguments: 6,
+        exitMechanism: "direct-syscall", exitSyscall: 33554433, exitLibrary: "/usr/lib/libSystem.B.dylib",
+        exitSymbol: "", loader: "/usr/lib/dyld", executionEvidence: "none",
+    };
+}
+
+pub func linuxArm64(): OsTarget {
+    return OsTarget {
+        name: "linux-arm64", arch: "aarch64", objectFormat: "elf", convention: "sysv",
+        pointerBytes: 8, stackAlign: 16, shadowBytes: 0, redZoneBytes: 0, registerArguments: 8,
+        exitMechanism: "direct-syscall", exitSyscall: 93, exitLibrary: "", exitSymbol: "",
+        loader: "", executionEvidence: "linux-arm64-vm",
+    };
+}
+
+pub func darwinArm64(): OsTarget {
+    return OsTarget {
+        name: "darwin-arm64", arch: "aarch64", objectFormat: "macho", convention: "darwin-arm64",
+        pointerBytes: 8, stackAlign: 16, shadowBytes: 0, redZoneBytes: 0, registerArguments: 8,
+        exitMechanism: "direct-syscall", exitSyscall: 1, exitLibrary: "/usr/lib/libSystem.B.dylib",
+        exitSymbol: "", loader: "/usr/lib/dyld", executionEvidence: "macos-arm64-hardware",
+    };
+}
+
+pub func targetByName(name: string): Result<OsTarget, string> {
+    if name == "linux-x64" { return Result.Ok(linuxX64()); }
+    if name == "windows-x64" { return Result.Ok(windowsX64()); }
+    if name == "darwin-x64" || name == "macos-x64" { return Result.Ok(darwinX64()); }
+    if name == "linux-arm64" || name == "linux-aarch64" { return Result.Ok(linuxArm64()); }
+    if name == "darwin-arm64" || name == "macos-arm64" { return Result.Ok(darwinArm64()); }
+    return Result.Err("platform: unknown target " + name);
+}
+
+pub func incomingStackOffset(target: OsTarget, argumentIndex: int): int {
+    if argumentIndex < target.registerArguments { return -1; }
+    var stackIndex = argumentIndex - target.registerArguments;
+    if target.convention == "win64" { return 48 + stackIndex * 8; }
+    return 16 + stackIndex * 8;
+}
+
+pub func outgoingStackOffset(target: OsTarget, argumentIndex: int): int {
+    if argumentIndex < target.registerArguments { return -1; }
+    var stackIndex = argumentIndex - target.registerArguments;
+    if target.convention == "win64" { return target.shadowBytes + stackIndex * 8; }
+    return stackIndex * 8;
+}
+
+pub func redZoneBytes(target: OsTarget): int { return target.redZoneBytes; }
+
+pub func generatorUsesRedZone(): bool { return false; }

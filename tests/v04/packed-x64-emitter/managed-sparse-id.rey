@@ -1,0 +1,106 @@
+struct IdIndex {
+    pub dense: Vec<int>,
+    pub sparseKeys: Vec<int>,
+    pub sparseValues: Vec<int>,
+    pub isDense: bool,
+    pub maximumId: int,
+}
+
+func useDense(maximumId: int, count: int): bool {
+    return maximumId >= 0 && maximumId <= 1048575 && maximumId / 8 < count;
+}
+
+func createIndex(maximumId: int, count: int): IdIndex {
+    var dense: Vec<int> = Vec.new();
+    var keys: Vec<int> = Vec.new();
+    var values: Vec<int> = Vec.new();
+    var isDense = useDense(maximumId, count);
+    if isDense {
+        var i = 0;
+        while i <= maximumId {
+            dense.push(-1);
+            i += 1;
+        }
+    } else {
+        var capacity = 0;
+        if count > 0 {
+            if count > 4611686018427387903 { capacity = count; }
+            else { capacity = count * 2 + 1; }
+        }
+        var i = 0;
+        while i < capacity {
+            keys.push(-1);
+            values.push(-1);
+            i += 1;
+        }
+    }
+    return IdIndex { dense: dense, sparseKeys: keys, sparseValues: values, isDense: isDense, maximumId: maximumId };
+}
+
+func setIndex(index: IdIndex, id: int, value: int): void {
+    if id < 0 { return; }
+    if index.isDense {
+        if id < index.dense.len() { index.dense.set(id, value); }
+        return;
+    }
+    var capacity = index.sparseKeys.len();
+    if capacity == 0 { return; }
+    var slot = id % capacity;
+    var probes = 0;
+    while probes < capacity {
+        var key = index.sparseKeys[slot];
+        if key == -1 || key == id {
+            index.sparseKeys.set(slot, id);
+            index.sparseValues.set(slot, value);
+            return;
+        }
+        slot = slot + 1;
+        if slot == capacity { slot = 0; }
+        probes = probes + 1;
+    }
+}
+
+func getIndex(index: IdIndex, id: int): int {
+    if id < 0 { return -1; }
+    if index.isDense {
+        if id >= index.dense.len() { return -1; }
+        return index.dense[id];
+    }
+    var capacity = index.sparseKeys.len();
+    if capacity == 0 { return -1; }
+    var slot = id % capacity;
+    var probes = 0;
+    while probes < capacity {
+        var key = index.sparseKeys[slot];
+        if key == -1 { return -1; }
+        if key == id { return index.sparseValues[slot]; }
+        slot = slot + 1;
+        if slot == capacity { slot = 0; }
+        probes = probes + 1;
+    }
+    return -1;
+}
+
+func require(ok: bool, code: int): void {
+    if !ok { exit(code); }
+}
+
+func main(): void {
+    var dense = createIndex(23, 4);
+    require(dense.isDense, 1);
+    setIndex(dense, 23, 230);
+    setIndex(dense, 0, 10);
+    require(getIndex(dense, 23) == 230 && getIndex(dense, 0) == 10, 2);
+    require(getIndex(dense, 24) == -1, 3);
+
+    var sparse = createIndex(9223372036854775807, 3);
+    require(!sparse.isDense, 4);
+    setIndex(sparse, 0, 11);
+    setIndex(sparse, 14, 22);
+    setIndex(sparse, 9223372036854775807, 33);
+    require(getIndex(sparse, 0) == 11, 5);
+    require(getIndex(sparse, 14) == 22, 6);
+    require(getIndex(sparse, 9223372036854775807) == 33, 7);
+    require(getIndex(sparse, 1) == -1, 8);
+    println("managed sparse IdIndex reproduction passed");
+}

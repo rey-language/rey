@@ -1,0 +1,45 @@
+import native::bytes::{byteString};
+import native::packed::{PackedBuffer, packedBufferWriteSegments};
+
+// The seed writes Rey strings using their explicit byte length, including NUL.
+pub func writeFileBytes(path: string, bytes: Vec<int>): Result<bool, string> {
+    var encoded = byteString(bytes);
+    if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
+    writeFile(path, encoded.unwrap());
+    return Result.Ok(true);
+}
+
+pub func writeCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
+    if __reyPackedWriteBytesFallback(path, bytes) { return Result.Ok(true); }
+    // Rebuild the exact error because the packed hook returns only bool.
+    var encoded = byteString(bytes);
+    if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
+    return Result.Err("byte values must be in 0..255");
+}
+
+pub func writeVerifiedCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
+    var encoded = byteString(bytes);
+    if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
+    var value = encoded.unwrap();
+    writeFile(path, value);
+    if !fileExists(path) { return Result.Err(path + ": error: failed to create native image"); }
+    if readFile(path) != value { return Result.Err(path + ": error: native image write verification failed"); }
+    return Result.Ok(true);
+}
+
+// The compiler binds only this validated fallback when explicitly trusted.
+func __reyPackedWriteBytesFallback(path: string, bytes: Vec<int>): bool {
+    var encoded = byteString(bytes);
+    if encoded.isErr() { return false; }
+    writeFile(path, encoded.unwrap());
+    return true;
+}
+
+pub func writeCompilerOutputPackedSegments(path: string, header: Vec<int>, body: PackedBuffer): Result<bool, string> {
+    if __reyPackedWriteSegmentsFallback(path, header, body) { return Result.Ok(true); }
+    return Result.Err("invalid packed compiler output");
+}
+
+func __reyPackedWriteSegmentsFallback(path: string, header: Vec<int>, body: PackedBuffer): bool {
+    return packedBufferWriteSegments(path, header, body);
+}

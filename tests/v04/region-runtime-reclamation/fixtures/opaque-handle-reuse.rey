@@ -1,0 +1,31 @@
+import layout::{layoutRegistryCreate, layoutRegistryRelease};
+import regions::{regionContextCreate, regionContextDestroy, regionCurrent, regionHandleCreate, regionHandleEnd, regionHandleAddress, regionHandleIsActive};
+
+func check(ok: bool): void {
+    if !ok { __reyRawFail(2299); }
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(0);
+    var context = regionContextCreate(registry);
+    var stale = regionHandleCreate(context);
+    var firstAddress = regionCurrent(context);
+    check(regionHandleIsActive(context, stale));
+    check(__reyRawEqual(regionHandleAddress(context, stale), firstAddress));
+
+    regionHandleEnd(context, stale);
+    check(!regionHandleIsActive(context, stale));
+    var current = regionHandleCreate(context);
+    var reusedAddress = regionCurrent(context);
+    check(__reyRawEqual(firstAddress, reusedAddress));
+    check(!__reyRawEqual(stale, current));
+    check(!regionHandleIsActive(context, stale));
+    check(regionHandleIsActive(context, current));
+    check(__reyRawEqual(regionHandleAddress(context, current), reusedAddress));
+
+    regionHandleEnd(context, current);
+    check(!regionHandleIsActive(context, stale));
+    check(!regionHandleIsActive(context, current));
+    regionContextDestroy(context);
+    layoutRegistryRelease(registry);
+}

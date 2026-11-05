@@ -1,0 +1,12 @@
+{
+  "graph-cycle-growth": 0,
+  "collect-before-8": 0,
+  "construction-roots": 0,
+  "raw-pointer-shape": 0,
+  "context-cycles": 0,
+  "native-collection-stress-128": 0,
+  "bad-create-capacity": 2101,
+  "corrupt-context": 2102,
+  "bad-root-index": 2103,
+  "bad-root-order": 2103
+}

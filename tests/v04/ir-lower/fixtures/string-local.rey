@@ -1,0 +1,4 @@
+func main(): void {
+    var text: string = "unsupported";
+    return;
+}

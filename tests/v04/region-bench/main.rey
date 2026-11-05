@@ -1,0 +1,48 @@
+import frontend::graph::{checkSourceFileGraphWithRuntime};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import native::arm64::{emitArm64};
+import native::image::{buildMachOArm64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func writeImage(path: string, bytes: Vec<int>): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), "byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path), "image write failed");
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 4, "usage: region-bench-driver fixture.rey sourceDir outputBinary");
+    var fixture = argv[1];
+    var sourceDirectory = argv[2];
+    var outputBinary = argv[3];
+    var entryPath = sourceDirectory + "/main.rey";
+    var layoutPath = sourceDirectory + "/layout/main.rey";
+    var regionsPath = sourceDirectory + "/regions/main.rey";
+    var managedPath = sourceDirectory + "/managed/main.rey";
+    var containersPath = sourceDirectory + "/containers/main.rey";
+    var hostPath = sourceDirectory + "/host/main.rey";
+    writeFile(entryPath, readFile(fixture));
+    var units: Vec<string> = [layoutPath, regionsPath, managedPath, containersPath, hostPath, entryPath];
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var darwin = emitArm64(program, "darwin");
+    if darwin.isErr() { eprintln(darwin.unwrapErr()); exit(1); }
+    var macho = buildMachOArm64(darwin.unwrap());
+    if macho.isErr() { eprintln(macho.unwrapErr()); exit(1); }
+    writeImage(outputBinary, macho.unwrap());
+    println("region-bench-emitted " + outputBinary);
+}

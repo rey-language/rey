@@ -1,0 +1,368 @@
+import ir;
+import ir::{IRFunction, IRProgram, Instruction, InstructionKind, SourceRef, Terminator, TerminatorKind, EffectSummary, Escape, Fact};
+import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram};
+import ir::managed::scalar::{applyScalarReplacement};
+import ir::verify::{verifyProgram};
+
+func source(at: int): SourceRef {
+    return ir.sourceRef("scalar-replacement.rey", at, at + 1);
+}
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("scalar-replacement failure: " + message); exit(1); }
+}
+
+func allocate(resultId: int, layoutId: int, at: int): Instruction {
+    return ir.call(resultId, ir.irRawAddress(), 90, [layoutId], source(at));
+}
+
+func effectsWithArgs(argumentCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var argumentAt = 0;
+    loop { if argumentAt >= argumentCount { break; } escapes.push(Escape::Unknown); argumentAt += 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, escapes, Escape::Unknown);
+}
+
+func mainFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(1, 1, source(1)));
+    instructions.push(allocate(10, 1, 2));
+    instructions.push(ir.constI64(2, 8, source(3)));
+    instructions.push(ir.rawOffset(11, 10, 2, source(4)));
+    instructions.push(ir.constI64(3, 7, source(5)));
+    instructions.push(ir.rawStoreI64(11, 3, source(6)));
+    instructions.push(ir.rawLoadI64(12, 11, source(7)));
+    instructions.push(allocate(20, 1, 8));
+    instructions.push(ir.constI64(4, 16, source(9)));
+    instructions.push(ir.rawOffset(21, 20, 4, source(10)));
+    instructions.push(ir.constI64(5, 9, source(11)));
+    instructions.push(ir.rawStoreI64(21, 5, source(12)));
+    instructions.push(ir.rawLoadI64(22, 21, source(13)));
+    var condition = ir.constBool(24, true, source(14));
+    instructions.push(condition);
+    var entry = ir.basicBlock(0, [], instructions, ir.branch(24, 1, [12, 22], 2, [12, 22], source(15)));
+    var first = ir.basicBlock(1, [ir.irValue(30, ir.irI64()), ir.irValue(31, ir.irI64())], [], ir.jump(3, [30, 31], source(16)));
+    var second = ir.basicBlock(2, [ir.irValue(32, ir.irI64()), ir.irValue(33, ir.irI64())], [], ir.jump(3, [32, 33], source(17)));
+    var sum = ir.addCheckedI64(42, 40, 41, source(18));
+    var merge = ir.basicBlock(3, [ir.irValue(40, ir.irI64()), ir.irValue(41, ir.irI64())], [sum], ir.returnValue(42, source(19)));
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "main"), ir.functionSignature([], ir.irI64()), [], [entry, first, second, merge], ir.unknownEffects());
+}
+
+func returnFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(1000000, 1, source(20)));
+    instructions.push(allocate(9223372036854775807, 1000000, 21));
+    instructions.push(ir.constI64(1000002, 8, source(22)));
+    instructions.push(ir.rawOffset(1000003, 9223372036854775807, 1000002, source(23)));
+    instructions.push(ir.constI64(1000004, 33, source(24)));
+    instructions.push(ir.rawStoreI64(1000003, 1000004, source(25)));
+    instructions.push(ir.rawLoadI64(1000005, 1000003, source(26)));
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(1000005, source(27)));
+    return ir.irFunction(1, ir.functionKey("scalar-replacement", "", "returnValue"), ir.functionSignature([], ir.irI64()), [], [block], ir.unknownEffects());
+}
+
+func derivedFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(200, 1, source(30)));
+    instructions.push(allocate(202, 200, 31));
+    instructions.push(ir.constI64(204, 8, source(32)));
+    instructions.push(ir.rawOffset(203, 202, 204, source(33)));
+    instructions.push(ir.rawLoadI64(205, 203, source(34)));
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(205, source(35)));
+    return ir.irFunction(2, ir.functionKey("scalar-replacement", "", "derived"), ir.functionSignature([], ir.irI64()), [], [block], ir.unknownEffects());
+}
+
+func allocatorFunction(): IRFunction {
+    var parameters = [ir.irValue(0, ir.irI64())];
+    var instructions = [ir.rawNull(1, source(28))];
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(1, source(29)));
+    return ir.irFunction(90, ir.functionKey("scalar-replacement", "", "allocate"), ir.functionSignature([ir.irI64()], ir.irRawAddress()), parameters, [block], effectsWithArgs(1));
+}
+
+func mutatingFunction(): IRFunction {
+    var parameters = [ir.irValue(0, ir.irRawAddress())];
+    var instructions = [ir.constI64(1, 99, source(60)), ir.rawStoreI64(0, 1, source(61))];
+    var block = ir.basicBlock(0, [], instructions, ir.returnVoid(source(62)));
+    return ir.irFunction(91, ir.functionKey("scalar-replacement", "", "mutate"), ir.functionSignature([ir.irRawAddress()], ir.irVoid()), parameters, [block], effectsWithArgs(1));
+}
+
+func sideEffectLayoutFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 8, source(63)), ir.rawMap(2, 1, source(64)), ir.rawUnmap(2, 1, source(65)), ir.constI64(3, 1, source(66))];
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(3, source(67)));
+    return ir.irFunction(91, ir.functionKey("scalar-replacement", "", "layoutWithEffects"), ir.functionSignature([], ir.irI64()), [], [block], ir.unknownEffects());
+}
+
+func scalarGuardModule(function: IRFunction, references: Vec<int>, extraFunctions: Vec<IRFunction>): ManagedProgram {
+    var functions: Vec<IRFunction> = [function, allocatorFunction()];
+    var extraAt = 0;
+    loop { if extraAt >= extraFunctions.len() { break; } functions.push(extraFunctions[extraAt]); extraAt += 1; }
+    var managed: Vec<ManagedFunction> = [managedFunction(function.id, references), managedFunction(90, [1])];
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: function.id, blockId: 0, resultId: 100, layoutId: 1 }];
+    var layout = ManagedLayout { id: 1, key: "scalar-replacement::Cell", payloadBytes: 8, fields: [] };
+    return ManagedProgram { program: ir.irProgram(function.id, functions), layouts: [layout], functions: managed, allocations: allocations, derived: [], allocateFunctionId: 90, storeReferenceFunctionId: 91, collectFunctionId: 92, variableLayouts: [], hooks: [] };
+}
+
+func loadBeforeStoreFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(1, 1, source(70)), allocate(100, 1, 71), ir.constI64(101, 8, source(72)),
+        ir.rawOffset(102, 100, 101, source(73)), ir.rawLoadI64(103, 102, source(74)),
+        ir.constI64(104, 7, source(75)), ir.rawStoreI64(102, 104, source(76)),
+    ];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "loadBeforeStore"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(103, source(77)))], ir.unknownEffects());
+}
+
+func escapedAddressFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(1, 1, source(80)), allocate(100, 1, 81), ir.constI64(101, 8, source(82)),
+        ir.rawOffset(102, 100, 101, source(83)), ir.constI64(103, 7, source(84)),
+        ir.rawStoreI64(102, 103, source(85)), ir.call(-1, ir.irVoid(), 91, [102], source(86)),
+        ir.rawLoadI64(104, 102, source(87)),
+    ];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "escapedAddress"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(104, source(88)))], ir.unknownEffects());
+}
+
+func aliasedAddressFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(1, 1, source(90)), allocate(100, 1, 91), ir.constI64(101, 8, source(92)),
+        ir.rawOffset(102, 100, 101, source(93)), ir.rawLoadI64(104, 102, source(95)), ir.constBool(106, true, source(96)),
+    ];
+    var entry = ir.basicBlock(0, [], instructions, ir.branch(106, 1, [], 2, [], source(97)));
+    var aliasedStore = ir.basicBlock(1, [], [ir.rawOffset(103, 100, 101, source(98)), ir.constI64(105, 7, source(99)), ir.rawStoreI64(103, 105, source(100))], ir.jump(3, [], source(101)));
+    var second = ir.basicBlock(2, [], [], ir.jump(3, [], source(102)));
+    var merge = ir.basicBlock(3, [], [], ir.returnValue(104, source(103)));
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "aliasedAddress"), ir.functionSignature([], ir.irI64()), [], [entry, aliasedStore, second, merge], ir.unknownEffects());
+}
+
+func sameBlockAliasedAddressFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(1, 1, source(110)), allocate(100, 1, 111), ir.constI64(101, 8, source(112)),
+        ir.rawOffset(102, 100, 101, source(113)), ir.rawOffset(103, 100, 101, source(114)),
+        ir.constI64(105, 7, source(115)), ir.rawStoreI64(102, 105, source(116)),
+        ir.constI64(106, 9, source(117)), ir.rawStoreI64(103, 106, source(118)), ir.rawLoadI64(104, 102, source(119)),
+    ];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "sameBlockAliasedAddress"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(104, source(120)))], ir.unknownEffects());
+}
+
+func byteStoreFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.constI64(1, 1, source(100)), allocate(100, 1, 101), ir.constI64(101, 8, source(102)),
+        ir.rawOffset(102, 100, 101, source(103)), ir.constI64(103, 7, source(104)),
+        ir.rawStoreByte(102, 103, source(105)), ir.rawLoadI64(104, 102, source(106)),
+    ];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "byteStore"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(104, source(107)))], ir.unknownEffects());
+}
+
+func dynamicLayoutFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [
+        ir.call(200, ir.irI64(), 91, [], source(130)), allocate(100, 200, 131),
+        ir.constI64(101, 8, source(132)), ir.rawOffset(102, 100, 101, source(133)),
+        ir.constI64(103, 7, source(134)), ir.rawStoreI64(102, 103, source(135)), ir.rawLoadI64(104, 102, source(136)),
+    ];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "dynamicLayout"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(104, source(137)))], ir.unknownEffects());
+}
+
+func unusedAllocationFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [ir.constI64(1, 1, source(140)), allocate(100, 1, 141), ir.constI64(101, 0, source(142))];
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "unusedAllocation"), ir.functionSignature([], ir.irI64()), [], [ir.basicBlock(0, [], instructions, ir.returnValue(101, source(143)))], ir.unknownEffects());
+}
+
+func sparseInteractionFunction(): IRFunction {
+    var instructions: Vec<Instruction> = [];
+    instructions.push(ir.constI64(10, 1, source(40)));
+    instructions.push(allocate(1000001, 10, 41));
+    instructions.push(ir.constI64(1000002, 8, source(42)));
+    instructions.push(ir.rawOffset(1000003, 1000001, 1000002, source(43)));
+    instructions.push(ir.constI64(1000004, 33, source(44)));
+    instructions.push(ir.rawStoreI64(1000003, 1000004, source(45)));
+    instructions.push(ir.rawLoadI64(1000005, 1000003, source(46)));
+    instructions.push(allocate(9223372036854775807, 1000005, 47));
+    instructions.push(ir.constI64(2000002, 8, source(48)));
+    instructions.push(ir.rawOffset(2000003, 9223372036854775807, 2000002, source(49)));
+    instructions.push(ir.rawStoreI64(2000003, 1000005, source(50)));
+    instructions.push(ir.rawLoadI64(2000004, 2000003, source(51)));
+    instructions.push(ir.constI64(2000005, 1, source(52)));
+    instructions.push(ir.addCheckedI64(2000006, 1000004, 2000005, source(53)));
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(2000006, source(54)));
+    return ir.irFunction(0, ir.functionKey("scalar-replacement", "", "sparseInteraction"), ir.functionSignature([], ir.irI64()), [], [block], ir.unknownEffects());
+}
+
+func sparseInteractionModule(): ManagedProgram {
+    var layout = ManagedLayout { id: 1, key: "scalar-replacement::Cell", payloadBytes: 8, fields: [] };
+    var allocations: Vec<ManagedAllocation> = [
+        ManagedAllocation { functionId: 0, blockId: 0, resultId: 1000001, layoutId: 1 },
+        ManagedAllocation { functionId: 0, blockId: 0, resultId: 9223372036854775807, layoutId: 1 },
+    ];
+    return ManagedProgram { program: ir.irProgram(0, [sparseInteractionFunction(), allocatorFunction()]), layouts: [layout], functions: [managedFunction(0, [1000001, 1000003, 9223372036854775807, 2000003]), managedFunction(90, [1])], allocations: allocations, derived: [], allocateFunctionId: 90, storeReferenceFunctionId: 91, collectFunctionId: 92, variableLayouts: [], hooks: [] };
+}
+
+func malformedTerminatorModule(): ManagedProgram {
+    var base = moduleUnderTest();
+    var functions: Vec<IRFunction> = [];
+    var functionAt = 0;
+    loop { if functionAt >= base.program.functions.len() { break; } functions.push(base.program.functions[functionAt]); functionAt += 1; }
+    var function = functions[0];
+    var block = function.blocks[0];
+    var term = Terminator { kind: TerminatorKind::Branch, targetBlockId: -1, targetArgs: [], conditionValueId: 24, trueTargetBlockId: 1, trueArgs: [12, 22], falseTargetBlockId: 2, falseArgs: [12, 22], valueId: 24, source: source(15) };
+    var blocks = function.blocks;
+    blocks.set(0, ir.basicBlock(block.id, block.params, block.instructions, term));
+    functions.set(0, ir.irFunction(function.id, function.key, function.signature, function.parameters, blocks, function.effects));
+    var program = IRProgram { entryFunctionId: 0, functions: functions };
+    return ManagedProgram { program: program, layouts: base.layouts, functions: base.functions, allocations: base.allocations, derived: base.derived, allocateFunctionId: base.allocateFunctionId, storeReferenceFunctionId: base.storeReferenceFunctionId, collectFunctionId: base.collectFunctionId, variableLayouts: base.variableLayouts, hooks: base.hooks };
+}
+
+func hasInstructionResult(function: IRFunction, resultId: int): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop { if instructionAt >= function.blocks[blockAt].instructions.len() { break; } if function.blocks[blockAt].instructions[instructionAt].resultId == resultId { return true; } instructionAt += 1; }
+        blockAt += 1;
+    }
+    return false;
+}
+
+func hasInstructionKind(function: IRFunction, kind: InstructionKind): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop { if instructionAt >= function.blocks[blockAt].instructions.len() { break; } if function.blocks[blockAt].instructions[instructionAt].kind == kind { return true; } instructionAt += 1; }
+        blockAt += 1;
+    }
+    return false;
+}
+
+func managedFunction(functionId: int, references: Vec<int>): ManagedFunction {
+    return ManagedFunction { functionId: functionId, referenceValues: references, parameterLayouts: [], returnLayout: 0 };
+}
+
+func containsAllocationCall(function: IRFunction): bool {
+    var blockAt = 0;
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var instructionAt = 0;
+        loop {
+            if instructionAt >= function.blocks[blockAt].instructions.len() { break; }
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == 90 { return true; }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    return false;
+}
+
+func moduleUnderTest(): ManagedProgram {
+    var fields: Vec<ManagedField> = [];
+    var layout = ManagedLayout { id: 1, key: "scalar-replacement::Cell", payloadBytes: 8, fields: fields };
+    var functions: Vec<IRFunction> = [mainFunction(), returnFunction(), derivedFunction(), allocatorFunction()];
+    var managed: Vec<ManagedFunction> = [managedFunction(0, [10, 11, 20, 21]), managedFunction(1, [9223372036854775807, 1000003]), managedFunction(2, [202, 203]), managedFunction(90, [1])];
+    var allocations: Vec<ManagedAllocation> = [
+        ManagedAllocation { functionId: 0, blockId: 0, resultId: 10, layoutId: 1 },
+        ManagedAllocation { functionId: 0, blockId: 0, resultId: 20, layoutId: 1 },
+        ManagedAllocation { functionId: 1, blockId: 0, resultId: 9223372036854775807, layoutId: 1 },
+        ManagedAllocation { functionId: 2, blockId: 0, resultId: 202, layoutId: 1 },
+    ];
+    var derived = [ManagedDerived { functionId: 2, valueId: 203, ownerId: 202 }];
+    return ManagedProgram { program: ir.irProgram(0, functions), layouts: [layout], functions: managed, allocations: allocations, derived: derived, allocateFunctionId: 90, storeReferenceFunctionId: 91, collectFunctionId: 92, variableLayouts: [], hooks: [] };
+}
+
+func malformedLargeModule(): ManagedProgram {
+    var base = moduleUnderTest();
+    var functions: Vec<IRFunction> = [];
+    var functionAt = 0;
+    loop { if functionAt >= base.program.functions.len() { break; } functions.push(base.program.functions[functionAt]); functionAt += 1; }
+    var fillerAt = 0;
+    loop {
+        if fillerAt >= 509 { break; }
+        var valueId = 3000000 + fillerAt;
+        var instructions = [ir.constI64(valueId, fillerAt, source(100 + fillerAt))];
+        var block = ir.basicBlock(0, [], instructions, ir.returnValue(valueId, source(200 + fillerAt)));
+        functions.push(ir.irFunction(3000 + fillerAt, ir.functionKey("scalar-replacement", "", "filler" + fillerAt.toString()), ir.functionSignature([], ir.irI64()), [], [block], ir.unknownEffects()));
+        fillerAt += 1;
+    }
+    var program = IRProgram { entryFunctionId: 777777, functions: functions };
+    return ManagedProgram { program: program, layouts: base.layouts, functions: base.functions, allocations: base.allocations, derived: base.derived, allocateFunctionId: base.allocateFunctionId, storeReferenceFunctionId: base.storeReferenceFunctionId, collectFunctionId: base.collectFunctionId, variableLayouts: base.variableLayouts, hooks: base.hooks };
+}
+
+func main(): void {
+    var input = moduleUnderTest();
+    var inputVerification = verifyProgram(input.program);
+    require(inputVerification.ok, "input IR must satisfy the verifier: " + inputVerification.errors.join("\n"));
+
+    var result = applyScalarReplacement(input);
+    require(result.isOk(), "scalar replacement must accept valid IR");
+    var output = result.unwrap();
+    var outputVerification = verifyProgram(output.program);
+    require(outputVerification.ok, "rewritten IR must satisfy the verifier");
+    require(output.allocations.len() == 1 && output.allocations[0].resultId == 202, "eligible scalar allocations should be removed while derived owners remain");
+
+    var main = output.program.functions[0];
+    require(!containsAllocationCall(main), "allocation calls should be removed after both stores are forwarded");
+    require(main.blocks[0].terminator.trueArgs[0] == 3 && main.blocks[0].terminator.trueArgs[1] == 5, "true-edge uses should be rewritten");
+    require(main.blocks[0].terminator.falseArgs[0] == 3 && main.blocks[0].terminator.falseArgs[1] == 5, "false-edge uses should be rewritten");
+    require(main.blocks[1].terminator.targetArgs[0] == 30 && main.blocks[1].terminator.targetArgs[1] == 31, "first jump arguments should remain intact");
+    require(main.blocks[2].terminator.targetArgs[0] == 32 && main.blocks[2].terminator.targetArgs[1] == 33, "second jump arguments should remain intact");
+    require(main.blocks[3].instructions[0].operands[0] == 40 && main.blocks[3].instructions[0].operands[1] == 41, "merge block operands should remain intact");
+
+    var returnFunction = output.program.functions[1];
+    require(!containsAllocationCall(returnFunction), "returning scalar allocation should be removed");
+    require(returnFunction.blocks[0].terminator.valueId == 1000004, "high-ID return use should be rewritten to the stored scalar");
+    var derived = output.program.functions[2];
+    require(containsAllocationCall(derived), "allocation backing a derived address must remain intact");
+
+    var malformed = malformedLargeModule();
+    require(malformed.program.functions.len() > 512, "verification regression must exceed the old size cutoff");
+    require(!verifyProgram(malformed.program).ok, "malformed regression input must fail verification");
+    var malformedResult = applyScalarReplacement(malformed);
+    require(malformedResult.isErr(), "public scalar replacement must reject malformed output at every program size");
+
+    var malformedTerm = malformedTerminatorModule();
+    require(!verifyProgram(malformedTerm.program).ok, "same-valued active terminator fields must be rejected by the verifier");
+    require(applyScalarReplacement(malformedTerm).isErr(), "same-valued active terminator fields must use exact fallback counting and remain rejected");
+
+    var interacting = sparseInteractionModule();
+    require(verifyProgram(interacting.program).ok, "sparse interacting allocations must start with valid IR");
+    var interactionResult = applyScalarReplacement(interacting);
+    require(interactionResult.isOk(), "interacting sparse allocations must rewrite safely");
+    var interactionOutput = interactionResult.unwrap();
+    require(verifyProgram(interactionOutput.program).ok, "sparse interaction rewrite must preserve valid IR");
+    require(interactionOutput.allocations.len() == 0, "sparse interacting allocations should both be removed");
+    require(hasInstructionResult(interactionOutput.program.functions[0], 1000004), "a rewritten layout value with remaining arithmetic uses must not be dropped");
+
+    var loadBeforeStore = scalarGuardModule(loadBeforeStoreFunction(), [100, 102], []);
+    require(verifyProgram(loadBeforeStore.program).ok, "load-before-store fixture input must be valid");
+    var loadBeforeStoreOutput = applyScalarReplacement(loadBeforeStore).unwrap();
+    require(loadBeforeStoreOutput.allocations.len() == 1 && hasInstructionResult(loadBeforeStoreOutput.program.functions[0], 103) && hasInstructionKind(loadBeforeStoreOutput.program.functions[0], InstructionKind::RawStoreI64), "a load before its store must not be forwarded");
+
+    var escapedAddress = scalarGuardModule(escapedAddressFunction(), [100, 102], [mutatingFunction()]);
+    require(verifyProgram(escapedAddress.program).ok, "escaped-address fixture input must be valid");
+    var escapedAddressOutput = applyScalarReplacement(escapedAddress).unwrap();
+    require(escapedAddressOutput.allocations.len() == 1 && hasInstructionResult(escapedAddressOutput.program.functions[0], 104) && hasInstructionKind(escapedAddressOutput.program.functions[0], InstructionKind::RawStoreI64), "an address passed to a writing call must not be forwarded");
+
+    var aliasedAddress = scalarGuardModule(aliasedAddressFunction(), [100, 102, 103], []);
+    require(verifyProgram(aliasedAddress.program).ok, "aliased-address fixture input must be valid");
+    var aliasedAddressOutput = applyScalarReplacement(aliasedAddress).unwrap();
+    require(aliasedAddressOutput.allocations.len() == 1 && hasInstructionResult(aliasedAddressOutput.program.functions[0], 104) && hasInstructionKind(aliasedAddressOutput.program.functions[0], InstructionKind::RawStoreI64), "another derived address must prevent forwarding and store removal");
+
+    var sameBlockAlias = scalarGuardModule(sameBlockAliasedAddressFunction(), [100, 102, 103], []);
+    require(verifyProgram(sameBlockAlias.program).ok, "same-block alias fixture input must be valid");
+    var sameBlockAliasOutput = applyScalarReplacement(sameBlockAlias).unwrap();
+    require(sameBlockAliasOutput.allocations.len() == 1 && hasInstructionResult(sameBlockAliasOutput.program.functions[0], 104) && hasInstructionKind(sameBlockAliasOutput.program.functions[0], InstructionKind::RawStoreI64), "a same-offset write through another address must not be bypassed");
+
+    var byteStore = scalarGuardModule(byteStoreFunction(), [100, 102], []);
+    require(verifyProgram(byteStore.program).ok, "byte-store fixture input must be valid");
+    var byteStoreOutput = applyScalarReplacement(byteStore).unwrap();
+    require(byteStoreOutput.allocations.len() == 1 && hasInstructionKind(byteStoreOutput.program.functions[0], InstructionKind::RawStoreByte) && hasInstructionResult(byteStoreOutput.program.functions[0], 104), "a byte store must not be forwarded to an i64 load");
+
+    var dynamicLayout = scalarGuardModule(dynamicLayoutFunction(), [100, 102, 200], [sideEffectLayoutFunction()]);
+    require(verifyProgram(dynamicLayout.program).ok, "dynamic-layout fixture input must be valid");
+    var dynamicLayoutOutput = applyScalarReplacement(dynamicLayout).unwrap();
+    require(dynamicLayoutOutput.allocations.len() == 0 && hasInstructionResult(dynamicLayoutOutput.program.functions[0], 200), "removing an allocation must preserve its side-effecting dynamic layout producer");
+
+    var unusedAllocation = scalarGuardModule(unusedAllocationFunction(), [100], []);
+    require(verifyProgram(unusedAllocation.program).ok, "unused-allocation fixture input must be valid");
+    var unusedAllocationOutput = applyScalarReplacement(unusedAllocation).unwrap();
+    require(unusedAllocationOutput.allocations.len() == 1 && containsAllocationCall(unusedAllocationOutput.program.functions[0]), "an unused allocation without a removable scalar address must retain its call and annotation");
+    print("scalar replacement: guarded scans passed");
+}
