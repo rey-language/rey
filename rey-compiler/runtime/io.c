@@ -65,7 +65,7 @@ static int rey_image_magic(const char* data, int64_t len) {
     if (b[0] == 0x7f && b[1] == 'E' && b[2] == 'L' && b[3] == 'F') return 1;
     if (b[0] == 'M' && b[1] == 'Z') return 1;
     if (b[0] == 0xfe && b[1] == 0xed && b[2] == 0xfa && (b[3] == 0xce || b[3] == 0xcf)) return 1;
-    if (b[0] == 0xcf && b[1] == 0xfa && b[2] == 0xed && b[3] == 0xfe) return 1;
+    if ((b[0] == 0xce || b[0] == 0xcf) && b[1] == 0xfa && b[2] == 0xed && b[3] == 0xfe) return 1;
     if (b[0] == 0xca && b[1] == 0xfe && b[2] == 0xba && b[3] == 0xbe) return 1;
     return 0;
 }
