@@ -21,9 +21,8 @@ if [ ! -x "$seed" ]; then
     exit 2
 fi
 
-if [ ! -f "$runtime/librey_rt.a" ]; then
-    "$root/scripts/build-runtime.sh" --output-dir "$runtime" >/dev/null
-fi
+# rebuild every time - a stale archive skips runtime fixes like executable images
+"$root/scripts/build-runtime.sh" --output-dir "$runtime" >/dev/null
 
 python3 "$root/scripts/embed-runtime.py"
 python3 "$root/scripts/embed-stdlib.py"

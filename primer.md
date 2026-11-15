@@ -1,5 +1,13 @@
 # Primer — rey-lang
 
+## Fast compiler delivery — 2026-11-15
+
+- Delivered `build/v04/rey`: stage H of the documented chain, rebuilt from the merged source by `scripts/build-fast-compiler.sh` (v0.3.1 seed + clang). It compiles all twelve `tests/v04/selfhost` fixtures, writes them with mode 755, and they run. A 6-line `println` program takes 2.17 s, 250 scalar functions 0.35 s, and the compiler source itself 80 s.
+- Measured the native compiler's slowness: S1..S3 need 68.98 s / 1.36 GB for the 6-line program and 165.69 s for 264 KB of scalar code, about 48 ms per function with near-linear scaling. A symbolized perf profile puts about 34% of samples inside the managed allocator (`regionAllocate`, `regionWriteObject`, `regionContextValidateFast`, `containersHeapLayout`, `layoutPayloadSizeValid`, `regionFindGroup`); every allocation revalidates the registry and walks region metadata, and the remaining time is spread over lexing, type checking, lowering, verification and emission. Stage H is 16-36x faster because clang optimizes the same source.
+- Executable output: managed compiler images open with mode 0755 (`managedWriteBytes`, `managedWritePackedSegments`); the legacy C runtime chmods 0755 when `writeFile` content has an ELF, Mach-O or PE magic; `writeVerifiedCompilerOutputBytes` writes through the image writer and then verifies the bytes. The compiler no longer prints its nine `phase:` progress lines.
+- Normal-teardown bootstrap: S0→H passed in 4:27 and H→S1 in 1:29. S1 wrote and verified S2 (`S2 --help` passes), but normal teardown swapped 15+ GB and was stopped at 37:18. This 15.6 GB machine still cannot complete normal teardown of a full self-build; completed full builds remain fast-exit chains.
+- Building stage H needs a fresh runtime archive. A stale `build/runtime/librey_rt.a` (Oct 20) made earlier rebuild attempts swap 20 GB; `scripts/build-fast-compiler.sh` now rebuilds the archive every time.
+
 ## Post-merge verification — 2026-11-15
 
 - PR #35 (`v0.4 implementation merge`) is merged into `master` at `1d9c9d0`; local `master` is synced with `origin/master`. No open PRs remain.
