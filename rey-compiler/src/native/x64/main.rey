@@ -1434,7 +1434,6 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
     if convention == "win64" {
         emitter.frames.push(X64Frame { functionId: -1, offset: emitterLength(emitter), frameBytes: -1 });
     }
-    eprintln("phase: x64 emit started functions=" + program.functions.len().toString());
     appendEntryStub(emitter, entryFunction, exitNumber, programUsesRawArgs(program));
     if emitter.error != "" { return Result.Err(emitter.error); }
     var overflowOffset = -1;
@@ -1452,7 +1451,6 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }
-    eprintln("phase: x64 functions emitted bytes=" + emitterLength(emitter).toString() + " fixups=" + emitter.fixups.len().toString());
     overflowOffset = emitterLength(emitter);
     if convention == "win64" {
         emitLoadImmediate32(emitter, 1, 1);
@@ -1466,7 +1464,6 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
         emitByte(emitter, 15); emitByte(emitter, 5);
     }
     if emitter.error != "" { return Result.Err(emitter.error); }
-    eprintln("phase: x64 patching " + emitter.fixups.len().toString() + " fixups overflow=" + overflowOffset.toString());
     var offsetsByFunctionId = functionOffsets(emitter.functions);
     i = 0;
     loop {
@@ -1485,7 +1482,6 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
         if emitter.error != "" { return Result.Err(emitter.error); }
         i = i + 1;
     }
-    eprintln("phase: x64 patches done");
     return Result.Ok(emitter);
 }
 

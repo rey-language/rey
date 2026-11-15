@@ -235,7 +235,6 @@ func main(): void {
             else { emittedPackedCode = emitProgramPacked(program, target); }
             if emittedPackedCode.isErr() { eprintln(emittedPackedCode.unwrapErr()); exit(1); return; }
             var packed = emittedPackedCode.unwrap();
-            eprintln("phase: x64 elf");
             packedHeader = buildElfX64HeaderForLength(packedBufferTryLength(packed.bytes), packed.entryOffset, packed.functions);
             if packedHeader.isErr() { eprintln(packedHeader.unwrapErr()); exit(1); return; }
         } else {
@@ -245,7 +244,6 @@ func main(): void {
             } else if reuse { emittedX64Code = emitProgramWithReuse(program, target); }
             else { emittedX64Code = emitProgram(program, target); }
             if emittedX64Code.isErr() { eprintln(emittedX64Code.unwrapErr()); exit(1); return; }
-            eprintln("phase: x64 elf");
             image = buildElfX64Owned(emittedX64Code.unwrap());
         }
     } else if target == "windows-x64" || target == "darwin-x64" {
@@ -272,7 +270,6 @@ func main(): void {
         writeFile(symbolMapPath, symbolMap(program, functions));
         if !fileExists(symbolMapPath) { eprintln(symbolMapPath + ": error: failed to create symbol map"); exit(1); return; }
     }
-    eprintln("phase: encoding native image");
     var written: Result<bool, string> = Result.Err("output not written");
     if experimentalPackedX64 { written = writeCompilerOutputPackedSegments(output, packedHeader.unwrap(), emittedPackedCode.unwrap().bytes); }
     else if trustPackedOutput { written = writeCompilerOutputBytes(output, image.unwrap()); }

@@ -1366,9 +1366,7 @@ pub func lowerManagedRegionsCompleted(module: ManagedProgram, bindings: RegionBi
     var output = IRProgram { entryFunctionId: wrapperId, functions: lowered.functions };
     output.functions.push(wrapperResult.unwrap());
     output.entryFunctionId = wrapperId;
-    eprintln("phase: region output verification started");
     var outputVerification = verifyProgram(output);
-    eprintln("phase: region output verified");
     if !outputVerification.ok { return Result.Err("managed regions: lowered IR verification failed"); }
     return pruneUnreachableImageFunctions(output);
 }
