@@ -1,5 +1,13 @@
 # Primer — rey-lang
 
+## Post-merge verification — 2026-11-15
+
+- PR #35 (`v0.4 implementation merge`) is merged into `master` at `1d9c9d0`; local `master` is synced with `origin/master`. No open PRs remain.
+- Verified the merged tree: `compiler/v1` release build succeeds and `cargo test` passes 166/166.
+- Verified the merged native artifacts from `/tmp/rey-pr-v04-finalfix-20261105`: S1, S2, S3 are byte-identical (SHA-256 `48953e3f8703ba1f3936750fd28daaa8a2686d786e2b2a8f23a0e0effc17d98a`). S3 compiled `tests/v04/selfhost/add.rey` in normal (non-fast-exit) mode with exit 0 and no swap; the produced binary exited 0 after the known `chmod +x` step.
+- Remaining known gaps (unchanged): full self-build normal-teardown completion, exact final ABA fixture rerun, generated Unix executables still need `chmod +x`, and the v0.4 release gates in `docs/V0.4-RELEASE-READINESS.md` remain blocked.
+- This verification made no code changes. The local untracked `--help/`, `perf.data`, and `perf.data.old` remain preserved, and this primer edit is intentionally uncommitted because commits to `master` are forbidden.
+
 ## Current session — 2026-11-05
 
 - User asked to open and merge the current v4 branch PR. The checkout is `codex-v0.4`; origin's default branch is `master` (there is no `main`), and the user authorized using the default. Commit `b164516` records the current 213-file change; follow-up primer commit `542548c` was pushed to origin. The compare page reports the branches are mergeable, but GitHub is signed out in the available browser, so no PR has been opened yet.
