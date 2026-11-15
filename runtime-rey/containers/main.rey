@@ -176,7 +176,8 @@ pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, 
 
     var fd = -1;
     loop {
-        fd = hostOpen(containersPathData(path), 577, 420);
+        // 493 (0755) - compiler images are executable artifacts
+        fd = hostOpen(containersPathData(path), 577, 493);
         if fd != -4 { break; }
     }
     if fd < 0 { containersFail(2208); return false; }
@@ -267,7 +268,8 @@ pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_
     var staging = __reyRawMap(4096);
     var fd = -1;
     loop {
-        fd = hostOpen(containersPathData(path), 577, 420);
+        // 493 (0755) - compiler images are executable artifacts
+        fd = hostOpen(containersPathData(path), 577, 493);
         if fd != -4 { break; }
     }
     if fd < 0 { __reyRawUnmap(staging, 4096); containersFail(2208); return false; }

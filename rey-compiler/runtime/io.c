@@ -59,6 +59,17 @@ char* rey_read_file(const char* path) {
     return text;
 }
 
+static int rey_image_magic(const char* data, int64_t len) {
+    if (!data || len < 4) return 0;
+    const unsigned char* b = (const unsigned char*)data;
+    if (b[0] == 0x7f && b[1] == 'E' && b[2] == 'L' && b[3] == 'F') return 1;
+    if (b[0] == 'M' && b[1] == 'Z') return 1;
+    if (b[0] == 0xfe && b[1] == 0xed && b[2] == 0xfa && (b[3] == 0xce || b[3] == 0xcf)) return 1;
+    if (b[0] == 0xcf && b[1] == 0xfa && b[2] == 0xed && b[3] == 0xfe) return 1;
+    if (b[0] == 0xca && b[1] == 0xfe && b[2] == 0xba && b[3] == 0xbe) return 1;
+    return 0;
+}
+
 void rey_write_file(const char* path, const char* content) {
     if (!path || !content) rey_panic_cstr("writeFile: cannot open for writing");
     FILE* f = fopen(path, "wb");
@@ -74,6 +85,8 @@ void rey_write_file(const char* path, const char* content) {
         put += (int64_t)count;
     }
     if (fclose(f) != 0) rey_panic_cstr("writeFile: failed to write");
+    // written program images get the executable bit
+    if (rey_image_magic(content, len)) chmod(path, 0755);
 }
 
 void rey_append_file(const char* path, const char* content) {

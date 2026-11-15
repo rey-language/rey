@@ -21,7 +21,9 @@ pub func writeVerifiedCompilerOutputBytes(path: string, bytes: Vec<int>): Result
     var encoded = byteString(bytes);
     if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
     var value = encoded.unwrap();
-    writeFile(path, value);
+    // image writer owns the executable mode; verify the bytes it wrote
+    var written = writeCompilerOutputBytes(path, bytes);
+    if written.isErr() { return written; }
     if !fileExists(path) { return Result.Err(path + ": error: failed to create native image"); }
     if readFile(path) != value { return Result.Err(path + ": error: native image write verification failed"); }
     return Result.Ok(true);
