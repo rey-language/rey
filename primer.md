@@ -1,5 +1,16 @@
 # Primer — rey-lang
 
+## Matched benchmark — 2026-11-16
+
+- Ran `benchmarks/v04/run.py` for six baselines plus three Rey compilers on this host, five measured runs and two warmups (three/two for S1), numeric 1,000,000 iterations and churn 256×32. Every run is checksum-verified by the harness.
+- Runtime medians, numeric: C 5.46 ms, Rust 5.32, Zig 5.32, v0.3 seed 5.87, C++ 6.00, Go 6.51, H3 21.50, S1 21.50, Python 150.08. Churn: C 1.75, seed 1.99, Rust 2.00, C++ 2.28, Go 2.93, Zig 3.72, S1 22.77, H3 23.03, Python 18.2.
+- Build medians: C 75 ms, Go 124, Rust 136, seed 172, C++ 400, H3 2.648 s, Zig 13.9 s, S1 76.565 s. Numeric peak RSS 0.82 MB (S1) and 0.95 MB (H3) versus 1.68 MB C/seed and 10.96 MB Python; images 1.02 MB managed versus 22 KB seed and 16 KB C.
+- H3 and S1 emit byte-identical program images (`b1935e44…`, 1,017,842 bytes), so the 3.9x numeric and 13x churn gap against C is backend and runtime behavior, not the producing compiler. H3 is only a 29x faster compiler for the same bytes.
+- The legacy seed stays within 8% (numeric) and 14% (churn) of C, so the region runtime accounts for most of the remaining gap under this harness.
+- The runner still speaks the seed CLI: it needs `/tmp/opencode/h3-wrapper` (adds `--target linux-x64`, drops `--runtime-dir`) and `/tmp/opencode/s1-wrapper` (drops `--runtime-dir`). Teaching `run.py` the v0.4 CLI is unstarted work.
+- Reports: `build/v04/benchmarks/20261116-all/{baseline,rey-seed,rey-h3,rey-s1}`. Dashboard generator: `/tmp/opencode/make-bench-html.py` (ephemeral, reads the gitignored reports).
+- S2/S3 were not benchmarked separately. S1 and S2 are byte-identical, so an S2→S3 rebuild reproduces the same bytes; a formal three-stage rerun is still optional work.
+
 ## Fast compiler delivery — 2026-11-15
 
 - Delivered `build/v04/rey`: stage H of the documented chain, rebuilt from the merged source by `scripts/build-fast-compiler.sh` (v0.3.1 seed + clang). It compiles all twelve `tests/v04/selfhost` fixtures, writes them with mode 755, and they run. A 6-line `println` program takes 2.17 s, 250 scalar functions 0.35 s, and the compiler source itself 80 s.
