@@ -170,7 +170,7 @@ run_failed_isolation_probe() {
         return 1
     fi
     [ -s "$trace" ] || { echo 'failed-isolation trace is missing' >&2; return 1; }
-    ! grep -Fq '"/seed/rey"' "$trace" || {
+    ! grep -Eq 'execve\("/seed/rey"|execveat\([^,]+, "/seed/rey"' "$trace" || {
         echo 'producer was invoked after a failed chroot' >&2
         return 1
     }

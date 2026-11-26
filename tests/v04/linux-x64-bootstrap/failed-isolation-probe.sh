@@ -16,7 +16,7 @@ set +e
 status=$?
 set -e
 [ "$status" -ne 0 ] || { echo 'missing-root isolation unexpectedly succeeded' >&2; exit 1; }
-if grep -Fq '"/seed/rey"' "$trace"; then
+if grep -Eq 'execve\("/seed/rey"|execveat\([^,]+, "/seed/rey"' "$trace"; then
     echo 'producer ran after isolation setup failed' >&2
     exit 1
 fi
