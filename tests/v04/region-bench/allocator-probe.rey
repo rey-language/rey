@@ -6,32 +6,6 @@ func addressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
     return __reyRawOffset(base, offset);
 }
 
-func putByte(buffer: __rey_raw_address, length: int, value: int): int {
-    __reyRawStoreByte(addressAt(buffer, length), value);
-    return length + 1;
-}
-
-func putInt(buffer: __rey_raw_address, length: int, value: int): int {
-    if value < 0 {
-        length = putByte(buffer, length, 45);
-        value = 0 - value;
-    }
-    if value == 0 { return putByte(buffer, length, 48); }
-    var digits = __reyRawMap(24);
-    var count = 0;
-    while value > 0 {
-        __reyRawStoreByte(addressAt(digits, count), value % 10 + 48);
-        count = count + 1;
-        value = value / 10;
-    }
-    while count > 0 {
-        count = count - 1;
-        length = putByte(buffer, length, __reyRawLoadByte(addressAt(digits, count)));
-    }
-    __reyRawUnmap(digits, 24);
-    return length;
-}
-
 func cpuMicros(): int {
     var buffer = __reyRawMap(16);
     var result = __reyRawToInt(__reyRawSyscall(228, __reyRawFromInt(2), buffer, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
@@ -42,90 +16,29 @@ func cpuMicros(): int {
     return seconds * 1000000 + nanoseconds / 1000;
 }
 
-func emitMetric(mode: int, count: int, payload: int, groups: int, elapsed: int): void {
-    var buffer = __reyRawMap(192);
-    var length = 0;
-    length = putByte(buffer, length, 112);
-    length = putByte(buffer, length, 104);
-    length = putByte(buffer, length, 97);
-    length = putByte(buffer, length, 115);
-    length = putByte(buffer, length, 101);
-    length = putByte(buffer, length, 61);
-    length = putInt(buffer, length, mode);
-    length = putByte(buffer, length, 32);
-    length = putByte(buffer, length, 110);
-    length = putByte(buffer, length, 61);
-    length = putInt(buffer, length, count);
-    length = putByte(buffer, length, 32);
-    length = putByte(buffer, length, 112);
-    length = putByte(buffer, length, 97);
-    length = putByte(buffer, length, 121);
-    length = putByte(buffer, length, 108);
-    length = putByte(buffer, length, 111);
-    length = putByte(buffer, length, 97);
-    length = putByte(buffer, length, 100);
-    length = putByte(buffer, length, 61);
-    length = putInt(buffer, length, payload);
-    length = putByte(buffer, length, 32);
-    length = putByte(buffer, length, 103);
-    length = putByte(buffer, length, 114);
-    length = putByte(buffer, length, 111);
-    length = putByte(buffer, length, 117);
-    length = putByte(buffer, length, 112);
-    length = putByte(buffer, length, 115);
-    length = putByte(buffer, length, 61);
-    length = putInt(buffer, length, groups);
-    length = putByte(buffer, length, 32);
-    length = putByte(buffer, length, 99);
-    length = putByte(buffer, length, 112);
-    length = putByte(buffer, length, 117);
-    length = putByte(buffer, length, 95);
-    length = putByte(buffer, length, 117);
-    length = putByte(buffer, length, 115);
-    length = putByte(buffer, length, 61);
-    length = putInt(buffer, length, elapsed);
-    length = putByte(buffer, length, 10);
-    var written = hostWrite(1, buffer, length);
-    __reyRawUnmap(buffer, 192);
-    if written != length { __reyRawFail(2299); }
-}
-
-func runZero(context: __rey_raw_address, layout: int, count: int, payload: int): void {
+func runPhase(context: __rey_raw_address, layout: int, count: int, groups: int): int {
     var region = regionHandleCreate(context);
     var index = 0;
-    var started = cpuMicros();
-    while index < count {
-        var object = regionHandleAllocateFixed(context, region, layout, 1);
-        if __reyRawEqual(object, __reyRawNull()) { __reyRawFail(2299); return; }
-        index = index + 1;
-    }
-    var finished = cpuMicros();
-    var elapsed = -1;
-    if started >= 0 && finished >= started { elapsed = finished - started; }
-    emitMetric(1, count, payload, 1, elapsed);
-    regionHandleEnd(context, region);
-}
-
-func runGroups(context: __rey_raw_address, layout: int, count: int, groups: int): void {
-    var region = regionHandleCreate(context);
-    var index = 0;
-    while index < groups {
-        var object = regionHandleAllocateFixed(context, region, layout, index + 1);
-        if __reyRawEqual(object, __reyRawNull()) { __reyRawFail(2299); return; }
-        index = index + 1;
+    if groups > 1 {
+        while index < groups {
+            var object = regionHandleAllocateFixed(context, region, layout, index + 1);
+            if __reyRawEqual(object, __reyRawNull()) { __reyRawFail(2299); return -1; }
+            index = index + 1;
+        }
     }
     index = 0;
     var started = cpuMicros();
     while index < count {
-        var object = regionHandleAllocateFixed(context, region, layout, index % groups + 1);
-        if __reyRawEqual(object, __reyRawNull()) { __reyRawFail(2299); return; }
+        var group = 1;
+        if groups > 1 { group = index % groups + 1; }
+        var object = regionHandleAllocateFixed(context, region, layout, group);
+        if __reyRawEqual(object, __reyRawNull()) { __reyRawFail(2299); return -1; }
         index = index + 1;
     }
     var finished = cpuMicros();
-    var elapsed = -1;
-    if started >= 0 && finished >= started { elapsed = finished - started; }
-    emitMetric(2, count, 8, groups, elapsed);
     regionHandleEnd(context, region);
+    if started < 0 || finished < started { return -1; }
+    return finished - started;
 }
 
 func main(): void {
@@ -133,11 +46,16 @@ func main(): void {
     var small = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
     var large = layoutRegisterFixed(registry, 1024, __reyRawNull(), 0);
     var context = regionContextCreate(registry);
-    runZero(context, small, 10000, 8);
-    runZero(context, large, 10000, 1024);
-    runGroups(context, small, 10000, 32);
-    runGroups(context, small, 10000, 128);
-    runGroups(context, small, 5000, 512);
+    var timings = __reyRawMap(40);
+    if __reyRawEqual(timings, __reyRawNull()) { __reyRawFail(2299); return; }
+    __reyRawStoreI64(timings, runPhase(context, small, 10000, 1));
+    __reyRawStoreI64(addressAt(timings, 8), runPhase(context, large, 10000, 1));
+    __reyRawStoreI64(addressAt(timings, 16), runPhase(context, small, 10000, 32));
+    __reyRawStoreI64(addressAt(timings, 24), runPhase(context, small, 10000, 128));
+    __reyRawStoreI64(addressAt(timings, 32), runPhase(context, small, 5000, 512));
+    var written = hostWrite(1, timings, 40);
+    __reyRawUnmap(timings, 40);
     regionContextDestroy(context);
     layoutRegistryRelease(registry);
+    if written != 40 { __reyRawFail(2299); }
 }

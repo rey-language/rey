@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import statistics
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -86,35 +87,16 @@ def parse_time(path):
 
 
 def parse_metrics(stdout):
-    lines = [line for line in stdout.decode("utf-8", "replace").splitlines() if line.strip()]
-    require(len(lines) == len(CASES),
-            "probe did not emit one line per phase: " + repr(lines))
+    require(len(stdout) == len(CASES) * 8,
+            "probe emitted %d bytes, expected %d timing bytes" % (len(stdout), len(CASES) * 8))
+    timings = struct.unpack("<%dq" % len(CASES), stdout)
     records = {}
-    for line in lines:
-        fields = {}
-        for part in line.split():
-            key, separator, value = part.partition("=")
-            require(separator, "malformed timing output: " + line)
-            fields[key] = int(value)
-        if "mode" not in fields and "phase" in fields:
-            fields["mode"] = fields["phase"]
-        if fields.get("mode") == 1:
-            case = "zero-%dx%d" % (fields.get("payload", -1), fields.get("n", -1))
-        elif fields.get("mode") == 2:
-            case = "groups-%dx%d" % (fields.get("groups", -1), fields.get("n", -1))
-        else:
-            raise Failure("probe reported an unknown phase: " + line)
-        require(case not in records, "probe repeated phase " + case)
-        require(fields.get("cpu_us", -1) > 0, case + " reported invalid process CPU time")
-        records[case] = fields
-    require(set(records) == {case[0] for case in CASES},
-            "probe phase set differs from expected: " + repr(sorted(records)))
-    for name, mode, count, payload, groups in CASES:
-        fields = records[name]
-        expected = {"mode": mode, "n": count, "payload": payload, "groups": groups}
-        for key, value in expected.items():
-            require(fields.get(key) == value,
-                    "%s reported %s=%r, expected %r" % (name, key, fields.get(key), value))
+    for (name, mode, count, payload, groups), cpu_us in zip(CASES, timings):
+        require(cpu_us > 0, name + " reported invalid process CPU time")
+        records[name] = {
+            "mode": mode, "n": count, "payload": payload, "groups": groups,
+            "cpu_us": cpu_us,
+        }
     return records
 
 

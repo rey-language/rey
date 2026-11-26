@@ -127,7 +127,7 @@ class Runner:
         stderr_path = self.logs / "functional-build.stderr"
         command = [
             "/usr/bin/time", "-v", "-o", str(timing), str(self.seed), "build", str(self.fixture),
-            "-o", str(image), "--target", "linux-x64", "--regions", "--managed",
+            "-o", str(image), "--target", "linux-x64", "--regions",
             "--runtime-root", str(self.runtime),
         ]
         cgroup_path = self.logs / "functional-build.cgroup"
