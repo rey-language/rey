@@ -1,0 +1,46 @@
+import frontend::graph::{checkSourceFileGraphWithRuntime};
+import ir::{IRProgram, printIR};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 7 && argv[1] == "runtime",
+            "expected runtime source, runtime directory, output directory, case, and evaluator policy");
+    var sourcePath = argv[2];
+    var sourceDirectory = argv[3];
+    var outputDirectory = argv[4];
+    var name = argv[5];
+    var expected = argv[6];
+    if expected == "native-only" {
+        writeFile(outputDirectory + "/" + name + ".steps", "native-only");
+        return;
+    }
+    var units: Vec<string> = [sourceDirectory + "/layout/main.rey", sourceDirectory + "/regions/main.rey", sourceDirectory + "/managed/main.rey", sourceDirectory + "/containers/main.rey", sourceDirectory + "/host/main.rey", sourcePath];
+    if name == "task-lifecycle" { units.push(sourceDirectory + "/task/main.rey"); }
+    var checked = checkSourceFileGraphWithRuntime(sourcePath, "", units);
+    if checked.isErr() { eprintln(sourcePath + ": " + checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(sourcePath + ": " + lowered.unwrapErr()); exit(1); }
+    var program: IRProgram = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(sourcePath + ": " + verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var evaluated = evaluateProgram(program, 12000000, 128);
+    writeFile(outputDirectory + "/" + name + ".evaluator.stderr", evaluated.error);
+    writeFile(outputDirectory + "/" + name + ".steps", evaluated.steps.toString());
+    writeFile(outputDirectory + "/" + name + ".evaluator.ir", printIR(program));
+    if expected == "0" {
+        require(evaluated.ok && evaluated.isVoid, name + ": evaluator failed: " + evaluated.error);
+    } else {
+        require(!evaluated.ok, name + ": fixture should fail through RawFail");
+        require(evaluated.error.contains("trusted runtime failure code " + expected),
+                name + ": expected RawFail " + expected + ", got " + evaluated.error);
+    }
+}

@@ -3,7 +3,6 @@ import ir::{IRProgram, printIR};
 import ir::lower::{lowerProgram};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
-import ir::eval::{evaluateProgram};
 import native::x64::{X64Code, emitProgram};
 import native::image::x64::{buildElfX64};
 import native::bytes::{byteString};
@@ -51,22 +50,6 @@ func compileRuntimeProgram(entryPath: string, sourceDirectory: string, task: boo
     return inferEffects(program);
 }
 
-func evaluateRuntimeProgram(program: IRProgram, name: string, expected: int, outputDirectory: string): void {
-    if name == "host-write" || name == "context-handle-aba" || name == "program-handle-aba" {
-        writeFile(outputDirectory + "/" + name + ".steps", "native-only");
-        return;
-    }
-    var evaluated = evaluateProgram(program, 12000000, 128);
-    writeFile(outputDirectory + "/" + name + ".evaluator.stderr", evaluated.error);
-    writeFile(outputDirectory + "/" + name + ".steps", evaluated.steps.toString());
-    if expected == 0 {
-        require(evaluated.ok && evaluated.isVoid, name + ": evaluator failed: " + evaluated.error);
-    } else {
-        require(!evaluated.ok, name + ": fixture should fail through RawFail");
-        require(evaluated.error.contains("trusted runtime failure code " + expected.toString()), name + ": expected RawFail " + expected.toString() + ", got " + evaluated.error);
-    }
-}
-
 func runtimeFixture(originalDirectory: string, stagedDirectory: string, sourceDirectory: string, outputDirectory: string, name: string): void {
     var expected = expectedCode(name);
     require(expected >= 0, "unknown region fixture name: " + name);
@@ -81,8 +64,6 @@ func runtimeFixture(originalDirectory: string, stagedDirectory: string, sourceDi
     writeFile(outputDirectory + "/" + name + ".ordinary-source.stderr", ordinary.unwrapErr());
 
     var program = compileRuntimeProgram(entryPath, sourceDirectory, name == "task-lifecycle");
-    evaluateRuntimeProgram(program, name, expected, outputDirectory);
-    writeFile(outputDirectory + "/" + name + ".evaluator.ir", printIR(program));
 
     var stagedSource = readFile(stagedPath);
     if stagedSource != readFile(originalPath) {
@@ -101,20 +82,10 @@ func reclamationFixture(fixtureDirectory: string, sourceDirectory: string, outpu
     var ordinary = checkSourceFileGraph(entryPath, "");
     require(ordinary.isErr(), name + ": ordinary source checking must reject raw runtime intrinsics");
     var program = compileRuntimeProgram(entryPath, sourceDirectory, false);
-    var nativeOnly = name == "reclaim-three-slabs" || name == "active-context-destroy" || name == "teardown-many-direct-chunks";
-    var steps = "native-only";
-    if !nativeOnly {
-        var evaluated = evaluateProgram(program, 12000000, 128);
-        require(evaluated.ok && evaluated.isVoid, name + ": evaluator failed: " + evaluated.error);
-        steps = evaluated.steps.toString();
-        writeFile(outputDirectory + "/" + name + ".evaluator.stderr", evaluated.error);
-        writeFile(outputDirectory + "/" + name + ".evaluator.ir", printIR(program));
-    }
     writeFile(outputDirectory + "/" + name + ".ordinary-source.stderr", ordinary.unwrapErr());
-    writeFile(outputDirectory + "/" + name + ".steps", steps);
     writeFile(outputDirectory + "/" + name + ".native.ir", printIR(program));
     emitImage(program, outputDirectory + "/linux-x64-" + name, name);
-    println("region-runtime-reclamation-case " + name + " emitted steps=" + steps);
+    println("region-runtime-reclamation-case " + name + " emitted");
 }
 
 func main(): void {

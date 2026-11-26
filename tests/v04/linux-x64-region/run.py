@@ -136,6 +136,7 @@ class RegionGate:
         self.compiler_copy = None
         self.region_driver = None
         self.ir_driver = None
+        self.runtime_evaluator_driver = None
         self.fixture_paths = None
 
     def prepare(self):
@@ -186,6 +187,7 @@ class RegionGate:
         harness_files = (
             self.source / "scripts/v04-linux-x64-region-gate.sh",
             GATE_DIR / "run.py", GATE_DIR / "region-driver.rey", GATE_DIR / "ir-driver.rey",
+            GATE_DIR / "runtime-evaluator-driver.rey",
             GATE_DIR / "layout-negative.rey", GATE_DIR / "raw-intrinsic.rey",
             GATE_DIR / "source-cases.json", GATE_DIR / "native-cases.json",
             GATE_DIR / "reclamation-cases.json", GATE_DIR / "static-cases.json",
@@ -513,9 +515,18 @@ class RegionGate:
         self.ir_driver = self.build_executable(
             "build-current-source-ir-driver", ir_source / "main.rey",
             out_bin / "ir-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
+        runtime_evaluator_source = self.compiler_stage(
+            "runtime-evaluator-driver", GATE_DIR / "runtime-evaluator-driver.rey")
+        self.runtime_evaluator_driver = self.build_executable(
+            "build-current-source-runtime-evaluator-driver", runtime_evaluator_source / "main.rey",
+            out_bin / "runtime-evaluator-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
         self.results["drivers"] = {
             "region": {"path": str(self.region_driver), "sha256": digest_file(self.region_driver)},
             "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver)},
+            "runtime_evaluator": {
+                "path": str(self.runtime_evaluator_driver),
+                "sha256": digest_file(self.runtime_evaluator_driver),
+            },
         }
         self.save()
 
@@ -695,6 +706,12 @@ class RegionGate:
         generated.mkdir(parents=True, exist_ok=True)
         records = {}
         for name, expected in direct.items():
+            evaluator_policy = expected["evaluator"]
+            evaluator_command = [str(self.runtime_evaluator_driver), "runtime",
+                                 str(source_fixtures / (name + ".rey")), str(source_dir),
+                                 str(generated), name, str(evaluator_policy)]
+            self.command("evaluate-direct-" + name, evaluator_command, timeout=300,
+                         build=True, heavy=False, expected_stdout=b"", expected_stderr=b"")
             command = [str(self.region_driver), "region", str(source_fixtures),
                        str(staged_fixtures), str(source_dir), str(generated), name]
             item, stdout, stderr = self.command("emit-direct-" + name, command, timeout=300,
@@ -710,7 +727,6 @@ class RegionGate:
                 expected_status=expected["status"], expected_stdout=expected["stdout"].encode(),
                 expected_stderr=expected["stderr"].encode())
             steps_text = (generated / (name + ".steps")).read_text().strip()
-            evaluator_policy = expected["evaluator"]
             if evaluator_policy == "native-only":
                 require(steps_text == "native-only",
                         name + ": native-only evaluator policy was not recorded exactly")
@@ -769,23 +785,27 @@ class RegionGate:
         generated.mkdir(parents=True, exist_ok=True)
         records = {}
         for name, expected in manifest.items():
+            evaluator_runs = name not in (
+                "reclaim-three-slabs", "active-context-destroy", "teardown-many-direct-chunks")
+            evaluator_command = [str(self.runtime_evaluator_driver), "runtime",
+                                 str(fixtures / (name + ".rey")), str(source_dir),
+                                 str(generated), name, "0" if evaluator_runs else "native-only"]
+            self.command("evaluate-reclamation-" + name, evaluator_command, timeout=300,
+                         build=True, heavy=False, expected_stdout=b"", expected_stderr=b"")
             command = [str(self.region_driver), "reclamation", str(fixtures), str(fixtures),
                        str(source_dir), str(generated), name]
             item, stdout, stderr = self.command("emit-reclamation-" + name, command, timeout=300,
                                                 build=True, heavy=False)
             expected_driver_line = re.compile(
                 r"^region-runtime-reclamation-case " + re.escape(name)
-                + r" emitted steps=(?:native-only|[0-9]+)\n$"
+                + r" emitted\n$"
             )
             require(expected_driver_line.fullmatch(stdout.decode("utf-8", "replace")) is not None,
                     name + ": reclamation driver omitted its case record")
             steps_text = (generated / (name + ".steps")).read_text().strip()
-            evaluator_runs = name not in (
-                "reclaim-three-slabs", "active-context-destroy", "teardown-many-direct-chunks")
             if evaluator_runs:
                 require(steps_text.isdigit(), name + ": reclamation evaluator step count is invalid")
-                checked_equal(stdout, ("region-runtime-reclamation-case " + name
-                                       + " emitted steps=" + steps_text + "\n").encode(),
+                checked_equal(stdout, ("region-runtime-reclamation-case " + name + "\n").encode(),
                               name + " reclamation driver output")
                 evaluator_stderr = generated / (name + ".evaluator.stderr")
                 evaluator_ir = generated / (name + ".evaluator.ir")
