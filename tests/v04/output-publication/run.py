@@ -247,11 +247,8 @@ func containersO02ProtectedInputPath(): __rey_raw_address {
         wrapped = ["flock", str(LOCK), "nice", "-n", "19", "timeout", "--kill-after=30s", str(seconds),
                    "/usr/bin/time", "-v", "-o", str(time_path), *map(str, argv)]
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-            try:
-                proc = subprocess.run(wrapped, stdout=stdout, stderr=stderr, timeout=seconds + 90, check=False)
-                status = proc.returncode
-            except subprocess.TimeoutExpired:
-                status = 124
+            proc = subprocess.run(wrapped, stdout=stdout, stderr=stderr, check=False)
+            status = proc.returncode
         time_text = time_path.read_text(errors="replace") if time_path.exists() else ""
         peak = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", time_text)
         record = {
