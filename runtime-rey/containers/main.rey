@@ -660,7 +660,7 @@ func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bo
 func containersWarnMapMayBeFromFailedBuild(): void {
     var message = __reyRawMap(78);
     if __reyRawToInt(message) < 0 { return; }
-+    __reyRawStoreByte(containersAddressAt(message, 0), 115);
+    __reyRawStoreByte(containersAddressAt(message, 0), 115);
     __reyRawStoreByte(containersAddressAt(message, 1), 121);
     __reyRawStoreByte(containersAddressAt(message, 2), 109);
     __reyRawStoreByte(containersAddressAt(message, 3), 98);
