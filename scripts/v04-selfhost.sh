@@ -55,7 +55,6 @@ compile_with() {
     output=$3
     shift 3
     run_memcap "compile $(basename "$source")" "$compiler" build "$source" -o "$output" --target darwin-arm64 "$@"
-    chmod +x "$output"
 }
 
 expect_status() {
@@ -91,26 +90,17 @@ smoke_h() {
     expect_status variadic 0 "$out/variadic"
 }
 
-supports_selfhost_fast_exit() {
-    compiler=$1
-    help=$("$compiler" --help 2>&1) || return 1
-    case "$help" in *--selfhost-fast-exit*) return 0 ;; *) return 1 ;; esac
-}
-
 build_stage() {
     name=$1
     input=$2
     output=$3
-    set -- "$input" build "$stage/main.rey" -o "$output" --target darwin-arm64 --regions --managed --trust-packed-output
-    if supports_selfhost_fast_exit "$input"; then set -- "$@" --selfhost-fast-exit; fi
+    set -- "$input" build "$stage/main.rey" -o "$output" --target darwin-arm64 --regions --managed
     run_memcap "$name" "$@"
-    chmod +x "$output"
 }
 
 echo "== stage compiler sources"
 stage_sources
 run_memcap "S0 builds H" "$seed" build "$stage/main.rey" -o "$work/H" --runtime-dir "$seed_runtime"
-chmod +x "$work/H"
 smoke_h
 if [ "$through" = "h" ]; then
     echo "stopped after H"

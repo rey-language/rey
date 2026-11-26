@@ -1,0 +1,7 @@
+BUILD /seed/rey build /src/compiler/main.rey -o /out/S1 --target linux-x64 --regions --managed
+BUILD /out/S1 build /src/compiler/main.rey -o /out/S2 --target linux-x64 --regions --managed
+BUILD /out/S2 build /src/compiler/main.rey -o /out/S3 --target linux-x64 --regions --managed
+ALLOW_EXEC /usr/sbin/chroot
+ALLOW_EXEC /seed/rey sha256=64c8bbe4e559a2355b79bfa0d357bd6e81d6dee92bbac73fe520165004883ee6
+ALLOW_EXEC /out/S1 sha256=recorded-at-S1-build
+ALLOW_EXEC /out/S2 sha256=recorded-at-S2-build
