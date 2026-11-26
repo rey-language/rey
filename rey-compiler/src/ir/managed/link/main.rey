@@ -104,6 +104,66 @@ func copyInts(values: Vec<int>): Vec<int> {
     return result;
 }
 
+// The compiler's IR Vec payload is immutable after construction. These sizes
+// count the nested IR records and vector elements rebuilt by copyFunction;
+// they exclude allocator headers, capacity slack, and shared string bytes.
+func logicalFunctionPayloadBytes(value: IRFunction): int {
+    var bytes = value.blocks.len() * 120 + value.signature.parameterTypes.len() * 8 + value.parameters.len() * 16 + value.effects.argumentEscapes.len() * 8;
+    var blockIndex = 0;
+    while blockIndex < value.blocks.len() {
+        var block = value.blocks[blockIndex];
+        bytes += block.params.len() * 16 + block.instructions.len() * 80;
+        bytes += (block.terminator.targetArgs.len() + block.terminator.trueArgs.len() + block.terminator.falseArgs.len()) * 8;
+        var instructionIndex = 0;
+        while instructionIndex < block.instructions.len() {
+            bytes += block.instructions[instructionIndex].operands.len() * 8;
+            instructionIndex += 1;
+        }
+        blockIndex += 1;
+    }
+    return bytes;
+}
+
+var retentionProfileActive = false;
+var retentionCopiedPayloadBytes = 0;
+var retentionCopiedFunctions = 0;
+
+func retentionProfileEnabled(): bool {
+    var enabled = getEnv("REY_COMPILER_RETENTION_PROFILE");
+    return enabled.isSome() && enabled.unwrap() == "1";
+}
+
+func retentionProfileEvent(event: string, fields: string) {
+    if retentionProfileActive { eprintln("REY_RETENTION event=" + event + " " + fields); }
+}
+
+func retentionProfileIR(event: string, program: IRProgram) {
+    if !retentionProfileActive { return; }
+    var blocks = 0;
+    var instructions = 0;
+    var operands = 0;
+    var functionIndex = 0;
+    while functionIndex < program.functions.len() {
+        var function = program.functions[functionIndex];
+        blocks += function.blocks.len();
+        var blockIndex = 0;
+        while blockIndex < function.blocks.len() {
+            var block = function.blocks[blockIndex];
+            instructions += block.instructions.len();
+            var instructionIndex = 0;
+            while instructionIndex < block.instructions.len() {
+                operands += block.instructions[instructionIndex].operands.len();
+                instructionIndex += 1;
+            }
+            operands += block.terminator.targetArgs.len() + block.terminator.trueArgs.len() + block.terminator.falseArgs.len();
+            blockIndex += 1;
+        }
+        functionIndex += 1;
+    }
+    retentionProfileEvent(event, "functions=" + program.functions.len().toString() + " blocks=" + blocks.toString() +
+        " instructions=" + instructions.toString() + " operand_slots=" + operands.toString());
+}
+
 func copySource(value: SourceRef): SourceRef {
     return ir.sourceRef(value.unitId, value.start, value.end);
 }
@@ -119,6 +179,10 @@ func copyValues(values: Vec<IRValue>): Vec<IRValue> {
 }
 
 func copyFunction(value: IRFunction, shift: int): IRFunction {
+    if retentionProfileActive {
+        retentionCopiedPayloadBytes += logicalFunctionPayloadBytes(value);
+        retentionCopiedFunctions += 1;
+    }
     var blocks: Vec<BasicBlock> = [];
     var blockIndex = 0;
     while blockIndex < value.blocks.len() {
@@ -555,12 +619,24 @@ func shiftedId(id: int, shift: int): Result<int, string> {
 }
 
 pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, runtimeRoot: string): Result<LinkedRegionProgram, string> {
+    retentionProfileActive = retentionProfileEnabled();
+    retentionCopiedPayloadBytes = 0;
+    retentionCopiedFunctions = 0;
     buildRuntimeIndex(runtimeProgram);
+    retentionProfileEvent("verification_start", "functions=" + input.program.functions.len().toString());
     if input.program.functions.len() <= 512 {
         var userVerified = verifyProgram(input.program);
+        retentionProfileEvent("user_verification", "functions=" + input.program.functions.len().toString() + " ok=" + userVerified.ok.toString() +
+            " errors=" + userVerified.errors.len().toString() + " scratch_slots=" + userVerified.scratchSlots.toString() +
+            " control_scratch_slots=" + userVerified.controlScratchSlots.toString());
         if !userVerified.ok { return Result.Err("region linker: invalid user IR: " + userVerified.errors.join("\n")); }
         var runtimeVerified = verifyProgram(runtimeProgram);
+        retentionProfileEvent("runtime_verification", "functions=" + runtimeProgram.functions.len().toString() + " ok=" + runtimeVerified.ok.toString() +
+            " errors=" + runtimeVerified.errors.len().toString() + " scratch_slots=" + runtimeVerified.scratchSlots.toString() +
+            " control_scratch_slots=" + runtimeVerified.controlScratchSlots.toString());
         if !runtimeVerified.ok { return Result.Err("region linker: invalid runtime IR: " + runtimeVerified.errors.join("\n")); }
+    } else {
+        retentionProfileEvent("link_verification", "functions=" + input.program.functions.len().toString() + " skipped=512_cutoff");
     }
     var forbidden = forbiddenRuntimeProgram(runtimeProgram);
     if forbidden != "" { return Result.Err(forbidden); }
@@ -660,8 +736,22 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         index += 1;
     }
     var functions: Vec<IRFunction> = [];
+    var sharedUserFunctions = 0;
+    var sharedUserPayloadBytes = 0;
+    retentionProfileEvent("link_copy_start", "user_functions=" + input.program.functions.len().toString() + " runtime_functions=" + runtimeProgram.functions.len().toString());
     index = 0;
-    while index < input.program.functions.len() { functions.push(copyFunction(input.program.functions[index], 0)); index += 1; }
+    while index < input.program.functions.len() {
+        var function = input.program.functions[index];
+        // User function IDs and their nested IR stay unchanged at link time.
+        // All consumers read these vectors; transforms build fresh vectors
+        // before replacing a function, so retaining this immutable payload is safe.
+        if retentionProfileActive {
+            sharedUserFunctions += 1;
+            sharedUserPayloadBytes += logicalFunctionPayloadBytes(function);
+        }
+        functions.push(function);
+        index += 1;
+    }
     index = 0;
     while index < runtimeProgram.functions.len() {
         var function = runtimeProgram.functions[index];
@@ -669,6 +759,12 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         functions.push(copyFunction(function, shift));
         index += 1;
     }
+    retentionProfileEvent("copy", "shared_user_functions=" + sharedUserFunctions.toString() +
+        " saved_payload_bytes=" + sharedUserPayloadBytes.toString() +
+        " relocated_runtime_functions=" + retentionCopiedFunctions.toString() +
+        " relocated_payload_bytes=" + retentionCopiedPayloadBytes.toString() +
+        " baseline_link_copy_bytes=" + (sharedUserPayloadBytes + retentionCopiedPayloadBytes).toString() +
+        " retained_link_copy_bytes=" + retentionCopiedPayloadBytes.toString());
     var cohortCreate = resolveOptionalRegionSymbol(runtimeProgram, api, "managedHandleRegionCreateCohort", [raw, raw, i64Kind, i64Kind], raw);
     if cohortCreate.isErr() { return Result.Err(cohortCreate.unwrapErr()); }
     var cohortId = -1;
@@ -696,6 +792,11 @@ pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgr
         var sourceAt = 0;
         while sourceAt < embeddedStd.len() { graphSources.push(embeddedStd[sourceAt]); sourceAt += 1; }
     }
+    var sourceBytes = 0;
+    var sourceIndex = 0;
+    while sourceIndex < graphSources.len() { sourceBytes += graphSources[sourceIndex].source.len(); sourceIndex += 1; }
+    retentionProfileEvent("runtime_reload_sources", "source_files=" + graphSources.len().toString() + " source_bytes=" + sourceBytes.toString());
+    retentionProfileEvent("runtime_reload_start", "source_files=" + graphSources.len().toString());
     var units = regionRuntimeUnits(root);
     var index = 0;
     while index < units.len() {
@@ -709,6 +810,7 @@ pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgr
     var lowered = lowerProgram(checked.unwrap());
     if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
     var program = lowered.unwrap();
+    retentionProfileIR("runtime_reload_lowered", program);
     var forbidden = forbiddenRuntimeProgram(program);
     if forbidden != "" { return Result.Err(forbidden); }
     var present = requiredRuntimeModulesPresent(program, root);
@@ -717,8 +819,13 @@ pub func loadRegionRuntime(runtimeRoot: string, stdRoot: string): Result<IRProgr
 }
 
 pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
+    retentionProfileActive = retentionProfileEnabled();
+    retentionCopiedPayloadBytes = 0;
+    retentionCopiedFunctions = 0;
+    retentionProfileEvent("user_lowering_start", "");
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
+    retentionProfileIR("user_lowered", input.unwrap().program);
     var root = effectiveRuntimeRoot(runtimeRoot);
     var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
     if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
@@ -727,24 +834,38 @@ pub func buildRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoo
     var linkedProgram = linked.unwrap();
     var planned = planManagedPlacement(linkedProgram.module);
     if planned.isErr() { return Result.Err(planned.unwrapErr()); }
-    return lowerManagedRegionsWithPromotionStress(linkedProgram.module, linkedProgram.bindings, planned.unwrap(), promotionStress);
+    retentionProfileEvent("region_lowering_start", "functions=" + linkedProgram.module.program.functions.len().toString());
+    var lowered = lowerManagedRegionsWithPromotionStress(linkedProgram.module, linkedProgram.bindings, planned.unwrap(), promotionStress);
+    if lowered.isOk() { retentionProfileIR("region_lowered", lowered.unwrap()); }
+    retentionProfileActive = false;
+    return lowered;
 }
 
 pub func buildCompletedRegionProgram(checked: CheckedProgram, runtimeRoot: string, stdRoot: string, promotionStress: bool): Result<IRProgram, string> {
     if experimentalEscapeSummaryEnabled() && runtimeRoot != "" { return Result.Err("experimental escape summary requires the embedded runtime"); }
+    retentionProfileActive = retentionProfileEnabled();
+    retentionCopiedPayloadBytes = 0;
+    retentionCopiedFunctions = 0;
+    retentionProfileEvent("user_lowering_start", "");
     var input = lowerManagedProgram(checked);
     if input.isErr() { return Result.Err(input.unwrapErr()); }
+    retentionProfileIR("user_lowered", input.unwrap().program);
     var root = effectiveRuntimeRoot(runtimeRoot);
     var runtime = loadRegionRuntime(runtimeRoot, stdRoot);
     if runtime.isErr() { return Result.Err(runtime.unwrapErr()); }
     var linked = linkRegionRuntime(input.unwrap(), runtime.unwrap(), root);
     if linked.isErr() { return Result.Err(linked.unwrapErr()); }
     var linkedProgram = linked.unwrap();
+    retentionProfileEvent("scalar_replacement_start", "functions=" + linkedProgram.module.program.functions.len().toString());
     var replaced = applyScalarReplacementForCompilerFast(linkedProgram.module);
     if replaced.isErr() { return Result.Err(replaced.unwrapErr()); }
+    retentionProfileIR("scalar_replacement", replaced.unwrap().program);
     var completed = completeManagedMemory(replaced.unwrap());
     if completed.isErr() { return Result.Err(completed.unwrapErr()); }
+    retentionProfileEvent("region_lowering_start", "functions=" + replaced.unwrap().program.functions.len().toString());
     var lowered = lowerManagedRegionsCompleted(replaced.unwrap(), linkedProgram.bindings, completed.unwrap(), promotionStress);
     if lowered.isErr() { return Result.Err(lowered.unwrapErr()); }
+    retentionProfileIR("region_lowered", lowered.unwrap());
+    retentionProfileActive = false;
     return lowered;
 }
