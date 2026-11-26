@@ -84,9 +84,17 @@ def write_json(path, value):
 
 
 def read_json(path):
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key: " + str(key))
+            result[key] = value
+        return result
+
     try:
-        return json.loads(Path(path).read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(Path(path).read_text(), object_pairs_hook=unique_pairs)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise GateFailure("cannot read manifest " + str(path) + ": " + str(exc))
 
 
