@@ -67,12 +67,25 @@ OUT=$(CDPATH= cd -- "$OUT" && pwd -P)
 run_budget() {
     label=$1
     shift
-    if ! sh "$BUDGET" run --seconds 1800 --label "$label" -- \
-        sh "$SRC/tests/v04/compiler-retention/cgroup-exec.sh" "$@" \
-        >"$OUT/logs/$label.wrapper.log" 2>&1; then
-        cat "$OUT/logs/$label.wrapper.log" >&2
-        return 1
-    fi
+    attempt=1
+    while :; do
+        wrapper_log="$OUT/logs/$label.try-$attempt.wrapper.log"
+        set +e
+        sh "$BUDGET" run --seconds 1800 --label "$label" -- \
+            sh "$SRC/tests/v04/compiler-retention/cgroup-exec.sh" "$@" \
+            >"$wrapper_log" 2>&1
+        status=$?
+        set -e
+        if [ "$status" -eq 0 ]; then return 0; fi
+        if [ "$status" -eq 73 ] && grep -q 'build lock is already held; command was not invoked' "$wrapper_log"; then
+            printf 'P01 waiting for ~/rey/build.lock before %s (attempt %s)\n' "$label" "$attempt"
+            attempt=$((attempt + 1))
+            sleep 5
+            continue
+        fi
+        cat "$wrapper_log" >&2
+        return "$status"
+    done
 }
 
 stage_driver() {
@@ -312,11 +325,28 @@ find "$SRC/rey-compiler/src" -type f -print0 | sort -z | xargs -0 sha256sum >"$O
 sha256sum "$SEED" "$SRC/rey-compiler/src/ir/managed/link/main.rey" "$CONTROL" \
     "$OUT/compiler/control" "$OUT/compiler/current" >"$OUT/input-hashes.sha256"
 
-sh "$SRC/scripts/v04-linux-x64-region-gate.sh" --engine "$OUT/compiler/current" \
-    --source "$SRC" --out "$OUT/r01" --suite regions >"$OUT/r01.stdout" 2>"$OUT/r01.stderr" || {
-        cat "$OUT/r01.stdout" "$OUT/r01.stderr" >&2
-        exit 1
-    }
+attempt=1
+while :; do
+    set +e
+    sh "$SRC/scripts/v04-linux-x64-region-gate.sh" --engine "$OUT/compiler/current" \
+        --source "$SRC" --out "$OUT/r01" --suite regions \
+        >"$OUT/logs/r01.try-$attempt.stdout" 2>"$OUT/logs/r01.try-$attempt.stderr"
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
+        cp "$OUT/logs/r01.try-$attempt.stdout" "$OUT/r01.stdout"
+        cp "$OUT/logs/r01.try-$attempt.stderr" "$OUT/r01.stderr"
+        break
+    fi
+    if [ "$status" -eq 73 ] && { grep -q 'build lock is already held; command was not invoked' "$OUT/logs/r01.try-$attempt.stdout" || grep -q 'build lock is already held; command was not invoked' "$OUT/logs/r01.try-$attempt.stderr"; }; then
+        printf 'P01 waiting for ~/rey/build.lock before R01 (attempt %s)\n' "$attempt"
+        attempt=$((attempt + 1))
+        sleep 5
+        continue
+    fi
+    cat "$OUT/logs/r01.try-$attempt.stdout" "$OUT/logs/r01.try-$attempt.stderr" >&2
+    exit "$status"
+done
 
 if [ "$rss_gate" != pass ]; then
     echo "FAIL P01: scaled peak RSS regression exceeds 5% ($baseline_peak -> $retained_peak KiB)" >&2
