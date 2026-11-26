@@ -1,0 +1,72 @@
+import frontend::graph::{EmbeddedSource, checkSourceFileGraph, checkSourceFileGraphWithEmbedded};
+import frontend::embedded_stdlib::{embeddedStdRoot, embeddedStdSources};
+import ir::{IRProgram, printIR};
+import ir::managed::link::{buildCompletedRegionProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import ir::eval::{evaluateProgram};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() >= 4 && argv[1] == "ir", "expected IR command and source path");
+    var command = argv[2];
+    var sourcePath = argv[3];
+    if command == "check" {
+        require(argv.len() == 4, "check takes only a source path");
+        var ordinary = checkSourceFileGraph(sourcePath, "");
+        if ordinary.isErr() { eprintln(ordinary.unwrapErr()); exit(1); }
+        return;
+    }
+    require(command == "dump" || command == "eval", "unknown IR command: " + command);
+    var runtimeRoot = "";
+    var hasRuntimeRoot = false;
+    var managed = false;
+    var regions = false;
+    var promotionStress = false;
+    var optionIndex = 4;
+    while optionIndex < argv.len() {
+        if argv[optionIndex] == "--runtime-root" && !hasRuntimeRoot {
+            require(optionIndex + 1 < argv.len(), "missing --runtime-root value");
+            runtimeRoot = argv[optionIndex + 1];
+            hasRuntimeRoot = true;
+            optionIndex += 2;
+        } else if argv[optionIndex] == "--managed" && !managed {
+            managed = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--regions" && !regions {
+            regions = true;
+            optionIndex += 1;
+        } else if argv[optionIndex] == "--promotion-stress" && !promotionStress {
+            promotionStress = true;
+            optionIndex += 1;
+        } else {
+            eprintln("unknown or duplicate IR option: " + argv[optionIndex]);
+            exit(2);
+            return;
+        }
+    }
+    require(managed && regions, "R01 IR commands require managed region lowering");
+    var stdRoot = embeddedStdRoot();
+    var embedded: Vec<EmbeddedSource> = embeddedStdSources();
+    var checked = checkSourceFileGraphWithEmbedded(sourcePath, stdRoot, [], embedded);
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); return; }
+    var lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, promotionStress);
+    if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); return; }
+    var program: IRProgram = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); return; }
+    program = inferEffects(program);
+    if command == "dump" {
+        print(printIR(program));
+        return;
+    }
+    var evaluated = evaluateProgram(program, 12000000, 128);
+    if !evaluated.ok { eprintln(evaluated.error); exit(1); return; }
+    if evaluated.isVoid { println("void"); }
+    else if evaluated.isBool { println((evaluated.value != 0).toString()); }
+    else { println(evaluated.value.toString()); }
+}

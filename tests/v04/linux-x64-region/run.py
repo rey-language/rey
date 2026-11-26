@@ -185,7 +185,7 @@ class RegionGate:
         self.results["compiler_source_hashes"] = tree_hashes(self.source / "rey-compiler")
         harness_files = (
             self.source / "scripts/v04-linux-x64-region-gate.sh",
-            GATE_DIR / "run.py", GATE_DIR / "region-driver.rey",
+            GATE_DIR / "run.py", GATE_DIR / "region-driver.rey", GATE_DIR / "ir-driver.rey",
             GATE_DIR / "layout-negative.rey", GATE_DIR / "raw-intrinsic.rey",
             GATE_DIR / "source-cases.json", GATE_DIR / "native-cases.json",
             GATE_DIR / "reclamation-cases.json", GATE_DIR / "static-cases.json",
@@ -509,11 +509,13 @@ class RegionGate:
         self.region_driver = self.build_executable(
             "build-current-source-region-driver", driver_source / "main.rey",
             out_bin / "region-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
-        self.ir_driver = self.region_driver
+        ir_source = self.compiler_stage("ir-driver", GATE_DIR / "ir-driver.rey")
+        self.ir_driver = self.build_executable(
+            "build-current-source-ir-driver", ir_source / "main.rey",
+            out_bin / "ir-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
         self.results["drivers"] = {
             "region": {"path": str(self.region_driver), "sha256": digest_file(self.region_driver)},
-            "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver),
-                   "shared_region_driver": True},
+            "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver)},
         }
         self.save()
 
