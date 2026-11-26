@@ -1,0 +1,110 @@
+import host::{hostExit};
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import regions::{regionContextCreate, regionContextDestroy, regionCurrent, regionHandleAllocateFixed, regionHandleCreate, regionHandleEnd};
+
+func require(condition: bool): void {
+    if !condition { hostExit(91); }
+}
+
+func fixedLayout(registry: __rey_raw_address): int {
+    return layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+}
+
+func readMode(): int {
+    var buffer = __reyRawMap(8);
+    var result = __reyRawToInt(__reyRawSyscall(0, __reyRawFromInt(0), buffer, __reyRawFromInt(1), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+    var mode = __reyRawLoadByte(buffer) - 48;
+    __reyRawUnmap(buffer, 8);
+    if result != 1 || mode < 0 || mode > 4 { hostExit(92); }
+    return mode;
+}
+
+func checkPayloadZeroAndTypedNulls(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(16);
+    __reyRawStoreI64(offsets, 0);
+    __reyRawStoreI64(__reyRawOffset(offsets, 8), 16);
+    var layout = layoutRegisterFixed(registry, 25, offsets, 2);
+    __reyRawUnmap(offsets, 16);
+    var context = regionContextCreate(registry);
+    var handle = regionHandleCreate(context);
+    var first = regionHandleAllocateFixed(context, handle, layout, 1);
+    var second = regionHandleAllocateFixed(context, handle, layout, 1);
+    var dirtyPayload = __reyRawOffset(second, 144);
+    var byteIndex = 0;
+    while byteIndex < 25 {
+        __reyRawStoreByte(__reyRawOffset(dirtyPayload, byteIndex), 165);
+        byteIndex = byteIndex + 1;
+    }
+    var third = regionHandleAllocateFixed(context, handle, layout, 1);
+    require(__reyRawEqual(third, __reyRawOffset(second, 128)));
+    byteIndex = 0;
+    while byteIndex < 25 {
+        require(__reyRawLoadByte(__reyRawOffset(third, 16 + byteIndex)) == 0);
+        byteIndex = byteIndex + 1;
+    }
+    require(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(third, 16)), __reyRawNull()));
+    require(__reyRawEqual(__reyRawLoadAddress(__reyRawOffset(third, 32)), __reyRawNull()));
+    require(!__reyRawEqual(first, __reyRawNull()));
+    regionContextDestroy(context);
+    layoutRegistryRelease(registry);
+}
+
+func rejectStaleRegion(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = fixedLayout(registry);
+    var context = regionContextCreate(registry);
+    var handle = regionHandleCreate(context);
+    regionHandleEnd(context, handle);
+    regionHandleAllocateFixed(context, handle, layout, 1);
+    hostExit(90);
+}
+
+func rejectForeignContext(): void {
+    var registryA = layoutRegistryCreate(1);
+    var registryB = layoutRegistryCreate(1);
+    var layoutA = fixedLayout(registryA);
+    var layoutB = fixedLayout(registryB);
+    var contextA = regionContextCreate(registryA);
+    var contextB = regionContextCreate(registryB);
+    var handleA = regionHandleCreate(contextA);
+    regionHandleAllocateFixed(contextB, handleA, layoutB, 1);
+    hostExit(90);
+}
+
+func rejectCorruptGroup(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = fixedLayout(registry);
+    var context = regionContextCreate(registry);
+    var handle = regionHandleCreate(context);
+    regionHandleAllocateFixed(context, handle, layout, 1);
+    var region = regionCurrent(context);
+    var group = __reyRawLoadAddress(__reyRawOffset(region, 40));
+    require(!__reyRawEqual(group, __reyRawNull()));
+    __reyRawStoreI64(group, 0);
+    regionHandleAllocateFixed(context, handle, layout, 1);
+    hostExit(90);
+}
+
+func rejectCorruptDescriptor(): void {
+    var registry = layoutRegistryCreate(1);
+    var offsets = __reyRawMap(8);
+    __reyRawStoreI64(offsets, 0);
+    var layout = layoutRegisterFixed(registry, 8, offsets, 1);
+    __reyRawUnmap(offsets, 8);
+    var descriptor = __reyRawLoadAddress(__reyRawOffset(registry, 64));
+    __reyRawStoreI64(__reyRawOffset(descriptor, 32), 8);
+    var context = regionContextCreate(registry);
+    var handle = regionHandleCreate(context);
+    regionHandleAllocateFixed(context, handle, layout, 1);
+    hostExit(90);
+}
+
+func main(): void {
+    var mode = readMode();
+    if mode == 0 { checkPayloadZeroAndTypedNulls(); return; }
+    if mode == 1 { rejectStaleRegion(); return; }
+    if mode == 2 { rejectForeignContext(); return; }
+    if mode == 3 { rejectCorruptGroup(); return; }
+    rejectCorruptDescriptor();
+}
