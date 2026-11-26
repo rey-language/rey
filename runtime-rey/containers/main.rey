@@ -657,6 +657,92 @@ func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bo
     return true;
 }
 
+func containersWarnMapMayBeFromFailedBuild(): void {
+    var message = __reyRawMap(78);
+    if __reyRawToInt(message) < 0 { return; }
++    __reyRawStoreByte(containersAddressAt(message, 0), 115);
+    __reyRawStoreByte(containersAddressAt(message, 1), 121);
+    __reyRawStoreByte(containersAddressAt(message, 2), 109);
+    __reyRawStoreByte(containersAddressAt(message, 3), 98);
+    __reyRawStoreByte(containersAddressAt(message, 4), 111);
+    __reyRawStoreByte(containersAddressAt(message, 5), 108);
+    __reyRawStoreByte(containersAddressAt(message, 6), 32);
+    __reyRawStoreByte(containersAddressAt(message, 7), 109);
+    __reyRawStoreByte(containersAddressAt(message, 8), 97);
+    __reyRawStoreByte(containersAddressAt(message, 9), 112);
+    __reyRawStoreByte(containersAddressAt(message, 10), 32);
+    __reyRawStoreByte(containersAddressAt(message, 11), 109);
+    __reyRawStoreByte(containersAddressAt(message, 12), 97);
+    __reyRawStoreByte(containersAddressAt(message, 13), 121);
+    __reyRawStoreByte(containersAddressAt(message, 14), 32);
+    __reyRawStoreByte(containersAddressAt(message, 15), 98);
+    __reyRawStoreByte(containersAddressAt(message, 16), 101);
+    __reyRawStoreByte(containersAddressAt(message, 17), 32);
+    __reyRawStoreByte(containersAddressAt(message, 18), 102);
+    __reyRawStoreByte(containersAddressAt(message, 19), 114);
+    __reyRawStoreByte(containersAddressAt(message, 20), 111);
+    __reyRawStoreByte(containersAddressAt(message, 21), 109);
+    __reyRawStoreByte(containersAddressAt(message, 22), 32);
+    __reyRawStoreByte(containersAddressAt(message, 23), 116);
+    __reyRawStoreByte(containersAddressAt(message, 24), 104);
+    __reyRawStoreByte(containersAddressAt(message, 25), 101);
+    __reyRawStoreByte(containersAddressAt(message, 26), 32);
+    __reyRawStoreByte(containersAddressAt(message, 27), 102);
+    __reyRawStoreByte(containersAddressAt(message, 28), 97);
+    __reyRawStoreByte(containersAddressAt(message, 29), 105);
+    __reyRawStoreByte(containersAddressAt(message, 30), 108);
+    __reyRawStoreByte(containersAddressAt(message, 31), 101);
+    __reyRawStoreByte(containersAddressAt(message, 32), 100);
+    __reyRawStoreByte(containersAddressAt(message, 33), 32);
+    __reyRawStoreByte(containersAddressAt(message, 34), 98);
+    __reyRawStoreByte(containersAddressAt(message, 35), 117);
+    __reyRawStoreByte(containersAddressAt(message, 36), 105);
+    __reyRawStoreByte(containersAddressAt(message, 37), 108);
+    __reyRawStoreByte(containersAddressAt(message, 38), 100);
+    __reyRawStoreByte(containersAddressAt(message, 39), 32);
+    __reyRawStoreByte(containersAddressAt(message, 40), 98);
+    __reyRawStoreByte(containersAddressAt(message, 41), 101);
+    __reyRawStoreByte(containersAddressAt(message, 42), 99);
+    __reyRawStoreByte(containersAddressAt(message, 43), 97);
+    __reyRawStoreByte(containersAddressAt(message, 44), 117);
+    __reyRawStoreByte(containersAddressAt(message, 45), 115);
+    __reyRawStoreByte(containersAddressAt(message, 46), 101);
+    __reyRawStoreByte(containersAddressAt(message, 47), 32);
+    __reyRawStoreByte(containersAddressAt(message, 48), 101);
+    __reyRawStoreByte(containersAddressAt(message, 49), 120);
+    __reyRawStoreByte(containersAddressAt(message, 50), 101);
+    __reyRawStoreByte(containersAddressAt(message, 51), 99);
+    __reyRawStoreByte(containersAddressAt(message, 52), 117);
+    __reyRawStoreByte(containersAddressAt(message, 53), 116);
+    __reyRawStoreByte(containersAddressAt(message, 54), 97);
+    __reyRawStoreByte(containersAddressAt(message, 55), 98);
+    __reyRawStoreByte(containersAddressAt(message, 56), 108);
+    __reyRawStoreByte(containersAddressAt(message, 57), 101);
+    __reyRawStoreByte(containersAddressAt(message, 58), 32);
+    __reyRawStoreByte(containersAddressAt(message, 59), 112);
+    __reyRawStoreByte(containersAddressAt(message, 60), 117);
+    __reyRawStoreByte(containersAddressAt(message, 61), 98);
+    __reyRawStoreByte(containersAddressAt(message, 62), 108);
+    __reyRawStoreByte(containersAddressAt(message, 63), 105);
+    __reyRawStoreByte(containersAddressAt(message, 64), 99);
+    __reyRawStoreByte(containersAddressAt(message, 65), 97);
+    __reyRawStoreByte(containersAddressAt(message, 66), 116);
+    __reyRawStoreByte(containersAddressAt(message, 67), 105);
+    __reyRawStoreByte(containersAddressAt(message, 68), 111);
+    __reyRawStoreByte(containersAddressAt(message, 69), 110);
+    __reyRawStoreByte(containersAddressAt(message, 70), 32);
+    __reyRawStoreByte(containersAddressAt(message, 71), 102);
+    __reyRawStoreByte(containersAddressAt(message, 72), 97);
+    __reyRawStoreByte(containersAddressAt(message, 73), 105);
+    __reyRawStoreByte(containersAddressAt(message, 74), 108);
+    __reyRawStoreByte(containersAddressAt(message, 75), 101);
+    __reyRawStoreByte(containersAddressAt(message, 76), 100);
+    __reyRawStoreByte(containersAddressAt(message, 77), 10);
+    containersWriteStaging(2, message, 78);
+    __reyRawUnmap(message, 78);
+    return;
+}
+
 func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): int {
     var protocolLength = managedStringLength(context, protocol);
     var protocolData = containersPathData(protocol);
@@ -768,7 +854,7 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
     if !containersPublishPreparedOutput(imageDirectory, preparedImage) {
         containersDiscardPreparedOutput(imageDirectory, preparedImage);
         containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);
-        eprintln("symbol map may be from the failed build because executable publication failed");
+        containersWarnMapMayBeFromFailedBuild();
         return 2;
     }
     containersDiscardPreparedOutput(imageDirectory, preparedImage);
