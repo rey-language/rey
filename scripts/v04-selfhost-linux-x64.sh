@@ -152,7 +152,7 @@ run_network_probe() {
     work_dir=$1
     trace="$work_dir/logs/network-socket.trace"
     helper="$tests/network-probe.sh"
-    if ! "$budget" run --seconds 20 --label network-probe -- \
+    if ! "$budget" run-held --seconds 20 --label network-probe -- \
         "$service" network 15 "$work_dir" "$trace" "$helper" >/dev/null; then
         return 1
     fi
@@ -165,7 +165,7 @@ run_failed_isolation_probe() {
     missing_root="$work_dir/root-that-must-not-exist"
     helper="$tests/failed-isolation-probe.sh"
     [ ! -e "$missing_root" ] || { echo 'failed-isolation test path already exists' >&2; return 1; }
-    if ! "$budget" run --seconds 20 --label failed-isolation -- \
+    if ! "$budget" run-held --seconds 20 --label failed-isolation -- \
         "$service" failed-isolation 15 "$work_dir" "$trace" "$missing_root" "$helper" >/dev/null; then
         return 1
     fi
@@ -186,7 +186,7 @@ run_stage() {
     trace="$work_dir/logs/producer.trace"
     stdout_file="$work_dir/evidence/smoke.stdout"
     stderr_file="$work_dir/evidence/smoke.stderr"
-    if ! "$budget" run --seconds "$timeout_sec" --label "${build_mode}-producer" -- \
+    if ! "$budget" run-held --seconds "$timeout_sec" --label "${build_mode}-producer" -- \
         "$service" build "$timeout_sec" "$work_dir" "$service_helper" \
         "$minimal_root" "$work_dir" "$seed_sha" "$input" /out/S1 "$trace" \
         "$stdout_file" "$stderr_file" "$expected_stdout" "$build_mode" >/dev/null; then
@@ -296,7 +296,7 @@ self_test() {
 
     minimal_root=$(stage_inputs "$source_dir" "$revision" "$work_dir" "$seed" smoke) || fail 'deterministic source staging failed'
     printf 'rey bootstrap smoke\n' >"$work_dir/evidence/expected.stdout"
-    run_stage "$work_dir" "$minimal_root" /src/smoke.rey 600 smoke \
+    run_stage "$work_dir" "$minimal_root" /src/smoke.rey 480 smoke \
         "$work_dir/evidence/expected.stdout" || fail 'isolated native smoke failed'
     cp -p "$minimal_root/out/S1" "$work_dir/S1"
     check_static_elf "$work_dir/S1" || fail 'smoke output is not a static Linux x64 ELF'
@@ -324,6 +324,7 @@ candidate() {
     check_static_elf "$work_dir/S1" || fail 'candidate output is not a static Linux x64 ELF'
     [ -x "$work_dir/S1" ] || fail 'candidate output is not directly executable'
     sha256sum "$work_dir/S1" >"$work_dir/evidence/S1.sha256"
+    printf '%s\n' 'PASS candidate S1'
 }
 
 if [ "${1:-}" = --plan ]; then
@@ -333,7 +334,18 @@ if [ "${1:-}" = --plan ]; then
 fi
 
 mode=${1:-}
-case "$mode" in --self-test|--candidate) shift ;; *)
+case "$mode" in
+    --self-test)
+        shift
+        exec "$budget" job --seconds 600 --label bootstrap-self-test -- "$root/scripts/v04-selfhost-linux-x64.sh" --locked-self-test "$@"
+        ;;
+    --candidate)
+        shift
+        exec "$budget" job --seconds 2400 --label bootstrap-candidate -- "$root/scripts/v04-selfhost-linux-x64.sh" --locked-candidate "$@"
+        ;;
+    --locked-self-test) mode=--self-test; shift ;;
+    --locked-candidate) mode=--candidate; shift ;;
+    *)
     if [ "$mode" = --verify ]; then
         echo 'full chain is unavailable until the §4 memory admission is cleared' >&2
         exit 2
