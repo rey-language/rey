@@ -1,0 +1,80 @@
+import native::image::x64::{buildElfX64HeaderForLength};
+import native::output::{writeCheckedCompilerOutputBytes, writeCompilerOutputBytes, writeVerifiedCompilerOutputPackedSegments};
+import native::packed::{packedBufferCreate, packedBufferTryAppendByte};
+import native::x64::{X64FunctionOffset};
+
+func codeBytes(): Vec<int> {
+    // Linux x64 _start: exit(0), followed by a second symbol at offset 9.
+    // The bytes after ret exercise signed and high byte values in the writer.
+    return [184, 60, 0, 0, 0, 49, 255, 15, 5, 195, 0, 127, 128, 255];
+}
+
+func functionOffsets(): Vec<X64FunctionOffset> {
+    return [
+        X64FunctionOffset { functionId: 1, offset: 0 },
+        X64FunctionOffset { functionId: 2, offset: 9 },
+    ];
+}
+
+func symbolMap(): string {
+    return "401000 <entry>\n401000 main\n401009 helper\n";
+}
+
+func writePlainImage(path: string): bool {
+    var code = codeBytes();
+    var header = buildElfX64HeaderForLength(code.len(), 0, functionOffsets());
+    if header.isErr() { return false; }
+    var image = header.unwrap();
+    var index = 0;
+    while index < code.len() { image.push(code[index]); index = index + 1; }
+    var written = writeCheckedCompilerOutputBytes(path, image);
+    if written.isErr() { return false; }
+    writeFile(path + ".map", symbolMap());
+    return fileExists(path + ".map");
+}
+
+func writeManagedImage(path: string): bool {
+    var code = codeBytes();
+    var header = buildElfX64HeaderForLength(code.len(), 0, functionOffsets());
+    if header.isErr() { return false; }
+    var image = header.unwrap();
+    var index = 0;
+    while index < code.len() { image.push(code[index]); index = index + 1; }
+    var written = writeCompilerOutputBytes(path, image);
+    if written.isErr() { return false; }
+    writeFile(path + ".map", symbolMap());
+    return fileExists(path + ".map");
+}
+
+func writePackedImage(path: string): bool {
+    var code = codeBytes();
+    var header = buildElfX64HeaderForLength(code.len(), 0, functionOffsets());
+    if header.isErr() { return false; }
+    var made = packedBufferCreate(0);
+    if made.isErr() { return false; }
+    var body = made.unwrap();
+    var index = 0;
+    while index < code.len() {
+        if !packedBufferTryAppendByte(body, code[index]) { return false; }
+        index = index + 1;
+    }
+    var written = writeVerifiedCompilerOutputPackedSegments(path, header.unwrap(), body);
+    if written.isErr() { return false; }
+    writeFile(path + ".map", symbolMap());
+    return fileExists(path + ".map");
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 3 { eprintln("expected mode and output path"); exit(2); return; }
+    var ok = false;
+    if argv[1] == "plain" { ok = writePlainImage(argv[2]); }
+    else if argv[1] == "managed" { ok = writeManagedImage(argv[2]); }
+    else if argv[1] == "packed" { ok = writePackedImage(argv[2]); }
+    else if argv[1] == "data" {
+        writeFile(argv[2], "plain writeFile data\n");
+        ok = fileExists(argv[2]);
+    } else { eprintln("unknown writer fixture"); exit(2); return; }
+    if !ok { eprintln("writer failed"); exit(1); return; }
+    println("writer success");
+}
