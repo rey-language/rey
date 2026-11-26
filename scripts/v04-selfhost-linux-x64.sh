@@ -152,8 +152,10 @@ run_network_probe() {
     work_dir=$1
     trace="$work_dir/logs/network-socket.trace"
     helper="$tests/network-probe.sh"
-    "$budget" run --seconds 20 --label network-probe -- \
-        "$service" network 15 "$work_dir" "$trace" "$helper" >/dev/null
+    if ! "$budget" run --seconds 20 --label network-probe -- \
+        "$service" network 15 "$work_dir" "$trace" "$helper" >/dev/null; then
+        return 1
+    fi
     [ -s "$trace" ] || { echo 'network probe did not write a socket trace' >&2; return 1; }
 }
 
@@ -163,8 +165,11 @@ run_failed_isolation_probe() {
     missing_root="$work_dir/root-that-must-not-exist"
     helper="$tests/failed-isolation-probe.sh"
     [ ! -e "$missing_root" ] || { echo 'failed-isolation test path already exists' >&2; return 1; }
-    "$budget" run --seconds 20 --label failed-isolation -- \
-        "$service" failed-isolation 15 "$work_dir" "$trace" "$missing_root" "$helper" >/dev/null
+    if ! "$budget" run --seconds 20 --label failed-isolation -- \
+        "$service" failed-isolation 15 "$work_dir" "$trace" "$missing_root" "$helper" >/dev/null; then
+        return 1
+    fi
+    [ -s "$trace" ] || { echo 'failed-isolation trace is missing' >&2; return 1; }
     ! grep -Fq '"/seed/rey"' "$trace" || {
         echo 'producer was invoked after a failed chroot' >&2
         return 1
@@ -181,10 +186,12 @@ run_stage() {
     trace="$work_dir/logs/producer.trace"
     stdout_file="$work_dir/evidence/smoke.stdout"
     stderr_file="$work_dir/evidence/smoke.stderr"
-    "$budget" run --seconds "$timeout_sec" --label "${build_mode}-producer" -- \
+    if ! "$budget" run --seconds "$timeout_sec" --label "${build_mode}-producer" -- \
         "$service" build "$timeout_sec" "$work_dir" "$service_helper" \
         "$minimal_root" "$work_dir" "$seed_sha" "$input" /out/S1 "$trace" \
-        "$stdout_file" "$stderr_file" "$expected_stdout" "$build_mode" >/dev/null
+        "$stdout_file" "$stderr_file" "$expected_stdout" "$build_mode" >/dev/null; then
+        return 1
+    fi
     [ -s "$trace" ] || { echo 'producer trace is missing' >&2; return 1; }
     [ -s "$work_dir/evidence/producer.time.txt" ] || { echo 'producer time report is missing' >&2; return 1; }
     [ -s "$work_dir/evidence/cgroup-before.txt" ] && [ -s "$work_dir/evidence/cgroup-after.txt" ] || {
