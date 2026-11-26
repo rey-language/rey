@@ -81,7 +81,7 @@ if [ "$build_status" -ne 0 ]; then
 fi
 
 sh "$checker" "$trace" /usr/sbin/chroot /seed/rey
-[ -x "$root$out" ] || { echo "producer output is absent or not executable: $output" >&2; exit 1; }
+[ -x "$root$output" ] || { echo "producer output is absent or not executable: $output" >&2; exit 1; }
 
 set +e
 if [ "$mode" = candidate ]; then
