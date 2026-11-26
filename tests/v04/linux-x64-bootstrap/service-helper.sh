@@ -85,9 +85,9 @@ sh "$checker" "$trace" /usr/sbin/chroot /seed/rey
 
 set +e
 if [ "$mode" = candidate ]; then
-    /usr/sbin/chroot "$root" "$output" --help >"$stdout_file" 2>"$stderr_file"
+    HOME=/root LANG=C LC_ALL=C PATH= /usr/sbin/chroot "$root" "$output" --help >"$stdout_file" 2>"$stderr_file"
 else
-    /usr/sbin/chroot "$root" "$output" >"$stdout_file" 2>"$stderr_file"
+    HOME=/root LANG=C LC_ALL=C PATH= /usr/sbin/chroot "$root" "$output" >"$stdout_file" 2>"$stderr_file"
 fi
 run_status=$?
 set -e
