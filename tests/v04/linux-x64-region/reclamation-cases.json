@@ -1,0 +1,7 @@
+{
+  "reclaim-three-slabs": {"status": 0, "stdout": "", "stderr": ""},
+  "direct-mapping-metrics": {"status": 0, "stdout": "", "stderr": ""},
+  "opaque-handle-reuse": {"status": 0, "stdout": "", "stderr": ""},
+  "active-context-destroy": {"status": 0, "stdout": "", "stderr": "", "address_space_mib": 16},
+  "teardown-many-direct-chunks": {"status": 0, "stdout": "", "stderr": ""}
+}

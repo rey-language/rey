@@ -1,0 +1,5 @@
+{
+  "managed-regions": {"stdout": "managed-regions: static assertions passed\n", "stderr": ""},
+  "managed-lifetime-safety": {"stdout": "managed lifetime safety: all fixtures passed", "stderr": ""},
+  "layout-negative": {"stdout": "region layout validation negatives passed\n", "stderr": ""}
+}

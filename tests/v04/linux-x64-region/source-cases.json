@@ -1,0 +1,18 @@
+{
+  "container-cycle.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-return.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-nested.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-graph.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-region-return.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-region-local.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-caller-region.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "container-caller-retain.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "host-fileio.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-scrutinee-payload.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-scrutinee-order.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-nested-payload.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-struct-pattern.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-after-statement.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-real-compiler-shape.rey": {"status": 0, "stdout": "", "stderr": ""},
+  "match-scrutinee-wide.rey": {"status": 0, "stdout": "", "stderr": ""}
+}

@@ -1,0 +1,4 @@
+func main(): void {
+    var memory = __reyRawMap(8);
+    __reyRawUnmap(memory, 8);
+}

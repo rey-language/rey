@@ -1,0 +1,23 @@
+{
+  "region-basic": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "program-region": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "group-separation": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "promotion-address-identity": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "promotion-older-source": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "promotion-null": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "promotion-dependency-chain": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "promotion-cycle": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "store-promotes-younger": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "store-records-older": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "destination-construction": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "region-end-lifo": {"status": 1, "stdout": "checkpoint: region-end-lifo\n", "stderr": "", "evaluator": 2203, "checkpoint": true},
+  "region-end-program": {"status": 1, "stdout": "checkpoint: region-end-program\n", "stderr": "", "evaluator": 2203, "checkpoint": true},
+  "double-end": {"status": 1, "stdout": "checkpoint: double-end\n", "stderr": "", "evaluator": 2204, "checkpoint": true},
+  "context-handle-aba": {"status": 1, "stdout": "checkpoint: context-handle-aba\n", "stderr": "", "evaluator": "native-only", "checkpoint": true},
+  "program-handle-aba": {"status": 1, "stdout": "checkpoint: program-handle-aba\n", "stderr": "", "evaluator": "native-only", "checkpoint": true},
+  "container-current-region": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "repeated-request-plateau": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "long-lived-graph-retention": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "task-lifecycle": {"status": 0, "stdout": "", "stderr": "", "evaluator": 0},
+  "host-write": {"status": 0, "stdout": "hello\n", "stderr": "", "evaluator": "native-only"}
+}

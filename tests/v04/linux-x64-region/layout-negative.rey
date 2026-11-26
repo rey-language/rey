@@ -1,0 +1,53 @@
+import ir;
+import ir::{IRTypeKind};
+import ir::managed::{ManagedField, ManagedLayout, ManagedProgram, ManagedVariableLayout};
+import ir::managed::regions::{RegionBindings, lowerManagedRegions};
+import ir::managed::placement::{ManagedPlacement};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func bindings(): RegionBindings {
+    return RegionBindings {
+        create: 100, destroy: 101, storeReference: 102, regionCreate: 103,
+        regionEnd: 104, regionAllocate: 105, allocateDestination: 106,
+        allocateProgram: 107, promoteReference: 108, promotionCount: 109,
+        layoutCreate: 110, layoutRegister: 111, layoutRegisterVariable: 112,
+        layoutRelease: 113, cohortCreate: -1, hooks: []
+    };
+}
+
+func malformedModule(layouts: Vec<ManagedLayout>, variableLayouts: Vec<ManagedVariableLayout>): ManagedProgram {
+    return ManagedProgram {
+        program: ir.irProgram(1, []), layouts: layouts, functions: [], allocations: [],
+        derived: [], allocateFunctionId: 20, storeReferenceFunctionId: 21,
+        collectFunctionId: 22, variableLayouts: variableLayouts, hooks: []
+    };
+}
+
+func mustReject(input: ManagedProgram, diagnostic: string, label: string): void {
+    var placement = ManagedPlacement { allocations: [], calls: [], regionFunctions: [] };
+    var result = lowerManagedRegions(input, bindings(), placement);
+    require(result.isErr(), label + " must be rejected");
+    require(result.unwrapErr().contains(diagnostic), label + " diagnostic: " + result.unwrapErr());
+}
+
+func main(): void {
+    mustReject(malformedModule([
+        ManagedLayout { id: 2, key: "fixture::Cell", payloadBytes: 8, fields: [] },
+    ], []), "invalid deterministic layout descriptor", "non-deterministic layout ID");
+
+    var badReferenceFields: Vec<ManagedField> = [
+        ManagedField { name: "child", offset: 0, kind: IRTypeKind::RawAddress, layoutId: 0 }
+    ];
+    mustReject(malformedModule([
+        ManagedLayout { id: 1, key: "fixture::Node", payloadBytes: 8, fields: badReferenceFields },
+    ], []), "reference field requires a valid positive layout ID", "invalid reference layout ID");
+
+    mustReject(malformedModule([
+        ManagedLayout { id: 1, key: "fixture::Bytes", payloadBytes: 8, fields: [] },
+    ], [ManagedVariableLayout { layoutId: 1, tailKind: 3 }]),
+       "invalid variable-tail descriptor metadata", "invalid variable-tail metadata");
+    println("region layout validation negatives passed");
+}
