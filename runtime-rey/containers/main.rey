@@ -353,25 +353,34 @@ func containersTargetIdentity(directory: int, name: __rey_raw_address): __rey_ra
 }
 
 func containersFormatOutputTemp(name: __rey_raw_address, sequence: int): void {
-    var prefix = [46, 114, 101, 121, 45, 111, 48, 50, 45];
-    var index = 0;
-    while index < prefix.len() { __reyRawStoreByte(containersAddressAt(name, index), prefix[index]); index += 1; }
-    var digits = __reyRawMap(32);
+    __reyRawStoreByte(containersAddressAt(name, 0), 46);
+    __reyRawStoreByte(containersAddressAt(name, 1), 114);
+    __reyRawStoreByte(containersAddressAt(name, 2), 101);
+    __reyRawStoreByte(containersAddressAt(name, 3), 121);
+    __reyRawStoreByte(containersAddressAt(name, 4), 45);
+    __reyRawStoreByte(containersAddressAt(name, 5), 111);
+    __reyRawStoreByte(containersAddressAt(name, 6), 48);
+    __reyRawStoreByte(containersAddressAt(name, 7), 50);
+    __reyRawStoreByte(containersAddressAt(name, 8), 45);
     var digitCount = 0;
     var value = sequence;
-    if value == 0 { __reyRawStoreByte(digits, 48); digitCount = 1; }
+    if value == 0 { __reyRawStoreByte(containersAddressAt(name, 9), 48); digitCount = 1; }
     while value > 0 {
-        __reyRawStoreByte(containersAddressAt(digits, digitCount), 48 + value % 10);
+        __reyRawStoreByte(containersAddressAt(name, 9 + digitCount), 48 + value % 10);
         value = value / 10;
         digitCount += 1;
     }
-    index = 0;
-    while index < digitCount {
-        __reyRawStoreByte(containersAddressAt(name, prefix.len() + index), __reyRawLoadByte(containersAddressAt(digits, digitCount - index - 1)));
+    var index = 0;
+    while index < digitCount / 2 {
+        var leftOffset = 9 + index;
+        var rightOffset = 9 + digitCount - index - 1;
+        var left = __reyRawLoadByte(containersAddressAt(name, leftOffset));
+        var right = __reyRawLoadByte(containersAddressAt(name, rightOffset));
+        __reyRawStoreByte(containersAddressAt(name, leftOffset), right);
+        __reyRawStoreByte(containersAddressAt(name, rightOffset), left);
         index += 1;
     }
-    __reyRawStoreByte(containersAddressAt(name, prefix.len() + digitCount), 0);
-    __reyRawUnmap(digits, 32);
+    __reyRawStoreByte(containersAddressAt(name, 9 + digitCount), 0);
     return;
 }
 
@@ -651,14 +660,28 @@ func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bo
 func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): int {
     var protocolLength = managedStringLength(context, protocol);
     var protocolData = containersPathData(protocol);
-    var prefix = [0, 114, 101, 121, 45, 111, 117, 116, 112, 117, 116, 45, 112, 97, 105, 114, 45, 118, 49, 0];
-    if protocolLength < prefix.len() { return -1; }
-    var index = 0;
-    while index < prefix.len() {
-        if __reyRawLoadByte(containersAddressAt(protocolData, index)) != prefix[index] { return -1; }
-        index += 1;
-    }
-    var separator = prefix.len();
+    if protocolLength < 20 { return -1; }
+    if __reyRawLoadByte(containersAddressAt(protocolData, 0)) != 0 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 2)) != 101 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 4)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 5)) != 111 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 7)) != 116 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 8)) != 112 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 10)) != 116 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 12)) != 112 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 13)) != 97 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 15)) != 114 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 18)) != 49 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 { return -1; }
+    var separator = 20;
     while separator < protocolLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 { separator += 1; }
     if separator == prefix.len() || separator >= protocolLength { return 1; }
     var imagePathLength = separator - prefix.len();
@@ -891,13 +914,25 @@ pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_
 }
 
 func containersIsProcEnviron(path: __rey_raw_address): bool {
-    var expected = [47, 112, 114, 111, 99, 47, 115, 101, 108, 102, 47, 101, 110, 118, 105, 114, 111, 110];
-    var index = 0;
-    while index < expected.len() {
-        if __reyRawLoadByte(containersAddressAt(path, index)) != expected[index] { return false; }
-        index += 1;
-    }
-    return __reyRawLoadByte(containersAddressAt(path, expected.len())) == 0;
+    return __reyRawLoadByte(containersAddressAt(path, 0)) == 47 &&
+        __reyRawLoadByte(containersAddressAt(path, 1)) == 112 &&
+        __reyRawLoadByte(containersAddressAt(path, 2)) == 114 &&
+        __reyRawLoadByte(containersAddressAt(path, 3)) == 111 &&
+        __reyRawLoadByte(containersAddressAt(path, 4)) == 99 &&
+        __reyRawLoadByte(containersAddressAt(path, 5)) == 47 &&
+        __reyRawLoadByte(containersAddressAt(path, 6)) == 115 &&
+        __reyRawLoadByte(containersAddressAt(path, 7)) == 101 &&
+        __reyRawLoadByte(containersAddressAt(path, 8)) == 108 &&
+        __reyRawLoadByte(containersAddressAt(path, 9)) == 102 &&
+        __reyRawLoadByte(containersAddressAt(path, 10)) == 47 &&
+        __reyRawLoadByte(containersAddressAt(path, 11)) == 101 &&
+        __reyRawLoadByte(containersAddressAt(path, 12)) == 110 &&
+        __reyRawLoadByte(containersAddressAt(path, 13)) == 118 &&
+        __reyRawLoadByte(containersAddressAt(path, 14)) == 105 &&
+        __reyRawLoadByte(containersAddressAt(path, 15)) == 114 &&
+        __reyRawLoadByte(containersAddressAt(path, 16)) == 111 &&
+        __reyRawLoadByte(containersAddressAt(path, 17)) == 110 &&
+        __reyRawLoadByte(containersAddressAt(path, 18)) == 0;
 }
 
 func containersReadZeroSizedProcFile(context: __rey_raw_address, fd: int, stringLayoutId: int): __rey_raw_address {
