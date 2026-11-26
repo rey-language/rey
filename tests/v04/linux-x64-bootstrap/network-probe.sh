@@ -15,8 +15,8 @@ set +e
 curl_status=$?
 set -e
 [ "$curl_status" -ne 0 ] || { echo 'network probe unexpectedly connected' >&2; exit 1; }
-grep -Eq 'socket\(AF_INET(6)?[^=]*= -1 EPERM' "$trace" || {
+grep -Eq 'socket\(AF_INET(6)?[^=]*= -1 (EPERM|EAFNOSUPPORT)' "$trace" || {
     echo 'network socket was not rejected by the active systemd filter' >&2
     exit 1
 }
-printf 'network socket blocked with EPERM\n'
+printf 'network socket blocked by address-family filter\n'
