@@ -490,12 +490,13 @@ class RegionGate:
         shutil.copyfile(entry, stage / "main.rey")
         return stage
 
-    def build_executable(self, label, source_file, output, *, runtime_root=None, heavy=True):
+    def build_executable(self, label, source_file, output, *, runtime_root=None,
+                         heavy=True, timeout=600):
         command = [str(self.engine), "build", str(source_file), "-o", str(output),
                    "--target", "linux-x64", "--managed", "--regions"]
         if runtime_root is not None:
             command += ["--runtime-root", str(runtime_root)]
-        self.command(label, command, timeout=600, build=True, heavy=heavy)
+        self.command(label, command, timeout=timeout, build=True, heavy=heavy)
         require(Path(output).is_file(), label + ": compiler reported success without an image")
         # Permission changes here apply only to generated test drivers.
         Path(output).chmod(Path(output).stat().st_mode | 0o111)
@@ -507,14 +508,12 @@ class RegionGate:
         driver_source = self.compiler_stage("region-driver", GATE_DIR / "region-driver.rey")
         self.region_driver = self.build_executable(
             "build-current-source-region-driver", driver_source / "main.rey",
-            out_bin / "region-driver", runtime_root=self.runtime, heavy=True)
-
-        self.ir_driver = self.build_executable(
-            "build-current-source-ir-driver", self.source / "rey-compiler/ir-main.rey",
-            out_bin / "ir-driver", runtime_root=self.runtime, heavy=True)
+            out_bin / "region-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
+        self.ir_driver = self.region_driver
         self.results["drivers"] = {
             "region": {"path": str(self.region_driver), "sha256": digest_file(self.region_driver)},
-            "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver)},
+            "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver),
+                   "shared_region_driver": True},
         }
         self.save()
 
@@ -544,7 +543,7 @@ class RegionGate:
         case = "container-cycle.rey"
         source = self.source / "tests/v04/region-source/fixtures" / case
         for mode, flags in (("normal", []), ("stress", ["--promotion-stress"])):
-            command = [str(self.ir_driver), "eval", str(source), "--managed", "--regions",
+            command = [str(self.ir_driver), "ir", "eval", str(source), "--managed", "--regions",
                        "--runtime-root", str(self.runtime)] + flags
             item, stdout, stderr = self.command(
                 "evaluator-" + mode + "-" + case, command, timeout=600,
@@ -557,7 +556,7 @@ class RegionGate:
 
     def run_raw_intrinsic_rejection(self):
         source = GATE_DIR / "raw-intrinsic.rey"
-        command = [str(self.ir_driver), "check", str(source)]
+        command = [str(self.ir_driver), "ir", "check", str(source)]
         item, stdout, stderr = self.command(
             "ordinary-source-raw-intrinsic-rejection", command, timeout=300,
             build=True, heavy=False, expected_status=1, expected_stdout=b"")
@@ -593,7 +592,7 @@ class RegionGate:
                                if line.startswith("func "))
             require(actual_count == count, "generated cutoff fixture function count mismatch")
             trace_before = len(self.results["commands"])
-            command = [str(self.ir_driver), "dump", str(source), "--managed", "--regions",
+            command = [str(self.ir_driver), "ir", "dump", str(source), "--managed", "--regions",
                        "--runtime-root", str(self.runtime)]
             item, stdout, stderr = self.command(
                 "function-count-" + count_text, command, timeout=600, build=True,
