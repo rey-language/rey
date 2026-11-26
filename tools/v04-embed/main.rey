@@ -1,0 +1,348 @@
+// Seed-compatible replacement for the historical Python embedding scripts.
+// Inputs are UTF-8 Rey source; CRLF and lone CR are normalized to LF before
+// escaping. Inventory order follows sorted path components, matching pathlib.
+// The caller prepares a fresh output tree at the staging root. The reverse
+// enumeration option is only an acceptance probe; final inventory is sorted.
+func fail(message: string): void {
+    eprintln("v04-embed: " + message);
+    exit(2);
+}
+
+func utf8Width(first: int): int {
+    if first < 128 { return 1; }
+    if first >= 194 && first <= 223 { return 2; }
+    if first >= 224 && first <= 239 { return 3; }
+    if first >= 240 && first <= 244 { return 4; }
+    return 0;
+}
+
+func validUtf8At(value: string, index: int, width: int): bool {
+    if index + width > value.len() { return false; }
+    if width == 1 { return true; }
+    var second = int(value[index + 1]);
+    if second < 128 || second > 191 { return false; }
+    var first = int(value[index]);
+    if first == 224 && second < 160 { return false; }
+    if first == 237 && second > 159 { return false; }
+    if first == 240 && second < 144 { return false; }
+    if first == 244 && second > 143 { return false; }
+    var offset = 2;
+    while offset < width {
+        var continuation = int(value[index + offset]);
+        if continuation < 128 || continuation > 191 { return false; }
+        offset = offset + 1;
+    }
+    return true;
+}
+
+func nextWidth(value: string, index: int): int {
+    var width = utf8Width(int(value[index]));
+    if width == 0 || !validUtf8At(value, index, width) {
+        fail("input is not valid UTF-8");
+        return 1;
+    }
+    return width;
+}
+
+func normalizeLineEndings(value: string): string {
+    var pieces: Vec<string> = Vec.new();
+    var start = 0;
+    var index = 0;
+    while index < value.len() {
+        var byte = int(value[index]);
+        if byte == 13 {
+            pieces.push(value.slice(start, index));
+            pieces.push("\n");
+            if index + 1 < value.len() && int(value[index + 1]) == 10 {
+                index = index + 2;
+            } else {
+                index = index + 1;
+            }
+            start = index;
+        } else {
+            index = index + 1;
+        }
+    }
+    pieces.push(value.slice(start, value.len()));
+    return joinTextBalanced(pieces, 0, pieces.len());
+}
+
+func reverseEntries(entries: Vec<string>): void {
+    var left = 0;
+    var right = entries.len() - 1;
+    while left < right {
+        var saved = entries[left];
+        entries.set(left, entries[right]);
+        entries.set(right, saved);
+        left = left + 1;
+        right = right - 1;
+    }
+}
+
+func collectSources(directory: string, prefix: string, reverseEnumeration: bool): Vec<string> {
+    var result: Vec<string> = Vec.new();
+    var entries = listDir(directory);
+    if reverseEnumeration { reverseEntries(entries); }
+    var index = 0;
+    while index < entries.len() {
+        var name = entries[index];
+        var path = directory + "/" + name;
+        var relative = name;
+        if prefix != "" { relative = prefix + "/" + name; }
+        if fileExists(path + "/.") {
+            var nested = collectSources(path, relative, reverseEnumeration);
+            var nestedIndex = 0;
+            while nestedIndex < nested.len() {
+                result.push(nested[nestedIndex]);
+                nestedIndex = nestedIndex + 1;
+            }
+        } else if name.endsWith(".rey") && fileExists(path) {
+            result.push(relative);
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
+func pathLess(left: string, right: string): bool {
+    var leftAt = 0;
+    var rightAt = 0;
+    loop {
+        var leftEnd = leftAt;
+        while leftEnd < left.len() && left[leftEnd] != '/' { leftEnd = leftEnd + 1; }
+        var rightEnd = rightAt;
+        while rightEnd < right.len() && right[rightEnd] != '/' { rightEnd = rightEnd + 1; }
+        var leftPart = left.slice(leftAt, leftEnd);
+        var rightPart = right.slice(rightAt, rightEnd);
+        if leftPart != rightPart { return leftPart < rightPart; }
+        var leftDone = leftEnd >= left.len();
+        var rightDone = rightEnd >= right.len();
+        if leftDone || rightDone { return leftDone && !rightDone; }
+        leftAt = leftEnd + 1;
+        rightAt = rightEnd + 1;
+    }
+    return false;
+}
+
+func sortPaths(paths: Vec<string>): void {
+    var index = 1;
+    while index < paths.len() {
+        var cursor = index;
+        while cursor > 0 && pathLess(paths[cursor], paths[cursor - 1]) {
+            var saved = paths[cursor - 1];
+            paths.set(cursor - 1, paths[cursor]);
+            paths.set(cursor, saved);
+            cursor = cursor - 1;
+        }
+        index = index + 1;
+    }
+}
+
+func splitCodepoints(value: string, maximum: int): Vec<string> {
+    var result: Vec<string> = Vec.new();
+    var start = 0;
+    var index = 0;
+    var count = 0;
+    while index < value.len() {
+        if count == maximum {
+            result.push(value.slice(start, index));
+            start = index;
+            count = 0;
+        }
+        index = index + nextWidth(value, index);
+        count = count + 1;
+    }
+    if start < value.len() || result.len() == 0 { result.push(value.slice(start, value.len())); }
+    return result;
+}
+
+func upperHexDigit(value: int): string {
+    return "0123456789ABCDEF"[value].toString();
+}
+
+func escapedLiteral(value: string): string {
+    var result = "\"";
+    var index = 0;
+    while index < value.len() {
+        var byte = int(value[index]);
+        var width = nextWidth(value, index);
+        if width > 1 {
+            result = result + value.slice(index, index + width);
+        } else if byte == 34 {
+            result = result + "\\\"";
+        } else if byte == 92 {
+            result = result + "\\\\";
+        } else if byte == 123 {
+            result = result + "\\x7B";
+        } else if byte == 125 {
+            result = result + "\\x7D";
+        } else if byte == 10 {
+            result = result + "\\n";
+        } else if byte == 13 {
+            result = result + "\\r";
+        } else if byte == 9 {
+            result = result + "\\t";
+        } else if byte < 32 || byte == 127 {
+            result = result + "\\x" + upperHexDigit(byte / 16) + upperHexDigit(byte % 16);
+        } else {
+            result = result + value.slice(index, index + 1);
+        }
+        index = index + width;
+    }
+    return result + "\"";
+}
+
+func balancedConcat(parts: Vec<string>, start: int, end: int): string {
+    if end - start == 1 { return parts[start]; }
+    var middle = start + (end - start) / 2;
+    return "(" + balancedConcat(parts, start, middle) + " +\n    " + balancedConcat(parts, middle, end) + ")";
+}
+
+func joinTextBalanced(parts: Vec<string>, start: int, end: int): string {
+    if end - start == 1 { return parts[start]; }
+    var middle = start + (end - start) / 2;
+    return joinTextBalanced(parts, start, middle) + joinTextBalanced(parts, middle, end);
+}
+
+func makeModuleLines(files: Vec<string>, sourceRoot: string, runtime: bool): Vec<string> {
+    var lines: Vec<string> = Vec.new();
+    if runtime {
+        lines.push("// generated by scripts/embed-runtime.py from runtime-rey/**/*.rey.");
+        lines.push("// regenerate before building native compiler stages after runtime edits.");
+        lines.push("import frontend::graph::\x7BEmbeddedSource\x7D;");
+        lines.push("");
+        lines.push("pub func embeddedRuntimeRoot(): string \x7B return \"/__rey_embedded_runtime/runtime-rey\"; \x7D");
+        lines.push("");
+    } else {
+        lines.push("// generated by scripts/embed-stdlib.py from std/src/**/*.rey.");
+        lines.push("// regenerate before building standalone compiler stages after stdlib edits.");
+        lines.push("import frontend::graph::\x7BEmbeddedSource\x7D;");
+        lines.push("");
+        lines.push("pub func embeddedStdRoot(): string \x7B return \"/__rey_embedded_stdlib/std\"; \x7D");
+        lines.push("");
+    }
+
+    var fileIndex = 0;
+    while fileIndex < files.len() {
+        var source = normalizeLineEndings(readFile(sourceRoot + "/" + files[fileIndex]));
+        var sourceParts = splitCodepoints(source, 8192);
+        var partCalls: Vec<string> = Vec.new();
+        var partIndex = 0;
+        while partIndex < sourceParts.len() {
+            var chunks = splitCodepoints(sourceParts[partIndex], 192);
+            var literals: Vec<string> = Vec.new();
+            var chunkIndex = 0;
+            while chunkIndex < chunks.len() {
+                literals.push(escapedLiteral(chunks[chunkIndex]));
+                chunkIndex = chunkIndex + 1;
+            }
+            var sourceFunction = "embeddedRuntimeSource";
+            if !runtime { sourceFunction = "embeddedStdSource"; }
+            var partFunction = sourceFunction + fileIndex.toString() + "Part" + partIndex.toString();
+            lines.push("func " + partFunction + "(): string \x7B");
+            lines.push("    return " + balancedConcat(literals, 0, literals.len()) + ";");
+            lines.push("\x7D");
+            lines.push("");
+            partCalls.push(partFunction + "()");
+            partIndex = partIndex + 1;
+        }
+
+        var sourceFunction = "embeddedRuntimeSource";
+        if !runtime { sourceFunction = "embeddedStdSource"; }
+        lines.push("func " + sourceFunction + fileIndex.toString() + "(): string \x7B");
+        lines.push("    return " + balancedConcat(partCalls, 0, partCalls.len()) + ";");
+        lines.push("\x7D");
+        lines.push("");
+        fileIndex = fileIndex + 1;
+    }
+
+    if runtime {
+        lines.push("pub func embeddedRuntimeSources(): Vec<EmbeddedSource> \x7B");
+        lines.push("    var root = embeddedRuntimeRoot();");
+    } else {
+        lines.push("pub func embeddedStdSources(): Vec<EmbeddedSource> \x7B");
+        lines.push("    var root = embeddedStdRoot();");
+    }
+    lines.push("    var sources: Vec<EmbeddedSource> = [];");
+    fileIndex = 0;
+    while fileIndex < files.len() {
+        var sourceFunction = "embeddedRuntimeSource";
+        var relative = files[fileIndex];
+        if runtime {
+            sourceFunction = "embeddedRuntimeSource";
+        } else {
+            sourceFunction = "embeddedStdSource";
+            relative = "src/" + relative;
+        }
+        var target = "root + \"/" + relative + "\"";
+        lines.push("    sources.push(EmbeddedSource \x7B path: " + target + ", source: " + sourceFunction + fileIndex.toString() + "() \x7D);");
+        fileIndex = fileIndex + 1;
+    }
+    lines.push("    return sources;");
+    lines.push("\x7D");
+    lines.push("");
+    return lines;
+}
+
+func renderModule(files: Vec<string>, sourceRoot: string, runtime: bool): string {
+    var lines = makeModuleLines(files, sourceRoot, runtime);
+    var pieces: Vec<string> = Vec.new();
+    var index = 0;
+    while index < lines.len() {
+        if index > 0 { pieces.push("\n"); }
+        pieces.push(lines[index]);
+        index = index + 1;
+    }
+    return joinTextBalanced(pieces, 0, pieces.len());
+}
+
+func renderInventory(files: Vec<string>, stdlib: bool): string {
+    var pieces: Vec<string> = Vec.new();
+    var index = 0;
+    while index < files.len() {
+        var line = files[index];
+        if stdlib { line = "src/" + line; }
+        pieces.push(line + "\n");
+        index = index + 1;
+    }
+    if pieces.len() == 0 { return ""; }
+    return joinTextBalanced(pieces, 0, pieces.len());
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 3 && argv.len() != 4 {
+        eprintln("Usage: rey-embed <source-root> <prepared-staging-root> [--reverse-enumeration]");
+        exit(2);
+        return;
+    }
+    var reverseEnumeration = false;
+    if argv.len() == 4 {
+        if argv[3] != "--reverse-enumeration" { fail("unknown option: " + argv[3]); }
+        reverseEnumeration = true;
+    }
+    var runtimeRoot = argv[1] + "/runtime-rey";
+    var stdlibRoot = argv[1] + "/std/src";
+    if !fileExists(runtimeRoot + "/main.rey") { fail("missing runtime source directory or main.rey: " + runtimeRoot); }
+    if !fileExists(stdlibRoot + "/core/main.rey") { fail("missing stdlib source directory or core/main.rey: " + stdlibRoot); }
+    var runtimeFiles = collectSources(runtimeRoot, "", reverseEnumeration);
+    var stdlibFiles = collectSources(stdlibRoot, "", reverseEnumeration);
+    if runtimeFiles.len() == 0 { fail("no runtime Rey sources found under " + runtimeRoot); }
+    if stdlibFiles.len() == 0 { fail("no standard-library Rey sources found under " + stdlibRoot); }
+    sortPaths(runtimeFiles);
+    sortPaths(stdlibFiles);
+
+    var runtimeModule = renderModule(runtimeFiles, runtimeRoot, true);
+    var stdlibModule = renderModule(stdlibFiles, stdlibRoot, false);
+    var runtimeInventory = renderInventory(runtimeFiles, false);
+    var stdlibInventory = renderInventory(stdlibFiles, true);
+    var stageRoot = argv[2];
+    var runtimeOutput = stageRoot + "/rey-compiler/src/frontend/embedded_runtime";
+    var stdlibOutput = stageRoot + "/rey-compiler/src/frontend/embedded_stdlib";
+    var inventoryOutput = stageRoot + "/embedded-source";
+    // The caller creates this fresh staging layout before invoking the tool.
+    writeFile(runtimeOutput + "/main.rey", runtimeModule);
+    writeFile(stdlibOutput + "/main.rey", stdlibModule);
+    writeFile(inventoryOutput + "/runtime.inventory", runtimeInventory);
+    writeFile(inventoryOutput + "/stdlib.inventory", stdlibInventory);
+}

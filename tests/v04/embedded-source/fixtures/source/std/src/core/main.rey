@@ -1,0 +1,2 @@
+// std core
+pub const name = "std";
