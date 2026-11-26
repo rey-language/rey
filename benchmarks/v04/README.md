@@ -1,33 +1,77 @@
-# Rey v0.4 matched baseline
+# Rey v0.4 matched native benchmarks
 
-This harness is an initial M0 baseline slice. It builds one source file and one executable per language/workload pair, so each competitor build contains the same single workload as the Rey build. The fixtures are independent programs with the same runtime input, signed 64-bit arithmetic, deterministic checksum, and processed-item count.
+The runner builds and directly executes one fixture per language/workload cell.
+The default matrix is C, C++, Rust, Zig, Go, and Rey across numeric, churn,
+parse, and stream workloads. Every output is checked against an independent
+Python oracle. Python fixtures remain available as an optional comparison with
+`--languages python,rey`.
 
 ## Run
 
-From the `rey-lang` repository root:
-
 ```sh
-python3 benchmarks/v04/run.py
-python3 benchmarks/v04/run.py --languages c,rey --workloads numeric,churn --size 20 --repeats 1 --warmups 0
-python3 benchmarks/v04/run.py --languages rust,go --workloads numeric --size 100000
+python3 -B benchmarks/v04/run.py \
+  --rey "$SEED" \
+  --languages c,cpp,rust,zig,go,rey \
+  --workloads numeric,churn,parse,stream \
+  --repeats 3 --warmups 1 --timeout 600 \
+  --output-dir "$W/bench"
 ```
 
-The default run uses 1,000,000 numeric iterations and 256 collection rounds. `--size` overrides the runtime input for every selected workload. Numeric is bounded at 10,000,000 iterations; churn is bounded at 4,096 rounds because the current Rey runtime does not generally reclaim allocations before process exit. Each churn round constructs an empty vector, appends 32 signed 64-bit values, traverses it for the checksum, then ends its logical lifetime. C uses a small dynamic-vector implementation; Python uses `array('q')` so its elements are signed 64-bit values.
+Supply `--baseline-rey "$BASE"` to compile and run a paired baseline for each
+Rey workload. The candidate and baseline compile the same Rey fixture from the
+same source tree with the same native flags. Their build time, image hash/size,
+startup estimate, run RSS, full-run median, workload estimate, and relative
+timing are retained in `results.json` and `table.md`.
 
-Select language and workload subsets with comma-separated lists. `--rey` or `REY_BIN` selects the Rey compiler seed; `--runtime-dir` or `REY_RUNTIME_DIR` selects the directory containing `librey_rt.a`. An explicit `--rey` takes precedence over automatic defaults. Without an explicit selection, the runner prefers the packaged v0.3.1 seed when present and then falls back to `build/rey`. For a seed built outside this checkout, pass its matching runtime directory explicitly.
+`--rey` selects the direct native Rey CLI. Its fixture build is equivalent to:
 
-Results, executables, and raw process output are written under `build/v04/benchmarks/` by default. Use `--output-dir` to choose another artifact directory. The JSON report records host and source revision information, compiler versions and hashes, source/binary/runtime hashes, exact commands, build and run samples, statuses, normalized output, and median plus median absolute deviation. Failed or unavailable toolchains remain explicit records; no timings are invented for them. Python's build is `not_applicable`, not a zero-second native build.
+```sh
+rey build SOURCE -o OUTPUT --target linux-x64 --regions --managed
+```
 
-## Measurement boundaries
+It uses the managed runtime embedded in the compiler. No legacy C runtime
+archive, helper `chmod`, fast exit, packed-output trust, or relaxed region flag
+is used. Every benchmark compiler invocation goes through B01's
+`scripts/v04-linux-x64-budget.sh run` wrapper, which takes the shared build lock,
+checks available memory, logs the producer output, and applies `nice -n 19` and
+GNU `timeout`. Program invocations also use `nice -n 19` and GNU `timeout`; on
+Linux `/usr/bin/time -v` records peak RSS.
 
-- Run times include a fresh process start and output. Warmups are recorded separately from measured runs.
-- Each measured build writes a separate executable, but compiler caches are left in their normal state. Build numbers describe the observed cache state; they are not cold, no-op, or incremental-build measurements.
-- The runner does not measure compiler startup separately, steady-state in-process throughput, cache invalidation, allocation counts, copied bytes, or managed live/reserved bytes.
-- Peak RSS is captured through `/usr/bin/time` on macOS (bytes) and Linux (KiB). Other systems and malformed/missing time output are recorded as unavailable.
-- C/C++/Rust/Zig use optimized native builds, Go uses its default optimizing build, and Python uses the selected interpreter. Rey uses the selected seed's defaults. These options and the selected seed are recorded; they are not a claim that every optimizer mode is semantically identical.
-- The expected checksum and processed count are computed independently by the runner and checked for each warmup and measured run. This catches output/input-consumption mismatches but does not prove that two implementations have identical machine-level work.
-- These two synthetic workloads are baseline tooling checks, not a universal language ranking or evidence about garbage collection. Results are specific to the recorded host, toolchain, seed, and runtime.
+## Workloads and oracles
 
-The fixtures deliberately avoid external packages. A missing compiler produces an `unavailable` record, while build failures, timeouts, nonzero exits, and output mismatches retain their raw samples and status.
+| Workload | Input size | Work measured | Independent result |
+|---|---|---|---|
+| `numeric` | Iterations | Signed 64-bit linear congruential state and checksum | Python recomputation of every state |
+| `churn` | Vector rounds | Construct, fill, traverse, and discard a 32-value vector | Python recomputation of each vector value |
+| `parse` | Decimal tokens | Repeatedly parse and fold eight signed decimal argument strings | Python integer parsing and token-cycle sum |
+| `stream` | Records | Constant-space generated-record filter and rolling checksum fold | Python execution of the record state machine |
 
-The Zig fixtures use the Zig 0.16 `std.process.Init` entrypoint and argument API. Older Zig versions may require fixture adaptation; failures are retained in the report.
+All programs print the same `checksum=<integer> processed=<integer>` line and
+must exit 0. `parse` processes the fixed signed tokens `11,-23,37,-41,53,-67,79,-89`.
+`stream` generates and consumes one record at a time without materializing a
+collection. It measures a streaming transform, not file I/O.
+
+The default sizes are 1,000,000 numeric iterations, 256 churn rounds, 250,000
+decimal tokens, and 1,000,000 stream records. `--size` overrides all selected
+workloads. Limits are recorded in the JSON report and enforced by the runner.
+
+## Measurement and artifacts
+
+Each native cell compiles a fresh executable `repeats` times. It then uses the
+last image for a zero-size startup probe, the requested warmup count, and the
+recorded workload samples. The table reports compile median, startup median,
+full run samples (in JSON), estimated workload median, run RSS median, and
+image size. The startup estimate is the median wall time for the same executable
+and arguments at size zero; workload time is `max(0, full-run median - startup
+median)`. This is a process-level estimate, not an in-process timer.
+
+The report records source and executable SHA-256 values, exact wrapped commands,
+compiler versions and options, sizes, host CPU/OS, compile time, startup and
+workload timings, peak RSS, and image size. Build caches are left in their
+normal state and are not described as cold. `table.md` is the compact report;
+`results-<run-id>.json` preserves all samples and raw stdout/stderr. Failed,
+missing, timed-out, skipped, or output-mismatching cells are not counted as
+valid and make the command exit nonzero.
+
+The workloads are synthetic matched checks, not a universal language ranking
+or a claim about file parsing, garbage collection, or real application speed.
