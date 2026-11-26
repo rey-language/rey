@@ -683,8 +683,8 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
         __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 { return -1; }
     var separator = 20;
     while separator < protocolLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 { separator += 1; }
-    if separator == prefix.len() || separator >= protocolLength { return 1; }
-    var imagePathLength = separator - prefix.len();
+    if separator == 20 || separator >= protocolLength { return 1; }
+    var imagePathLength = separator - 20;
     var mapPathStart = separator + 1;
     var mapPathLength = protocolLength - mapPathStart;
     if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 { return 1; }
@@ -695,8 +695,8 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
         if __reyRawToInt(mapPath) >= 0 { __reyRawUnmap(mapPath, 4096); }
         return 1;
     }
-    index = 0;
-    while index < imagePathLength { __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, prefix.len() + index))); index += 1; }
+    var index = 0;
+    while index < imagePathLength { __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; }
     __reyRawStoreByte(containersAddressAt(imagePath, imagePathLength), 0);
     index = 0;
     while index < mapPathLength { __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocolData, mapPathStart + index))); index += 1; }
