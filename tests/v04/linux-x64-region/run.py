@@ -508,18 +508,20 @@ class RegionGate:
         out_bin = self.out / "bin"
         out_bin.mkdir(parents=True, exist_ok=True)
         driver_source = self.compiler_stage("region-driver", GATE_DIR / "region-driver.rey")
+        # Harness binaries use S3's runtime. Every fixture they check or emit
+        # is explicitly compiled against the copied, hashed current runtime.
         self.region_driver = self.build_executable(
             "build-current-source-region-driver", driver_source / "main.rey",
-            out_bin / "region-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
+            out_bin / "region-driver", heavy=True, timeout=1200)
         ir_source = self.compiler_stage("ir-driver", GATE_DIR / "ir-driver.rey")
         self.ir_driver = self.build_executable(
             "build-current-source-ir-driver", ir_source / "main.rey",
-            out_bin / "ir-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
+            out_bin / "ir-driver", heavy=True, timeout=1200)
         runtime_evaluator_source = self.compiler_stage(
             "runtime-evaluator-driver", GATE_DIR / "runtime-evaluator-driver.rey")
         self.runtime_evaluator_driver = self.build_executable(
             "build-current-source-runtime-evaluator-driver", runtime_evaluator_source / "main.rey",
-            out_bin / "runtime-evaluator-driver", runtime_root=self.runtime, heavy=True, timeout=1200)
+            out_bin / "runtime-evaluator-driver", heavy=True, timeout=1200)
         self.results["drivers"] = {
             "region": {"path": str(self.region_driver), "sha256": digest_file(self.region_driver)},
             "ir": {"path": str(self.ir_driver), "sha256": digest_file(self.ir_driver)},
