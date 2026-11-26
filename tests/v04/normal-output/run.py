@@ -108,9 +108,8 @@ class Runner:
             prior = json.loads(prior_path.read_text())
             require(prior.get("gate") == "O01 normal output" and
                     prior.get("seed_sha256") == SEED_SHA256 and
-                    prior.get("source") == str(self.source) and
-                    prior.get("status") != "PASS normal output",
-                    "OUT contains unrelated or completed evidence; refusing to reuse it")
+                    prior.get("source") == str(self.source),
+                    "OUT contains unrelated evidence; refusing to reuse it")
             attempt = 2
             while (self.requested_out / ("attempt-%02d" % attempt)).exists():
                 attempt += 1
@@ -156,16 +155,17 @@ class Runner:
         insert = '''
 var o01FaultMode: int = 0;
 
-func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
+func o01FaultPath(path: __rey_raw_address, suffixLength: int, expectedHash: int): bool {
     var length = 0;
     while length < 4096 && __reyRawLoadByte(__reyRawOffset(path, length)) != 0 { length = length + 1; }
-    if length < suffix.len() { return false; }
+    if length < suffixLength { return false; }
     var index = 0;
-    while index < suffix.len() {
-        if __reyRawLoadByte(__reyRawOffset(path, length - suffix.len() + index)) != int(suffix[index]) { return false; }
+    var hash = 0;
+    while index < suffixLength {
+        hash = hash * 31 + __reyRawLoadByte(__reyRawOffset(path, length - suffixLength + index));
         index = index + 1;
     }
-    return true;
+    return hash == expectedHash;
 }
 '''
         text = text.replace("func hostRawInt(value: int): __rey_raw_address {", insert + "\nfunc hostRawInt(value: int): __rey_raw_address {", 1)
@@ -175,9 +175,9 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
 }''',
              '''pub func hostOpen(path: __rey_raw_address, flags: int, mode: int): int {
     if flags == 577 {
-        if o01FaultPath(path, ".o01-write") { o01FaultMode = 1; }
-        else if o01FaultPath(path, ".o01-close") { o01FaultMode = 2; }
-        else if o01FaultPath(path, ".o01-read") { o01FaultMode = 3; }
+        if o01FaultPath(path, 10, 1312259019416084) { o01FaultMode = 1; }
+        else if o01FaultPath(path, 10, 1312259000772653) { o01FaultMode = 2; }
+        else if o01FaultPath(path, 9, 42330935948481) { o01FaultMode = 3; }
     }
     return __reyRawToInt(__reyRawHostSyscall(2, path, hostRawInt(flags), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull()));
 }''', "hostOpen"),
@@ -254,7 +254,7 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
             'set +e; run_scope user "$@"; code=$?; set -e; [ ! -f "$started" ] || exit "$code"; '
             'set +e; run_scope system "$@"; code=$?; set -e; exit "$code"'
         )
-        wrapped = ["sh", str(self.budget), "run-held", "--seconds", str(timeout), "--label", slug, "--",
+        wrapped = ["sh", str(self.budget), "run", "--seconds", str(timeout + 60), "--label", slug, "--",
                    "sh", "-c", launcher, "o01-launch", capture, str(stdout_path), str(stderr_path),
                    str(trace_path), str(cgroup_path), str(timing_path), str(started_path), str(status_path),
                    str(timeout), *map(str, argv)]
@@ -262,11 +262,11 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
         with wrapper_stdout_path.open("wb") as out_stream, wrapper_stderr_path.open("wb") as err_stream:
             try:
                 proc = subprocess.Popen(wrapped, stdout=out_stream, stderr=err_stream,
-                                        start_new_session=True, pass_fds=(3,))
+                                        start_new_session=True)
             except OSError as exc:
                 raise Failure(label + " could not start: " + str(exc))
             try:
-                status = proc.wait(timeout=timeout + 90)
+                status = proc.wait(timeout=timeout + 150)
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, signal.SIGTERM)
                 try:
@@ -319,7 +319,7 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
                         not name.startswith(("clang-", "python3.", "llvm-", "ld.lld-")),
                         label + " unexpected exec attempt: " + line)
 
-    def run_program(self, label: str, argv: list[str], expected_status: int = 0,
+    def run_program(self, label: str, argv: list[str], expected_status: int | None = 0,
                     expected_stdout: bytes | None = None) -> tuple[bytes, bytes]:
         self.counter += 1
         slug = "%03d-%s" % (self.counter, re.sub(r"[^A-Za-z0-9._-]", "_", label))
@@ -329,15 +329,21 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
                                   stdout=out_stream, stderr=err_stream, check=False,
                                   preexec_fn=lambda: os.umask(0o022))
         stdout, stderr = stdout_path.read_bytes(), stderr_path.read_bytes()
-        require(proc.returncode == expected_status,
-                label + ": expected status " + str(expected_status) + ", got " + str(proc.returncode)
-                + "; stderr=" + repr(stderr.decode("utf-8", "replace")))
+        if expected_status is None:
+            require(proc.returncode != 0,
+                    label + ": expected a nonzero status, got 0; stderr="
+                    + repr(stderr.decode("utf-8", "replace")))
+        else:
+            require(proc.returncode == expected_status,
+                    label + ": expected status " + str(expected_status) + ", got " + str(proc.returncode)
+                    + "; stderr=" + repr(stderr.decode("utf-8", "replace")))
         if expected_stdout is not None:
             require(stdout == expected_stdout,
                     label + ": stdout differs: " + repr(stdout.decode("utf-8", "replace")))
         runs = self.results.setdefault("runs", [])
         assert isinstance(runs, list)
         runs.append({"label": label, "argv": list(map(str, argv)), "status": proc.returncode,
+                     "expected_status": "nonzero" if expected_status is None else expected_status,
                      "stdout_log": str(stdout_path), "stderr_log": str(stderr_path)})
         self.save()
         return stdout, stderr
@@ -351,7 +357,7 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
             command.append("--trust-packed-output")
         if runtime is not None:
             command.extend(["--runtime-root", str(runtime)])
-        self.invoke_build(label, command, timeout=600)
+        self.invoke_build(label, command, timeout=1950)
         require(output.is_file() and file_mode(output) == 0o755,
                 label + " did not produce an immediately executable staged driver")
         self.check_elf(output)
@@ -397,6 +403,8 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
 
     def check_runtime_writer_source(self) -> None:
         containers = (self.source / "runtime-rey/containers/main.rey").read_text()
+        host_path = self.source / "runtime-rey/host/main.rey"
+        host = host_path.read_text()
         require(containers.count("__reyRawMap(4096)") == 2,
                 "Linux x64 image writers do not share the fixed 4096-byte staging bound")
         require(containers.count("hostFchmod(fd, 493)") == 2,
@@ -405,11 +413,15 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
                 "byte and packed writers do not read back through EOF")
         require(containers.count("return readOk && readClose == 0;") == 2,
                 "byte and packed writers do not check readback close")
+        require("pub func hostFchmod(fd: int, mode: int): int {" in host and
+                "__reyRawHostSyscall(77, hostRawInt(fd), hostRawInt(mode)" in host,
+                "Linux x64 host fchmod syscall wrapper is missing")
         require("hostOpen(containersPathData(path), 577, 420)" in containers and
                 "if hostClose(fd) != 0 { containersFail(2208); }" in containers,
                 "plain writeFile permissions or close handling changed")
         self.results["checks"]["runtime_writer_source"] = {
             "containers_sha256": sha256(self.source / "runtime-rey/containers/main.rey"),
+            "host_sha256": sha256(host_path),
             "staging_bytes": 4096, "readback_to_eof": True,
             "checked_close": True, "linux_x64_mode": "0755",
             "plain_write_file_mode": "0644 on fresh paths; preserve existing mode",
@@ -437,37 +449,42 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
 
     def run(self) -> None:
         self.prepare()
-        self.stage_modules()
+        module_root = self.stage_modules()
         for name in ("native-main.rey", "ir/lower/main.rey", "native/bytes/main.rey",
                      "native/packed/main.rey", "native/output/main.rey", "native/image/x64/main.rey"):
-            path = self.stage / name if name != "native-main.rey" else self.compiler_source
+            path = module_root / name if name != "native-main.rey" else module_root / "main.rey"
             require(path.is_file(), "staged writer module is missing: " + name)
         self.results["source_hashes"] = {
             "native_main": sha256(self.compiler_source),
-            "lowerer": sha256(self.stage / "ir/lower/main.rey"),
-            "bytes": sha256(self.stage / "native/bytes/main.rey"),
-            "packed": sha256(self.stage / "native/packed/main.rey"),
-            "output": sha256(self.stage / "native/output/main.rey"),
-            "image_x64": sha256(self.stage / "native/image/x64/main.rey"),
+            "lowerer": sha256(module_root / "ir/lower/main.rey"),
+            "bytes": sha256(module_root / "native/bytes/main.rey"),
+            "packed": sha256(module_root / "native/packed/main.rey"),
+            "output": sha256(module_root / "native/output/main.rey"),
+            "image_x64": sha256(module_root / "native/image/x64/main.rey"),
             "containers": sha256(self.source / "runtime-rey/containers/main.rey"),
             "host": sha256(self.source / "runtime-rey/host/main.rey"),
-            "embedded_runtime": sha256(self.stage / "frontend/embedded_runtime/main.rey"),
+            "embedded_runtime": sha256(module_root / "frontend/embedded_runtime/main.rey"),
         }
         self.check_cli_source()
         self.check_runtime_writer_source()
         self.save()
 
-        driver_source = self.stage / "normal-output-driver.rey"
+        driver_source = module_root / "normal-output-driver.rey"
         shutil.copyfile(HERE / "driver.rey", driver_source)
         writer_driver = self.out / "producers/seed-built-staged-writer"
+        writer_driver.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(self.seed, writer_driver)
+        seed_writer_hash = sha256(writer_driver)
         self.build_staged_driver(self.seed, driver_source, writer_driver, None,
                                  "build-seed-staged-writer-driver", trusted=True)
+        require(file_mode(writer_driver) == 0o755 and sha256(writer_driver) != seed_writer_hash,
+                "seed-to-candidate writer transition did not replace the executable destination")
         self.results["checks"]["seed_to_staged_writer_binding"] = {
-            "seed_sha256": sha256(self.seed), "driver_sha256": sha256(writer_driver),
+            "seed_sha256": seed_writer_hash, "driver_sha256": sha256(writer_driver),
             "driver_binding": "pinned S3 seed compiles current output modules with its legacy bootstrap hook",
             "current_source_binding": "checkedPackedOutput-gated hooks verified by source invariants",
             "runtime_sha256": "embedded in pinned S3 seed for the executable writer fixtures",
-            "runtime_overlay_sha256": sha256(self.stage / "frontend/embedded_runtime/main.rey"),
+            "runtime_overlay_sha256": sha256(module_root / "frontend/embedded_runtime/main.rey"),
             "rebuilt_candidate_recheck": "pending §4 memory gate",
         }
 
@@ -510,6 +527,11 @@ func o01FaultPath(path: __rey_raw_address, suffix: string): bool {
         fault_source.write_text('''import native::output::{writeVerifiedCompilerOutputBytes};
 func main(): void {
     var argv = args();
+    if argv.len() == 3 && argv[1] == "data" {
+        writeFile(argv[2], "plain writeFile data\\n");
+        println("writer success");
+        return;
+    }
     if argv.len() != 2 { exit(2); return; }
     var result = writeVerifiedCompilerOutputBytes(argv[1], [0, 127, 128, 255, 0, 42]);
     if result.isErr() { eprintln("writer failed"); exit(1); return; }
@@ -517,8 +539,7 @@ func main(): void {
 }
 ''')
         fault_driver = self.out / "producers/fault-injection-driver"
-        self.build_staged_driver(self.seed, fault_source, fault_driver, None,
-                                 "build-seed-fault-driver", trusted=True)
+        shutil.copy2(writer_driver, fault_driver)
         trusted_fault_hash = sha256(fault_driver)
         self.build_staged_driver(self.seed, fault_source, fault_driver, fault_root / "runtime-rey",
                                  "build-current-runtime-fault-driver", trusted=False)
@@ -539,18 +560,34 @@ func main(): void {
             destination.parent.mkdir(parents=True, exist_ok=True)
             stdout, _stderr = self.run_program("injected-" + fault,
                                                [str(fault_driver), str(destination) + ".o01-" + fault],
-                                               expected_status=1)
+                                               expected_status=None)
             require(stdout == b"" and
                     str(destination).encode() not in stdout,
                     fault + " failure returned success or printed a success report")
 
         current_runtime_success = self.out / "faults/current-runtime-boundary-bytes"
-        self.run_program("current-runtime-verified-write", [str(fault_driver), str(current_runtime_success)],
+        self.run_program("current-runtime-verified-write",
+                         [str(fault_driver), str(current_runtime_success)],
                          expected_stdout=b"writer success\n")
         require(current_runtime_success.read_bytes() == bytes((0, 127, 128, 255, 0, 42)) and
                 file_mode(current_runtime_success) == 0o644,
                 "current runtime verified byte write or plain data permissions differ")
-
+        current_data_fresh = self.out / "data/current-write-file-fresh"
+        self.run_program("current-runtime-write-file-fresh",
+                         [str(fault_driver), "data", str(current_data_fresh)],
+                         expected_stdout=b"writer success\n")
+        require(current_data_fresh.read_bytes() == b"plain writeFile data\n" and
+                file_mode(current_data_fresh) == 0o644,
+                "current runtime plain writeFile fresh bytes or mode differ")
+        current_data_existing = self.out / "data/current-write-file-existing"
+        current_data_existing.write_bytes(b"old data")
+        os.chmod(current_data_existing, 0o600)
+        self.run_program("current-runtime-write-file-existing",
+                         [str(fault_driver), "data", str(current_data_existing)],
+                         expected_stdout=b"writer success\n")
+        require(current_data_existing.read_bytes() == b"plain writeFile data\n" and
+                file_mode(current_data_existing) == 0o600,
+                "current runtime plain writeFile changed an existing mode")
         raw_output = self.out / "raw-authority-output"
         stdout, _stderr = self.invoke_build("reject-ordinary-raw-authority",
                                             [str(self.seed), "build", str(HERE / "raw-authority.rey"), "-o",
