@@ -157,27 +157,34 @@ class Runner:
         source = self.runtime / "containers/main.rey"
         text = source.read_text()
         require("var containersOutputTempSequence: int = 1;" in text, "O02 output runtime marker is missing")
+        protected_input_path = str(self.inputs / "fixture.rey")
+        protected_input_bytes = protected_input_path.encode()
+        protected_input_storage = len(protected_input_bytes) + 1
+
+        def cstring_match(value_name: str, expected: str) -> str:
+            encoded = expected.encode()
+            checks = [
+                "__reyRawLoadByte(containersAddressAt(%s, %d)) == %d" % (value_name, index, byte)
+                for index, byte in enumerate(encoded)
+            ]
+            checks.append("__reyRawLoadByte(containersAddressAt(%s, %d)) == 0" % (value_name, len(encoded)))
+            return " &&\n        ".join(checks)
+
+        protected_input_stores = "\n".join(
+            "    __reyRawStoreByte(containersAddressAt(value, %d), %d);" % (index, byte)
+            for index, byte in enumerate(protected_input_bytes)
+        )
+        helper = """
+func containersO02ProtectedInputPath(): __rey_raw_address {
+    var value = __reyRawMap(%d);
+%s
+    __reyRawStoreByte(containersAddressAt(value, %d), 0);
+    return value;
+}
+""" % (protected_input_storage, protected_input_stores, len(protected_input_bytes))
         text = text.replace("var containersOutputTempSequence: int = 1;",
                             "var containersOutputTempSequence: int = 1;\nvar containersO02FailWriteCountdown = -1;\n" +
                             "var containersO02RacedImage = false;\nvar containersO02RacedMap = false;", 1)
-        helper = '''
-func containersO02CStringEqualsBytes(value: __rey_raw_address, expected: Vec<int>): bool {
-    var index = 0;
-    while index < expected.len() {
-        if __reyRawLoadByte(containersAddressAt(value, index)) != expected[index] { return false; }
-        index += 1;
-    }
-    return __reyRawLoadByte(containersAddressAt(value, expected.len())) == 0;
-}
-
-func containersO02CStringFromBytes(expected: Vec<int>): __rey_raw_address {
-    var value = __reyRawMap(expected.len() + 1);
-    var index = 0;
-    while index < expected.len() { __reyRawStoreByte(containersAddressAt(value, index), expected[index]); index += 1; }
-    __reyRawStoreByte(containersAddressAt(value, expected.len()), 0);
-    return value;
-}
-'''
         text = text.replace("var containersO02FailWriteCountdown = -1;",
                             "var containersO02FailWriteCountdown = -1;\n" + helper, 1)
         write_anchor = "func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {\n    var offset = 0;"
@@ -191,33 +198,28 @@ func containersO02CStringFromBytes(expected: Vec<int>): __rey_raw_address {
         map_failure_image = str(self.out / "faults/map-write-failure/image")
         path_anchor = "__reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);"
         require(path_anchor in text, "O02 pair path parser is missing")
-        fault_path_bytes = "[" + ", ".join(str(value) for value in image_path.encode()) + "]"
-        map_failure_path_bytes = "[" + ", ".join(str(value) for value in map_failure_image.encode()) + "]"
         text = text.replace(path_anchor,
-                            path_anchor + "\n    if containersO02CStringEqualsBytes(imagePath, " + fault_path_bytes + ") { containersO02FailWriteCountdown = 0; }" +
-                            "\n    if containersO02CStringEqualsBytes(imagePath, " + map_failure_path_bytes + ") { containersO02FailWriteCountdown = 2; }", 1)
+                            path_anchor + "\n    if " + cstring_match("imagePath", image_path) + " { containersO02FailWriteCountdown = 0; }" +
+                            "\n    if " + cstring_match("imagePath", map_failure_image) + " { containersO02FailWriteCountdown = 2; }", 1)
         rename_start = "func containersHostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {\n    return hostRenameat2(oldDirectory, oldPath, newDirectory, newPath, flags);\n}"
         require(rename_start in text, "O02 rename hook is missing")
-        protected_input_bytes = "[" + ", ".join(str(value) for value in str(self.inputs / "fixture.rey").encode()) + "]"
         rename_injected = f'''func containersHostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {{
-    if flags == 2 && containersO02CStringEqualsBytes(newPath, [102, 97, 105, 108, 45, 109, 97, 112]) {{ return -5; }}
-    if flags == 2 && containersO02CStringEqualsBytes(newPath, [114, 101, 110, 97, 109, 101, 45, 105, 109, 97, 103, 101]) {{ return -5; }}
-    if flags == 2 && !containersO02RacedImage && containersO02CStringEqualsBytes(newPath, [114, 97, 99, 101, 45, 105, 109, 97, 103, 101]) {{
+    if flags == 2 && {cstring_match("newPath", "fail-map")} {{ return -5; }}
+    if flags == 2 && {cstring_match("newPath", "rename-image")} {{ return -5; }}
+    if flags == 2 && !containersO02RacedImage && {cstring_match("newPath", "race-image")} {{
         containersO02RacedImage = true;
         containersHostUnlinkat(newDirectory, newPath, 0);
-        var protectedInputBytes = {protected_input_bytes};
-        var protectedInput = containersO02CStringFromBytes(protectedInputBytes);
+        var protectedInput = containersO02ProtectedInputPath();
         var linked = __reyRawToInt(__reyRawHostSyscall(265, __reyRawFromInt(-100), protectedInput, __reyRawFromInt(newDirectory), newPath, __reyRawFromInt(0), __reyRawNull()));
-        __reyRawUnmap(protectedInput, protectedInputBytes.len() + 1);
+        __reyRawUnmap(protectedInput, {protected_input_storage});
         if linked != 0 {{ return -5; }}
     }}
-    if flags == 2 && !containersO02RacedMap && containersO02CStringEqualsBytes(newPath, [114, 97, 99, 101, 45, 109, 97, 112]) {{
+    if flags == 2 && !containersO02RacedMap && {cstring_match("newPath", "race-map")} {{
         containersO02RacedMap = true;
         containersHostUnlinkat(newDirectory, newPath, 0);
-        var protectedInputBytes = {protected_input_bytes};
-        var protectedInput = containersO02CStringFromBytes(protectedInputBytes);
+        var protectedInput = containersO02ProtectedInputPath();
         var linked = __reyRawToInt(__reyRawHostSyscall(265, __reyRawFromInt(-100), protectedInput, __reyRawFromInt(newDirectory), newPath, __reyRawFromInt(0), __reyRawNull()));
-        __reyRawUnmap(protectedInput, protectedInputBytes.len() + 1);
+        __reyRawUnmap(protectedInput, {protected_input_storage});
         if linked != 0 {{ return -5; }}
     }}
     return hostRenameat2(oldDirectory, oldPath, newDirectory, newPath, flags);
