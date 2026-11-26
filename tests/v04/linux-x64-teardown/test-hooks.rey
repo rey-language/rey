@@ -1,0 +1,70 @@
+
+// Test-only runtime instrumentation, appended to the staged copy by run.py.
+pub func regionTestNullAddress(): __rey_raw_address {
+    return __reyRawNull();
+}
+
+pub func regionTestSameAddress(left: __rey_raw_address, right: __rey_raw_address): bool {
+    return __reyRawEqual(left, right);
+}
+
+func regionTestChunkFor(object: __rey_raw_address): __rey_raw_address {
+    var data = regionAddressAt(object, -72);
+    var record = regionAddressAt(data, 0);
+    var group = __reyRawLoadAddress(regionAddressAt(record, 8));
+    return __reyRawLoadAddress(regionAddressAt(group, 32));
+}
+
+func regionTestPrintMap(kind: string, base: __rey_raw_address, extent: int): void {
+    println("owned-map " + kind + " " + __reyRawToInt(base).toString() + " " + extent.toString());
+}
+
+pub func regionTestPrintDirectObject(object: __rey_raw_address): void {
+    var chunk = regionTestChunkFor(object);
+    regionTestPrintMap("direct", __reyRawLoadAddress(regionAddressAt(chunk, 16)), __reyRawLoadI64(regionAddressAt(chunk, 24)));
+}
+
+pub func regionTestPrintContextMaps(context: __rey_raw_address): void {
+    regionTestPrintMap("context", context, 304);
+    regionTestPrintMap("program", __reyRawLoadAddress(regionAddressAt(context, 16)), 128);
+    var slab = __reyRawLoadAddress(regionAddressAt(context, 208));
+    var slabCount = __reyRawLoadI64(regionAddressAt(context, 216));
+    var steps = 0;
+    while !__reyRawEqual(slab, __reyRawNull()) {
+        if steps >= slabCount { regionFail(2299); return; }
+        regionTestPrintMap("slab", slab, 262144);
+        slab = __reyRawLoadAddress(regionAddressAt(slab, 0));
+        steps = steps + 1;
+    }
+    if steps != slabCount { regionFail(2299); }
+}
+
+pub func regionTestCorrupt(context: __rey_raw_address, firstObject: __rey_raw_address, secondObject: __rey_raw_address, mode: int): void {
+    var chunk = regionTestChunkFor(firstObject);
+    if mode == 1 {
+        __reyRawStoreI64(regionAddressAt(chunk, 32), 9223372036854770000);
+    } else if mode == 2 {
+        var wrongOwner = regionCreate(context);
+        __reyRawStoreAddress(regionAddressAt(chunk, 40), wrongOwner);
+    } else if mode == 3 {
+        __reyRawStoreI64(regionAddressAt(chunk, 24), __reyRawLoadI64(regionAddressAt(chunk, 24)) + 1);
+    } else if mode == 4 {
+        var wrongBase = __reyRawMap(8192);
+        if __reyRawEqual(wrongBase, __reyRawNull()) { regionFail(2299); return; }
+        println("unowned-map wrong-base " + __reyRawToInt(wrongBase).toString() + " 8192");
+        __reyRawStoreAddress(regionAddressAt(chunk, 16), wrongBase);
+    } else if mode == 5 {
+        var secondChunk = regionTestChunkFor(secondObject);
+        __reyRawStoreAddress(regionAddressAt(secondChunk, 16), __reyRawLoadAddress(regionAddressAt(chunk, 16)));
+    } else if mode == 7 {
+        __reyRawStoreI64(regionAddressAt(context, 56), __reyRawLoadI64(regionAddressAt(context, 56)) + 1);
+    } else {
+        regionFail(2299);
+    }
+}
+
+pub func regionTestCorruptSlabLinks(context: __rey_raw_address): void {
+    var slab = __reyRawLoadAddress(regionAddressAt(context, 208));
+    if __reyRawEqual(slab, __reyRawNull()) { regionFail(2299); return; }
+    __reyRawStoreAddress(slab, __reyRawFromInt(1));
+}

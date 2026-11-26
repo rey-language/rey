@@ -1,0 +1,165 @@
+import layout::{layoutRegisterVariable, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedRegionCreate, managedRegionEnd, managedLiveObjects, managedMappedDirectRequestedBytes, managedMappedDirectBlockCount, managedMappedSlabBytes, managedCachedBlockBytes, managedAllocateSized};
+import regions::{regionContextCreate, regionContextDestroy, regionCurrent, regionHandleCreate, regionHandleEnd, regionHandleAddress, regionHandleIsActive, regionTestNullAddress, regionTestSameAddress, regionTestPrintContextMaps, regionTestPrintDirectObject, regionTestCorrupt, regionTestCorruptSlabLinks};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func positiveReclaimThreeSlabs(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = layoutRegisterVariable(registry, 8, regionTestNullAddress(), 0, 1);
+    var context = managedCreate(registry);
+    var region = managedRegionCreate(context);
+    var index = 0;
+    while index < 127 {
+        managedAllocateSized(context, layout, 3992);
+        index = index + 1;
+    }
+    require(managedLiveObjects(context) == 127, "reclaim-three-slabs live count mismatch");
+    var beforeBytes = managedMappedSlabBytes(context);
+    require(beforeBytes >= 786432, "reclaim-three-slabs did not allocate three slabs");
+    regionTestPrintContextMaps(context);
+    managedRegionEnd(context, region);
+    require(managedLiveObjects(context) == 0, "reclaim-three-slabs release left live objects");
+    require(managedMappedSlabBytes(context) == 524288, "reclaim-three-slabs did not retain exactly two reusable slabs");
+    require(managedCachedBlockBytes(context) > 0, "reclaim-three-slabs cache was empty after release");
+    println("walk reclaim-three-slabs regions=1 groups=1 chunks=127 direct=0 slabs-before=" + (beforeBytes / 262144).toString() + " slabs-after-region-end=2");
+    managedDestroy(context);
+    println("checkpoint: reclaim-three-slabs-live-caller");
+    layoutRegistryRelease(registry);
+}
+
+func positiveDirectMetrics(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = layoutRegisterVariable(registry, 8, regionTestNullAddress(), 0, 1);
+    var context = managedCreate(registry);
+    var region = managedRegionCreate(context);
+    var first = managedAllocateSized(context, layout, 5000);
+    var second = managedAllocateSized(context, layout, 5001);
+    require(managedMappedDirectRequestedBytes(context) == 10208, "direct-mapping-metrics requested bytes mismatch");
+    require(managedMappedDirectBlockCount(context) == 2, "direct-mapping-metrics block count mismatch");
+    println("walk direct-mapping-metrics regions=2 groups=2 chunks=2 direct=2");
+    regionTestPrintDirectObject(first);
+    regionTestPrintDirectObject(second);
+    regionTestPrintContextMaps(context);
+    managedRegionEnd(context, region);
+    require(managedMappedDirectRequestedBytes(context) == 0 && managedMappedDirectBlockCount(context) == 0, "region end did not release and forget direct mappings");
+    managedDestroy(context);
+    println("checkpoint: direct-mapping-metrics-live-caller");
+    layoutRegistryRelease(registry);
+}
+
+func positiveOpaqueHandleReuse(): void {
+    var registry = layoutRegistryCreate(0);
+    var context = regionContextCreate(registry);
+    var stale = regionHandleCreate(context);
+    var firstAddress = regionCurrent(context);
+    require(regionHandleIsActive(context, stale) && regionTestSameAddress(regionHandleAddress(context, stale), firstAddress), "opaque-handle-reuse initial handle mismatch");
+    regionHandleEnd(context, stale);
+    require(!regionHandleIsActive(context, stale), "opaque-handle-reuse stale handle remained active");
+    var current = regionHandleCreate(context);
+    var reusedAddress = regionCurrent(context);
+    require(regionTestSameAddress(firstAddress, reusedAddress) && !regionTestSameAddress(stale, current), "opaque-handle-reuse failed to distinguish reused address");
+    require(!regionHandleIsActive(context, stale) && regionHandleIsActive(context, current), "opaque-handle-reuse generation check failed");
+    regionHandleEnd(context, current);
+    println("walk opaque-handle-reuse regions=1 groups=0 chunks=0 direct=0");
+    regionTestPrintContextMaps(context);
+    regionContextDestroy(context);
+    println("checkpoint: opaque-handle-reuse-live-caller");
+    layoutRegistryRelease(registry);
+}
+
+func positiveActiveContextDestroy(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = layoutRegisterVariable(registry, 8, regionTestNullAddress(), 0, 1);
+    var round = 0;
+    var totalDirectBytes = 0;
+    while round < 128 {
+        var context = managedCreate(registry);
+        var first = managedAllocateSized(context, layout, 65536);
+        var child = managedRegionCreate(context);
+        var second = managedAllocateSized(context, layout, 65536);
+        var nested = managedRegionCreate(context);
+        managedAllocateSized(context, layout, 24);
+        require(managedMappedDirectBlockCount(context) == 2, "active-context-destroy direct block count mismatch");
+        require(managedMappedDirectRequestedBytes(context) > 131072, "active-context-destroy direct bytes mismatch");
+        totalDirectBytes = totalDirectBytes + managedMappedDirectRequestedBytes(context);
+        if round == 0 { println("walk active-context-destroy rounds=128 regions=3 groups=3 chunks=3 direct-per-context=2"); }
+        regionTestPrintContextMaps(context);
+        regionTestPrintDirectObject(first);
+        regionTestPrintDirectObject(second);
+        managedDestroy(context);
+        if round == 0 { println("checkpoint: active-context-destroy-live-caller"); }
+        round = round + 1;
+    }
+    require(totalDirectBytes >= 16777216, "active-context-destroy processed less than 16 MiB of direct mappings");
+    println("walk active-context-destroy-total rounds=128 direct=256 requested-bytes=" + totalDirectBytes.toString());
+    layoutRegistryRelease(registry);
+}
+
+func positiveManyDirectChunks(): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = layoutRegisterVariable(registry, 8, regionTestNullAddress(), 0, 1);
+    var context = managedCreate(registry);
+    var index = 0;
+    while index < 512 {
+        var object = managedAllocateSized(context, layout, 8192);
+        regionTestPrintDirectObject(object);
+        index = index + 1;
+    }
+    require(managedLiveObjects(context) == 512, "many-direct-chunks live count mismatch");
+    require(managedMappedDirectBlockCount(context) == 512, "many-direct-chunks direct count mismatch");
+    require(managedMappedDirectRequestedBytes(context) == 4247552, "many-direct-chunks direct bytes mismatch");
+    println("walk teardown-many-direct-chunks regions=1 groups=1 chunks=512 direct=512");
+    regionTestPrintContextMaps(context);
+    managedDestroy(context);
+    println("checkpoint: teardown-many-direct-chunks-live-caller");
+    layoutRegistryRelease(registry);
+}
+
+func negativeDestroy(caseName: string): void {
+    var registry = layoutRegistryCreate(1);
+    var layout = layoutRegisterVariable(registry, 8, regionTestNullAddress(), 0, 1);
+    var context = managedCreate(registry);
+    var object = managedAllocateSized(context, layout, 8192);
+    var second = object;
+    if caseName == "duplicate-mapping" {
+        second = managedAllocateSized(context, layout, 8192);
+    }
+    regionTestPrintDirectObject(object);
+    if caseName == "duplicate-mapping" { regionTestPrintDirectObject(second); }
+    regionTestPrintContextMaps(context);
+    if caseName == "corrupt-slab-links" {
+        regionTestCorruptSlabLinks(context);
+    } else if caseName == "excessive-used" { regionTestCorrupt(context, object, second, 1); }
+    else if caseName == "wrong-owner" { regionTestCorrupt(context, object, second, 2); }
+    else if caseName == "bad-size" { regionTestCorrupt(context, object, second, 3); }
+    else if caseName == "wrong-base" { regionTestCorrupt(context, object, second, 4); }
+    else if caseName == "duplicate-mapping" { regionTestCorrupt(context, object, second, 5); }
+    else if caseName == "wrong-accounting" { regionTestCorrupt(context, object, second, 7); }
+    else {
+        eprintln("unknown negative teardown case: " + caseName);
+        exit(2);
+    }
+    var directCount = 1;
+    var regionCount = 1;
+    if caseName == "duplicate-mapping" { directCount = 2; }
+    if caseName == "wrong-owner" { regionCount = 2; }
+    println("walk " + caseName + " regions=" + regionCount.toString() + " groups=1 chunks=" + directCount.toString() + " direct=" + directCount.toString());
+    println("checkpoint: expected-rejection-" + caseName);
+    managedDestroy(context);
+    println("unexpected destroy success: " + caseName);
+    exit(0);
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 2, "expected one teardown case name");
+    if argv[1] == "reclaim-three-slabs" { positiveReclaimThreeSlabs(); }
+    else if argv[1] == "direct-mapping-metrics" { positiveDirectMetrics(); }
+    else if argv[1] == "opaque-handle-reuse" { positiveOpaqueHandleReuse(); }
+    else if argv[1] == "active-context-destroy" { positiveActiveContextDestroy(); }
+    else if argv[1] == "teardown-many-direct-chunks" { positiveManyDirectChunks(); }
+    else { negativeDestroy(argv[1]); }
+}

@@ -58,7 +58,10 @@ func regionBlockClass(bytes: int): int {
 }
 
 func regionSlabHeaderValid(slab: __rey_raw_address): bool {
-    if __reyRawEqual(slab, __reyRawNull()) || __reyRawLoadI64(regionAddressAt(slab, 32)) != 1380272226 { return false; }
+    if __reyRawEqual(slab, __reyRawNull()) { return false; }
+    var slabNumber = __reyRawToInt(slab);
+    if slabNumber <= 0 || slabNumber % 4096 != 0 || slabNumber > 9223372036854775807 - 262144 { return false; }
+    if __reyRawLoadI64(regionAddressAt(slab, 32)) != 1380272226 { return false; }
     var live = __reyRawLoadI64(regionAddressAt(slab, 16));
     var cursor = __reyRawLoadI64(regionAddressAt(slab, 24));
     var minted = __reyRawLoadI64(regionAddressAt(slab, 40));
@@ -85,6 +88,24 @@ func regionBlockSlabFor(context: __rey_raw_address, block: __rey_raw_address, by
     var slab = __reyRawLoadAddress(header);
     if __reyRawEqual(slab, __reyRawNull()) || !regionSlabHeaderValid(slab) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(slab, 56)), context) || !regionBlockAddressInSlab(slab, block, bytes) || __reyRawLoadI64(regionAddressAt(header, 8)) != state { regionFail(2202); return __reyRawNull(); }
     return slab;
+}
+
+func regionKnownBlockSlabFor(context: __rey_raw_address, block: __rey_raw_address, bytes: int, state: int): __rey_raw_address {
+    if __reyRawEqual(block, __reyRawNull()) || bytes <= 0 { return __reyRawNull(); }
+    var slab = __reyRawLoadAddress(regionAddressAt(context, 208));
+    var count = __reyRawLoadI64(regionAddressAt(context, 216));
+    if count < 0 { return __reyRawNull(); }
+    var steps = 0;
+    while !__reyRawEqual(slab, __reyRawNull()) {
+        if steps >= count { return __reyRawNull(); }
+        if regionBlockAddressInSlab(slab, block, bytes) {
+            return regionBlockSlabFor(context, block, bytes, state);
+        }
+        slab = __reyRawLoadAddress(slab);
+        steps = steps + 1;
+    }
+    if steps != count { return __reyRawNull(); }
+    return __reyRawNull();
 }
 
 func regionSlabBlock(context: __rey_raw_address, bytes: int): __rey_raw_address {
@@ -157,14 +178,140 @@ func regionSlabBlock(context: __rey_raw_address, bytes: int): __rey_raw_address 
     return block;
 }
 
+func regionDirectRecordOwned(context: __rey_raw_address, record: __rey_raw_address, previous: __rey_raw_address): bool {
+    if __reyRawEqual(record, __reyRawNull()) { return false; }
+    var slab = regionKnownBlockSlabFor(context, record, 64, 64);
+    if __reyRawEqual(slab, __reyRawNull()) || !__reyRawEqual(slab, __reyRawLoadAddress(regionPointerBefore(record, 16))) { return false; }
+    if __reyRawLoadI64(record) != 1380272230 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(record, 8)), previous) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(record, 24)), context) { return false; }
+    var base = __reyRawLoadAddress(regionAddressAt(record, 32));
+    var extent = __reyRawLoadI64(regionAddressAt(record, 40));
+    var baseNumber = __reyRawToInt(base);
+    if __reyRawEqual(base, __reyRawNull()) || baseNumber <= 0 || baseNumber % 4096 != 0 || extent <= 4096 || baseNumber > 9223372036854775807 - extent { return false; }
+    if __reyRawLoadI64(regionAddressAt(record, 48)) != 0 || __reyRawLoadI64(regionAddressAt(record, 56)) != 0 { return false; }
+    return true;
+}
+
+func regionDirectRecordsValid(context: __rey_raw_address, uniqueBases: bool, expectedState: int): bool {
+    var record = __reyRawLoadAddress(regionAddressAt(context, 288));
+    var count = __reyRawLoadI64(regionAddressAt(context, 296));
+    var expectedCount = __reyRawLoadI64(regionAddressAt(context, 280));
+    var expectedBytes = __reyRawLoadI64(regionAddressAt(context, 272));
+    if count < 0 || count != expectedCount || (count == 0 && !__reyRawEqual(record, __reyRawNull())) || (count > 0 && __reyRawEqual(record, __reyRawNull())) { return false; }
+    var steps = 0;
+    var bytes = 0;
+    var previous = __reyRawNull();
+    while !__reyRawEqual(record, __reyRawNull()) {
+        if steps >= count || !regionDirectRecordOwned(context, record, previous) || __reyRawLoadI64(regionAddressAt(record, 48)) != expectedState { return false; }
+        var extent = __reyRawLoadI64(regionAddressAt(record, 40));
+        if bytes > 9223372036854775807 - extent { return false; }
+        bytes = bytes + extent;
+        if uniqueBases {
+            var earlier = __reyRawLoadAddress(regionAddressAt(context, 288));
+            var earlierSteps = 0;
+            while earlierSteps < steps {
+                if __reyRawEqual(__reyRawLoadAddress(regionAddressAt(earlier, 32)), __reyRawLoadAddress(regionAddressAt(record, 32))) { return false; }
+                earlier = __reyRawLoadAddress(regionAddressAt(earlier, 16));
+                earlierSteps = earlierSteps + 1;
+            }
+            if earlierSteps != steps { return false; }
+        }
+        previous = record;
+        record = __reyRawLoadAddress(regionAddressAt(record, 16));
+        steps = steps + 1;
+    }
+    return steps == count && bytes == expectedBytes;
+}
+
+func regionDirectClaimChunk(context: __rey_raw_address, base: __rey_raw_address, extent: int): bool {
+    var record = __reyRawLoadAddress(regionAddressAt(context, 288));
+    var count = __reyRawLoadI64(regionAddressAt(context, 296));
+    var steps = 0;
+    var matches = 0;
+    var matched = __reyRawNull();
+    while !__reyRawEqual(record, __reyRawNull()) {
+        if steps >= count { return false; }
+        if __reyRawEqual(__reyRawLoadAddress(regionAddressAt(record, 32)), base) {
+            if __reyRawLoadI64(regionAddressAt(record, 40)) != extent || __reyRawLoadI64(regionAddressAt(record, 48)) != 1 { return false; }
+            matches = matches + 1;
+            matched = record;
+        }
+        record = __reyRawLoadAddress(regionAddressAt(record, 16));
+        steps = steps + 1;
+    }
+    if steps != count || matches != 1 { return false; }
+    __reyRawStoreI64(regionAddressAt(matched, 48), 2);
+    return true;
+}
+
+func regionDirectClaimsComplete(context: __rey_raw_address): bool {
+    var record = __reyRawLoadAddress(regionAddressAt(context, 288));
+    var count = __reyRawLoadI64(regionAddressAt(context, 296));
+    var steps = 0;
+    while !__reyRawEqual(record, __reyRawNull()) {
+        if steps >= count || __reyRawLoadI64(regionAddressAt(record, 48)) != 2 { return false; }
+        record = __reyRawLoadAddress(regionAddressAt(record, 16));
+        steps = steps + 1;
+    }
+    return steps == count;
+}
+
+func regionDirectBlockRelease(context: __rey_raw_address, block: __rey_raw_address, bytes: int): void {
+    if !regionDirectMetricsValid(context) || !regionDirectRecordsValid(context, false, 0) { regionFail(2202); return; }
+    var record = __reyRawLoadAddress(regionAddressAt(context, 288));
+    var count = __reyRawLoadI64(regionAddressAt(context, 296));
+    var steps = 0;
+    var matches = 0;
+    var found = __reyRawNull();
+    while !__reyRawEqual(record, __reyRawNull()) {
+        if steps >= count { regionFail(2202); return; }
+        if __reyRawEqual(__reyRawLoadAddress(regionAddressAt(record, 32)), block) {
+            if __reyRawLoadI64(regionAddressAt(record, 40)) != bytes { regionFail(2202); return; }
+            matches = matches + 1;
+            found = record;
+        }
+        record = __reyRawLoadAddress(regionAddressAt(record, 16));
+        steps = steps + 1;
+    }
+    if steps != count || matches != 1 { regionFail(2202); return; }
+    var previous = __reyRawLoadAddress(regionAddressAt(found, 8));
+    var next = __reyRawLoadAddress(regionAddressAt(found, 16));
+    if __reyRawEqual(previous, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(context, 288), next); }
+    else { __reyRawStoreAddress(regionAddressAt(previous, 16), next); }
+    if !__reyRawEqual(next, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(next, 8), previous); }
+    __reyRawUnmap(block, bytes);
+    __reyRawStoreI64(regionAddressAt(found, 0), 0);
+    __reyRawStoreI64(regionAddressAt(context, 272), __reyRawLoadI64(regionAddressAt(context, 272)) - bytes);
+    __reyRawStoreI64(regionAddressAt(context, 280), __reyRawLoadI64(regionAddressAt(context, 280)) - 1);
+    __reyRawStoreI64(regionAddressAt(context, 296), count - 1);
+    regionBlockRelease(context, found, 64);
+}
+
 func regionDirectBlockMap(context: __rey_raw_address, bytes: int): __rey_raw_address {
     if bytes <= 4096 { regionFail(2202); return __reyRawNull(); }
-    if !regionDirectMetricsValid(context) { regionFail(2202); return __reyRawNull(); }
+    if !regionDirectMetricsValid(context) || !regionDirectRecordsValid(context, false, 0) { regionFail(2202); return __reyRawNull(); }
     var requested = __reyRawLoadI64(regionAddressAt(context, 272));
     var count = __reyRawLoadI64(regionAddressAt(context, 280));
     if requested > 9223372036854775807 - bytes || count >= 9223372036854775807 { regionFail(2201); return __reyRawNull(); }
+    var ownedCount = __reyRawLoadI64(regionAddressAt(context, 296));
+    var ownedHead = __reyRawLoadAddress(regionAddressAt(context, 288));
+    if ownedCount != count || (ownedCount == 0 && !__reyRawEqual(ownedHead, __reyRawNull())) || (ownedCount > 0 && __reyRawEqual(ownedHead, __reyRawNull())) { regionFail(2202); return __reyRawNull(); }
     var block = __reyRawMap(bytes);
     if __reyRawEqual(block, __reyRawNull()) { return __reyRawNull(); }
+    var blockNumber = __reyRawToInt(block);
+    if blockNumber <= 0 || blockNumber % 4096 != 0 || blockNumber > 9223372036854775807 - bytes { __reyRawUnmap(block, bytes); regionFail(2202); return __reyRawNull(); }
+    var record = regionBlockMap(context, 64);
+    if __reyRawEqual(record, __reyRawNull()) { __reyRawUnmap(block, bytes); return __reyRawNull(); }
+    __reyRawStoreI64(record, 1380272230);
+    __reyRawStoreAddress(regionAddressAt(record, 8), ownedHead);
+    __reyRawStoreAddress(regionAddressAt(record, 16), __reyRawNull());
+    __reyRawStoreAddress(regionAddressAt(record, 24), context);
+    __reyRawStoreAddress(regionAddressAt(record, 32), block);
+    __reyRawStoreI64(regionAddressAt(record, 40), bytes);
+    __reyRawStoreI64(regionAddressAt(record, 48), 0);
+    __reyRawStoreI64(regionAddressAt(record, 56), 0);
+    if !__reyRawEqual(ownedHead, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(ownedHead, 16), record); }
+    __reyRawStoreAddress(regionAddressAt(context, 288), record);
+    __reyRawStoreI64(regionAddressAt(context, 296), ownedCount + 1);
     __reyRawStoreI64(regionAddressAt(context, 272), requested + bytes);
     __reyRawStoreI64(regionAddressAt(context, 280), count + 1);
     return block;
@@ -327,16 +474,7 @@ func regionBlockRelease(context: __rey_raw_address, block: __rey_raw_address, by
     else if blockBytes == 2048 { headOffset = 168; countOffset = 176; localHeadOffset = 112; }
     else if blockBytes == 4096 { headOffset = 184; countOffset = 192; localHeadOffset = 120; }
     else {
-        if !regionDirectMetricsValid(context) { regionFail(2202); return; }
-        var requested = __reyRawLoadI64(regionAddressAt(context, 272));
-        var directCount = __reyRawLoadI64(regionAddressAt(context, 280));
-        if requested < bytes || directCount <= 0 { regionFail(2202); return; }
-        var nextRequested = requested - bytes;
-        var nextCount = directCount - 1;
-        if nextCount > nextRequested / 4097 || (nextRequested == 0 && nextCount != 0) || (nextRequested > 0 && nextCount == 0) { regionFail(2202); return; }
-        __reyRawUnmap(block, bytes);
-        __reyRawStoreI64(regionAddressAt(context, 272), nextRequested);
-        __reyRawStoreI64(regionAddressAt(context, 280), nextCount);
+        regionDirectBlockRelease(context, block, bytes);
         return;
     }
     var head = __reyRawLoadAddress(regionAddressAt(context, headOffset));
@@ -378,35 +516,29 @@ func regionBlockCacheDestroyClass(context: __rey_raw_address, headOffset: int, c
     var count = __reyRawLoadI64(regionAddressAt(context, countOffset));
     if count < 0 || (count == 0 && !__reyRawEqual(block, __reyRawNull())) || (count > 0 && __reyRawEqual(block, __reyRawNull())) { regionFail(2202); return false; }
     var steps = 0;
+    var previous = __reyRawNull();
     while !__reyRawEqual(block, __reyRawNull()) {
-        if steps >= count { regionFail(2202); return false; }
+        if steps >= count || __reyRawEqual(regionKnownBlockSlabFor(context, block, bytes, -bytes), __reyRawNull()) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(block, 8)), previous) { regionFail(2202); return false; }
         var next = __reyRawLoadAddress(block);
+        if !__reyRawEqual(next, __reyRawNull()) && (__reyRawEqual(regionKnownBlockSlabFor(context, next, bytes, -bytes), __reyRawNull()) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(next, 8)), block)) { regionFail(2202); return false; }
+        previous = block;
         block = next;
         steps = steps + 1;
     }
     if steps != count { regionFail(2202); return false; }
-    __reyRawStoreAddress(regionAddressAt(context, headOffset), __reyRawNull());
-    __reyRawStoreI64(regionAddressAt(context, countOffset), 0);
     return true;
 }
 
-func regionBlockCacheDestroy(context: __rey_raw_address): bool {
+func regionBlockCacheValidate(context: __rey_raw_address): bool {
+    if !regionSlabsValid(context) { regionFail(2202); return false; }
+    if !regionBlockCacheDestroyClass(context, 72, 80, 32) || !regionBlockCacheDestroyClass(context, 88, 96, 64) || !regionBlockCacheDestroyClass(context, 104, 112, 128) || !regionBlockCacheDestroyClass(context, 120, 128, 256) || !regionBlockCacheDestroyClass(context, 136, 144, 512) || !regionBlockCacheDestroyClass(context, 152, 160, 1024) || !regionBlockCacheDestroyClass(context, 168, 176, 2048) || !regionBlockCacheDestroyClass(context, 184, 192, 4096) { return false; }
+    return true;
+}
+
+func regionBlockCacheRelease(context: __rey_raw_address): bool {
     var slab = __reyRawLoadAddress(regionAddressAt(context, 208));
     var slabCount = __reyRawLoadI64(regionAddressAt(context, 216));
-    if slabCount < 0 || (slabCount == 0 && !__reyRawEqual(slab, __reyRawNull())) || (slabCount > 0 && __reyRawEqual(slab, __reyRawNull())) { regionFail(2202); return false; }
     var slabSteps = 0;
-    var previous = __reyRawNull();
-    while !__reyRawEqual(slab, __reyRawNull()) {
-        if slabSteps >= slabCount || !regionSlabHeaderValid(slab) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(slab, 56)), context) || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(slab, 8)), previous) { regionFail(2202); return false; }
-        var nextSlab = __reyRawLoadAddress(slab);
-        if !__reyRawEqual(nextSlab, __reyRawNull()) && !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(nextSlab, 8)), slab) { regionFail(2202); return false; }
-        previous = slab;
-        slab = nextSlab;
-        slabSteps = slabSteps + 1;
-    }
-    if slabSteps != slabCount { regionFail(2202); return false; }
-    slab = __reyRawLoadAddress(regionAddressAt(context, 208));
-    slabSteps = 0;
     while !__reyRawEqual(slab, __reyRawNull()) {
         if slabSteps >= slabCount { regionFail(2202); return false; }
         var nextSlab = __reyRawLoadAddress(slab);
@@ -439,8 +571,17 @@ func regionDestroyChunkSweep(context: __rey_raw_address): bool {
     var capacityTotal = 0;
     var directBytes = 0;
     var directCount = 0;
-    var directHead = __reyRawNull();
-    var directTail = __reyRawNull();
+    if !regionDirectRecordsValid(context, true, 0) { regionFail(2202); return false; }
+    var ownedRecord = __reyRawLoadAddress(regionAddressAt(context, 288));
+    var ownedCount = __reyRawLoadI64(regionAddressAt(context, 296));
+    var ownedSteps = 0;
+    while !__reyRawEqual(ownedRecord, __reyRawNull()) {
+        if ownedSteps >= ownedCount { regionFail(2202); return false; }
+        __reyRawStoreI64(regionAddressAt(ownedRecord, 48), 1);
+        ownedRecord = __reyRawLoadAddress(regionAddressAt(ownedRecord, 16));
+        ownedSteps = ownedSteps + 1;
+    }
+    if ownedSteps != ownedCount { regionFail(2202); return false; }
     while !__reyRawEqual(region, __reyRawNull()) {
         if regionSteps >= regionLimit || __reyRawLoadI64(region) != 1380272221 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(region, 16)), context) || __reyRawLoadI64(regionAddressAt(region, 72)) != 0 { regionFail(2202); return false; }
         var group = __reyRawLoadAddress(regionAddressAt(region, 40));
@@ -468,11 +609,9 @@ func regionDestroyChunkSweep(context: __rey_raw_address): bool {
                 capacityTotal = capacityTotal + capacity;
                 if capacity > 4096 {
                     if directBytes > 9223372036854775807 - capacity || directCount >= 9223372036854775807 { regionFail(2201); return false; }
+                    if !regionDirectClaimChunk(context, data, capacity) { regionFail(2202); return false; }
                     directBytes = directBytes + capacity;
                     directCount = directCount + 1;
-                    if __reyRawEqual(directTail, __reyRawNull()) { directHead = chunk; }
-                    else { __reyRawStoreAddress(regionAddressAt(directTail, 48), chunk); }
-                    directTail = chunk;
                 }
                 chunk = nextChunk;
                 chunkSteps = chunkSteps + 1;
@@ -491,20 +630,23 @@ func regionDestroyChunkSweep(context: __rey_raw_address): bool {
     if regionSteps != regionLimit || groupTotal != __reyRawLoadI64(regionAddressAt(context, 200)) || objectTotal != __reyRawLoadI64(regionAddressAt(context, 64)) || capacityTotal != __reyRawLoadI64(regionAddressAt(context, 56)) || objectTotal > capacityTotal / 96 { regionFail(2202); return false; }
     if !regionDirectMetricsValid(context) { regionFail(2202); return false; }
     if directBytes != __reyRawLoadI64(regionAddressAt(context, 272)) || directCount != __reyRawLoadI64(regionAddressAt(context, 280)) { regionFail(2202); return false; }
-    if !__reyRawEqual(directTail, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(directTail, 48), __reyRawNull()); }
-    var directChunk = directHead;
-    var releasedDirect = 0;
-    while !__reyRawEqual(directChunk, __reyRawNull()) {
-        if releasedDirect >= directCount { regionFail(2202); return false; }
-        var nextDirect = __reyRawLoadAddress(regionAddressAt(directChunk, 48));
-        var directData = __reyRawLoadAddress(regionAddressAt(directChunk, 16));
-        var directCapacity = __reyRawLoadI64(regionAddressAt(directChunk, 24));
-        if __reyRawEqual(directData, __reyRawNull()) || directCapacity <= 4096 { regionFail(2202); return false; }
-        regionBlockRelease(context, directData, directCapacity);
-        directChunk = nextDirect;
-        releasedDirect = releasedDirect + 1;
+    if directCount != ownedCount || !regionDirectClaimsComplete(context) { regionFail(2202); return false; }
+    ownedRecord = __reyRawLoadAddress(regionAddressAt(context, 288));
+    ownedSteps = 0;
+    while !__reyRawEqual(ownedRecord, __reyRawNull()) {
+        if ownedSteps >= ownedCount { regionFail(2202); return false; }
+        var nextOwned = __reyRawLoadAddress(regionAddressAt(ownedRecord, 16));
+        var mappingBase = __reyRawLoadAddress(regionAddressAt(ownedRecord, 32));
+        var mappingExtent = __reyRawLoadI64(regionAddressAt(ownedRecord, 40));
+        __reyRawUnmap(mappingBase, mappingExtent);
+        ownedRecord = nextOwned;
+        ownedSteps = ownedSteps + 1;
     }
-    if releasedDirect != directCount { regionFail(2202); return false; }
+    if ownedSteps != ownedCount { regionFail(2202); return false; }
+    __reyRawStoreAddress(regionAddressAt(context, 288), __reyRawNull());
+    __reyRawStoreI64(regionAddressAt(context, 296), 0);
+    __reyRawStoreI64(regionAddressAt(context, 272), 0);
+    __reyRawStoreI64(regionAddressAt(context, 280), 0);
     return true;
 }
 
@@ -609,7 +751,10 @@ func regionCohortValid(region: __rey_raw_address): bool {
 func regionDirectMetricsValid(context: __rey_raw_address): bool {
     var requested = __reyRawLoadI64(regionAddressAt(context, 272));
     var count = __reyRawLoadI64(regionAddressAt(context, 280));
+    var ownedCount = __reyRawLoadI64(regionAddressAt(context, 296));
+    var ownedHead = __reyRawLoadAddress(regionAddressAt(context, 288));
     if requested < 0 || count < 0 || count > requested / 4097 { return false; }
+    if ownedCount != count || ownedCount < 0 || (ownedCount == 0 && !__reyRawEqual(ownedHead, __reyRawNull())) || (ownedCount > 0 && __reyRawEqual(ownedHead, __reyRawNull())) { return false; }
     if (requested == 0 && count != 0) || (requested > 0 && count == 0) { return false; }
     return true;
 }
@@ -1867,11 +2012,11 @@ pub func regionContextCreate(registry: __rey_raw_address): __rey_raw_address {
     if __reyRawEqual(registry, __reyRawNull()) || layoutCountFast(registry) < 0 { regionFail(2202); return __reyRawNull(); }
     var programSerial = layoutNextRegionSerial(registry);
     if programSerial < 1 || programSerial > 134217727 { regionFail(2201); return __reyRawNull(); }
-    // The opaque 288-byte context tail stores requested bytes at 272 and block count at 280.
-    var context = __reyRawMap(288);
+    // The opaque context tail stores requested bytes/count at 272/280 and the independent direct-map owner list at 288/296.
+    var context = __reyRawMap(304);
     if __reyRawEqual(context, __reyRawNull()) { regionFail(2202); return __reyRawNull(); }
     var contextId = __reyRawToInt(registry) / 4096;
-    if contextId < 1 || contextId > 68719476735 || __reyRawToInt(registry) % 4096 != 0 || __reyRawToInt(registry) >= 281474976710656 { __reyRawUnmap(context, 288); regionFail(2201); return __reyRawNull(); }
+    if contextId < 1 || contextId > 68719476735 || __reyRawToInt(registry) % 4096 != 0 || __reyRawToInt(registry) >= 281474976710656 { __reyRawUnmap(context, 304); regionFail(2201); return __reyRawNull(); }
     var program = __reyRawMap(128);
     __reyRawStoreI64(context, 1380272220);
     __reyRawStoreAddress(regionAddressAt(context, 8), registry);
@@ -1909,6 +2054,8 @@ pub func regionContextCreate(registry: __rey_raw_address): __rey_raw_address {
     __reyRawStoreI64(regionAddressAt(context, 264), contextId);
     __reyRawStoreI64(regionAddressAt(context, 272), 0);
     __reyRawStoreI64(regionAddressAt(context, 280), 0);
+    __reyRawStoreAddress(regionAddressAt(context, 288), __reyRawNull());
+    __reyRawStoreI64(regionAddressAt(context, 296), 0);
     __reyRawStoreI64(program, 1380272221);
     __reyRawStoreAddress(regionAddressAt(program, 8), __reyRawNull());
     __reyRawStoreAddress(regionAddressAt(program, 16), context);
@@ -1927,15 +2074,15 @@ pub func regionContextCreate(registry: __rey_raw_address): __rey_raw_address {
 
 pub func regionContextDestroy(context: __rey_raw_address): void {
     regionContextValidate(context);
-    if !regionSlabsValid(context) { regionFail(2202); return; }
+    if !regionBlockCacheValidate(context) { return; }
     if !regionDestroyChunkSweep(context) { return; }
-    if !regionDirectMetricsValid(context) || __reyRawLoadI64(regionAddressAt(context, 272)) != 0 || __reyRawLoadI64(regionAddressAt(context, 280)) != 0 { regionFail(2202); return; }
-    if !regionBlockCacheDestroy(context) { return; }
+    if !regionDirectMetricsValid(context) || __reyRawLoadI64(regionAddressAt(context, 272)) != 0 || __reyRawLoadI64(regionAddressAt(context, 280)) != 0 || __reyRawLoadI64(regionAddressAt(context, 296)) != 0 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(context, 288)), __reyRawNull()) { regionFail(2202); return; }
+    if !regionBlockCacheRelease(context) { return; }
     var program = __reyRawLoadAddress(regionAddressAt(context, 16));
     __reyRawStoreI64(program, 0);
     __reyRawUnmap(program, 128);
     __reyRawStoreI64(context, 0);
-    __reyRawUnmap(context, 288);
+    __reyRawUnmap(context, 304);
 }
 
 pub func regionProgram(context: __rey_raw_address): __rey_raw_address {
