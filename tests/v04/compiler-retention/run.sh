@@ -67,7 +67,9 @@ OUT=$(CDPATH= cd -- "$OUT" && pwd -P)
 run_budget() {
     label=$1
     shift
-    if ! sh "$BUDGET" run --seconds 1800 --label "$label" -- "$@" >"$OUT/logs/$label.wrapper.log" 2>&1; then
+    if ! sh "$BUDGET" run --seconds 1800 --label "$label" -- \
+        sh "$SRC/tests/v04/compiler-retention/cgroup-exec.sh" "$@" \
+        >"$OUT/logs/$label.wrapper.log" 2>&1; then
         cat "$OUT/logs/$label.wrapper.log" >&2
         return 1
     fi
