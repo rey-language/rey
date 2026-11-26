@@ -10,6 +10,20 @@ cap=$1
 seconds=$2
 check_script=$3
 shift 3
+report_cgroup() {
+    status=$1
+    cgroup_path=$(sed -n 's/^0:://p' /proc/self/cgroup)
+    if [ -z "$cgroup_path" ]; then
+        printf 'P01_CGROUP memory.peak=unknown memory.events=unknown memory.swap.events=unknown status=%s\n' "$status"
+        return
+    fi
+    memory_peak=$(cat "/sys/fs/cgroup$cgroup_path/memory.peak" 2>/dev/null || echo unknown)
+    memory_events=$(tr '\n' ',' <"/sys/fs/cgroup$cgroup_path/memory.events" 2>/dev/null || echo unknown)
+    swap_events=$(tr '\n' ',' <"/sys/fs/cgroup$cgroup_path/memory.swap.events" 2>/dev/null || echo unknown)
+    printf 'P01_CGROUP memory.peak=%s memory.events=%s memory.swap.events=%s status=%s\n' \
+        "$memory_peak" "$memory_events" "$swap_events" "$status"
+}
+trap 'exit_status=$?; report_cgroup "$exit_status"' EXIT
 sh "$check_script" "$cap" 512M
 run_seconds=$((seconds - 60))
 timeout --kill-after=30s "$run_seconds" "$@" &
@@ -46,10 +60,4 @@ set +e
 wait "$job"
 status=$?
 set -e
-cgroup_path=$(sed -n 's/^0:://p' /proc/self/cgroup)
-memory_peak=$(cat "/sys/fs/cgroup$cgroup_path/memory.peak" 2>/dev/null || echo unknown)
-memory_events=$(tr '\n' ',' <"/sys/fs/cgroup$cgroup_path/memory.events" 2>/dev/null || echo unknown)
-swap_events=$(tr '\n' ',' <"/sys/fs/cgroup$cgroup_path/memory.swap.events" 2>/dev/null || echo unknown)
-printf 'P01_CGROUP memory.peak=%s memory.events=%s memory.swap.events=%s status=%s\n' \
-    "$memory_peak" "$memory_events" "$swap_events" "$status"
 exit "$status"

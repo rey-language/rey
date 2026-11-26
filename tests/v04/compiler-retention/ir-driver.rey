@@ -1,0 +1,31 @@
+import frontend::graph::{EmbeddedSource, checkSourceFileGraphWithEmbedded};
+import frontend::embedded_stdlib::{embeddedStdRoot, embeddedStdSources};
+import ir::{IRProgram, printIR};
+import ir::managed::link::{buildCompletedRegionProgram};
+import ir::verify::{verifyProgram};
+
+func fail(message: string): void {
+    eprintln(message);
+    exit(1);
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 4 || argv[2] != "--runtime-root" {
+        eprintln("usage: ir-retention SOURCE --runtime-root DIRECTORY");
+        exit(2);
+        return;
+    }
+    var sourcePath = argv[1];
+    var runtimeRoot = argv[3];
+    var stdRoot = embeddedStdRoot();
+    var embedded: Vec<EmbeddedSource> = embeddedStdSources();
+    var checked = checkSourceFileGraphWithEmbedded(sourcePath, stdRoot, [], embedded);
+    if checked.isErr() { fail(checked.unwrapErr()); return; }
+    var lowered = buildCompletedRegionProgram(checked.unwrap(), runtimeRoot, stdRoot, false);
+    if lowered.isErr() { fail(lowered.unwrapErr()); return; }
+    var program: IRProgram = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { fail(verified.errors.join("\n")); return; }
+    println(printIR(program));
+}

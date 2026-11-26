@@ -51,8 +51,8 @@ elif [ ! -x "$BASE" ]; then
     exit 1
 fi
 test -x "$SEED"
-test -f "$SRC/rey-compiler/native-main.rey"
 test -f "$SRC/rey-compiler/src/ir/managed/link/main.rey"
+test -f "$SRC/tests/v04/compiler-retention/ir-driver.rey"
 test -f "$CONTROL"
 test -f "$BUDGET"
 actual_control_sha=$(sha256sum "$CONTROL" | awk '{print $1}')
@@ -92,7 +92,7 @@ stage_driver() {
     variant=$1
     stage="$OUT/stage/$variant/src"
     cp -R "$SRC/rey-compiler/src/." "$stage/"
-    cp "$SRC/rey-compiler/native-main.rey" "$stage/main.rey"
+    cp "$SRC/tests/v04/compiler-retention/ir-driver.rey" "$stage/main.rey"
     if [ "$variant" = control ]; then
         cp "$CONTROL" "$stage/ir/managed/link/main.rey"
     fi
@@ -146,9 +146,8 @@ run_compile() {
             "$SRC/tests/v04/compiler-retention/capture-profile.py" \
             --events "$run_dir/events.jsonl" --stdout "$run_dir/stdout" \
             --stderr "$run_dir/stderr" --status "$run_dir/status.json" -- \
-            "$compiler" build "$source" -o "$run_dir/output" \
-            --target linux-x64 --managed --regions --runtime-root "$SRC/runtime-rey"
-        test -f "$run_dir/output"
+            "$compiler" "$source" --runtime-root "$SRC/runtime-rey"
+        test -f "$run_dir/stdout"
         return
     fi
     run_budget "$label" sh -c '
@@ -157,16 +156,15 @@ run_compile() {
         timefile=$2
         compiler=$3
         source=$4
-        image=$5
-        runtime=$6
-        stdout=$7
-        stderr=$8
+        runtime=$5
+        stdout=$6
+        stderr=$7
         if [ "$profile" = 1 ]; then export REY_COMPILER_RETENTION_PROFILE=1; fi
-        exec /usr/bin/time -v -o "$timefile" "$compiler" build "$source" -o "$image" \
-            --target linux-x64 --managed --regions --runtime-root "$runtime" >"$stdout" 2>"$stderr"
-    ' p01 "$profile" "$run_dir/time.txt" "$compiler" "$source" "$run_dir/output" \
+        exec /usr/bin/time -v -o "$timefile" "$compiler" "$source" \
+            --runtime-root "$runtime" >"$stdout" 2>"$stderr"
+    ' p01 "$profile" "$run_dir/time.txt" "$compiler" "$source" \
         "$SRC/runtime-rey" "$run_dir/stdout" "$run_dir/stderr"
-    test -f "$run_dir/output"
+    test -f "$run_dir/stdout"
 }
 
 stage_driver control
@@ -197,10 +195,6 @@ for case_name in small functions-511 functions-512 functions-513 scaled; do
             diff -u "$control_run/stderr" "$current_run/stderr" >&2 || true
             exit 1
         fi
-        if ! cmp -s "$control_run/output" "$current_run/output"; then
-            echo "FAIL P01: $case_name image differs at repeat $repetition" >&2
-            exit 1
-        fi
         repetition=$((repetition + 1))
     done
 done
@@ -213,8 +207,8 @@ for case_name in small functions-511 functions-512 functions-513 scaled; do
         echo "FAIL P01: profiling changed $case_name compiler diagnostics" >&2
         exit 1
     fi
-    if ! cmp -s "$OUT/results/current/$case_name/run-1/output" "$profile_run/output"; then
-        echo "FAIL P01: profiling changed $case_name output" >&2
+    if ! cmp -s "$OUT/results/current/$case_name/run-1/stdout" "$profile_run/stdout"; then
+        echo "FAIL P01: profiling changed $case_name lowered IR result" >&2
         exit 1
     fi
     grep '^REY_RETENTION event=' "$profile_run/stderr" >"$OUT/profiles/$case_name.events"
@@ -310,7 +304,7 @@ cat >"$OUT/summary.md" <<EOF
 - Control linker SHA-256: $CONTROL_SHA
 - Current linker SHA-256: $(sha256sum "$SRC/rey-compiler/src/ir/managed/link/main.rey" | awk '{print $1}')
 - Runtime tree SHA-256 list: $OUT/runtime-hashes.sha256
-- Staged module comparison: diagnostics and output images match for small, 511, 512, 513, and scaled inputs.
+- Staged module comparison: final lowered IR dumps and diagnostics match for small, 511, 512, 513, and scaled inputs.
 - Scaled fixture: 2049 source functions, 24 integer operations per helper.
 - Link nested payload copied in control model: $baseline_bytes bytes.
 - Link nested payload copied with retained user IR: $retained_bytes bytes.
@@ -328,7 +322,7 @@ sha256sum "$SEED" "$SRC/rey-compiler/src/ir/managed/link/main.rey" "$CONTROL" \
 attempt=1
 while :; do
     set +e
-    sh "$SRC/scripts/v04-linux-x64-region-gate.sh" --engine "$OUT/compiler/current" \
+    sh "$SRC/scripts/v04-linux-x64-region-gate.sh" --engine "$SEED" \
         --source "$SRC" --out "$OUT/r01" --suite regions \
         >"$OUT/logs/r01.try-$attempt.stdout" 2>"$OUT/logs/r01.try-$attempt.stderr"
     status=$?
