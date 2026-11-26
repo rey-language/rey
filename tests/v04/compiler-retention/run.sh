@@ -306,9 +306,9 @@ cat >"$OUT/summary.md" <<EOF
 - Runtime tree SHA-256 list: $OUT/runtime-hashes.sha256
 - Staged module comparison: final lowered IR dumps and diagnostics match for small, 511, 512, 513, and scaled inputs.
 - Scaled fixture: 2049 source functions, 24 integer operations per helper.
-- Link nested payload copied in control model: $baseline_bytes bytes.
-- Link nested payload copied with retained user IR: $retained_bytes bytes.
-- Link nested payload avoided: $saved_bytes bytes ($saved_percent%).
+- Control linker logical nested payload copied: $baseline_bytes bytes.
+- Current linker logical nested payload copied: $retained_bytes bytes.
+- Measured logical payload copy reduction: $saved_bytes bytes ($saved_percent%).
 - Scaled maximum RSS: control $baseline_peak KiB; retained $retained_peak KiB; 5% gate $rss_gate.
 - Phase event details: profiles/*.events.
 - R01 staged-driver report: r01/.

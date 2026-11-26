@@ -736,22 +736,19 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         index += 1;
     }
     var functions: Vec<IRFunction> = [];
-    var sharedUserFunctions = 0;
-    var sharedUserPayloadBytes = 0;
+    var copiedUserFunctions = 0;
+    var copiedUserPayloadBytes = 0;
     retentionProfileEvent("link_copy_start", "user_functions=" + input.program.functions.len().toString() + " runtime_functions=" + runtimeProgram.functions.len().toString());
     index = 0;
+    var userCopyBytesBefore = retentionCopiedPayloadBytes;
     while index < input.program.functions.len() {
-        var function = input.program.functions[index];
-        // User function IDs and their nested IR stay unchanged at link time.
-        // All consumers read these vectors; transforms build fresh vectors
-        // before replacing a function, so retaining this immutable payload is safe.
-        if retentionProfileActive {
-            sharedUserFunctions += 1;
-            sharedUserPayloadBytes += logicalFunctionPayloadBytes(function);
-        }
-        functions.push(function);
+        functions.push(copyFunction(input.program.functions[index], 0));
+        copiedUserFunctions += 1;
         index += 1;
     }
+    copiedUserPayloadBytes = retentionCopiedPayloadBytes - userCopyBytesBefore;
+    var runtimeCopyBytesBefore = retentionCopiedPayloadBytes;
+    var runtimeFunctionsBefore = retentionCopiedFunctions;
     index = 0;
     while index < runtimeProgram.functions.len() {
         var function = runtimeProgram.functions[index];
@@ -759,11 +756,14 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
         functions.push(copyFunction(function, shift));
         index += 1;
     }
-    retentionProfileEvent("copy", "shared_user_functions=" + sharedUserFunctions.toString() +
-        " saved_payload_bytes=" + sharedUserPayloadBytes.toString() +
-        " relocated_runtime_functions=" + retentionCopiedFunctions.toString() +
-        " relocated_payload_bytes=" + retentionCopiedPayloadBytes.toString() +
-        " baseline_link_copy_bytes=" + (sharedUserPayloadBytes + retentionCopiedPayloadBytes).toString() +
+    var runtimeCopiedPayloadBytes = retentionCopiedPayloadBytes - runtimeCopyBytesBefore;
+    var runtimeCopiedFunctions = retentionCopiedFunctions - runtimeFunctionsBefore;
+    retentionProfileEvent("copy", "copied_user_functions=" + copiedUserFunctions.toString() +
+        " copied_user_payload_bytes=" + copiedUserPayloadBytes.toString() +
+        " saved_payload_bytes=0" +
+        " relocated_runtime_functions=" + runtimeCopiedFunctions.toString() +
+        " relocated_payload_bytes=" + runtimeCopiedPayloadBytes.toString() +
+        " baseline_link_copy_bytes=" + retentionCopiedPayloadBytes.toString() +
         " retained_link_copy_bytes=" + retentionCopiedPayloadBytes.toString());
     var cohortCreate = resolveOptionalRegionSymbol(runtimeProgram, api, "managedHandleRegionCreateCohort", [raw, raw, i64Kind, i64Kind], raw);
     if cohortCreate.isErr() { return Result.Err(cohortCreate.unwrapErr()); }
