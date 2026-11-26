@@ -20,9 +20,91 @@ struct DominatorTraversal {
     pub parent: Vec<int>,
 }
 
+struct VerifierWorkspace {
+    pub definitions: Vec<ValueDef>,
+    pub denseIndices: Vec<int>,
+    pub definitionIndices: HashMap<string, int>,
+    pub definitionKeys: Vec<string>,
+    pub blockIndices: HashMap<string, int>,
+    pub blockKeys: Vec<string>,
+    pub successors: Vec<Vec<int>>,
+    pub predecessors: Vec<Vec<int>>,
+    pub postorder: Vec<int>,
+    pub visited: Vec<int>,
+    pub iterator: Vec<int>,
+    pub order: Vec<int>,
+    pub stack: Vec<int>,
+    pub reversePostorder: Vec<int>,
+    pub parent: Vec<int>,
+    pub idom: Vec<int>,
+    pub semi: Vec<int>,
+    pub ancestor: Vec<int>,
+    pub label: Vec<int>,
+    pub bucket: Vec<Vec<int>>,
+    pub evalPath: Vec<int>,
+    pub intervals: Vec<int>,
+    pub firstChild: Vec<int>,
+    pub nextSibling: Vec<int>,
+    pub intervalStack: Vec<int>,
+    pub scratchMetrics: Vec<int>,
+}
+
 pub struct VerifyResult {
     pub ok: bool,
     pub errors: Vec<string>,
+    pub scratchSlots: int,
+    pub controlScratchSlots: int,
+}
+
+func newVerifierWorkspace(): VerifierWorkspace {
+    return VerifierWorkspace {
+        definitions: [], denseIndices: [], definitionIndices: HashMap.new(), definitionKeys: [],
+        blockIndices: HashMap.new(), blockKeys: [], successors: [], predecessors: [],
+        postorder: [], visited: [], iterator: [], order: [], stack: [], reversePostorder: [], parent: [],
+        idom: [], semi: [], ancestor: [], label: [], bucket: [], evalPath: [],
+        intervals: [], firstChild: [], nextSibling: [], intervalStack: [],
+        scratchMetrics: [0, 0],
+    };
+}
+
+func clearIntVector(values: Vec<int>): void {
+    loop { if values.len() == 0 { break; } values.pop(); }
+}
+
+func resetIntVector(values: Vec<int>, count: int, value: int): void {
+    clearIntVector(values);
+    var index = 0;
+    loop { if index >= count { break; } values.push(value); index = index + 1; }
+}
+
+func clearStringVector(values: Vec<string>): void {
+    loop { if values.len() == 0 { break; } values.pop(); }
+}
+
+func clearDefinitionVector(values: Vec<ValueDef>): void {
+    loop { if values.len() == 0 { break; } values.pop(); }
+}
+
+func clearMapKeys(values: HashMap<string, int>, keys: Vec<string>): void {
+    var index = 0;
+    loop {
+        if index >= keys.len() { break; }
+        values.delete(keys[index]);
+        index = index + 1;
+    }
+    clearStringVector(keys);
+}
+
+func prepareNestedVectors(values: Vec<Vec<int>>, count: int): void {
+    while values.len() < count { values.push([]); }
+    var index = 0;
+    loop {
+        if index >= values.len() { break; }
+        var row = values[index];
+        clearIntVector(row);
+        values.set(index, row);
+        index = index + 1;
+    }
 }
 
 func sameType(left: IRType, right: IRType): bool {
@@ -49,7 +131,7 @@ func findBlockIndex(indices: HashMap<string, int>, blockId: int): int {
     return -1;
 }
 
-func buildDefinitionTable(definitions: Vec<ValueDef>, indices: HashMap<string, int>): DefinitionTable {
+func buildDefinitionTable(definitions: Vec<ValueDef>, indices: HashMap<string, int>, denseIndices: Vec<int>): DefinitionTable {
     var maximumId = -1;
     var index = 0;
     loop {
@@ -58,7 +140,7 @@ func buildDefinitionTable(definitions: Vec<ValueDef>, indices: HashMap<string, i
         index = index + 1;
     }
     if maximumId >= 0 && maximumId <= 1000000 && maximumId <= definitions.len() * 4 + 1024 {
-        var denseIndices: Vec<int> = [];
+        clearIntVector(denseIndices);
         index = 0;
         loop {
             if index > maximumId { break; }
@@ -72,8 +154,9 @@ func buildDefinitionTable(definitions: Vec<ValueDef>, indices: HashMap<string, i
             if denseIndices[definitionId] < 0 { denseIndices.set(definitionId, index); }
             index = index + 1;
         }
-        return DefinitionTable { definitions: definitions, denseIndices: denseIndices, sparseIndices: HashMap.new(), usesDenseIndices: true };
+        return DefinitionTable { definitions: definitions, denseIndices: denseIndices, sparseIndices: indices, usesDenseIndices: true };
     }
+    clearIntVector(denseIndices);
     return DefinitionTable { definitions: definitions, denseIndices: [], sparseIndices: indices, usesDenseIndices: false };
 }
 
@@ -137,57 +220,50 @@ func appendGraphEdge(graph: Vec<Vec<int>>, source: int, target: int): void {
     graph.set(source, neighbors);
 }
 
-func computeReversePostorder(successors: Vec<Vec<int>>, blockCount: int): DominatorTraversal {
-    var postorder: Vec<int> = [];
-    var visited: Vec<int> = [];
-    var iterator: Vec<int> = [];
-    var parent: Vec<int> = [];
-    var order: Vec<int> = [];
+func computeReversePostorder(successors: Vec<Vec<int>>, blockCount: int, workspace: VerifierWorkspace): DominatorTraversal {
+    clearIntVector(workspace.postorder);
+    resetIntVector(workspace.visited, blockCount, 0);
+    resetIntVector(workspace.iterator, blockCount, 0);
+    resetIntVector(workspace.parent, blockCount, -1);
+    clearIntVector(workspace.order);
+    clearIntVector(workspace.stack);
+    clearIntVector(workspace.reversePostorder);
     var index = 0;
-    loop {
-        if index >= blockCount { break; }
-        visited.push(0);
-        iterator.push(0);
-        parent.push(-1);
-        index = index + 1;
-    }
-    var stack: Vec<int> = [];
     if blockCount > 0 {
-        visited.set(0, 1);
-        stack.push(0);
-        order.push(0);
+        workspace.visited.set(0, 1);
+        workspace.stack.push(0);
+        workspace.order.push(0);
     }
     loop {
-        if stack.len() == 0 { break; }
-        var node = stack[stack.len() - 1];
-        var next = iterator[node];
+        if workspace.stack.len() == 0 { break; }
+        var node = workspace.stack[workspace.stack.len() - 1];
+        var next = workspace.iterator[node];
         var found = -1;
         var neighbors = successors[node];
         loop {
             if next >= neighbors.len() { break; }
             var candidate = neighbors[next];
             next = next + 1;
-            if visited[candidate] == 0 { found = candidate; break; }
+            if workspace.visited[candidate] == 0 { found = candidate; break; }
         }
-        iterator.set(node, next);
+        workspace.iterator.set(node, next);
         if found < 0 {
-            postorder.push(node);
-            stack.pop();
+            workspace.postorder.push(node);
+            workspace.stack.pop();
         } else {
-            visited.set(found, 1);
-            parent.set(found, node);
-            order.push(found);
-            stack.push(found);
+            workspace.visited.set(found, 1);
+            workspace.parent.set(found, node);
+            workspace.order.push(found);
+            workspace.stack.push(found);
         }
     }
-    var rpo: Vec<int> = [];
-    var postIndex = postorder.len();
+    var postIndex = workspace.postorder.len();
     loop {
         if postIndex <= 0 { break; }
         postIndex = postIndex - 1;
-        rpo.push(postorder[postIndex]);
+        workspace.reversePostorder.push(workspace.postorder[postIndex]);
     }
-    return DominatorTraversal { reversePostorder: rpo, order: order, parent: parent };
+    return DominatorTraversal { reversePostorder: workspace.reversePostorder, order: workspace.order, parent: workspace.parent };
 }
 
 func intersectDominators(left: int, right: int, idom: Vec<int>, rpoNumber: Vec<int>): int {
@@ -207,8 +283,8 @@ func intersectDominators(left: int, right: int, idom: Vec<int>, rpoNumber: Vec<i
     return 0;
 }
 
-func evalDominator(value: int, semi: Vec<int>, ancestor: Vec<int>, label: Vec<int>): int {
-    var path: Vec<int> = [];
+func evalDominator(value: int, semi: Vec<int>, ancestor: Vec<int>, label: Vec<int>, path: Vec<int>): int {
+    clearIntVector(path);
     var current = value;
     loop {
         var parent = ancestor[current];
@@ -227,135 +303,144 @@ func evalDominator(value: int, semi: Vec<int>, ancestor: Vec<int>, label: Vec<in
     return label[value];
 }
 
-func computeImmediateDominators(predecessors: Vec<Vec<int>>, blockCount: int, traversal: DominatorTraversal): Vec<int> {
-    var idom: Vec<int> = [];
-    var semi: Vec<int> = [];
-    var ancestor: Vec<int> = [];
-    var label: Vec<int> = [];
-    var bucket: Vec<Vec<int>> = [];
+func computeImmediateDominators(predecessors: Vec<Vec<int>>, blockCount: int, traversal: DominatorTraversal, workspace: VerifierWorkspace): Vec<int> {
+    resetIntVector(workspace.idom, blockCount, -1);
+    resetIntVector(workspace.semi, blockCount, -1);
+    resetIntVector(workspace.ancestor, blockCount, -1);
+    resetIntVector(workspace.label, blockCount, 0);
+    prepareNestedVectors(workspace.bucket, blockCount);
+    clearIntVector(workspace.evalPath);
     var index = 0;
     loop {
         if index >= blockCount { break; }
-        idom.push(-1);
-        semi.push(-1);
-        ancestor.push(-1);
-        label.push(index);
-        bucket.push([]);
+        workspace.label.set(index, index);
         index = index + 1;
     }
-    if traversal.order.len() == 0 { return idom; }
+    if traversal.order.len() == 0 { return workspace.idom; }
     var orderIndex = 0;
     loop {
         if orderIndex >= traversal.order.len() { break; }
-        semi.set(traversal.order[orderIndex], orderIndex);
-        label.set(traversal.order[orderIndex], traversal.order[orderIndex]);
+        workspace.semi.set(traversal.order[orderIndex], orderIndex);
+        workspace.label.set(traversal.order[orderIndex], traversal.order[orderIndex]);
         orderIndex = orderIndex + 1;
     }
     var root = traversal.order[0];
-    idom.set(root, root);
+    workspace.idom.set(root, root);
     orderIndex = traversal.order.len() - 1;
     loop {
         if orderIndex <= 0 { break; }
         var block = traversal.order[orderIndex];
-        var semidominator = semi[block];
+        var semidominator = workspace.semi[block];
         var predecessorIndex = 0;
         var blockPredecessors = predecessors[block];
         loop {
             if predecessorIndex >= blockPredecessors.len() { break; }
             var predecessor = blockPredecessors[predecessorIndex];
-            if semi[predecessor] >= 0 {
-                var candidate = evalDominator(predecessor, semi, ancestor, label);
-                if semi[candidate] < semidominator { semidominator = semi[candidate]; }
+            if workspace.semi[predecessor] >= 0 {
+                var candidate = evalDominator(predecessor, workspace.semi, workspace.ancestor, workspace.label, workspace.evalPath);
+                if workspace.semi[candidate] < semidominator { semidominator = workspace.semi[candidate]; }
             }
             predecessorIndex = predecessorIndex + 1;
         }
-        semi.set(block, semidominator);
+        workspace.semi.set(block, semidominator);
         var semiVertex = traversal.order[semidominator];
-        var semiBucket = bucket[semiVertex];
+        var semiBucket = workspace.bucket[semiVertex];
         semiBucket.push(block);
-        bucket.set(semiVertex, semiBucket);
+        workspace.bucket.set(semiVertex, semiBucket);
         var parent = traversal.parent[block];
-        ancestor.set(block, parent);
-        var parentBucket = bucket[parent];
+        workspace.ancestor.set(block, parent);
+        var parentBucket = workspace.bucket[parent];
         var bucketAt = 0;
         loop {
             if bucketAt >= parentBucket.len() { break; }
             var pending = parentBucket[bucketAt];
-            var candidate = evalDominator(pending, semi, ancestor, label);
-            if semi[candidate] < semi[pending] { idom.set(pending, candidate); }
-            else { idom.set(pending, parent); }
+            var candidate = evalDominator(pending, workspace.semi, workspace.ancestor, workspace.label, workspace.evalPath);
+            if workspace.semi[candidate] < workspace.semi[pending] { workspace.idom.set(pending, candidate); }
+            else { workspace.idom.set(pending, parent); }
             bucketAt = bucketAt + 1;
         }
-        bucket.set(parent, []);
+        clearIntVector(parentBucket);
+        workspace.bucket.set(parent, parentBucket);
         orderIndex = orderIndex - 1;
     }
     orderIndex = 1;
     loop {
         if orderIndex >= traversal.order.len() { break; }
         var block = traversal.order[orderIndex];
-        var semiVertex = traversal.order[semi[block]];
-        if idom[block] >= 0 && idom[block] != semiVertex { idom.set(block, idom[idom[block]]); }
+        var semiVertex = traversal.order[workspace.semi[block]];
+        if workspace.idom[block] >= 0 && workspace.idom[block] != semiVertex { workspace.idom.set(block, workspace.idom[workspace.idom[block]]); }
         orderIndex = orderIndex + 1;
     }
-    return idom;
+    return workspace.idom;
 }
 
-func computeDominanceIntervals(idom: Vec<int>, blockCount: int): Vec<int> {
-    var interval: Vec<int> = [];
-    var index = 0;
-    loop {
-        if index >= blockCount * 2 { break; }
-        interval.push(-1);
-        index = index + 1;
-    }
-    if blockCount == 0 { return interval; }
-    var firstChild: Vec<int> = [];
-    var nextSibling: Vec<int> = [];
-    index = 0;
-    loop {
-        if index >= blockCount { break; }
-        firstChild.push(-1);
-        nextSibling.push(-1);
-        index = index + 1;
-    }
+func computeDominanceIntervals(idom: Vec<int>, blockCount: int, workspace: VerifierWorkspace): Vec<int> {
+    resetIntVector(workspace.intervals, blockCount * 2, -1);
+    resetIntVector(workspace.firstChild, blockCount, -1);
+    resetIntVector(workspace.nextSibling, blockCount, -1);
+    clearIntVector(workspace.intervalStack);
+    if blockCount == 0 { return workspace.intervals; }
     var childIndex = 1;
     loop {
         if childIndex >= blockCount { break; }
         var parentIndex = idom[childIndex];
         if parentIndex >= 0 {
-            nextSibling.set(childIndex, firstChild[parentIndex]);
-            firstChild.set(parentIndex, childIndex);
+            workspace.nextSibling.set(childIndex, workspace.firstChild[parentIndex]);
+            workspace.firstChild.set(parentIndex, childIndex);
         }
         childIndex = childIndex + 1;
     }
-    var stack: Vec<int> = [];
-    stack.push(0);
+    workspace.intervalStack.push(0);
     var timer = 0;
     loop {
-        if stack.len() == 0 { break; }
-        var marker = stack.pop();
+        if workspace.intervalStack.len() == 0 { break; }
+        var marker = workspace.intervalStack.pop();
         if marker >= blockCount {
             var exitIndex = marker - blockCount;
-            interval.set(exitIndex * 2 + 1, timer);
+            workspace.intervals.set(exitIndex * 2 + 1, timer);
             continue;
         }
-        interval.set(marker * 2, timer);
+        workspace.intervals.set(marker * 2, timer);
         timer = timer + 1;
-        stack.push(marker + blockCount);
-        var child = firstChild[marker];
+        workspace.intervalStack.push(marker + blockCount);
+        var child = workspace.firstChild[marker];
         loop {
             if child < 0 { break; }
-            stack.push(child);
-            child = nextSibling[child];
+            workspace.intervalStack.push(child);
+            child = workspace.nextSibling[child];
         }
     }
-    return interval;
+    return workspace.intervals;
 }
 
-func analyzeDominance(successors: Vec<Vec<int>>, predecessors: Vec<Vec<int>>, blockCount: int): Vec<int> {
-    var traversal = computeReversePostorder(successors, blockCount);
-    var idom = computeImmediateDominators(predecessors, blockCount, traversal);
-    return computeDominanceIntervals(idom, blockCount);
+func analyzeDominance(successors: Vec<Vec<int>>, predecessors: Vec<Vec<int>>, blockCount: int, workspace: VerifierWorkspace): Vec<int> {
+    var traversal = computeReversePostorder(successors, blockCount, workspace);
+    var idom = computeImmediateDominators(predecessors, blockCount, traversal, workspace);
+    return computeDominanceIntervals(idom, blockCount, workspace);
+}
+
+func nestedVectorSlots(values: Vec<Vec<int>>, activeRows: int): int {
+    var slots = activeRows;
+    var index = 0;
+    loop {
+        if index >= activeRows { break; }
+        slots = slots + values[index].len();
+        index = index + 1;
+    }
+    return slots;
+}
+
+func workspaceScratchSlots(workspace: VerifierWorkspace, blockCount: int): int {
+    var slots = workspace.definitions.len() + workspace.denseIndices.len();
+    slots = slots + workspace.definitionKeys.len() + workspace.blockKeys.len();
+    slots = slots + nestedVectorSlots(workspace.successors, blockCount);
+    slots = slots + nestedVectorSlots(workspace.predecessors, blockCount);
+    slots = slots + workspace.postorder.len() + workspace.visited.len() + workspace.iterator.len();
+    slots = slots + workspace.order.len() + workspace.stack.len() + workspace.reversePostorder.len() + workspace.parent.len();
+    slots = slots + workspace.idom.len() + workspace.semi.len() + workspace.ancestor.len() + workspace.label.len();
+    slots = slots + nestedVectorSlots(workspace.bucket, blockCount) + workspace.evalPath.len();
+    slots = slots + workspace.intervals.len() + workspace.firstChild.len() + workspace.nextSibling.len() + workspace.intervalStack.len();
+    return slots;
 }
 
 func checkI64Operand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
@@ -397,7 +482,7 @@ func checkCheckedI64Instruction(errors: Vec<string>, table: DefinitionTable, ins
     }
 }
 
-func checkFunction(program: IRProgram, function: IRFunction, functionIndices: HashMap<string, int>): Vec<string> {
+func checkFunction(program: IRProgram, function: IRFunction, functionIndices: HashMap<string, int>, workspace: VerifierWorkspace): Vec<string> {
     var errors: Vec<string> = [];
     var functionLabel = "function %f" + function.id.toString() + " (" + functionKeyName(function.key) + ")";
 
@@ -411,9 +496,20 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         errors.push(functionLabel + ": effect argument vector does not match signature arity");
     }
 
-    var blockIndices: HashMap<string, int> = HashMap.new();
+    clearMapKeys(workspace.blockIndices, workspace.blockKeys);
+    clearMapKeys(workspace.definitionIndices, workspace.definitionKeys);
+    clearDefinitionVector(workspace.definitions);
+    clearIntVector(workspace.denseIndices);
     var blockAt = 0;
-    loop { if blockAt >= function.blocks.len() { break; } var key = function.blocks[blockAt].id.toString(); if !blockIndices.has(key) { blockIndices.set(key, blockAt); } blockAt = blockAt + 1; }
+    loop {
+        if blockAt >= function.blocks.len() { break; }
+        var key = function.blocks[blockAt].id.toString();
+        if !workspace.blockIndices.has(key) {
+            workspace.blockIndices.set(key, blockAt);
+            workspace.blockKeys.push(key);
+        }
+        blockAt = blockAt + 1;
+    }
 
     var paramIndex = 0;
     loop {
@@ -424,8 +520,6 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         paramIndex = paramIndex + 1;
     }
 
-    var definitions: Vec<ValueDef> = [];
-    var definitionIndices: HashMap<string, int> = HashMap.new();
     paramIndex = 0;
     loop {
         if paramIndex >= function.parameters.len() { break; }
@@ -439,12 +533,13 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         }
         if parameter.id >= 0 {
             var key = parameter.id.toString();
-            if definitionIndices.has(key) {
+            if workspace.definitionIndices.has(key) {
                 errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
             } else {
-                definitionIndices.set(key, definitions.len());
+                workspace.definitionIndices.set(key, workspace.definitions.len());
+                workspace.definitionKeys.push(key);
             }
-            definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: -1, instructionIndex: -1 });
+            workspace.definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: -1, instructionIndex: -1 });
         }
         paramIndex = paramIndex + 1;
     }
@@ -454,7 +549,7 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         if blockIndex >= function.blocks.len() { break; }
         var block = function.blocks[blockIndex];
         if block.id < 0 { errors.push(functionLabel + ": block ID must be nonnegative"); }
-        if blockIndices.get(block.id.toString()) != blockIndex { errors.push(functionLabel + ": duplicate block ID bb" + block.id.toString()); }
+        if workspace.blockIndices.get(block.id.toString()) != blockIndex { errors.push(functionLabel + ": duplicate block ID bb" + block.id.toString()); }
         if blockIndex == 0 && block.params.len() != 0 {
             errors.push(functionLabel + ": entry block cannot have parameters");
         }
@@ -466,12 +561,13 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
             if parameter.ty.kind == IRTypeKind::Void { errors.push(functionLabel + ": block parameter cannot be void"); }
             if parameter.id >= 0 {
                 var key = parameter.id.toString();
-                if definitionIndices.has(key) {
+                if workspace.definitionIndices.has(key) {
                     errors.push(functionLabel + ": duplicate SSA value ID %v" + parameter.id.toString());
                 } else {
-                    definitionIndices.set(key, definitions.len());
+                    workspace.definitionIndices.set(key, workspace.definitions.len());
+                    workspace.definitionKeys.push(key);
                 }
-                definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: blockIndex, instructionIndex: -1 });
+                workspace.definitions.push(ValueDef { id: parameter.id, ty: parameter.ty, blockIndex: blockIndex, instructionIndex: -1 });
             }
             parameterIndex = parameterIndex + 1;
         }
@@ -482,12 +578,13 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
             if instruction.resultId < -1 { errors.push(functionLabel + ": result ID must be nonnegative or the void sentinel -1"); }
             if instruction.resultId >= 0 {
                 var key = instruction.resultId.toString();
-                if definitionIndices.has(key) {
+                if workspace.definitionIndices.has(key) {
                     errors.push(functionLabel + ": duplicate SSA value ID %v" + instruction.resultId.toString());
                 } else {
-                    definitionIndices.set(key, definitions.len());
+                    workspace.definitionIndices.set(key, workspace.definitions.len());
+                    workspace.definitionKeys.push(key);
                 }
-                definitions.push(ValueDef { id: instruction.resultId, ty: instruction.ty, blockIndex: blockIndex, instructionIndex: instructionIndex });
+                workspace.definitions.push(ValueDef { id: instruction.resultId, ty: instruction.ty, blockIndex: blockIndex, instructionIndex: instructionIndex });
             }
             checkSource(errors, instruction.source, functionLabel + " block bb" + block.id.toString() + " instruction " + instructionIndex.toString());
             instructionIndex = instructionIndex + 1;
@@ -496,18 +593,11 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         blockIndex = blockIndex + 1;
     }
 
-    var definitionTable = buildDefinitionTable(definitions, definitionIndices);
+    var definitionTable = buildDefinitionTable(workspace.definitions, workspace.definitionIndices, workspace.denseIndices);
 
     var blockCount = function.blocks.len();
-    var successors: Vec<Vec<int>> = [];
-    var predecessors: Vec<Vec<int>> = [];
-    var edgeNode = 0;
-    loop {
-        if edgeNode >= blockCount { break; }
-        successors.push([]);
-        predecessors.push([]);
-        edgeNode = edgeNode + 1;
-    }
+    prepareNestedVectors(workspace.successors, blockCount);
+    prepareNestedVectors(workspace.predecessors, blockCount);
 
     blockIndex = 0;
     loop {
@@ -521,12 +611,12 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
             if terminator.conditionValueId != -1 || terminator.trueTargetBlockId != -1 || terminator.falseTargetBlockId != -1 || terminator.trueArgs.len() != 0 || terminator.falseArgs.len() != 0 || terminator.valueId != -1 {
                 errors.push(context + ": jump contains fields belonging to another terminator kind");
             }
-            var targetIndex = findBlockIndex(blockIndices, terminator.targetBlockId);
+            var targetIndex = findBlockIndex(workspace.blockIndices, terminator.targetBlockId);
             if targetIndex < 0 {
                 errors.push(context + ": jump target bb" + terminator.targetBlockId.toString() + " does not exist");
             } else {
-                appendGraphEdge(successors, blockIndex, targetIndex);
-                appendGraphEdge(predecessors, targetIndex, blockIndex);
+                appendGraphEdge(workspace.successors, blockIndex, targetIndex);
+                appendGraphEdge(workspace.predecessors, targetIndex, blockIndex);
                 var target = function.blocks[targetIndex];
                 if terminator.targetArgs.len() != target.params.len() {
                     errors.push(context + ": jump argument count does not match target parameters");
@@ -547,12 +637,12 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
             }
             var condition = findDefinition(definitionTable, terminator.conditionValueId);
             if condition.id >= 0 && condition.ty.kind != IRTypeKind::Bool { errors.push(context + ": branch condition must have type bool"); }
-            var trueIndex = findBlockIndex(blockIndices, terminator.trueTargetBlockId);
+            var trueIndex = findBlockIndex(workspace.blockIndices, terminator.trueTargetBlockId);
             if trueIndex < 0 {
                 errors.push(context + ": true branch target bb" + terminator.trueTargetBlockId.toString() + " does not exist");
             } else {
-                appendGraphEdge(successors, blockIndex, trueIndex);
-                appendGraphEdge(predecessors, trueIndex, blockIndex);
+                appendGraphEdge(workspace.successors, blockIndex, trueIndex);
+                appendGraphEdge(workspace.predecessors, trueIndex, blockIndex);
                 var trueBlock = function.blocks[trueIndex];
                 if terminator.trueArgs.len() != trueBlock.params.len() { errors.push(context + ": true branch argument count does not match target parameters"); }
                 var trueArgIndex = 0;
@@ -563,12 +653,12 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
                     trueArgIndex = trueArgIndex + 1;
                 }
             }
-            var falseIndex = findBlockIndex(blockIndices, terminator.falseTargetBlockId);
+            var falseIndex = findBlockIndex(workspace.blockIndices, terminator.falseTargetBlockId);
             if falseIndex < 0 {
                 errors.push(context + ": false branch target bb" + terminator.falseTargetBlockId.toString() + " does not exist");
             } else {
-                appendGraphEdge(successors, blockIndex, falseIndex);
-                appendGraphEdge(predecessors, falseIndex, blockIndex);
+                appendGraphEdge(workspace.successors, blockIndex, falseIndex);
+                appendGraphEdge(workspace.predecessors, falseIndex, blockIndex);
                 var falseBlock = function.blocks[falseIndex];
                 if terminator.falseArgs.len() != falseBlock.params.len() { errors.push(context + ": false branch argument count does not match target parameters"); }
                 var falseArgIndex = 0;
@@ -595,9 +685,9 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         blockIndex = blockIndex + 1;
     }
 
-    if blockCount > 0 && predecessors[0].len() > 0 { errors.push(functionLabel + ": entry block bb" + function.blocks[0].id.toString() + " cannot have incoming edges"); }
+    if blockCount > 0 && workspace.predecessors[0].len() > 0 { errors.push(functionLabel + ": entry block bb" + function.blocks[0].id.toString() + " cannot have incoming edges"); }
 
-    var dominance = analyzeDominance(successors, predecessors, blockCount);
+    var dominance = analyzeDominance(workspace.successors, workspace.predecessors, blockCount, workspace);
     var useErrors: Vec<string> = [];
     blockIndex = 0;
     loop {
@@ -826,11 +916,15 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
         errors.push(useErrors[useErrorIndex]);
         useErrorIndex = useErrorIndex + 1;
     }
+    var scratchSlots = workspaceScratchSlots(workspace, blockCount);
+    if scratchSlots > workspace.scratchMetrics[0] { workspace.scratchMetrics.set(0, scratchSlots); }
+    workspace.scratchMetrics.set(1, workspace.scratchMetrics[1] + scratchSlots);
     return errors;
 }
 
 pub func verifyProgram(program: IRProgram): VerifyResult {
     var errors: Vec<string> = [];
+    var workspace = newVerifierWorkspace();
     if program.functions.len() == 0 { errors.push("program: must contain at least one function"); }
     if program.entryFunctionId < 0 { errors.push("program: entry function ID must be nonnegative"); }
     var functionIndices: HashMap<string, int> = HashMap.new();
@@ -869,7 +963,7 @@ pub func verifyProgram(program: IRProgram): VerifyResult {
         duplicateAt = 0;
         loop { if duplicateAt >= priorCount { break; } errors.push("program: duplicate stable function key " + functionKeyName(function.key)); duplicateAt = duplicateAt + 1; }
         stableKeyCounts.set(stableKey, priorCount + 1);
-        var functionErrors = checkFunction(program, function, functionIndices);
+        var functionErrors = checkFunction(program, function, functionIndices, workspace);
         var errorIndex = 0;
         loop {
             if errorIndex >= functionErrors.len() { break; }
@@ -878,5 +972,10 @@ pub func verifyProgram(program: IRProgram): VerifyResult {
         }
         functionIndex = functionIndex + 1;
     }
-    return VerifyResult { ok: errors.len() == 0, errors: errors };
+    return VerifyResult {
+        ok: errors.len() == 0,
+        errors: errors,
+        scratchSlots: workspace.scratchMetrics[0],
+        controlScratchSlots: workspace.scratchMetrics[1],
+    };
 }

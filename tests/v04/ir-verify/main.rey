@@ -1,6 +1,22 @@
 import ir;
-import ir::verify::{verifyProgram};
+import ir::verify::{VerifyResult, verifyProgram};
 import ir::{IRProgram, IRFunction, IRType, IRValue, Instruction, BasicBlock, FunctionSignature, SourceRef};
+import native::x64::{emitProgramVerified};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func diagnosticText(label: string, result: VerifyResult): string {
+    var output = label + ": ";
+    if result.ok { output = output + "valid\n"; }
+    else { output = output + "invalid\n"; }
+    var index = 0;
+    loop {
+        if index >= result.errors.len() { break; }
+        output = output + result.errors[index] + "\n";
+        index = index + 1;
+    }
+    return output;
+}
 
 func source(start: int, end: int): SourceRef {
     return ir.sourceRef("verify.rey", start, end);
@@ -122,6 +138,30 @@ func unreachableProgram(): IRProgram {
     return ir.irProgram(0, [function]);
 }
 
+func mixedDenseAndSparseProgram(): IRProgram {
+    var sparseInstruction = ir.constI64(1000001, 9, source(20, 21));
+    var sparseBlock = ir.basicBlock(0, [], [sparseInstruction], ir.returnValue(1000001, source(21, 22)));
+    var sparseFunction = ir.irFunction(
+        0,
+        ir.functionKey("indices", "", "sparse"),
+        ir.functionSignature([], ir.irI64()),
+        [],
+        [sparseBlock],
+        ir.unknownEffects()
+    );
+    var denseInstruction = ir.constI64(0, 3, source(22, 23));
+    var denseBlock = ir.basicBlock(0, [], [denseInstruction], ir.returnValue(0, source(23, 24)));
+    var denseFunction = ir.irFunction(
+        1,
+        ir.functionKey("indices", "", "dense"),
+        ir.functionSignature([], ir.irI64()),
+        [],
+        [denseBlock],
+        ir.unknownEffects()
+    );
+    return ir.irProgram(0, [sparseFunction, denseFunction]);
+}
+
 func hasDiagnostic(errors: Vec<string>, text: string): bool {
     var index = 0;
     loop {
@@ -133,9 +173,14 @@ func hasDiagnostic(errors: Vec<string>, text: string): bool {
 }
 
 func main(): void {
+    var arguments = args();
+    assert(arguments.len() == 2, "expected an output directory argument");
+    var outputDirectory = arguments[1];
+    var diagnosticOutput = "";
     var valid = verifyProgram(makeProgram(0));
     assert(valid.ok, "diamond with block parameters and a call must verify with unknown effects");
     assert(valid.errors.len() == 0, "valid IR should have no diagnostics");
+    diagnosticOutput = diagnosticOutput + diagnosticText("diamond", valid);
 
     var mode = 1;
     loop {
@@ -143,17 +188,34 @@ func main(): void {
         var result = verifyProgram(makeProgram(mode));
         assert(!result.ok, "malformed fixture mode " + mode.toString() + " must be rejected");
         assert(result.errors.len() > 0, "rejected fixture must include a deterministic diagnostic");
+        diagnosticOutput = diagnosticOutput + diagnosticText("malformed-" + mode.toString(), result);
         mode = mode + 1;
     }
 
     var validIrreducible = verifyProgram(irreducibleProgram(true));
     assert(validIrreducible.ok, "entry value in an irreducible join must dominate");
+    diagnosticOutput = diagnosticOutput + diagnosticText("irreducible-valid", validIrreducible);
     var invalidIrreducible = verifyProgram(irreducibleProgram(false));
     assert(!invalidIrreducible.ok, "branch value used across an irreducible entry must be rejected");
     assert(hasDiagnostic(invalidIrreducible.errors, "does not dominate"), "irreducible rejection must name dominance");
+    diagnosticOutput = diagnosticOutput + diagnosticText("irreducible-dominance-negative", invalidIrreducible);
 
     var unreachable = verifyProgram(unreachableProgram());
     assert(!unreachable.ok, "unreachable block must be rejected");
     assert(hasDiagnostic(unreachable.errors, "unreachable block"), "unreachable rejection must name the block");
+    diagnosticOutput = diagnosticOutput + diagnosticText("unreachable", unreachable);
+
+    var mixedIndices = verifyProgram(mixedDenseAndSparseProgram());
+    assert(mixedIndices.ok, "sparse indexing followed by dense indexing must verify");
+    diagnosticOutput = diagnosticOutput + diagnosticText("mixed-dense-sparse-indexing", mixedIndices);
+
+    var code = emitProgramVerified(makeProgram(0), "linux-x64");
+    assert(code.isOk(), "verified emitter must accept the checked-in valid branch-argument fixture");
+    var elf = buildElfX64(code.unwrap());
+    assert(elf.isOk(), "ELF writer must accept verified fixture output");
+    var bytes = byteString(elf.unwrap());
+    assert(bytes.isOk(), "ELF bytes must convert exactly to a binary string");
+    writeFile(outputDirectory + "/diagnostics.txt", diagnosticOutput);
+    writeFile(outputDirectory + "/emitted.elf", bytes.unwrap());
     print("ir verifier: all fixtures passed");
 }

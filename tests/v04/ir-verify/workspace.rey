@@ -1,0 +1,79 @@
+import ir;
+import ir::verify::{VerifyResult, verifyProgram};
+import ir::{BasicBlock, IRFunction, IRProgram, Instruction, SourceRef};
+
+func require(ok: bool, label: string): void {
+    if !ok {
+        print("FAIL " + label);
+        exit(1);
+    }
+}
+
+func source(start: int): SourceRef {
+    return ir.sourceRef("workspace.rey", start, start + 1);
+}
+
+func makeFunction(functionId: int, blockCount: int): IRFunction {
+    var blocks: Vec<BasicBlock> = [];
+    var blockIndex = 0;
+    loop {
+        if blockIndex >= blockCount { break; }
+        var instructions: Vec<Instruction> = [ir.constI64(blockIndex, blockIndex + functionId * blockCount, source(blockIndex + 1))];
+        var terminator = ir.jump(blockIndex + 1, [], source(blockIndex + 1));
+        if blockIndex + 1 == blockCount { terminator = ir.returnValue(blockIndex, source(blockIndex + 1)); }
+        blocks.push(ir.basicBlock(blockIndex, [], instructions, terminator));
+        blockIndex = blockIndex + 1;
+    }
+    return ir.irFunction(
+        functionId,
+        ir.functionKey("workspace", "", "function" + functionId.toString()),
+        ir.functionSignature([], ir.irI64()),
+        [],
+        blocks,
+        ir.unknownEffects()
+    );
+}
+
+func errorsText(result: VerifyResult): string {
+    var text = "";
+    var index = 0;
+    loop {
+        if index >= result.errors.len() { break; }
+        text = text + result.errors[index] + "\n";
+        index = index + 1;
+    }
+    return text;
+}
+
+func main(): void {
+    var functionCount = 16;
+    var blockCount = 12;
+    var functions: Vec<IRFunction> = [];
+    var functionIndex = 0;
+    loop {
+        if functionIndex >= functionCount { break; }
+        var currentBlockCount = blockCount;
+        if functionIndex % 4 == 1 { currentBlockCount = 4; }
+        else if functionIndex % 4 == 2 { currentBlockCount = 7; }
+        functions.push(makeFunction(functionIndex, currentBlockCount));
+        functionIndex = functionIndex + 1;
+    }
+    var program = ir.irProgram(0, functions);
+    var allFunctions = verifyProgram(program);
+    require(allFunctions.ok, "many-function fixture must verify: " + errorsText(allFunctions));
+
+    var largestFunctionSlots = 0;
+    functionIndex = 0;
+    loop {
+        if functionIndex >= functionCount { break; }
+        var oneFunction = verifyProgram(ir.irProgram(functionIndex, [functions[functionIndex]]));
+        require(oneFunction.ok, "single-function control must verify: " + errorsText(oneFunction));
+        if oneFunction.scratchSlots > largestFunctionSlots { largestFunctionSlots = oneFunction.scratchSlots; }
+        functionIndex = functionIndex + 1;
+    }
+    require(allFunctions.scratchSlots <= largestFunctionSlots, "reused outstanding slots must stay within the largest function");
+    require(allFunctions.scratchSlots * 100 <= allFunctions.controlScratchSlots * 80, "reused slots must be at least 20 percent below control");
+    print("many-function fixture: " + functionCount.toString() + " functions x " + blockCount.toString() + " blocks");
+    print("scratch slots: " + allFunctions.scratchSlots.toString() + " max, " + allFunctions.controlScratchSlots.toString() + " control, " + largestFunctionSlots.toString() + " largest function");
+    print("PASS ir verifier workspace");
+}
