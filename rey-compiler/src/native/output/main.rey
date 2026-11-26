@@ -11,17 +11,13 @@ pub func writeFileBytes(path: string, bytes: Vec<int>): Result<bool, string> {
 
 pub func writeCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
     if __reyPackedWriteBytesFallback(path, bytes) { return Result.Ok(true); }
-    // Rebuild the exact error because the packed hook returns only bool.
-    var encoded = byteString(bytes);
-    if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
-    return Result.Err("byte values must be in 0..255");
+    return Result.Err(path + ": error: native image write or verification failed");
 }
 
 pub func writeVerifiedCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
     var encoded = byteString(bytes);
     if encoded.isErr() { return Result.Err(encoded.unwrapErr()); }
     var value = encoded.unwrap();
-    // image writer owns the executable mode; verify the bytes it wrote
     var written = writeCompilerOutputBytes(path, bytes);
     if written.isErr() { return written; }
     if !fileExists(path) { return Result.Err(path + ": error: failed to create native image"); }
@@ -29,7 +25,14 @@ pub func writeVerifiedCompilerOutputBytes(path: string, bytes: Vec<int>): Result
     return Result.Ok(true);
 }
 
-// The compiler binds only this validated fallback when explicitly trusted.
+pub func writeCheckedCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
+    var written = writeCompilerOutputBytes(path, bytes);
+    if written.isErr() { return written; }
+    if !fileExists(path) { return Result.Err(path + ": error: failed to create native image"); }
+    return Result.Ok(true);
+}
+
+// The compiler binds this exact private fallback to the checked Linux x64 writer.
 func __reyPackedWriteBytesFallback(path: string, bytes: Vec<int>): bool {
     var encoded = byteString(bytes);
     if encoded.isErr() { return false; }
@@ -40,6 +43,11 @@ func __reyPackedWriteBytesFallback(path: string, bytes: Vec<int>): bool {
 pub func writeCompilerOutputPackedSegments(path: string, header: Vec<int>, body: PackedBuffer): Result<bool, string> {
     if __reyPackedWriteSegmentsFallback(path, header, body) { return Result.Ok(true); }
     return Result.Err("invalid packed compiler output");
+}
+
+pub func writeVerifiedCompilerOutputPackedSegments(path: string, header: Vec<int>, body: PackedBuffer): Result<bool, string> {
+    if __reyPackedWriteSegmentsFallback(path, header, body) { return Result.Ok(true); }
+    return Result.Err(path + ": error: packed image write or verification failed");
 }
 
 func __reyPackedWriteSegmentsFallback(path: string, header: Vec<int>, body: PackedBuffer): bool {

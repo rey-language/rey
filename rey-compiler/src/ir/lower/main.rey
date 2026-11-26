@@ -475,7 +475,7 @@ var activeGlobalGetId: int = -1;
 var activeGlobalSetId: int = -1;
 var activeGlobalBytes: int = 0;
 var lowerTargetOS: string = "darwin";
-var trustedPackedOutput: bool = false;
+var checkedPackedOutput: bool = false;
 // Darwin MAP_FIXED rejects 0x200000000 with EPERM. 0x180000000 is a free fixed page.
 var globalSlabAddress: int = 6442450944;
 
@@ -483,8 +483,8 @@ pub func setLowerTargetOS(os: string) {
     lowerTargetOS = os;
 }
 
-pub func setTrustedPackedOutput(enabled: bool) {
-    trustedPackedOutput = enabled;
+pub func setCheckedPackedOutput(enabled: bool) {
+    checkedPackedOutput = enabled;
 }
 
 pub func getLowerTargetOS(): string {
@@ -3837,7 +3837,7 @@ func packedWriterFallbackShape(plan: FunctionPlan): bool {
     }
 }
 
-func packedWriterDependenciesTrusted(lowerer: FunctionLowerer, plan: FunctionPlan): bool {
+func packedWriterDependenciesChecked(lowerer: FunctionLowerer, plan: FunctionPlan): bool {
     var byteCall: Expr = Expr::Identifier(IdentExpr { name: emptyString, span: plan.declaration.span });
     match plan.declaration.body[0] {
         Stmt::VarDecl(variable) => { byteCall = variable.value; },
@@ -3919,7 +3919,7 @@ func packedSegmentsFallbackShape(plan: FunctionPlan): bool {
     }
 }
 
-func packedSegmentsDependenciesTrusted(lowerer: FunctionLowerer, plan: FunctionPlan): bool {
+func packedSegmentsDependenciesChecked(lowerer: FunctionLowerer, plan: FunctionPlan): bool {
     var expression: Expr = Expr::Identifier(IdentExpr { name: emptyString, span: plan.declaration.span });
     match plan.declaration.body[0] {
         Stmt::Return(statement) => { expression = statement.value; },
@@ -3988,10 +3988,10 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
         return failExpression(lowerer, expression, "resolved call target is not a top-level scalar function in this source unit");
     }
     var target = lowerer.plans[targetIndex];
-    if lowerer.managed && trustedPackedOutput && target.sourceName == "__reyPackedWriteBytesFallback" && packedWriterFallbackShape(target) && packedWriterDependenciesTrusted(lowerer, target) {
+    if lowerer.managed && checkedPackedOutput && target.sourceName == "__reyPackedWriteBytesFallback" && packedWriterFallbackShape(target) && packedWriterDependenciesChecked(lowerer, target) {
         return lowerPackedWriterFallback(lowerer, expression, callExpr, target);
     }
-    if lowerer.managed && trustedPackedOutput && target.sourceName == "__reyPackedWriteSegmentsFallback" && packedSegmentsFallbackShape(target) && packedSegmentsDependenciesTrusted(lowerer, target) {
+    if lowerer.managed && checkedPackedOutput && target.sourceName == "__reyPackedWriteSegmentsFallback" && packedSegmentsFallbackShape(target) && packedSegmentsDependenciesChecked(lowerer, target) {
         return lowerPackedSegmentsFallback(lowerer, expression, callExpr, target);
     }
     var arguments: Vec<int> = [];
@@ -5542,7 +5542,7 @@ func managedHookNames(): Vec<string> {
         "managedMapCreate", "managedMapLength", "managedMapHas", "managedMapKeys", "managedMapGetI64", "managedMapGetReference",
         "managedMapSetI64", "managedMapSetReference", "managedMapDelete",
     ];
-    if trustedPackedOutput { names.push(litManagedWriteBytes); names.push(litManagedWritePackedSegments); }
+    if checkedPackedOutput { names.push(litManagedWriteBytes); names.push(litManagedWritePackedSegments); }
     return names;
 }
 

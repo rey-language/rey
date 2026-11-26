@@ -32,6 +32,10 @@ pub func hostClose(fd: int): int {
     return __reyRawToInt(__reyRawHostSyscall(3, hostRawInt(fd), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
 }
 
+pub func hostFchmod(fd: int, mode: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(77, hostRawInt(fd), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
 pub func hostLseek(fd: int, offset: int, whence: int): int {
     return __reyRawToInt(__reyRawHostSyscall(8, hostRawInt(fd), hostRawInt(offset), hostRawInt(whence), __reyRawNull(), __reyRawNull(), __reyRawNull()));
 }

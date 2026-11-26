@@ -1,4 +1,4 @@
-import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostGetdirentries, hostLseek, hostOpen, hostRead, hostUnlink, hostWrite};
+import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostFchmod, hostGetdirentries, hostLseek, hostOpen, hostRead, hostUnlink, hostWrite};
 import layout::{layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
 import managed::{managedAllocateSized, managedLiveObjects, managedStoreReference};
 
@@ -174,18 +174,19 @@ pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, 
         index = index + 1;
     }
 
+    var staging = __reyRawMap(4096);
+    if __reyRawToInt(staging) < 0 { return false; }
     var fd = -1;
     loop {
-        // 493 (0755) - compiler images are executable artifacts
+        // O_WRONLY | O_CREAT | O_TRUNC. Plain writeFile keeps its 0644 mode.
         fd = hostOpen(containersPathData(path), 577, 493);
         if fd != -4 { break; }
     }
-    if fd < 0 { containersFail(2208); return false; }
-
-    var staging = __reyRawNull();
-    if length > 0 { staging = __reyRawMap(4096); }
+    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
+    if hostFchmod(fd, 493) != 0 { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
     var offset = 0;
-    while offset < length {
+    var writeOk = true;
+    while offset < length && writeOk {
         var count = 4096;
         if length - offset < count { count = length - offset; }
         index = 0;
@@ -195,24 +196,47 @@ pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, 
             index = index + 1;
         }
 
-        var writtenOffset = 0;
-        loop {
-            if writtenOffset >= count { break; }
-            var written = hostWrite(fd, __reyRawOffset(staging, writtenOffset), count - writtenOffset);
-            if written == -4 { continue; }
-            if written <= 0 {
-                __reyRawUnmap(staging, 4096);
-                var ignoredClose = hostClose(fd);
-                containersFail(2208);
-                return false;
-            }
-            writtenOffset = writtenOffset + written;
-        }
+        if !containersWriteStaging(fd, staging, count) { writeOk = false; }
         offset = offset + count;
     }
-    if length > 0 { __reyRawUnmap(staging, 4096); }
-    if hostClose(fd) != 0 { containersFail(2208); return false; }
-    return true;
+    if !writeOk { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
+    if hostClose(fd) != 0 { __reyRawUnmap(staging, 4096); return false; }
+
+    loop {
+        fd = hostOpen(containersPathData(path), 0, 0);
+        if fd != -4 { break; }
+    }
+    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
+    offset = 0;
+    var readOk = true;
+    while offset < length && readOk {
+        var expected = 4096;
+        if length - offset < expected { expected = length - offset; }
+        var received = 0;
+        while received < expected && readOk {
+            var count = hostRead(fd, staging, expected - received);
+            if count == -4 { continue; }
+            if count <= 0 { readOk = false; }
+            else {
+                index = 0;
+                while index < count {
+                    var wanted = __reyRawLoadI64(containersVecTailAddress(backing, offset + received + index));
+                    if __reyRawLoadByte(containersAddressAt(staging, index)) != wanted { readOk = false; break; }
+                    index = index + 1;
+                }
+                received = received + count;
+            }
+        }
+        offset = offset + received;
+    }
+    if readOk {
+        var extra = -4;
+        loop { extra = hostRead(fd, staging, 1); if extra != -4 { break; } }
+        if extra != 0 { readOk = false; }
+    }
+    var readClose = hostClose(fd);
+    __reyRawUnmap(staging, 4096);
+    return readOk && readClose == 0;
 }
 
 func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {
@@ -224,6 +248,13 @@ func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bo
         offset = offset + written;
     }
     return true;
+}
+
+func containersPackedByte(lane: int, slot: int): int {
+    var factor = 1;
+    var index = 0;
+    while index < slot { factor = factor * 256; index = index + 1; }
+    return (lane / factor) % 256;
 }
 
 // The compiler supplies the checked layouts for its private packed buffer.
@@ -266,48 +297,94 @@ pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_
         index = index + 1;
     }
     var staging = __reyRawMap(4096);
+    if __reyRawToInt(staging) < 0 { return false; }
     var fd = -1;
     loop {
-        // 493 (0755) - compiler images are executable artifacts
         fd = hostOpen(containersPathData(path), 577, 493);
         if fd != -4 { break; }
     }
-    if fd < 0 { __reyRawUnmap(staging, 4096); containersFail(2208); return false; }
+    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
+    if hostFchmod(fd, 493) != 0 { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
     var staged = 0;
+    var writeOk = true;
     index = 0;
-    while index < headerLength {
+    while index < headerLength && writeOk {
         __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddress(headerBacking, index)));
         staged = staged + 1;
         index = index + 1;
         if staged == 4096 {
-            if !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
-            staged = 0;
+            if !containersWriteStaging(fd, staging, staged) { writeOk = false; }
+            else { staged = 0; }
         }
     }
     index = 0;
     var remaining = length;
-    while index < usedLanes {
+    while index < usedLanes && writeOk {
         var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
         var count = 7;
         if remaining < count { count = remaining; }
         var byteAt = 0;
-        while byteAt < count {
+        while byteAt < count && writeOk {
             __reyRawStoreByte(containersAddressAt(staging, staged), lane % 256);
             lane = lane / 256;
             staged = staged + 1;
             byteAt = byteAt + 1;
-            if staged == 4096 {
-                if !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
-                staged = 0;
+            if staged == 4096 && writeOk {
+                if !containersWriteStaging(fd, staging, staged) { writeOk = false; }
+                else { staged = 0; }
             }
         }
         remaining = remaining - count;
         index = index + 1;
     }
-    if staged > 0 && !containersWriteStaging(fd, staging, staged) { __reyRawUnmap(staging, 4096); hostClose(fd); containersFail(2208); return false; }
+    if staged > 0 && writeOk && !containersWriteStaging(fd, staging, staged) { writeOk = false; }
+    if !writeOk { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
+    if hostClose(fd) != 0 { __reyRawUnmap(staging, 4096); return false; }
+
+    loop {
+        fd = hostOpen(containersPathData(path), 0, 0);
+        if fd != -4 { break; }
+    }
+    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
+    var totalLength = headerLength + length;
+    var verified = 0;
+    var readOk = true;
+    while verified < totalLength && readOk {
+        var expected = 4096;
+        if totalLength - verified < expected { expected = totalLength - verified; }
+        var received = 0;
+        while received < expected && readOk {
+            var count = hostRead(fd, staging, expected - received);
+            if count == -4 { continue; }
+            if count <= 0 { readOk = false; }
+            else {
+                var byteIndex = 0;
+                while byteIndex < count {
+                    var absoluteIndex = verified + received + byteIndex;
+                    var wanted = 0;
+                    if absoluteIndex < headerLength {
+                        wanted = __reyRawLoadI64(containersVecTailAddress(headerBacking, absoluteIndex));
+                    } else {
+                        var bodyIndex = absoluteIndex - headerLength;
+                        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, bodyIndex / 7));
+                        wanted = containersPackedByte(lane, bodyIndex % 7);
+                    }
+                    if __reyRawLoadByte(containersAddressAt(staging, byteIndex)) != wanted { readOk = false; break; }
+                    byteIndex = byteIndex + 1;
+                }
+                received = received + count;
+            }
+        }
+        verified = verified + received;
+    }
+    if readOk {
+        var extra = -4;
+        loop { extra = hostRead(fd, staging, 1); if extra != -4 { break; } }
+        if extra != 0 { readOk = false; }
+    }
+    var readClose = hostClose(fd);
     __reyRawUnmap(staging, 4096);
-    if hostClose(fd) != 0 { containersFail(2208); return false; }
-    return true;
+    return readOk && readClose == 0;
 }
 
 pub func managedAppendFile(context: __rey_raw_address, path: __rey_raw_address, content: __rey_raw_address): void {
