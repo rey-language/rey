@@ -1,0 +1,12 @@
+{
+  "baseline_revision": "ff6df4a8720ca8947bf51349b66bcf7d5503f490",
+  "baseline_x64_sha256": "ebf211c157ab7f9b729fbeb2c2073f303488284163aee8245c98590e752504a9",
+  "cases": [
+    { "name": "loops", "target": "back-edge and epilogue branches" },
+    { "name": "far-branches", "target": "far conditional and block branches" },
+    { "name": "calls", "target": "forward, nested, and sparse function calls" },
+    { "name": "trap-paths", "target": "checked arithmetic trap relocations" },
+    { "name": "sparse-ids", "target": "sparse block, value, and function IDs" },
+    { "name": "scaled", "target": "retained-slot reduction across many functions" }
+  ]
+}

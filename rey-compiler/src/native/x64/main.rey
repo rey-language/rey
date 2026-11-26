@@ -29,6 +29,15 @@ pub struct PackedX64Code {
     pub functions: Vec<X64FunctionOffset>,
 }
 
+pub struct X64FixupStats {
+    pub peakLiveFixupSlots: int,
+    pub controlPeakFixupSlots: int,
+    pub maxLocalFixupsPerFunction: int,
+    pub maxRetainedLocalFixupsAtFunctionEnd: int,
+    pub finalPublicationFixupSlots: int,
+    pub functionCount: int,
+}
+
 pub struct X64Relocation {
     pub offset: int,
     pub kind: int,
@@ -97,6 +106,14 @@ struct Emitter {
     pub packedBytes: PackedBuffer?,
     pub functions: Vec<X64FunctionOffset>,
     pub fixups: Vec<Fixup>,
+    pub localFixups: Vec<Fixup>,
+    pub peakLiveFixupSlots: int,
+    pub controlPeakFixupSlots: int,
+    pub controlResolvedLocalFixups: int,
+    pub maxLocalFixupsPerFunction: int,
+    pub maxRetainedLocalFixupsAtFunctionEnd: int,
+    pub localFixupsThisFunction: int,
+    pub recycleLocalFixups: bool,
     pub error: string,
     pub convention: string,
     pub os: string,
@@ -104,6 +121,28 @@ struct Emitter {
     pub imports: Vec<X64Import>,
     pub frames: Vec<X64Frame>,
     pub maxFrame: int,
+}
+
+func noteFixupSlots(emitter: Emitter): void {
+    var liveSlots = emitter.fixups.len();
+    if emitter.recycleLocalFixups { liveSlots = liveSlots + emitter.localFixups.len(); }
+    if liveSlots > emitter.peakLiveFixupSlots { emitter.peakLiveFixupSlots = liveSlots; }
+    var controlSlots = emitter.fixups.len() + emitter.controlResolvedLocalFixups;
+    if !emitter.recycleLocalFixups { controlSlots = emitter.fixups.len(); }
+    if controlSlots > emitter.controlPeakFixupSlots { emitter.controlPeakFixupSlots = controlSlots; }
+}
+
+func emitFixup(emitter: Emitter, fixup: Fixup): void {
+    if fixup.kind == 0 || fixup.kind == 1 || fixup.kind == 2 {
+        if emitter.recycleLocalFixups { emitter.localFixups.push(fixup); }
+        else { emitter.fixups.push(fixup); }
+        emitter.controlResolvedLocalFixups = emitter.controlResolvedLocalFixups + 1;
+        emitter.localFixupsThisFunction = emitter.localFixupsThisFunction + 1;
+        if emitter.localFixupsThisFunction > emitter.maxLocalFixupsPerFunction { emitter.maxLocalFixupsPerFunction = emitter.localFixupsThisFunction; }
+    } else {
+        emitter.fixups.push(fixup);
+    }
+    noteFixupSlots(emitter);
 }
 
 func emitterLength(emitter: Emitter): int {
@@ -519,7 +558,7 @@ func emitJmp(emitter: Emitter, kind: int, targetFunctionId: int, targetBlockId: 
     }
     var offset = emitterLength(emitter);
     emitI32(emitter, 0);
-    emitter.fixups.push(Fixup { offset: offset, kind: kind, targetFunctionId: targetFunctionId, targetBlockId: targetBlockId, targetOffset: targetOffset });
+    emitFixup(emitter, Fixup { offset: offset, kind: kind, targetFunctionId: targetFunctionId, targetBlockId: targetBlockId, targetOffset: targetOffset });
 }
 
 func patchRelative(emitter: Emitter, fixup: Fixup, target: int): void {
@@ -921,7 +960,7 @@ func emitInstruction(emitter: Emitter, instruction: Instruction, indexes: IdInde
         emitByte(emitter, 232);
         var winCall = emitterLength(emitter);
         emitI32(emitter, 0);
-        emitter.fixups.push(Fixup { offset: winCall, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
+        emitFixup(emitter, Fixup { offset: winCall, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
         if instruction.resultId >= 0 { emitStoreValue(emitter, indexes, 0, instruction.resultId); }
         return;
     }
@@ -944,7 +983,7 @@ func emitInstruction(emitter: Emitter, instruction: Instruction, indexes: IdInde
         emitByte(emitter, 232);
         var callOffset = emitterLength(emitter);
         emitI32(emitter, 0);
-        emitter.fixups.push(Fixup { offset: callOffset, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
+        emitFixup(emitter, Fixup { offset: callOffset, kind: 3, targetFunctionId: instruction.functionId, targetBlockId: -1, targetOffset: -1 });
         if instruction.resultId >= 0 { emitStoreValue(emitter, indexes, 0, instruction.resultId); }
         return;
     }
@@ -1142,15 +1181,19 @@ func emitTerminator(emitter: Emitter, function: IRFunction, indexes: IdIndex, bl
         emitLoadValue(emitter, indexes, 0, terminator.conditionValueId);
         emitByte(emitter, 72); emitByte(emitter, 133); emitByte(emitter, 192);
         emitJmp(emitter, 2, -1, -1, -1);
-        var conditionalFixupIndex = emitter.fixups.len() - 1;
+        var conditionalFixupIndex = emitter.localFixups.len() - 1;
+        if !emitter.recycleLocalFixups { conditionalFixupIndex = emitter.fixups.len() - 1; }
         var trueIndex = blockIndex(blocksById, terminator.trueTargetBlockId);
         var trueBlock = function.blocks[trueIndex];
         emitEdgeCopy(emitter, indexes, scratchStart, trueBlock, terminator.trueArgs);
         emitJmp(emitter, 0, -1, terminator.trueTargetBlockId, -1);
         var falseOffset = emitterLength(emitter);
-        var conditionalFixup = emitter.fixups[conditionalFixupIndex];
+        var conditionalFixup = Fixup { offset: 0, kind: -1, targetFunctionId: -1, targetBlockId: -1, targetOffset: -1 };
+        if emitter.recycleLocalFixups { conditionalFixup = emitter.localFixups[conditionalFixupIndex]; }
+        else { conditionalFixup = emitter.fixups[conditionalFixupIndex]; }
         conditionalFixup.targetOffset = falseOffset;
-        emitter.fixups.set(conditionalFixupIndex, conditionalFixup);
+        if emitter.recycleLocalFixups { emitter.localFixups.set(conditionalFixupIndex, conditionalFixup); }
+        else { emitter.fixups.set(conditionalFixupIndex, conditionalFixup); }
         var falseIndex = blockIndex(blocksById, terminator.falseTargetBlockId);
         var falseBlock = function.blocks[falseIndex];
         emitEdgeCopy(emitter, indexes, scratchStart, falseBlock, terminator.falseArgs);
@@ -1165,19 +1208,30 @@ func emitTerminator(emitter: Emitter, function: IRFunction, indexes: IdIndex, bl
     emitter.error = "native x64: unsupported scalar terminator";
 }
 
-func resolveLocalFixups(emitter: Emitter, fixupStart: int, fixupFinish: int, blockOffsets: IdIndex, epilogueOffset: int): void {
-    var i = fixupStart;
+func resolveLocalFixups(emitter: Emitter, fixupStart: int, blockOffsets: IdIndex, epilogueOffset: int): void {
+    var i = 0;
+    var finish = emitter.localFixups.len();
+    if !emitter.recycleLocalFixups { i = fixupStart; finish = emitter.fixups.len(); }
     loop {
-        if i >= fixupFinish { break; }
-        var fixup = emitter.fixups[i];
+        if i >= finish { break; }
+        var fixup = Fixup { offset: 0, kind: -1, targetFunctionId: -1, targetBlockId: -1, targetOffset: -1 };
+        if emitter.recycleLocalFixups { fixup = emitter.localFixups[i]; }
+        else { fixup = emitter.fixups[i]; }
         if fixup.kind == 0 || fixup.kind == 1 || fixup.kind == 2 {
             var target = fixup.targetOffset;
             if fixup.kind == 0 { target = blockOffset(blockOffsets, fixup.targetBlockId); }
             if fixup.kind == 1 { target = epilogueOffset; }
-            if target < 0 { emitter.error = "native x64: unresolved local control-flow target"; return; }
+            if target < 0 { emitter.error = "native x64: unresolved local control-flow target"; break; }
             patchRelative(emitter, fixup, target);
+            if emitter.error != "" { break; }
         }
         i = i + 1;
+    }
+    if emitter.recycleLocalFixups {
+        while emitter.localFixups.len() > 0 { emitter.localFixups.pop(); }
+        if emitter.localFixups.len() > emitter.maxRetainedLocalFixupsAtFunctionEnd {
+            emitter.maxRetainedLocalFixupsAtFunctionEnd = emitter.localFixups.len();
+        }
     }
 }
 
@@ -1212,6 +1266,10 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     var slotIndexes = valueSlotIndexes(slots);
     var blocksById = blockIndexes(function.blocks);
     var blockOffsets = idIndexCreate(blocksById.maximumId, function.blocks.len());
+    if emitter.recycleLocalFixups && emitter.localFixups.len() != 0 {
+        emitter.error = "native x64: local fixup scratch was not recycled";
+        return;
+    }
     var fixupStart = emitter.fixups.len();
     var scratchCount = maxEdgeParams(function);
     var outgoingBytes = 16;
@@ -1298,7 +1356,11 @@ func emitFunction(emitter: Emitter, function: IRFunction, overflowOffset: int, l
     }
     emitByte(emitter, 201);
     emitByte(emitter, 195);
-    resolveLocalFixups(emitter, fixupStart, emitter.fixups.len(), blockOffsets, epilogueOffset);
+    resolveLocalFixups(emitter, fixupStart, blockOffsets, epilogueOffset);
+    if emitter.recycleLocalFixups && emitter.localFixups.len() > emitter.maxRetainedLocalFixupsAtFunctionEnd {
+        emitter.maxRetainedLocalFixupsAtFunctionEnd = emitter.localFixups.len();
+    }
+    emitter.localFixupsThisFunction = 0;
 }
 
 func programUsesRawArgs(program: IRProgram): bool {
@@ -1341,7 +1403,7 @@ func appendEntryStub(emitter: Emitter, entryFunction: IRFunction, exitNumber: in
     emitByte(emitter, 232);
     var callOffset = emitterLength(emitter);
     emitI32(emitter, 0);
-    emitter.fixups.push(Fixup { offset: callOffset, kind: 3, targetFunctionId: entryFunction.id, targetBlockId: -1, targetOffset: -1 });
+    emitFixup(emitter, Fixup { offset: callOffset, kind: 3, targetFunctionId: entryFunction.id, targetBlockId: -1, targetOffset: -1 });
     if emitter.convention == "win64" {
         if entryFunction.signature.returnType.kind == IRTypeKind::Void {
             emitByte(emitter, 49); emitByte(emitter, 201);
@@ -1368,7 +1430,7 @@ func canonicalTarget(target: string): string {
     return target;
 }
 
-func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packedOutput: bool): Result<Emitter, string> {
+func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packedOutput: bool, recycleLocalFixups: bool): Result<Emitter, string> {
     var canonical = canonicalTarget(target);
     var convention = "";
     if canonical == "linux-x64" || canonical == "darwin-x64" { convention = "sysv"; }
@@ -1428,7 +1490,13 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
         if created.isErr() { return Result.Err("native x64: " + created.unwrapErr()); }
         packedBytes = created.unwrap();
     }
-    var emitter = Emitter { bytes: Vec.new(), packedBytes: packedBytes, functions: Vec.new(), fixups: Vec.new(), error: "", convention: convention, os: os, relocations: noneRelocations, imports: noneImports, frames: noneFrames, maxFrame: 0 };
+    var emitter = Emitter {
+        bytes: Vec.new(), packedBytes: packedBytes, functions: Vec.new(), fixups: Vec.new(), localFixups: Vec.new(),
+        peakLiveFixupSlots: 0, controlPeakFixupSlots: 0, controlResolvedLocalFixups: 0,
+        maxLocalFixupsPerFunction: 0, maxRetainedLocalFixupsAtFunctionEnd: 0,
+        localFixupsThisFunction: 0, recycleLocalFixups: recycleLocalFixups,
+        error: "", convention: convention, os: os, relocations: noneRelocations, imports: noneImports, frames: noneFrames, maxFrame: 0
+    };
     var exitNumber = 60;
     if canonical == "darwin-x64" { exitNumber = 33554433; }
     if convention == "win64" {
@@ -1485,8 +1553,41 @@ func emitEmitterInternal(program: IRProgram, target: string, reuse: bool, packed
     return Result.Ok(emitter);
 }
 
+pub func emitProgramFixupStats(program: IRProgram, target: string): Result<X64FixupStats, string> {
+    if target != "linux-x64" { return Result.Err("native x64: target must be linux-x64"); }
+    var verification = verifyProgram(program);
+    if !verification.ok {
+        if verification.errors.len() > 0 { return Result.Err("native x64: invalid IR: " + verification.errors[0]); }
+        return Result.Err("native x64: invalid IR program");
+    }
+    var emitted = emitEmitterInternal(program, target, false, false, true);
+    if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
+    var emitter = emitted.unwrap();
+    return Result.Ok(X64FixupStats {
+        peakLiveFixupSlots: emitter.peakLiveFixupSlots,
+        controlPeakFixupSlots: emitter.controlPeakFixupSlots,
+        maxLocalFixupsPerFunction: emitter.maxLocalFixupsPerFunction,
+        maxRetainedLocalFixupsAtFunctionEnd: emitter.maxRetainedLocalFixupsAtFunctionEnd,
+        finalPublicationFixupSlots: emitter.fixups.len(),
+        functionCount: emitter.functions.len(),
+    });
+}
+
+pub func emitProgramFixupControl(program: IRProgram, target: string): Result<X64Code, string> {
+    if target != "linux-x64" { return Result.Err("native x64: target must be linux-x64"); }
+    var verification = verifyProgram(program);
+    if !verification.ok {
+        if verification.errors.len() > 0 { return Result.Err("native x64: invalid IR: " + verification.errors[0]); }
+        return Result.Err("native x64: invalid IR program");
+    }
+    var emitted = emitEmitterInternal(program, target, false, false, false);
+    if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
+    var emitter = emitted.unwrap();
+    return Result.Ok(X64Code { bytes: emitter.bytes, entryOffset: 0, functions: emitter.functions });
+}
+
 func emitImageVerifiedInternal(program: IRProgram, target: string, reuse: bool): Result<X64Image, string> {
-    var emitted = emitEmitterInternal(program, target, reuse, false);
+    var emitted = emitEmitterInternal(program, target, reuse, false, true);
     if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
     var emitter = emitted.unwrap();
     var canonical = canonicalTarget(target);
@@ -1544,7 +1645,7 @@ func emitProgramPackedInternal(program: IRProgram, target: string, reuse: bool, 
             return Result.Err("native x64: invalid IR program");
         }
     }
-    var emitted = emitEmitterInternal(program, target, reuse, true);
+    var emitted = emitEmitterInternal(program, target, reuse, true, true);
     if emitted.isErr() { return Result.Err(emitted.unwrapErr()); }
     var emitter = emitted.unwrap();
     var packed = emitter.packedBytes;

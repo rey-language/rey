@@ -1,0 +1,218 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, IRFunction, IRProgram, IRType, IRValue, Instruction, SourceRef};
+import native::bytes::{byteString};
+import native::packed::{packedBufferLength, packedBufferReadBytes};
+import native::x64::{PackedX64Code, X64Code, emitProgram, emitProgramFixupControl, emitProgramPacked, emitProgramPackedWithReuse, emitProgramWithReuse};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("x64-fixup-reuse", 0, 1); }
+
+func effects(count: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    while index < count {
+        escapes.push(ir.escapeUnknown());
+        index = index + 1;
+    }
+    return ir.effectSummary(ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), ir.factUnknown(), escapes, ir.escapeUnknown());
+}
+
+func function(id: int, name: string, parameters: Vec<IRValue>, parameterTypes: Vec<IRType>, result: IRType, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("x64-fixup-reuse", "", name), ir.functionSignature(parameterTypes, result), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func loopProgram(): IRProgram {
+    var entry = function(0, "loopEntry", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(0, 8, source()), ir.constI64(1, 1, source())], ir.jump(1, [0], source())),
+        ir.basicBlock(1, [ir.irValue(10, ir.irI64())], [ir.compareI64(11, ir.compareSgt(), 10, 1, source())], ir.branch(11, 2, [], 3, [], source())),
+        ir.basicBlock(2, [], [ir.subCheckedI64(12, 10, 1, source())], ir.jump(1, [12], source())),
+        ir.basicBlock(3, [], [ir.call(13, ir.irI64(), 4, [], source())], ir.returnValue(13, source()))
+    ]);
+    var helper = function(4, "loopExit", [], [], ir.irI64(), [ir.basicBlock(0, [], [ir.constI64(20, 42, source())], ir.returnValue(20, source()))]);
+    return ir.irProgram(0, [entry, helper]);
+}
+
+func farBranchProgram(): IRProgram {
+    var distantInstructions: Vec<Instruction> = [];
+    var index = 0;
+    while index < 512 {
+        distantInstructions.push(ir.constI64(100 + index, index, source()));
+        index = index + 1;
+    }
+    distantInstructions.push(ir.constI64(1000, 22, source()));
+    var entry = function(0, "farBranch", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constBool(0, true, source())], ir.branch(0, 1, [], 2, [], source())),
+        ir.basicBlock(1, [], [ir.constI64(1, 11, source())], ir.returnValue(1, source())),
+        ir.basicBlock(2, [], distantInstructions, ir.returnValue(1000, source()))
+    ]);
+    return ir.irProgram(0, [entry]);
+}
+
+func callsProgram(): IRProgram {
+    var entry = function(0, "callEntry", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.call(1, ir.irI64(), 42, [], source())], ir.returnValue(1, source()))
+    ]);
+    var middle = function(42, "callMiddle", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.call(2, ir.irI64(), 10000000, [], source())], ir.returnValue(2, source()))
+    ]);
+    var leaf = function(10000000, "callLeaf", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(3, 9, source())], ir.returnValue(3, source()))
+    ]);
+    return ir.irProgram(0, [entry, middle, leaf]);
+}
+
+pub func trapProgram(): IRProgram {
+    var entry = function(0, "trapPaths", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [
+            ir.constI64(0, -9223372036854775807 - 1, source()),
+            ir.constI64(1, -1, source()),
+            ir.constI64(2, 0, source()),
+            ir.divCheckedI64(3, 0, 2, source()),
+            ir.remCheckedI64(4, 0, 2, source()),
+            ir.addCheckedI64(5, 0, 1, source()),
+            ir.subCheckedI64(6, 0, 1, source()),
+            ir.mulCheckedI64(7, 0, 0, source())
+        ], ir.returnValue(3, source()))
+    ]);
+    return ir.irProgram(0, [entry]);
+}
+
+func sparseProgram(): IRProgram {
+    var entry = function(0, "sparseEntry", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constBool(9000000, true, source())], ir.branch(9000000, 10000000, [], 10000001, [], source())),
+        ir.basicBlock(10000000, [], [ir.call(20000000, ir.irI64(), 9000000, [], source())], ir.returnValue(20000000, source())),
+        ir.basicBlock(10000001, [], [ir.constI64(30000000, -7, source())], ir.returnValue(30000000, source()))
+    ]);
+    var helper = function(9000000, "sparseHelper", [], [], ir.irI64(), [
+        ir.basicBlock(0, [], [ir.constI64(1, 17, source())], ir.returnValue(1, source()))
+    ]);
+    return ir.irProgram(0, [entry, helper]);
+}
+
+pub func scaledProgram(count: int): IRProgram {
+    var entryInstructions: Vec<Instruction> = [ir.constI64(900, 0, source())];
+    var previousValue = 900;
+    var index = 0;
+    var functions: Vec<IRFunction> = [];
+    while index < count {
+        var functionId = index + 1;
+        var callValue = 1000 + index;
+        var sumValue = 2000 + index;
+        entryInstructions.push(ir.call(callValue, ir.irI64(), functionId, [], source()));
+        entryInstructions.push(ir.addCheckedI64(sumValue, previousValue, callValue, source()));
+        previousValue = sumValue;
+        var helper = function(functionId, "scaledBranch" + index.toString(), [], [], ir.irI64(), [
+            ir.basicBlock(0, [], [ir.constBool(0, true, source())], ir.branch(0, 1, [], 2, [], source())),
+            ir.basicBlock(1, [], [ir.constI64(1, 1, source())], ir.returnValue(1, source())),
+            ir.basicBlock(2, [], [ir.constI64(2, 2, source())], ir.returnValue(2, source()))
+        ]);
+        functions.push(helper);
+        index = index + 1;
+    }
+    var entry = function(0, "scaledEntry", [], [], ir.irI64(), [ir.basicBlock(0, [], entryInstructions, ir.returnValue(previousValue, source()))]);
+    var ordered: Vec<IRFunction> = [entry];
+    index = 0;
+    while index < functions.len() { ordered.push(functions[index]); index = index + 1; }
+    return ir.irProgram(0, ordered);
+}
+
+func compareBytes(left: Vec<int>, right: Vec<int>, label: string): void {
+    require(left.len() == right.len(), label + ": byte lengths differ");
+    var index = 0;
+    while index < left.len() {
+        require(left[index] == right[index], label + ": byte differs at offset " + index.toString());
+        index = index + 1;
+    }
+}
+
+func compareFunctions(left: X64Code, right: X64Code, label: string): void {
+    require(left.entryOffset == right.entryOffset, label + ": entry offsets differ");
+    require(left.functions.len() == right.functions.len(), label + ": function counts differ");
+    var index = 0;
+    while index < left.functions.len() {
+        require(left.functions[index].functionId == right.functions[index].functionId, label + ": function IDs differ");
+        require(left.functions[index].offset == right.functions[index].offset, label + ": function offsets differ");
+        index = index + 1;
+    }
+}
+
+func comparePacked(plain: X64Code, packed: PackedX64Code, label: string): void {
+    require(plain.entryOffset == packed.entryOffset, label + ": packed entry offset differs");
+    require(plain.functions.len() == packed.functions.len(), label + ": packed function count differs");
+    var index = 0;
+    while index < plain.functions.len() {
+        require(plain.functions[index].functionId == packed.functions[index].functionId, label + ": packed function ID differs");
+        require(plain.functions[index].offset == packed.functions[index].offset, label + ": packed function offset differs");
+        index = index + 1;
+    }
+    var byteCount = packedBufferLength(packed.bytes);
+    require(byteCount.isOk() && byteCount.unwrap() == plain.bytes.len(), label + ": packed code length differs");
+    var decoded = packedBufferReadBytes(packed.bytes, 0, plain.bytes.len());
+    require(decoded.isOk(), label + ": packed code read failed");
+    var decodedText = decoded.unwrap();
+    var byteIndex = 0;
+    while byteIndex < plain.bytes.len() {
+        require(plain.bytes[byteIndex] == int(decodedText[byteIndex]), label + ": packed byte differs at offset " + byteIndex.toString());
+        byteIndex = byteIndex + 1;
+    }
+}
+
+func offsetsText(code: X64Code): string {
+    var text = "entry=" + code.entryOffset.toString() + "\n";
+    var index = 0;
+    while index < code.functions.len() {
+        text = text + "function=" + code.functions[index].functionId.toString() + "," + code.functions[index].offset.toString() + "\n";
+        index = index + 1;
+    }
+    return text;
+}
+
+func saveCode(directory: string, name: string, code: X64Code): void {
+    var encoded = byteString(code.bytes);
+    require(encoded.isOk(), name + ": code byte encoding failed");
+    var codePath = directory + "/" + name + ".code";
+    writeFile(codePath, encoded.unwrap());
+    require(fileExists(codePath) && readFile(codePath) == encoded.unwrap(), name + ": code output readback differs");
+    var offsets = offsetsText(code);
+    var offsetsPath = directory + "/" + name + ".offsets";
+    writeFile(offsetsPath, offsets);
+    require(fileExists(offsetsPath) && readFile(offsetsPath) == offsets, name + ": offsets output readback differs");
+}
+
+func saveCase(directory: string, name: string, program: IRProgram): void {
+    var controlResult = emitProgramFixupControl(program, "linux-x64");
+    if controlResult.isErr() { eprintln(name + ": control emission failed: " + controlResult.unwrapErr()); exit(1); }
+    var plainResult = emitProgram(program, "linux-x64");
+    if plainResult.isErr() { eprintln(name + ": plain emission failed: " + plainResult.unwrapErr()); exit(1); }
+    var reuseResult = emitProgramWithReuse(program, "linux-x64");
+    if reuseResult.isErr() { eprintln(name + ": reuse emission failed: " + reuseResult.unwrapErr()); exit(1); }
+    var packedResult = emitProgramPacked(program, "linux-x64");
+    if packedResult.isErr() { eprintln(name + ": packed emission failed: " + packedResult.unwrapErr()); exit(1); }
+    var packedReuseResult = emitProgramPackedWithReuse(program, "linux-x64");
+    if packedReuseResult.isErr() { eprintln(name + ": packed reuse emission failed: " + packedReuseResult.unwrapErr()); exit(1); }
+    var plain = plainResult.unwrap();
+    var control = controlResult.unwrap();
+    var reused = reuseResult.unwrap();
+    compareFunctions(control, plain, name + " control");
+    compareBytes(control.bytes, plain.bytes, name + " control");
+    compareFunctions(plain, reused, name + " reuse");
+    compareBytes(plain.bytes, reused.bytes, name + " reuse");
+    comparePacked(plain, packedResult.unwrap(), name + " packed");
+    comparePacked(reused, packedReuseResult.unwrap(), name + " packed reuse");
+    saveCode(directory + "/control", name, control);
+    saveCode(directory + "/recycled", name, plain);
+    println("PASS fixture " + name);
+}
+
+pub func runFixtures(directory: string): void {
+    require(directory.len() > 0, "output directory is empty");
+    saveCase(directory, "loops", loopProgram());
+    saveCase(directory, "far-branches", farBranchProgram());
+    saveCase(directory, "calls", callsProgram());
+    saveCase(directory, "trap-paths", trapProgram());
+    saveCase(directory, "sparse-ids", sparseProgram());
+    saveCase(directory, "scaled", scaledProgram(64));
+}

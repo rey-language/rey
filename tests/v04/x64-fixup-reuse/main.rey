@@ -1,0 +1,30 @@
+import x64_fixup_reuse;
+import native::x64::{emitProgramFixupStats};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func main(): void {
+    var argv = args();
+    if argv.len() != 2 { eprintln("fixup fixture expects one output directory"); exit(1); }
+    x64_fixup_reuse.runFixtures(argv[1]);
+    var result = emitProgramFixupStats(x64_fixup_reuse.scaledProgram(64), "linux-x64");
+    if result.isErr() { eprintln("fixup stats failed: " + result.unwrapErr()); exit(1); }
+    var stats = result.unwrap();
+    require(stats.controlPeakFixupSlots > stats.peakLiveFixupSlots, "scaled case did not reduce peak live fixup slots");
+    require(stats.maxRetainedLocalFixupsAtFunctionEnd == 0, "a function retained resolved local fixups");
+    require(stats.maxLocalFixupsPerFunction > 0, "scaled case did not exercise local fixups");
+    require(stats.finalPublicationFixupSlots >= 65, "call fixups did not remain live through publication");
+    require(stats.functionCount == 65, "scaled case function count differs");
+    var trapResult = emitProgramFixupStats(x64_fixup_reuse.trapProgram(), "linux-x64");
+    if trapResult.isErr() { eprintln("trap fixup stats failed: " + trapResult.unwrapErr()); exit(1); }
+    var trapStats = trapResult.unwrap();
+    require(trapStats.finalPublicationFixupSlots > 1, "trap relocations did not remain live through publication");
+    println("FIXUP_SLOTS control_peak=" + stats.controlPeakFixupSlots.toString()
+        + " recycled_peak=" + stats.peakLiveFixupSlots.toString()
+        + " max_local=" + stats.maxLocalFixupsPerFunction.toString()
+        + " retained_at_function_end=" + stats.maxRetainedLocalFixupsAtFunctionEnd.toString()
+        + " publication=" + stats.finalPublicationFixupSlots.toString()
+        + " trap_publication=" + trapStats.finalPublicationFixupSlots.toString());
+}
