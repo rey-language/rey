@@ -15,5 +15,9 @@
   "double-end": 2204,
   "container-current-region": 0,
   "repeated-request-plateau": 0,
-  "long-lived-graph-retention": 0
+  "long-lived-graph-retention": 0,
+  "context-handle-aba": 2204,
+  "program-handle-aba": 2204,
+  "task-lifecycle": 0,
+  "host-write": 0
 }
