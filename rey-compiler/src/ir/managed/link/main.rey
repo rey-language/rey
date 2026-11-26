@@ -84,6 +84,14 @@ func runtimeSourcesForTarget(root: string, target: string, sources: Vec<Embedded
         found = true;
     }
     if !found { return Result.Err("managed linker: missing host runtime source for " + target + " at " + hostPath); }
+    if target != "linux-x64" {
+        // Transactional compiler output uses the Linux x64 openat/renameat2 ABI.
+        hostSource = hostSource + "\npub func hostOutputSafetySupported(): bool \x7B return false; \x7D\n" +
+            "pub func hostOpenat(directory: int, path: __rey_raw_address, flags: int, mode: int): int \x7B return -1; \x7D\n" +
+            "pub func hostFstat(fd: int, buffer: __rey_raw_address): int \x7B return -1; \x7D\n" +
+            "pub func hostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int \x7B return -1; \x7D\n" +
+            "pub func hostUnlinkat(directory: int, path: __rey_raw_address, flags: int): int \x7B return -1; \x7D\n";
+    }
     var mainHostPath = root + "/host/main.rey";
     var result: Vec<EmbeddedSource> = [];
     index = 0;
@@ -129,8 +137,9 @@ var retentionCopiedPayloadBytes = 0;
 var retentionCopiedFunctions = 0;
 
 func retentionProfileEnabled(): bool {
-    var enabled = getEnv("REY_COMPILER_RETENTION_PROFILE");
-    return enabled.isSome() && enabled.unwrap() == "1";
+    if !fileExists("/proc/self/environ") { return false; }
+    var environment = readFile("/proc/self/environ");
+    return environment.contains("REY_COMPILER_RETENTION_PROFILE=1\x00");
 }
 
 func retentionProfileEvent(event: string, fields: string) {

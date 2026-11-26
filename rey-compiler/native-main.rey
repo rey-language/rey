@@ -12,8 +12,8 @@ import native::image::{buildMachOArm64, buildElfArm64};
 import native::x64::{X64Code, X64Image, X64FunctionOffset, PackedX64Code, emitProgram, emitProgramWithReuse, emitProgramVerified, emitProgramVerifiedWithReuse, emitProgramPacked, emitProgramPackedWithReuse, emitProgramPackedVerified, emitProgramPackedVerifiedWithReuse, emitImage, emitImageWithReuse};
 import native::image::x64::{buildElfX64Owned, buildElfX64HeaderForLength, buildMachOX64};
 import native::image::pe::{buildPeX64};
-import native::output::{writeCheckedCompilerOutputBytes, writeVerifiedCompilerOutputBytes, writeVerifiedCompilerOutputPackedSegments};
-import native::packed::{packedBufferTryLength};
+import native::output::{writeCheckedCompilerOutputBytes, writeVerifiedCompilerOutputBytes, writeVerifiedCompilerOutputPackedSegments, writeVerifiedCompilerOutputs};
+import native::packed::{PackedBuffer, packedBufferTryLength};
 import ir::optimize::scalar::{foldConstants};
 
 func symbolHex(value: int): string {
@@ -45,6 +45,23 @@ func symbolMap(program: IRProgram, functions: Vec<X64FunctionOffset>): string {
         }
         result = result + symbolHex(4198400 + functionOffset.offset) + " " + name + "\n";
         i += 1;
+    }
+    return result;
+}
+
+func packedImageBytes(header: Vec<int>, body: PackedBuffer): Vec<int> {
+    var result: Vec<int> = [];
+    var index = 0;
+    while index < header.len() { result.push(header[index]); index += 1; }
+    var length = packedBufferTryLength(body);
+    index = 0;
+    while index < length {
+        var lane = body.lanes[index / 7];
+        var factor = 1;
+        var slot = 0;
+        while slot < index % 7 { factor *= 256; slot += 1; }
+        result.push((lane / factor) % 256);
+        index += 1;
     }
     return result;
 }
@@ -142,6 +159,8 @@ func main(): void {
     else { eprintln("unsupported native target: " + target); exit(2); return; }
     setLowerTargetOS(target);
     setCheckedPackedOutput(checkedPackedOutput);
+    var checkedOutput = checkedPackedOutput || (forceManaged && target == "linux-x64");
+    if checkedOutput && !checkedPackedOutput { setCheckedPackedOutput(true); }
     var verifiedByRegionLowering = false;
     var path = argv[2];
     var output = argv[4];
@@ -154,6 +173,7 @@ func main(): void {
         if normalizedSymbolMap == normalizedPath || normalizedSymbolMap == normalizedOutput {
             eprintln("symbol map must differ from the source and output paths"); exit(2); return;
         }
+        if !forceManaged || !checkedOutput { eprintln("symbol map requires managed checked output publication"); exit(2); return; }
     }
     if !fileExists(path) { eprintln(path + ": error: source file not found"); exit(1); return; }
     var embeddedStd: Vec<EmbeddedSource> = [];
@@ -220,15 +240,17 @@ func main(): void {
         else { image = buildElfArm64(code.unwrap()); }
     }
     if !packedX64 && image.isErr() { eprintln(image.unwrapErr()); exit(1); return; }
+    var written: Result<bool, string> = Result.Err("output not written");
     if hasSymbolMap {
         var functions: Vec<X64FunctionOffset> = [];
         if packedX64 { functions = emittedPackedCode.unwrap().functions; }
         else { functions = emittedX64Code.unwrap().functions; }
-        writeFile(symbolMapPath, symbolMap(program, functions));
-        if !fileExists(symbolMapPath) { eprintln(symbolMapPath + ": error: failed to create symbol map"); exit(1); return; }
+        var mapContent = symbolMap(program, functions);
+        if packedX64 { written = writeVerifiedCompilerOutputs(output, packedImageBytes(packedHeader.unwrap(), emittedPackedCode.unwrap().bytes), symbolMapPath, mapContent); }
+        else { written = writeVerifiedCompilerOutputs(output, image.unwrap(), symbolMapPath, mapContent); }
     }
-    var written: Result<bool, string> = Result.Err("output not written");
-    if packedX64 { written = writeVerifiedCompilerOutputPackedSegments(output, packedHeader.unwrap(), emittedPackedCode.unwrap().bytes); }
+    else if packedX64 { written = writeVerifiedCompilerOutputPackedSegments(output, packedHeader.unwrap(), emittedPackedCode.unwrap().bytes); }
+    else if target == "linux-x64" && checkedOutput { written = writeVerifiedCompilerOutputBytes(output, image.unwrap()); }
     else if target == "linux-x64" { written = writeCheckedCompilerOutputBytes(output, image.unwrap()); }
     else { written = writeVerifiedCompilerOutputBytes(output, image.unwrap()); }
     if written.isErr() { eprintln(written.unwrapErr()); exit(1); return; }

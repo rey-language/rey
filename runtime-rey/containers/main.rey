@@ -1,9 +1,105 @@
-import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostFchmod, hostGetdirentries, hostLseek, hostOpen, hostRead, hostUnlink, hostWrite};
+import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostFchmod, hostFstat, hostGetdirentries, hostLseek, hostOpen, hostOpenat, hostOutputSafetySupported, hostRead, hostRenameat2, hostUnlink, hostUnlinkat, hostWrite};
 import layout::{layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
 import managed::{managedAllocateSized, managedLiveObjects, managedStoreReference};
 
+var containersProtectedInputIdentityStorage: int = 0;
+var containersProtectedInputIdentityCount: int = 0;
+var containersProtectedInputIdentityCapacity: int = 0;
+var containersOutputTempSequence: int = 1;
+
 func containersAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
     return __reyRawOffset(base, offset);
+}
+
+func containersOutputDirectoryMake(fd: int, name: int, parent: int, device: int, inode: int, valid: bool): __rey_raw_address {
+    if !valid { return __reyRawNull(); }
+    var value = __reyRawMap(48);
+    if __reyRawToInt(value) <= 0 { return __reyRawNull(); }
+    __reyRawStoreI64(value, fd);
+    __reyRawStoreI64(containersAddressAt(value, 8), name);
+    __reyRawStoreI64(containersAddressAt(value, 16), parent);
+    __reyRawStoreI64(containersAddressAt(value, 24), device);
+    __reyRawStoreI64(containersAddressAt(value, 32), inode);
+    var validValue = 0;
+    if valid { validValue = 1; }
+    __reyRawStoreI64(containersAddressAt(value, 40), validValue);
+    return value;
+}
+
+func containersOutputFd(directory: __rey_raw_address): int { return __reyRawLoadI64(directory); }
+func containersOutputName(directory: __rey_raw_address): __rey_raw_address { return __reyRawFromInt(__reyRawLoadI64(containersAddressAt(directory, 8))); }
+func containersOutputParent(directory: __rey_raw_address): __rey_raw_address { return __reyRawFromInt(__reyRawLoadI64(containersAddressAt(directory, 16))); }
+func containersOutputDevice(directory: __rey_raw_address): int { return __reyRawLoadI64(containersAddressAt(directory, 24)); }
+func containersOutputInode(directory: __rey_raw_address): int { return __reyRawLoadI64(containersAddressAt(directory, 32)); }
+func containersOutputValid(directory: __rey_raw_address): bool {
+    if __reyRawToInt(directory) <= 0 { return false; }
+    return __reyRawLoadI64(containersAddressAt(directory, 40)) != 0;
+}
+
+func containersPreparedOutputMake(fd: int, name: int, device: int, inode: int, valid: bool): __rey_raw_address {
+    if !valid { return __reyRawNull(); }
+    var value = __reyRawMap(40);
+    if __reyRawToInt(value) <= 0 { return __reyRawNull(); }
+    __reyRawStoreI64(value, fd);
+    __reyRawStoreI64(containersAddressAt(value, 8), name);
+    __reyRawStoreI64(containersAddressAt(value, 16), device);
+    __reyRawStoreI64(containersAddressAt(value, 24), inode);
+    var validValue = 0;
+    if valid { validValue = 1; }
+    __reyRawStoreI64(containersAddressAt(value, 32), validValue);
+    return value;
+}
+
+func containersPreparedFd(prepared: __rey_raw_address): int { return __reyRawLoadI64(prepared); }
+func containersPreparedName(prepared: __rey_raw_address): __rey_raw_address { return __reyRawFromInt(__reyRawLoadI64(containersAddressAt(prepared, 8))); }
+func containersPreparedDevice(prepared: __rey_raw_address): int { return __reyRawLoadI64(containersAddressAt(prepared, 16)); }
+func containersPreparedInode(prepared: __rey_raw_address): int { return __reyRawLoadI64(containersAddressAt(prepared, 24)); }
+func containersPreparedValid(prepared: __rey_raw_address): bool {
+    if __reyRawToInt(prepared) <= 0 { return false; }
+    return __reyRawLoadI64(containersAddressAt(prepared, 32)) != 0;
+}
+
+func containersTargetIdentityMake(state: int, device: int, inode: int): __rey_raw_address {
+    var value = __reyRawMap(24);
+    if __reyRawToInt(value) <= 0 { return __reyRawNull(); }
+    __reyRawStoreI64(value, state);
+    __reyRawStoreI64(containersAddressAt(value, 8), device);
+    __reyRawStoreI64(containersAddressAt(value, 16), inode);
+    return value;
+}
+
+func containersTargetState(identity: __rey_raw_address): int {
+    if __reyRawToInt(identity) <= 0 { return -1; }
+    return __reyRawLoadI64(identity);
+}
+func containersTargetDevice(identity: __rey_raw_address): int {
+    if __reyRawToInt(identity) <= 0 { return 0; }
+    return __reyRawLoadI64(containersAddressAt(identity, 8));
+}
+func containersTargetInode(identity: __rey_raw_address): int {
+    if __reyRawToInt(identity) <= 0 { return 0; }
+    return __reyRawLoadI64(containersAddressAt(identity, 16));
+}
+
+func containersReleaseTargetIdentity(identity: __rey_raw_address): void {
+    if __reyRawToInt(identity) > 0 { __reyRawUnmap(identity, 24); }
+    return;
+}
+
+func containersHostOpenat(directory: int, path: __rey_raw_address, flags: int, mode: int): int {
+    return hostOpenat(directory, path, flags, mode);
+}
+
+func containersHostFstat(fd: int, buffer: __rey_raw_address): int {
+    return hostFstat(fd, buffer);
+}
+
+func containersHostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {
+    return hostRenameat2(oldDirectory, oldPath, newDirectory, newPath, flags);
+}
+
+func containersHostUnlinkat(directory: int, path: __rey_raw_address, flags: int): int {
+    return hostUnlinkat(directory, path, flags);
 }
 
 func containersFail(code: int): void {
@@ -101,6 +197,360 @@ func containersCStringLength(value: __rey_raw_address): int {
     return length;
 }
 
+func containersRememberInput(fd: int): bool {
+    if !hostOutputSafetySupported() { return true; }
+    var statBuffer = __reyRawMap(144);
+    if __reyRawToInt(statBuffer) < 0 { return false; }
+    if containersHostFstat(fd, statBuffer) != 0 { __reyRawUnmap(statBuffer, 144); return false; }
+    var device = __reyRawLoadI64(statBuffer);
+    var inode = __reyRawLoadI64(containersAddressAt(statBuffer, 8));
+    __reyRawUnmap(statBuffer, 144);
+    var storage = __reyRawFromInt(containersProtectedInputIdentityStorage);
+    var index = 0;
+    while index < containersProtectedInputIdentityCount {
+        var offset = index * 16;
+        if __reyRawLoadI64(containersAddressAt(storage, offset)) == device &&
+            __reyRawLoadI64(containersAddressAt(storage, offset + 8)) == inode { return true; }
+        index += 1;
+    }
+    if containersProtectedInputIdentityCount >= containersProtectedInputIdentityCapacity {
+        var nextCapacity = 64;
+        if containersProtectedInputIdentityCapacity > 0 { nextCapacity = containersProtectedInputIdentityCapacity * 2; }
+        if nextCapacity < containersProtectedInputIdentityCapacity || nextCapacity > 134217727 { return false; }
+        var nextStorage = __reyRawMap(nextCapacity * 16);
+        if __reyRawToInt(nextStorage) < 0 { return false; }
+        var nextIndex = 0;
+        while nextIndex < containersProtectedInputIdentityCount * 2 {
+            __reyRawStoreI64(containersAddressAt(nextStorage, nextIndex * 8), __reyRawLoadI64(containersAddressAt(storage, nextIndex * 8)));
+            nextIndex += 1;
+        }
+        if containersProtectedInputIdentityCapacity > 0 { __reyRawUnmap(storage, containersProtectedInputIdentityCapacity * 16); }
+        containersProtectedInputIdentityStorage = __reyRawToInt(nextStorage);
+        containersProtectedInputIdentityCapacity = nextCapacity;
+        storage = nextStorage;
+    }
+    var outputOffset = containersProtectedInputIdentityCount * 16;
+    __reyRawStoreI64(containersAddressAt(storage, outputOffset), device);
+    __reyRawStoreI64(containersAddressAt(storage, outputOffset + 8), inode);
+    containersProtectedInputIdentityCount += 1;
+    return true;
+}
+
+func containersInputIdentityProtected(device: int, inode: int): bool {
+    var index = 0;
+    var storage = __reyRawFromInt(containersProtectedInputIdentityStorage);
+    while index < containersProtectedInputIdentityCount {
+        var offset = index * 16;
+        if __reyRawLoadI64(containersAddressAt(storage, offset)) == device &&
+            __reyRawLoadI64(containersAddressAt(storage, offset + 8)) == inode { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+func containersCStringEqual(left: __rey_raw_address, right: __rey_raw_address): bool {
+    var index = 0;
+    loop {
+        var a = __reyRawLoadByte(containersAddressAt(left, index));
+        var b = __reyRawLoadByte(containersAddressAt(right, index));
+        if a != b { return false; }
+        if a == 0 { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+func containersOpenOutputDirectory(path: __rey_raw_address): __rey_raw_address {
+    var length = containersCStringLength(path);
+    if length <= 0 || length >= 4095 { return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false); }
+    var slash = -1;
+    var index = 0;
+    while index < length {
+        if __reyRawLoadByte(containersAddressAt(path, index)) == 47 { slash = index; }
+        index += 1;
+    }
+    var nameIndex = slash + 1;
+    var nameLength = length - nameIndex;
+    if nameLength <= 0 || nameLength > 255 || (nameLength == 1 && __reyRawLoadByte(containersAddressAt(path, nameIndex)) == 46) ||
+        (nameLength == 2 && __reyRawLoadByte(containersAddressAt(path, nameIndex)) == 46 && __reyRawLoadByte(containersAddressAt(path, nameIndex + 1)) == 46) {
+        return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    }
+    var name = __reyRawMap(256);
+    if __reyRawToInt(name) < 0 { return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false); }
+    index = 0;
+    while index < nameLength {
+        __reyRawStoreByte(containersAddressAt(name, index), __reyRawLoadByte(containersAddressAt(path, nameIndex + index)));
+        index += 1;
+    }
+    __reyRawStoreByte(containersAddressAt(name, nameLength), 0);
+    var parent = __reyRawMap(4096);
+    if __reyRawToInt(parent) < 0 { __reyRawUnmap(name, 256); return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false); }
+    var parentLength = slash;
+    if slash < 0 {
+        __reyRawStoreByte(parent, 46);
+        parentLength = 1;
+    } else if slash == 0 {
+        __reyRawStoreByte(parent, 47);
+        parentLength = 1;
+    } else {
+        index = 0;
+        while index < slash {
+            __reyRawStoreByte(containersAddressAt(parent, index), __reyRawLoadByte(containersAddressAt(path, index)));
+            index += 1;
+        }
+    }
+    __reyRawStoreByte(containersAddressAt(parent, parentLength), 0);
+    var fd = hostOpen(parent, 589824, 0);
+    if fd < 0 { __reyRawUnmap(parent, 4096); __reyRawUnmap(name, 256); return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false); }
+    var statBuffer = __reyRawMap(144);
+    if __reyRawToInt(statBuffer) < 0 || containersHostFstat(fd, statBuffer) != 0 {
+        hostClose(fd);
+        if __reyRawToInt(statBuffer) >= 0 { __reyRawUnmap(statBuffer, 144); }
+        __reyRawUnmap(parent, 4096);
+        __reyRawUnmap(name, 256);
+        return containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    }
+    var device = __reyRawLoadI64(statBuffer);
+    var inode = __reyRawLoadI64(containersAddressAt(statBuffer, 8));
+    __reyRawUnmap(statBuffer, 144);
+    var directory = containersOutputDirectoryMake(fd, __reyRawToInt(name), __reyRawToInt(parent), device, inode, true);
+    if __reyRawToInt(directory) <= 0 {
+        hostClose(fd);
+        __reyRawUnmap(parent, 4096);
+        __reyRawUnmap(name, 256);
+        return __reyRawNull();
+    }
+    return directory;
+}
+
+func containersCloseOutputDirectory(directory: __rey_raw_address): void {
+    if containersOutputValid(directory) {
+        hostClose(containersOutputFd(directory));
+        __reyRawUnmap(containersOutputParent(directory), 4096);
+        __reyRawUnmap(containersOutputName(directory), 256);
+        __reyRawUnmap(directory, 48);
+    }
+}
+
+func containersTargetIdentity(directory: int, name: __rey_raw_address): __rey_raw_address {
+    var fd = containersHostOpenat(directory, name, 2621440, 0);
+    if fd == -2 { return containersTargetIdentityMake(0, 0, 0); }
+    if fd < 0 { return containersTargetIdentityMake(-1, 0, 0); }
+    var statBuffer = __reyRawMap(144);
+    if __reyRawToInt(statBuffer) < 0 { hostClose(fd); return containersTargetIdentityMake(-1, 0, 0); }
+    var state = -1;
+    var device = 0;
+    var inode = 0;
+    if containersHostFstat(fd, statBuffer) == 0 {
+        state = 1;
+        device = __reyRawLoadI64(statBuffer);
+        inode = __reyRawLoadI64(containersAddressAt(statBuffer, 8));
+    }
+    var closeResult = hostClose(fd);
+    __reyRawUnmap(statBuffer, 144);
+    if closeResult != 0 { state = -1; device = 0; inode = 0; }
+    return containersTargetIdentityMake(state, device, inode);
+}
+
+func containersFormatOutputTemp(name: __rey_raw_address, sequence: int): void {
+    var prefix = [46, 114, 101, 121, 45, 111, 48, 50, 45];
+    var index = 0;
+    while index < prefix.len() { __reyRawStoreByte(containersAddressAt(name, index), prefix[index]); index += 1; }
+    var digits = __reyRawMap(32);
+    var digitCount = 0;
+    var value = sequence;
+    if value == 0 { __reyRawStoreByte(digits, 48); digitCount = 1; }
+    while value > 0 {
+        __reyRawStoreByte(containersAddressAt(digits, digitCount), 48 + value % 10);
+        value = value / 10;
+        digitCount += 1;
+    }
+    index = 0;
+    while index < digitCount {
+        __reyRawStoreByte(containersAddressAt(name, prefix.len() + index), __reyRawLoadByte(containersAddressAt(digits, digitCount - index - 1)));
+        index += 1;
+    }
+    __reyRawStoreByte(containersAddressAt(name, prefix.len() + digitCount), 0);
+    __reyRawUnmap(digits, 32);
+    return;
+}
+
+func containersCreatePreparedOutput(directory: __rey_raw_address, otherDirectory: __rey_raw_address, mode: int): __rey_raw_address {
+    if !containersOutputValid(directory) { return containersPreparedOutputMake(-1, 0, 0, 0, false); }
+    var name = __reyRawMap(64);
+    if __reyRawToInt(name) < 0 { return containersPreparedOutputMake(-1, 0, 0, 0, false); }
+    var attempts = 0;
+    loop {
+        if attempts >= 4096 { __reyRawUnmap(name, 64); return containersPreparedOutputMake(-1, 0, 0, 0, false); }
+        containersFormatOutputTemp(name, containersOutputTempSequence);
+        containersOutputTempSequence += 1;
+        var reserved = containersCStringEqual(name, containersOutputName(directory));
+        if containersOutputValid(otherDirectory) && containersOutputDevice(directory) == containersOutputDevice(otherDirectory) && containersOutputInode(directory) == containersOutputInode(otherDirectory) &&
+            containersCStringEqual(name, containersOutputName(otherDirectory)) { reserved = true; }
+        if reserved { attempts += 1; continue; }
+        var fd = containersHostOpenat(containersOutputFd(directory), name, 524482, mode);
+        if fd >= 0 {
+            var statBuffer = __reyRawMap(144);
+            if __reyRawToInt(statBuffer) < 0 || containersHostFstat(fd, statBuffer) != 0 {
+                hostClose(fd);
+                containersHostUnlinkat(containersOutputFd(directory), name, 0);
+                if __reyRawToInt(statBuffer) >= 0 { __reyRawUnmap(statBuffer, 144); }
+                __reyRawUnmap(name, 64);
+                return containersPreparedOutputMake(-1, 0, 0, 0, false);
+            }
+            var device = __reyRawLoadI64(statBuffer);
+            var inode = __reyRawLoadI64(containersAddressAt(statBuffer, 8));
+            __reyRawUnmap(statBuffer, 144);
+            var prepared = containersPreparedOutputMake(fd, __reyRawToInt(name), device, inode, true);
+            if __reyRawToInt(prepared) <= 0 {
+                hostClose(fd);
+                containersHostUnlinkat(containersOutputFd(directory), name, 0);
+                __reyRawUnmap(name, 64);
+                return __reyRawNull();
+            }
+            return prepared;
+        }
+        if fd != -17 { __reyRawUnmap(name, 64); return containersPreparedOutputMake(-1, 0, 0, 0, false); }
+        attempts += 1;
+    }
+    return containersPreparedOutputMake(-1, 0, 0, 0, false);
+}
+
+func containersDiscardPreparedOutput(directory: __rey_raw_address, prepared: __rey_raw_address): void {
+    if containersPreparedValid(prepared) {
+        var current = containersTargetIdentity(containersOutputFd(directory), containersPreparedName(prepared));
+        if containersTargetState(current) == 1 && containersTargetDevice(current) == containersPreparedDevice(prepared) && containersTargetInode(current) == containersPreparedInode(prepared) {
+            containersHostUnlinkat(containersOutputFd(directory), containersPreparedName(prepared), 0);
+        }
+        containersReleaseTargetIdentity(current);
+        __reyRawUnmap(containersPreparedName(prepared), 64);
+        __reyRawUnmap(prepared, 40);
+    }
+}
+
+func containersPublishPreparedOutput(directory: __rey_raw_address, prepared: __rey_raw_address): bool {
+    var attempts = 0;
+    loop {
+        if attempts >= 16 { return false; }
+        var temporary = containersTargetIdentity(containersOutputFd(directory), containersPreparedName(prepared));
+        var temporaryMatches = containersTargetState(temporary) == 1 && containersTargetDevice(temporary) == containersPreparedDevice(prepared) && containersTargetInode(temporary) == containersPreparedInode(prepared);
+        containersReleaseTargetIdentity(temporary);
+        if !temporaryMatches { return false; }
+        var current = containersTargetIdentity(containersOutputFd(directory), containersOutputName(directory));
+        var currentState = containersTargetState(current);
+        var currentDevice = containersTargetDevice(current);
+        var currentInode = containersTargetInode(current);
+        if currentState < 0 { containersReleaseTargetIdentity(current); return false; }
+        if currentState == 1 && containersInputIdentityProtected(currentDevice, currentInode) { containersReleaseTargetIdentity(current); return false; }
+        containersReleaseTargetIdentity(current);
+        if currentState == 0 {
+            var absentRename = containersHostRenameat2(containersOutputFd(directory), containersPreparedName(prepared), containersOutputFd(directory), containersOutputName(directory), 1);
+            if absentRename == 0 {
+                var published = containersTargetIdentity(containersOutputFd(directory), containersOutputName(directory));
+                var publishedMatches = containersTargetState(published) == 1 && containersTargetDevice(published) == containersPreparedDevice(prepared) && containersTargetInode(published) == containersPreparedInode(prepared);
+                containersReleaseTargetIdentity(published);
+                return publishedMatches;
+            }
+            if absentRename == -17 { attempts += 1; continue; }
+            return false;
+        }
+        var exchange = containersHostRenameat2(containersOutputFd(directory), containersPreparedName(prepared), containersOutputFd(directory), containersOutputName(directory), 2);
+        if exchange != 0 { return false; }
+        var published = containersTargetIdentity(containersOutputFd(directory), containersOutputName(directory));
+        var displaced = containersTargetIdentity(containersOutputFd(directory), containersPreparedName(prepared));
+        var publishedMatches = containersTargetState(published) == 1 && containersTargetDevice(published) == containersPreparedDevice(prepared) && containersTargetInode(published) == containersPreparedInode(prepared);
+        var displacedState = containersTargetState(displaced);
+        var displacedDevice = containersTargetDevice(displaced);
+        var displacedInode = containersTargetInode(displaced);
+        var displacedSafe = displacedState == 1 && !containersInputIdentityProtected(displacedDevice, displacedInode);
+        containersReleaseTargetIdentity(published);
+        containersReleaseTargetIdentity(displaced);
+        if !publishedMatches || !displacedSafe {
+            containersHostRenameat2(containersOutputFd(directory), containersPreparedName(prepared), containersOutputFd(directory), containersOutputName(directory), 2);
+            return false;
+        }
+        containersHostUnlinkat(containersOutputFd(directory), containersPreparedName(prepared), 0);
+        return true;
+    }
+    return false;
+}
+
+func containersPrepareByteVector(context: __rey_raw_address, directory: __rey_raw_address, otherDirectory: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, start: int, requestedLength: int, mode: int): __rey_raw_address {
+    var invalid = containersPreparedOutputMake(-1, 0, 0, 0, false);
+    var backing = containersVecBacking(context, vector, 1);
+    if containersVecRequireKind(context, backing, 1) != dataLayoutId { containersFail(2203); return invalid; }
+    var vectorLength = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if vectorLength < 0 || vectorLength > capacity || start < 0 || requestedLength < 0 || start > vectorLength || requestedLength > vectorLength - start { containersFail(2205); return invalid; }
+    var length = requestedLength;
+    var index = 0;
+    while index < length {
+        var value = __reyRawLoadI64(containersVecTailAddress(backing, start + index));
+        if value < 0 || value > 255 { return invalid; }
+        index += 1;
+    }
+    var prepared = containersCreatePreparedOutput(directory, otherDirectory, mode);
+    if !containersPreparedValid(prepared) { return invalid; }
+    var staging = __reyRawMap(4096);
+    if __reyRawToInt(staging) < 0 { hostClose(containersPreparedFd(prepared)); containersDiscardPreparedOutput(directory, prepared); return invalid; }
+    var offset = 0;
+    var writeOk = true;
+    while offset < length && writeOk {
+        var count = 4096;
+        if length - offset < count { count = length - offset; }
+        index = 0;
+        while index < count {
+            __reyRawStoreByte(containersAddressAt(staging, index), __reyRawLoadI64(containersVecTailAddress(backing, start + offset + index)));
+            index += 1;
+        }
+        if !containersWriteStaging(containersPreparedFd(prepared), staging, count) { writeOk = false; }
+        offset += count;
+    }
+    if writeOk && hostFchmod(containersPreparedFd(prepared), mode) != 0 { writeOk = false; }
+    if writeOk && hostLseek(containersPreparedFd(prepared), 0, 0) != 0 { writeOk = false; }
+    offset = 0;
+    while offset < length && writeOk {
+        var expected = 4096;
+        if length - offset < expected { expected = length - offset; }
+        var received = 0;
+        while received < expected && writeOk {
+            var count = hostRead(containersPreparedFd(prepared), staging, expected - received);
+            if count == -4 { continue; }
+            if count <= 0 { writeOk = false; }
+            else {
+                index = 0;
+                while index < count {
+                    if __reyRawLoadByte(containersAddressAt(staging, index)) != __reyRawLoadI64(containersVecTailAddress(backing, start + offset + received + index)) { writeOk = false; break; }
+                    index += 1;
+                }
+                received += count;
+            }
+        }
+        offset += received;
+    }
+    if writeOk {
+        var extra = -4;
+        loop { extra = hostRead(containersPreparedFd(prepared), staging, 1); if extra != -4 { break; } }
+        if extra != 0 { writeOk = false; }
+    }
+    var closeResult = hostClose(containersPreparedFd(prepared));
+    __reyRawUnmap(staging, 4096);
+    if !writeOk || closeResult != 0 {
+        containersDiscardPreparedOutput(directory, prepared);
+        return invalid;
+    }
+    return prepared;
+}
+
+func containersOutputDestinationsSafe(imageDirectory: __rey_raw_address, imageIdentity: __rey_raw_address, mapDirectory: __rey_raw_address, mapIdentity: __rey_raw_address): bool {
+    if containersOutputDevice(imageDirectory) == containersOutputDevice(mapDirectory) && containersOutputInode(imageDirectory) == containersOutputInode(mapDirectory) && containersCStringEqual(containersOutputName(imageDirectory), containersOutputName(mapDirectory)) { return false; }
+    if containersTargetState(imageIdentity) < 0 || containersTargetState(mapIdentity) < 0 { return false; }
+    if containersTargetState(imageIdentity) == 1 && containersInputIdentityProtected(containersTargetDevice(imageIdentity), containersTargetInode(imageIdentity)) { return false; }
+    if containersTargetState(mapIdentity) == 1 && containersInputIdentityProtected(containersTargetDevice(mapIdentity), containersTargetInode(mapIdentity)) { return false; }
+    if containersTargetState(imageIdentity) == 1 && containersTargetState(mapIdentity) == 1 && containersTargetDevice(imageIdentity) == containersTargetDevice(mapIdentity) && containersTargetInode(imageIdentity) == containersTargetInode(mapIdentity) { return false; }
+    return true;
+}
+
 pub func managedStringFromCString(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address): __rey_raw_address {
     var length = containersCStringLength(value);
     var result = containersNewString(context, stringLayoutId, length);
@@ -159,234 +609,6 @@ pub func managedWriteFile(context: __rey_raw_address, path: __rey_raw_address, c
     return;
 }
 
-pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): bool {
-    containersStringLayout(context, path);
-    var backing = containersVecBacking(context, vector, 1);
-    var actualLayoutId = containersVecRequireKind(context, backing, 1);
-    if actualLayoutId != dataLayoutId { containersFail(2203); return false; }
-    var length = __reyRawLoadI64(containersAddressAt(backing, 16));
-    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
-    if length < 0 || length > capacity { containersFail(2205); return false; }
-    var index = 0;
-    while index < length {
-        var value = __reyRawLoadI64(containersVecTailAddress(backing, index));
-        if value < 0 || value > 255 { return false; }
-        index = index + 1;
-    }
-
-    var staging = __reyRawMap(4096);
-    if __reyRawToInt(staging) < 0 { return false; }
-    var fd = -1;
-    loop {
-        // O_WRONLY | O_CREAT | O_TRUNC. Plain writeFile keeps its 0644 mode.
-        fd = hostOpen(containersPathData(path), 577, 493);
-        if fd != -4 { break; }
-    }
-    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
-    if hostFchmod(fd, 493) != 0 { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
-    var offset = 0;
-    var writeOk = true;
-    while offset < length && writeOk {
-        var count = 4096;
-        if length - offset < count { count = length - offset; }
-        index = 0;
-        while index < count {
-            var value = __reyRawLoadI64(containersVecTailAddress(backing, offset + index));
-            __reyRawStoreByte(__reyRawOffset(staging, index), value);
-            index = index + 1;
-        }
-
-        if !containersWriteStaging(fd, staging, count) { writeOk = false; }
-        offset = offset + count;
-    }
-    if !writeOk { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
-    if hostClose(fd) != 0 { __reyRawUnmap(staging, 4096); return false; }
-
-    loop {
-        fd = hostOpen(containersPathData(path), 0, 0);
-        if fd != -4 { break; }
-    }
-    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
-    offset = 0;
-    var readOk = true;
-    while offset < length && readOk {
-        var expected = 4096;
-        if length - offset < expected { expected = length - offset; }
-        var received = 0;
-        while received < expected && readOk {
-            var count = hostRead(fd, staging, expected - received);
-            if count == -4 { continue; }
-            if count <= 0 { readOk = false; }
-            else {
-                index = 0;
-                while index < count {
-                    var wanted = __reyRawLoadI64(containersVecTailAddress(backing, offset + received + index));
-                    if __reyRawLoadByte(containersAddressAt(staging, index)) != wanted { readOk = false; break; }
-                    index = index + 1;
-                }
-                received = received + count;
-            }
-        }
-        offset = offset + received;
-    }
-    if readOk {
-        var extra = -4;
-        loop { extra = hostRead(fd, staging, 1); if extra != -4 { break; } }
-        if extra != 0 { readOk = false; }
-    }
-    var readClose = hostClose(fd);
-    __reyRawUnmap(staging, 4096);
-    return readOk && readClose == 0;
-}
-
-func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {
-    var offset = 0;
-    while offset < count {
-        var written = hostWrite(fd, containersAddressAt(staging, offset), count - offset);
-        if written == -4 { continue; }
-        if written <= 0 { return false; }
-        offset = offset + written;
-    }
-    return true;
-}
-
-func containersPackedByte(lane: int, slot: int): int {
-    var factor = 1;
-    var index = 0;
-    while index < slot { factor = factor * 256; index = index + 1; }
-    return (lane / factor) % 256;
-}
-
-// The compiler supplies the checked layouts for its private packed buffer.
-pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_address, header: __rey_raw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): bool {
-    containersStringLayout(context, path);
-    if containersHeapLayout(context, body) != bodyLayoutId { containersFail(2205); return false; }
-    var registry = containersRegistry(context);
-    if layoutPayloadBytes(registry, bodyLayoutId) != 24 || layoutTailKind(registry, bodyLayoutId) != 0 || layoutReferenceCount(registry, bodyLayoutId) != 1 || layoutReferenceOffset(registry, bodyLayoutId, 0) != 0 {
-        containersFail(2205);
-        return false;
-    }
-    var length = __reyRawLoadI64(containersAddressAt(body, 24));
-    if __reyRawLoadI64(containersAddressAt(body, 32)) != 1346458188 || length < 0 || length > 1073741823 { return false; }
-    var lanes = __reyRawLoadAddress(containersAddressAt(body, 16));
-    var headerBacking = containersVecBacking(context, header, 1);
-    var laneBacking = containersVecBacking(context, lanes, 1);
-    if containersVecRequireKind(context, headerBacking, 1) != dataLayoutId || containersVecRequireKind(context, laneBacking, 1) != dataLayoutId { containersFail(2203); return false; }
-    var headerLength = __reyRawLoadI64(containersAddressAt(headerBacking, 16));
-    var laneLength = __reyRawLoadI64(containersAddressAt(laneBacking, 16));
-    var headerCapacity = (__reyRawLoadI64(containersAddressAt(headerBacking, 8)) - 8) / 8;
-    var laneCapacity = (__reyRawLoadI64(containersAddressAt(laneBacking, 8)) - 8) / 8;
-    var usedLanes = (length + 6) / 7;
-    if headerLength < 0 || headerLength > 65536 || headerLength > headerCapacity || laneLength < usedLanes || laneLength > laneCapacity || laneLength > 153391689 { return false; }
-    var index = 0;
-    while index < headerLength {
-        var value = __reyRawLoadI64(containersVecTailAddress(headerBacking, index));
-        if value < 0 || value > 255 { return false; }
-        index = index + 1;
-    }
-    index = 0;
-    while index < usedLanes {
-        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
-        if lane < 0 || lane >= 72057594037927936 { return false; }
-        if index == usedLanes - 1 && length % 7 != 0 {
-            var limit = 1;
-            var tail = length % 7;
-            while tail > 0 { limit = limit * 256; tail = tail - 1; }
-            if lane >= limit { return false; }
-        }
-        index = index + 1;
-    }
-    var staging = __reyRawMap(4096);
-    if __reyRawToInt(staging) < 0 { return false; }
-    var fd = -1;
-    loop {
-        fd = hostOpen(containersPathData(path), 577, 493);
-        if fd != -4 { break; }
-    }
-    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
-    if hostFchmod(fd, 493) != 0 { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
-    var staged = 0;
-    var writeOk = true;
-    index = 0;
-    while index < headerLength && writeOk {
-        __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddress(headerBacking, index)));
-        staged = staged + 1;
-        index = index + 1;
-        if staged == 4096 {
-            if !containersWriteStaging(fd, staging, staged) { writeOk = false; }
-            else { staged = 0; }
-        }
-    }
-    index = 0;
-    var remaining = length;
-    while index < usedLanes && writeOk {
-        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
-        var count = 7;
-        if remaining < count { count = remaining; }
-        var byteAt = 0;
-        while byteAt < count && writeOk {
-            __reyRawStoreByte(containersAddressAt(staging, staged), lane % 256);
-            lane = lane / 256;
-            staged = staged + 1;
-            byteAt = byteAt + 1;
-            if staged == 4096 && writeOk {
-                if !containersWriteStaging(fd, staging, staged) { writeOk = false; }
-                else { staged = 0; }
-            }
-        }
-        remaining = remaining - count;
-        index = index + 1;
-    }
-    if staged > 0 && writeOk && !containersWriteStaging(fd, staging, staged) { writeOk = false; }
-    if !writeOk { hostClose(fd); __reyRawUnmap(staging, 4096); return false; }
-    if hostClose(fd) != 0 { __reyRawUnmap(staging, 4096); return false; }
-
-    loop {
-        fd = hostOpen(containersPathData(path), 0, 0);
-        if fd != -4 { break; }
-    }
-    if fd < 0 { __reyRawUnmap(staging, 4096); return false; }
-    var totalLength = headerLength + length;
-    var verified = 0;
-    var readOk = true;
-    while verified < totalLength && readOk {
-        var expected = 4096;
-        if totalLength - verified < expected { expected = totalLength - verified; }
-        var received = 0;
-        while received < expected && readOk {
-            var count = hostRead(fd, staging, expected - received);
-            if count == -4 { continue; }
-            if count <= 0 { readOk = false; }
-            else {
-                var byteIndex = 0;
-                while byteIndex < count {
-                    var absoluteIndex = verified + received + byteIndex;
-                    var wanted = 0;
-                    if absoluteIndex < headerLength {
-                        wanted = __reyRawLoadI64(containersVecTailAddress(headerBacking, absoluteIndex));
-                    } else {
-                        var bodyIndex = absoluteIndex - headerLength;
-                        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, bodyIndex / 7));
-                        wanted = containersPackedByte(lane, bodyIndex % 7);
-                    }
-                    if __reyRawLoadByte(containersAddressAt(staging, byteIndex)) != wanted { readOk = false; break; }
-                    byteIndex = byteIndex + 1;
-                }
-                received = received + count;
-            }
-        }
-        verified = verified + received;
-    }
-    if readOk {
-        var extra = -4;
-        loop { extra = hostRead(fd, staging, 1); if extra != -4 { break; } }
-        if extra != 0 { readOk = false; }
-    }
-    var readClose = hostClose(fd);
-    __reyRawUnmap(staging, 4096);
-    return readOk && readClose == 0;
-}
-
 pub func managedAppendFile(context: __rey_raw_address, path: __rey_raw_address, content: __rey_raw_address): void {
     var fd = hostOpen(containersPathData(path), 1089, 420);
     if fd < 0 { containersFail(2208); return; }
@@ -401,11 +623,319 @@ pub func managedAppendFile(context: __rey_raw_address, path: __rey_raw_address, 
     return;
 }
 
+pub func managedWriteBytes(context: __rey_raw_address, path: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): bool {
+    containersStringLayout(context, path);
+    var pairedStatus = containersPublishCompilerOutputPair(context, path, vector, dataLayoutId);
+    if pairedStatus >= 0 { return pairedStatus == 0; }
+    var directory = containersOpenOutputDirectory(containersPathData(path));
+    if !containersOutputValid(directory) { return false; }
+    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    var prepared = containersPrepareByteVector(context, directory, otherDirectory, vector, dataLayoutId, 0, managedVecLength(context, vector), 493);
+    var ok = containersPreparedValid(prepared) && containersPublishPreparedOutput(directory, prepared);
+    if containersPreparedValid(prepared) { containersDiscardPreparedOutput(directory, prepared); }
+    containersCloseOutputDirectory(directory);
+    return ok;
+}
+
+func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {
+    var offset = 0;
+    while offset < count {
+        var written = hostWrite(fd, containersAddressAt(staging, offset), count - offset);
+        if written == -4 { continue; }
+        if written <= 0 { return false; }
+        offset = offset + written;
+    }
+    return true;
+}
+
+func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): int {
+    var protocolLength = managedStringLength(context, protocol);
+    var protocolData = containersPathData(protocol);
+    var prefix = [0, 114, 101, 121, 45, 111, 117, 116, 112, 117, 116, 45, 112, 97, 105, 114, 45, 118, 49, 0];
+    if protocolLength < prefix.len() { return -1; }
+    var index = 0;
+    while index < prefix.len() {
+        if __reyRawLoadByte(containersAddressAt(protocolData, index)) != prefix[index] { return -1; }
+        index += 1;
+    }
+    var separator = prefix.len();
+    while separator < protocolLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 { separator += 1; }
+    if separator == prefix.len() || separator >= protocolLength { return 1; }
+    var imagePathLength = separator - prefix.len();
+    var mapPathStart = separator + 1;
+    var mapPathLength = protocolLength - mapPathStart;
+    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 { return 1; }
+    var imagePath = __reyRawMap(4096);
+    var mapPath = __reyRawMap(4096);
+    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 {
+        if __reyRawToInt(imagePath) >= 0 { __reyRawUnmap(imagePath, 4096); }
+        if __reyRawToInt(mapPath) >= 0 { __reyRawUnmap(mapPath, 4096); }
+        return 1;
+    }
+    index = 0;
+    while index < imagePathLength { __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, prefix.len() + index))); index += 1; }
+    __reyRawStoreByte(containersAddressAt(imagePath, imagePathLength), 0);
+    index = 0;
+    while index < mapPathLength { __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocolData, mapPathStart + index))); index += 1; }
+    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);
+
+    var backing = containersVecBacking(context, vector, 1);
+    if containersVecRequireKind(context, backing, 1) != dataLayoutId { containersFail(2203); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
+    var totalLength = __reyRawLoadI64(containersAddressAt(backing, 16));
+    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
+    if totalLength < 20 || totalLength > capacity { containersFail(2205); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
+    var trailer = totalLength - 20;
+    if __reyRawLoadI64(containersVecTailAddress(backing, trailer)) != 82 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 1)) != 89 ||
+        __reyRawLoadI64(containersVecTailAddress(backing, trailer + 2)) != 80 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 3)) != 49 {
+        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+    }
+    var imageLength = 0;
+    var mapLength = 0;
+    var factor = 1;
+    index = 0;
+    while index < 4 {
+        var imagePart = __reyRawLoadI64(containersVecTailAddress(backing, trailer + 4 + index));
+        var mapPart = __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index));
+        if imagePart < 0 || imagePart > 255 || mapPart < 0 || mapPart > 255 || (index == 3 && (imagePart > 127 || mapPart > 127)) {
+            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+        }
+        imageLength += imagePart * factor;
+        mapLength += mapPart * factor;
+        factor *= 256;
+        index += 1;
+    }
+    index = 4;
+    while index < 8 {
+        if __reyRawLoadI64(containersVecTailAddress(backing, trailer + 4 + index)) != 0 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index)) != 0 {
+            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+        }
+        index += 1;
+    }
+    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + 20 != totalLength {
+        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+    }
+
+    var imageDirectory = containersOpenOutputDirectory(imagePath);
+    var mapDirectory = containersOpenOutputDirectory(mapPath);
+    __reyRawUnmap(imagePath, 4096);
+    __reyRawUnmap(mapPath, 4096);
+    if !containersOutputValid(imageDirectory) || !containersOutputValid(mapDirectory) {
+        containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirectory(mapDirectory); return 1;
+    }
+    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));
+    var mapIdentity = containersTargetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));
+    var destinationsSafe = containersOutputDestinationsSafe(imageDirectory, imageIdentity, mapDirectory, mapIdentity);
+    containersReleaseTargetIdentity(imageIdentity);
+    containersReleaseTargetIdentity(mapIdentity);
+    if !destinationsSafe {
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    var preparedImage = containersPrepareByteVector(context, imageDirectory, mapDirectory, vector, dataLayoutId, 0, imageLength, 493);
+    if !containersPreparedValid(preparedImage) { containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1; }
+    var preparedMap = containersPrepareByteVector(context, mapDirectory, imageDirectory, vector, dataLayoutId, imageLength, mapLength, 420);
+    if !containersPreparedValid(preparedMap) {
+        containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    if !containersPublishPreparedOutput(mapDirectory, preparedMap) {
+        containersDiscardPreparedOutput(mapDirectory, preparedMap); containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    containersDiscardPreparedOutput(mapDirectory, preparedMap);
+    if !containersPublishPreparedOutput(imageDirectory, preparedImage) {
+        containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);
+        eprintln("symbol map may be from the failed build because executable publication failed");
+        return 2;
+    }
+    containersDiscardPreparedOutput(imageDirectory, preparedImage);
+    containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);
+    return 0;
+}
+
+func containersPackedByte(lane: int, slot: int): int {
+    var factor = 1;
+    var index = 0;
+    while index < slot { factor = factor * 256; index = index + 1; }
+    return (lane / factor) % 256;
+}
+
+// The compiler supplies the checked layouts for its private packed buffer.
+func containersPreparePackedOutput(context: __rey_raw_address, directory: __rey_raw_address, header: __rey_raw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): __rey_raw_address {
+    var invalid = containersPreparedOutputMake(-1, 0, 0, 0, false);
+    if containersHeapLayout(context, body) != bodyLayoutId { containersFail(2205); return invalid; }
+    var registry = containersRegistry(context);
+    if layoutPayloadBytes(registry, bodyLayoutId) != 24 || layoutTailKind(registry, bodyLayoutId) != 0 || layoutReferenceCount(registry, bodyLayoutId) != 1 || layoutReferenceOffset(registry, bodyLayoutId, 0) != 0 {
+        containersFail(2205);
+        return invalid;
+    }
+    var length = __reyRawLoadI64(containersAddressAt(body, 24));
+    if __reyRawLoadI64(containersAddressAt(body, 32)) != 1346458188 || length < 0 || length > 1073741823 { return invalid; }
+    var lanes = __reyRawLoadAddress(containersAddressAt(body, 16));
+    var headerBacking = containersVecBacking(context, header, 1);
+    var laneBacking = containersVecBacking(context, lanes, 1);
+    if containersVecRequireKind(context, headerBacking, 1) != dataLayoutId || containersVecRequireKind(context, laneBacking, 1) != dataLayoutId { containersFail(2203); return invalid; }
+    var headerLength = __reyRawLoadI64(containersAddressAt(headerBacking, 16));
+    var laneLength = __reyRawLoadI64(containersAddressAt(laneBacking, 16));
+    var headerCapacity = (__reyRawLoadI64(containersAddressAt(headerBacking, 8)) - 8) / 8;
+    var laneCapacity = (__reyRawLoadI64(containersAddressAt(laneBacking, 8)) - 8) / 8;
+    var usedLanes = (length + 6) / 7;
+    if headerLength < 0 || headerLength > 65536 || headerLength > headerCapacity || laneLength < usedLanes || laneLength > laneCapacity || laneLength > 153391689 { return invalid; }
+    var index = 0;
+    while index < headerLength {
+        var value = __reyRawLoadI64(containersVecTailAddress(headerBacking, index));
+        if value < 0 || value > 255 { return invalid; }
+        index += 1;
+    }
+    index = 0;
+    while index < usedLanes {
+        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
+        if lane < 0 || lane >= 72057594037927936 { return invalid; }
+        if index == usedLanes - 1 && length % 7 != 0 {
+            var limit = 1;
+            var tail = length % 7;
+            while tail > 0 { limit = limit * 256; tail -= 1; }
+            if lane >= limit { return invalid; }
+        }
+        index += 1;
+    }
+    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    var prepared = containersCreatePreparedOutput(directory, otherDirectory, 493);
+    if !containersPreparedValid(prepared) { return invalid; }
+    var staging = __reyRawMap(4096);
+    if __reyRawToInt(staging) < 0 { hostClose(containersPreparedFd(prepared)); containersDiscardPreparedOutput(directory, prepared); return invalid; }
+    var staged = 0;
+    var writeOk = true;
+    index = 0;
+    while index < headerLength && writeOk {
+        __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddress(headerBacking, index)));
+        staged += 1;
+        index += 1;
+        if staged == 4096 {
+            if !containersWriteStaging(containersPreparedFd(prepared), staging, staged) { writeOk = false; }
+            else { staged = 0; }
+        }
+    }
+    index = 0;
+    var remaining = length;
+    while index < usedLanes && writeOk {
+        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));
+        var count = 7;
+        if remaining < count { count = remaining; }
+        var byteAt = 0;
+        while byteAt < count && writeOk {
+            __reyRawStoreByte(containersAddressAt(staging, staged), lane % 256);
+            lane = lane / 256;
+            staged += 1;
+            byteAt += 1;
+            if staged == 4096 && writeOk {
+                if !containersWriteStaging(containersPreparedFd(prepared), staging, staged) { writeOk = false; }
+                else { staged = 0; }
+            }
+        }
+        remaining -= count;
+        index += 1;
+    }
+    if staged > 0 && writeOk && !containersWriteStaging(containersPreparedFd(prepared), staging, staged) { writeOk = false; }
+    if writeOk && hostFchmod(containersPreparedFd(prepared), 493) != 0 { writeOk = false; }
+    if writeOk && hostLseek(containersPreparedFd(prepared), 0, 0) != 0 { writeOk = false; }
+    var totalLength = headerLength + length;
+    var verified = 0;
+    while verified < totalLength && writeOk {
+        var expected = 4096;
+        if totalLength - verified < expected { expected = totalLength - verified; }
+        var received = 0;
+        while received < expected && writeOk {
+            var count = hostRead(containersPreparedFd(prepared), staging, expected - received);
+            if count == -4 { continue; }
+            if count <= 0 { writeOk = false; }
+            else {
+                var byteIndex = 0;
+                while byteIndex < count {
+                    var absoluteIndex = verified + received + byteIndex;
+                    var wanted = 0;
+                    if absoluteIndex < headerLength { wanted = __reyRawLoadI64(containersVecTailAddress(headerBacking, absoluteIndex)); }
+                    else {
+                        var bodyIndex = absoluteIndex - headerLength;
+                        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, bodyIndex / 7));
+                        wanted = containersPackedByte(lane, bodyIndex % 7);
+                    }
+                    if __reyRawLoadByte(containersAddressAt(staging, byteIndex)) != wanted { writeOk = false; break; }
+                    byteIndex += 1;
+                }
+                received += count;
+            }
+        }
+        verified += received;
+    }
+    if writeOk {
+        var extra = -4;
+        loop { extra = hostRead(containersPreparedFd(prepared), staging, 1); if extra != -4 { break; } }
+        if extra != 0 { writeOk = false; }
+    }
+    var closeResult = hostClose(containersPreparedFd(prepared));
+    __reyRawUnmap(staging, 4096);
+    if !writeOk || closeResult != 0 { containersDiscardPreparedOutput(directory, prepared); return invalid; }
+    return prepared;
+}
+
+pub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_address, header: __rey_raw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): bool {
+    containersStringLayout(context, path);
+    var directory = containersOpenOutputDirectory(containersPathData(path));
+    if !containersOutputValid(directory) { return false; }
+    var prepared = containersPreparePackedOutput(context, directory, header, body, bodyLayoutId, dataLayoutId);
+    var ok = containersPreparedValid(prepared) && containersPublishPreparedOutput(directory, prepared);
+    if containersPreparedValid(prepared) { containersDiscardPreparedOutput(directory, prepared); }
+    containersCloseOutputDirectory(directory);
+    return ok;
+}
+
+func containersIsProcEnviron(path: __rey_raw_address): bool {
+    var expected = [47, 112, 114, 111, 99, 47, 115, 101, 108, 102, 47, 101, 110, 118, 105, 114, 111, 110];
+    var index = 0;
+    while index < expected.len() {
+        if __reyRawLoadByte(containersAddressAt(path, index)) != expected[index] { return false; }
+        index += 1;
+    }
+    return __reyRawLoadByte(containersAddressAt(path, expected.len())) == 0;
+}
+
+func containersReadZeroSizedProcFile(context: __rey_raw_address, fd: int, stringLayoutId: int): __rey_raw_address {
+    var capacity = 4194304;
+    var staging = __reyRawMap(capacity);
+    if __reyRawToInt(staging) < 0 { hostClose(fd); containersFail(2208); return __reyRawNull(); }
+    var total = 0;
+    var done = false;
+    while !done && total < capacity {
+        var count = hostRead(fd, containersAddressAt(staging, total), capacity - total);
+        if count == -4 { continue; }
+        if count < 0 { __reyRawUnmap(staging, capacity); hostClose(fd); containersFail(2208); return __reyRawNull(); }
+        if count == 0 { done = true; }
+        else { total += count; }
+    }
+    if !done {
+        var extra = hostRead(fd, staging, 1);
+        if extra != 0 { __reyRawUnmap(staging, capacity); hostClose(fd); containersFail(2208); return __reyRawNull(); }
+    }
+    var result = containersNewString(context, stringLayoutId, total);
+    var index = 0;
+    while index < total {
+        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(staging, index)));
+        index += 1;
+    }
+    var closeResult = hostClose(fd);
+    __reyRawUnmap(staging, capacity);
+    if closeResult != 0 { containersFail(2208); return __reyRawNull(); }
+    return result;
+}
+
 pub func managedReadFile(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: int): __rey_raw_address {
     var fd = hostOpen(containersPathData(path), 0, 0);
     if fd < 0 { containersFail(2208); return __reyRawNull(); }
+    if !containersRememberInput(fd) { hostClose(fd); containersFail(2210); return __reyRawNull(); }
     var size = hostLseek(fd, 0, 2);
     if size < 0 || hostLseek(fd, 0, 0) < 0 { hostClose(fd); containersFail(2208); return __reyRawNull(); }
+    if size == 0 && containersIsProcEnviron(containersPathData(path)) { return containersReadZeroSizedProcFile(context, fd, stringLayoutId); }
     var result = containersNewString(context, stringLayoutId, size);
     var offset = 0;
     while offset < size {

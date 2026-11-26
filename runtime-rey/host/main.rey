@@ -40,6 +40,26 @@ pub func hostLseek(fd: int, offset: int, whence: int): int {
     return __reyRawToInt(__reyRawHostSyscall(8, hostRawInt(fd), hostRawInt(offset), hostRawInt(whence), __reyRawNull(), __reyRawNull(), __reyRawNull()));
 }
 
+pub func hostOutputSafetySupported(): bool {
+    return true;
+}
+
+pub func hostOpenat(directory: int, path: __rey_raw_address, flags: int, mode: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(257, hostRawInt(directory), path, hostRawInt(flags), hostRawInt(mode), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostFstat(fd: int, buffer: __rey_raw_address): int {
+    return __reyRawToInt(__reyRawHostSyscall(5, hostRawInt(fd), buffer, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
+pub func hostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(316, hostRawInt(oldDirectory), oldPath, hostRawInt(newDirectory), newPath, hostRawInt(flags), __reyRawNull()));
+}
+
+pub func hostUnlinkat(directory: int, path: __rey_raw_address, flags: int): int {
+    return __reyRawToInt(__reyRawHostSyscall(263, hostRawInt(directory), path, hostRawInt(flags), __reyRawNull(), __reyRawNull(), __reyRawNull()));
+}
+
 pub func hostUnlink(path: __rey_raw_address): int {
     return __reyRawToInt(__reyRawHostSyscall(87, path, __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));
 }

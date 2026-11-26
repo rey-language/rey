@@ -25,6 +25,28 @@ pub func writeVerifiedCompilerOutputBytes(path: string, bytes: Vec<int>): Result
     return Result.Ok(true);
 }
 
+pub func writeVerifiedCompilerOutputs(imagePath: string, image: Vec<int>, mapPath: string, mapContent: string): Result<bool, string> {
+    var imageLength = image.len();
+    var mapLength = mapContent.len();
+    var index = 0;
+    while index < mapLength {
+        var value = int(mapContent[index]);
+        if value < 0 || value > 255 { return Result.Err(mapPath + ": error: symbol map is not byte encodable"); }
+        index += 1;
+    }
+    index = 0;
+    while index < mapLength { image.push(int(mapContent[index])); index += 1; }
+    image.push(82); image.push(89); image.push(80); image.push(49);
+    var value = imageLength;
+    index = 0;
+    while index < 8 { image.push(value % 256); value = value / 256; index += 1; }
+    value = mapLength;
+    index = 0;
+    while index < 8 { image.push(value % 256); value = value / 256; index += 1; }
+    var protocolPath = "\x00rey-output-pair-v1\x00" + imagePath + "\x00" + mapPath;
+    return writeCompilerOutputBytes(protocolPath, image);
+}
+
 pub func writeCheckedCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
     var written = writeCompilerOutputBytes(path, bytes);
     if written.isErr() { return written; }

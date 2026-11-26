@@ -19,7 +19,7 @@ output.write_bytes(b"output sentinel")
 
 def run(target: str, symbol_path: str | Path, output_path: str | Path = output) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run([str(compiler), "build", str(source), "-o", str(output_path),
-                           "--target", target, "--symbol-map", str(symbol_path)],
+                           "--target", target, "--managed", "--regions", "--symbol-map", str(symbol_path)],
                           capture_output=True, timeout=60, check=False)
 
 for path in (source, output, f"{work}/./source.rey", f"{work}/./image"):
