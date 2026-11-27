@@ -302,14 +302,14 @@ func regionDirectBlockMap(context: __rey_raw_address, bytes: int): __rey_raw_add
     var record = regionBlockMap(context, 64);
     if __reyRawEqual(record, __reyRawNull()) { __reyRawUnmap(block, bytes); return __reyRawNull(); }
     __reyRawStoreI64(record, 1380272230);
-    __reyRawStoreAddress(regionAddressAt(record, 8), ownedHead);
-    __reyRawStoreAddress(regionAddressAt(record, 16), __reyRawNull());
+    __reyRawStoreAddress(regionAddressAt(record, 8), __reyRawNull());
+    __reyRawStoreAddress(regionAddressAt(record, 16), ownedHead);
     __reyRawStoreAddress(regionAddressAt(record, 24), context);
     __reyRawStoreAddress(regionAddressAt(record, 32), block);
     __reyRawStoreI64(regionAddressAt(record, 40), bytes);
     __reyRawStoreI64(regionAddressAt(record, 48), 0);
     __reyRawStoreI64(regionAddressAt(record, 56), 0);
-    if !__reyRawEqual(ownedHead, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(ownedHead, 16), record); }
+    if !__reyRawEqual(ownedHead, __reyRawNull()) { __reyRawStoreAddress(regionAddressAt(ownedHead, 8), record); }
     __reyRawStoreAddress(regionAddressAt(context, 288), record);
     __reyRawStoreI64(regionAddressAt(context, 296), ownedCount + 1);
     __reyRawStoreI64(regionAddressAt(context, 272), requested + bytes);
