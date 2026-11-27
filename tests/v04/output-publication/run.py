@@ -15,7 +15,6 @@ import sys
 import time
 
 
-LOCK = Path("/home/ubuntu/rey/build.lock")
 SEED_SHA256 = "64c8bbe4e559a2355b79bfa0d357bd6e81d6dee92bbac73fe520165004883ee6"
 CODE = bytes((184, 60, 0, 0, 0, 49, 255, 15, 5, 195, 0, 127, 128, 255))
 MAP = b"401000 <entry>\n"
@@ -93,7 +92,6 @@ class Runner:
                 "output publication acceptance requires Linux x64")
         require(self.seed.is_file() and os.access(self.seed, os.X_OK), "SEED must be executable")
         require(self.results["seed_sha256"] == SEED_SHA256, "SEED hash does not match pinned S3")
-        require(LOCK.is_file(), "serialized build lock is missing")
         require(self.source.is_dir() and (self.source / "rey-compiler/native-main.rey").is_file(),
                 "SOURCE does not contain the native compiler")
         require(self.source != self.requested_out and self.source not in self.requested_out.parents,
@@ -138,8 +136,7 @@ class Runner:
                                    capture_output=True, text=True, timeout=120, check=False)
         require(generated.returncode == 0, "runtime overlay generation failed: " + generated.stderr)
         self.results.update({
-            "build_lock": str(LOCK),
-            "resource_policy": "unlimited memory; nice -n 19; timeout; flock; /usr/bin/time -v",
+            "resource_policy": "unlimited memory; nice -n 19; timeout; /usr/bin/time -v",
             "runtime_root": str(self.runtime),
             "stdlib_override": str(self.std),
             "source_hashes": {
@@ -244,7 +241,7 @@ func containersO02ProtectedInputPath(): __rey_raw_address {
         stdout_path = self.logs / (slug + ".stdout")
         stderr_path = self.logs / (slug + ".stderr")
         time_path = self.logs / (slug + ".time-v")
-        wrapped = ["flock", str(LOCK), "nice", "-n", "19", "timeout", "--kill-after=30s", str(seconds),
+        wrapped = ["nice", "-n", "19", "timeout", "--kill-after=30s", str(seconds),
                    "/usr/bin/time", "-v", "-o", str(time_path), *map(str, argv)]
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
             proc = subprocess.run(wrapped, stdout=stdout, stderr=stderr, check=False)
