@@ -1086,6 +1086,9 @@ pub func lowerManagedRoots(module: ManagedProgram, bindings: RuntimeBindings, pl
     var output = appendFunction(IRProgram { entryFunctionId: wrapperId, functions: lowered.functions }, wrapperResult.unwrap());
     output.entryFunctionId = wrapperId;
     var outputVerification = verifyProgram(output);
-    if !outputVerification.ok { return Result.Err("managed roots: lowered IR verification failed"); }
+    if !outputVerification.ok {
+        return Result.Err("managed roots: lowered IR verification failed (errors=" + outputVerification.errors.len().toString() +
+            "): " + outputVerification.errors.join("\n"));
+    }
     return Result.Ok(output);
 }
