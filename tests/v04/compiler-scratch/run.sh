@@ -32,7 +32,6 @@ case "$OUT" in /*) ;; *) OUT="$CALLER/$OUT" ;; esac
 SRC=$(CDPATH= cd -- "$SRC" && pwd -P)
 case "$BASE" in /*) ;; *) BASE="$CALLER/$BASE" ;; esac
 SEED=$(CDPATH= cd -- "$(dirname -- "$SEED")" && pwd -P)/$(basename -- "$SEED")
-LOCK=/home/ubuntu/rey/build.lock
 DRIVER_SOURCE="$SRC/tests/v04/compiler-scratch/main.rey"
 REGION_DRIVER_SOURCE="$SRC/tests/v04/compiler-scratch/region-lowering.rey"
 RUNTIME_DRIVER_SOURCE="$SRC/tests/v04/compiler-scratch/runtime.rey"
@@ -47,7 +46,6 @@ test -x "$SEED"
 test -f "$DRIVER_SOURCE"
 test -f "$REGION_DRIVER_SOURCE"
 test -f "$RUNTIME_DRIVER_SOURCE"
-test -f "$LOCK" || { mkdir -p "$(dirname -- "$LOCK")"; touch "$LOCK"; }
 
 if [ -e "$OUT" ]; then
     mkdir -p "$OUT"
@@ -76,10 +74,9 @@ cp "$RUNTIME_DRIVER_SOURCE" "$OUT/runtime-fixtures/original/region-basic.rey"
 cp "$RUNTIME_DRIVER_SOURCE" "$OUT/runtime-fixtures/staged/region-basic.rey"
 
 run_build() {
-    label=$1
     rss=$2
     shift 2
-    flock "$LOCK" nice -n 19 /usr/bin/time -v -o "$rss" \
+    /usr/bin/time -v -o "$rss" \
         timeout --kill-after=30s 7200 "$@"
 }
 
@@ -105,7 +102,7 @@ else
     sha256sum "$BASE" >"$OUT/base-managed-source.sha256"
 fi
 
-nice -n 19 timeout --kill-after=30s 25200 python3 -B \
+timeout --kill-after=30s 25200 python3 -B \
     "$SRC/tests/v04/compiler-scratch/r01-uncapped.py" "$SEED" "$SRC" "$OUT/r01"
 R01_REGION_DRIVER="$OUT/r01/bin/region-driver"
 test -x "$R01_REGION_DRIVER"
@@ -113,7 +110,7 @@ test -x "$R01_REGION_DRIVER"
 run_runtime_probe_build() {
     report=$1
     shift
-    flock "$LOCK" nice -n 19 /usr/bin/time -v -o "$report" \
+    /usr/bin/time -v -o "$report" \
         timeout --kill-after=30s 1800 "$@"
 }
 

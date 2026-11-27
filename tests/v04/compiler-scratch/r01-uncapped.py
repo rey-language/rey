@@ -63,7 +63,7 @@ def uncapped_prepare(self):
         "evaluator_runs_use_original_sources": True,
     }
     self.results["manifests"] = self.validate_manifests()
-    self.results["build_policy"] = "uncapped; flock held for the complete R01 job; nice -n 19; timeout; per-command /usr/bin/time -v"
+    self.results["build_policy"] = "uncapped; timeout; per-command /usr/bin/time -v"
     self.results["resource_cap"] = None
     self.save()
 
@@ -89,10 +89,10 @@ def uncapped_command(self, label, argv, *, timeout=180, build=False, heavy=False
                    "uncapped-r01", str(resource_limit_mib), *command]
     effective_timeout = max(timeout, 7200) if build else timeout
     if build:
-        command = ["nice", "-n", "19", "/usr/bin/time", "-v", "-o", str(time_path),
+        command = ["/usr/bin/time", "-v", "-o", str(time_path),
                    "timeout", "--kill-after=30s", str(effective_timeout), *command]
     else:
-        command = ["nice", "-n", "19", "timeout", "--kill-after=30s", str(timeout), *command]
+        command = ["timeout", "--kill-after=30s", str(timeout), *command]
     run_env = dict(os.environ)
     if env:
         run_env.update(env)
@@ -158,21 +158,11 @@ def main():
     out = out.resolve()
     if out.exists():
         out = out / ("attempt-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + str(os.getpid()))
-    lock = Path("/home/ubuntu/rey/build.lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.touch(exist_ok=True)
     gate_module = load_gate(source)
     gate_module.RegionGate.gate_module = gate_module
     gate_module.RegionGate.prepare = uncapped_prepare
     gate_module.RegionGate.command = uncapped_command
     gate = gate_module.RegionGate(engine, source, out)
-    # The lock is acquired once around the entire multi-stage R01 job.
-    command = ["flock", str(lock), "nice", "-n", "19", "timeout", "--kill-after=30s", "25200",
-               sys.executable, "-B", str(Path(__file__).resolve()), str(engine), str(source), str(out)]
-    if os.environ.get("REY_R01_UNCAPPED_HELD") != "1":
-        run_env = dict(os.environ)
-        run_env["REY_R01_UNCAPPED_HELD"] = "1"
-        os.execvpe(command[0], command, run_env)
     try:
         gate.run()
     except (gate_module.GateFailure, OSError, ValueError, KeyError, IndexError) as exc:

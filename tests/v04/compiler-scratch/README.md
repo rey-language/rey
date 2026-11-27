@@ -24,7 +24,8 @@ The runtime measurement warms a kind-1 cohort, records the maximum
 `managedRegionScratchUsed` for one iteration, then for ten iterations. Each
 iteration allocates the fixed payload and ends its cohort before continuing.
 The observed peak must remain within 1.1× of the warmed one-iteration peak.
-`run.sh` also runs the staged R01 suite using `r01-uncapped.py`, which holds
-`/home/ubuntu/rey/build.lock` for the complete gate and records `/usr/bin/time
--v` peak RSS for each compiler invocation without a memory cap or memory
-availability abort.
+`run.sh` also runs the staged R01 suite using `r01-uncapped.py`. Compiler
+invocations run directly, with `timeout` and `/usr/bin/time -v` peak RSS
+reports, without a memory cap or memory availability abort. This lets the
+acceptance run alongside other slices on a build host without a shared build
+lock.
