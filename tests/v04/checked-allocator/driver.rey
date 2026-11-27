@@ -1,7 +1,7 @@
 import frontend::graph::{checkSourceFileGraphWithRuntime};
 import ir::managed::link::{buildRegionProgram};
 import ir::{IRProgram};
-import ir::lower::{lowerProgram};
+import ir::lower::{lowerProgram, setLowerTargetOS};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::x64::{emitProgram};
@@ -26,6 +26,7 @@ func main(): void {
     var fixture = argv[1];
     var sourceDirectory = argv[2];
     var outputBinary = argv[3];
+    setLowerTargetOS("linux-x64");
     var compilerSourceDirectory = "";
     if argv.len() == 5 { compilerSourceDirectory = argv[4]; }
     var entryPath = sourceDirectory + "/main.rey";
