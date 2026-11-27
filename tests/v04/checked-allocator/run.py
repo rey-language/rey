@@ -72,6 +72,7 @@ class Runner:
         self.logs = self.out / "logs"
         self.runtime = self.out / "runtime-rey"
         self.commands = []
+        self.driver = None
 
     def require_lock(self):
         try:
@@ -93,8 +94,7 @@ class Runner:
         self.out.mkdir(parents=True, exist_ok=True)
         self.logs.mkdir()
         shutil.copytree(self.source / "runtime-rey", self.runtime)
-        self.fixture = self.runtime / "checked-allocator.rey"
-        shutil.copyfile(FUNCTIONAL_FIXTURE, self.fixture)
+        self.fixture = FUNCTIONAL_FIXTURE
         self.results = {
             "schema": "rey-v04-checked-allocator-v1",
             "workspace": str(self.workspace),
@@ -126,9 +126,8 @@ class Runner:
         stdout_path = self.logs / "functional-build.stdout"
         stderr_path = self.logs / "functional-build.stderr"
         command = [
-            "/usr/bin/time", "-v", "-o", str(timing), str(self.seed), "build", str(self.fixture),
-            "-o", str(image), "--target", "linux-x64", "--regions",
-            "--runtime-root", str(self.runtime),
+            "/usr/bin/time", "-v", "-o", str(timing), str(self.driver),
+            str(self.fixture), str(self.runtime), str(image),
         ]
         cgroup_path = self.logs / "functional-build.cgroup"
         status_path = self.logs / "functional-build.status"
@@ -159,11 +158,11 @@ class Runner:
         self.commands.append(record)
         self.save()
         require(result.returncode == 0 and image.is_file(),
-                "functional fixture compiler build failed; inspect " + str(stderr_path))
-        require(peak is not None and peak > 0, "functional compiler peak RSS was not recorded")
+                "trusted runtime functional build failed; inspect " + str(stderr_path))
+        require(peak is not None and peak > 0, "functional driver peak RSS was not recorded")
         require(cgroup.get("memory.max") == "max" and cgroup.get("memory.swap.max") == "max"
                 and cgroup.get("memory.peak", 0) > 0,
-                "functional compiler uncapped cgroup peak was not recorded")
+                "functional driver uncapped cgroup peak was not recorded")
         image.chmod(image.stat().st_mode | 0o111)
         return image
 
@@ -210,6 +209,8 @@ class Runner:
         probe_results = json.loads((probe_out / "results.json").read_text())
         self.results["compiler_builds"].extend(probe_results["compiler_builds"])
         self.results["probe_summary"] = probe_results["summary"]
+        self.driver = Path(probe_results["compiler_driver"]).resolve(strict=True)
+        self.results["compiler_driver"] = str(self.driver)
         self.save()
 
     def run_repeat_gates(self):

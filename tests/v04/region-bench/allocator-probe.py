@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import statistics
 import struct
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BUILD_HELPER = HERE.parent / "checked-allocator" / "uncapped-build.sh"
 WORKLOAD = HERE / "allocator-probe.rey"
+DRIVER_SOURCE = HERE.parent / "checked-allocator" / "driver.rey"
 CONTROL_REVISION = (HERE / "allocator-control-revision.txt").read_text().strip()
 CASES = (
     ("zero-8x10000", 1, 10000, 8, 1),
@@ -69,8 +71,6 @@ def git_source(source, revision, relative):
 
 
 def prepare_runtime(source, destination, control):
-    import shutil
-
     shutil.copytree(source / "runtime-rey", destination)
     if control:
         for module in ("layout", "regions"):
@@ -109,6 +109,7 @@ class Probe:
         self.require_improvement = require_improvement
         self.builds = []
         self.samples = {}
+        self.driver = None
         self.source_revision = self.git_revision()
 
     def git_revision(self):
@@ -144,22 +145,72 @@ class Probe:
             "compiler_builds": self.builds,
         }
 
+    def build_driver(self):
+        compiler_source = self.out / "compiler-src"
+        shutil.copytree(self.source / "rey-compiler/src", compiler_source)
+        shutil.copyfile(DRIVER_SOURCE, compiler_source / "main.rey")
+        image = self.out / "bin" / "checked-allocator-driver"
+        image.parent.mkdir()
+        timing = self.out / "logs" / "driver-build.time"
+        stdout_path = self.out / "logs" / "driver-build.stdout"
+        stderr_path = self.out / "logs" / "driver-build.stderr"
+        cgroup_path = self.out / "logs" / "driver-build.cgroup"
+        status_path = self.out / "logs" / "driver-build.status"
+        time_command = [
+            "/usr/bin/time", "-v", "-o", str(timing), str(self.seed), "build",
+            str(compiler_source / "main.rey"), "-o", str(image), "--target", "linux-x64",
+        ]
+        command = [str(BUILD_HELPER), str(timing), str(cgroup_path), str(status_path), "2400",
+                   "--", *time_command]
+        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+            result = subprocess.run(command, stdout=stdout, stderr=stderr, check=False,
+                                    pass_fds=(3,))
+        peak = parse_time(timing) if timing.is_file() and timing.stat().st_size else None
+        cgroup = {}
+        if cgroup_path.is_file():
+            for line in cgroup_path.read_text().splitlines():
+                key, separator, value = line.partition("=")
+                if separator:
+                    cgroup[key] = int(value) if key in ("memory.peak", "command_status") else value
+        record = {
+            "runtime": "compiler-driver",
+            "command": command,
+            "status": result.returncode,
+            "image_sha256": sha256(image) if image.is_file() else None,
+            "time_v": str(timing),
+            "peak_rss_bytes": peak,
+            "uncapped_cgroup": cgroup,
+            "cgroup_record": str(cgroup_path),
+            "status_record": str(status_path),
+            "stdout": str(stdout_path),
+            "stderr": str(stderr_path),
+        }
+        self.builds.append(record)
+        self.results["compiler_driver"] = str(image)
+        self.results["compiler_driver_source_sha256"] = sha256(DRIVER_SOURCE)
+        (self.out / "results.json").write_text(json.dumps(self.results, indent=2, sort_keys=True) + "\n")
+        require(result.returncode == 0 and image.is_file(),
+                "trusted runtime compiler driver build failed; inspect " + str(stderr_path))
+        require(peak is not None, "compiler driver peak RSS was not captured")
+        require(cgroup.get("memory.max") == "max" and cgroup.get("memory.swap.max") == "max"
+                and cgroup.get("memory.peak", 0) > 0,
+                "compiler driver uncapped cgroup peak was not captured")
+        image.chmod(image.stat().st_mode | 0o111)
+        self.driver = image
+        return image
+
     def build(self, runtime_name, runtime):
         case_dir = self.out / runtime_name
         case_dir.mkdir(parents=True)
         runtime_snapshot = case_dir / "runtime-rey"
-        import shutil
         shutil.copytree(runtime, runtime_snapshot)
-        fixture = runtime_snapshot / "allocator-probe.rey"
         image = case_dir / "allocator-probe"
-        fixture.write_bytes(WORKLOAD.read_bytes())
         timing = self.out / "logs" / (runtime_name + "-build.time")
         stdout_path = self.out / "logs" / (runtime_name + "-build.stdout")
         stderr_path = self.out / "logs" / (runtime_name + "-build.stderr")
         time_command = [
-            "/usr/bin/time", "-v", "-o", str(timing), str(self.seed), "build", str(fixture),
-            "-o", str(image), "--target", "linux-x64", "--regions",
-            "--runtime-root", str(runtime_snapshot),
+            "/usr/bin/time", "-v", "-o", str(timing), str(self.driver),
+            str(WORKLOAD), str(runtime_snapshot), str(image),
         ]
         cgroup_path = self.out / "logs" / (runtime_name + "-build.cgroup")
         status_path = self.out / "logs" / (runtime_name + "-build.status")
@@ -213,6 +264,7 @@ class Probe:
 
     def run(self):
         self.prepare()
+        self.build_driver()
         images = {}
         for runtime_name, runtime in (
             ("control", self.out / "control-runtime"),

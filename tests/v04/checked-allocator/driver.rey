@@ -1,0 +1,50 @@
+import frontend::graph::{checkSourceFileGraphWithRuntime};
+import ir::lower::{lowerProgram};
+import ir::verify::{verifyProgram};
+import ir::analysis::{inferEffects};
+import native::x64::{emitProgram};
+import native::image::x64::{buildElfX64};
+import native::bytes::{byteString};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL checked-allocator driver: " + message); exit(1); }
+}
+
+func writeImage(path: string, bytes: Vec<int>): void {
+    var encoded = byteString(bytes);
+    require(encoded.isOk(), "byte conversion failed");
+    writeFile(path, encoded.unwrap());
+    require(fileExists(path), "image write failed");
+}
+
+func main(): void {
+    var argv = args();
+    require(argv.len() == 4, "usage: checked-allocator-driver fixture.rey sourceDir outputBinary");
+    var fixture = argv[1];
+    var sourceDirectory = argv[2];
+    var outputBinary = argv[3];
+    var entryPath = sourceDirectory + "/main.rey";
+    writeFile(entryPath, readFile(fixture));
+    var units: Vec<string> = [
+        sourceDirectory + "/layout/main.rey",
+        sourceDirectory + "/regions/main.rey",
+        sourceDirectory + "/managed/main.rey",
+        sourceDirectory + "/containers/main.rey",
+        sourceDirectory + "/host/main.rey",
+        entryPath,
+    ];
+    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
+    if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
+    var lowered = lowerProgram(checked.unwrap());
+    if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); }
+    var program = lowered.unwrap();
+    var verified = verifyProgram(program);
+    if !verified.ok { eprintln(verified.errors.join("\n")); exit(1); }
+    program = inferEffects(program);
+    var x64 = emitProgram(program, "linux-x64");
+    if x64.isErr() { eprintln(x64.unwrapErr()); exit(1); }
+    var elf = buildElfX64(x64.unwrap());
+    if elf.isErr() { eprintln(elf.unwrapErr()); exit(1); }
+    writeImage(outputBinary, elf.unwrap());
+    println("checked-allocator-driver-emitted " + outputBinary);
+}
