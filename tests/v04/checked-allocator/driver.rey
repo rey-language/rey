@@ -1,12 +1,15 @@
 import frontend::graph::{checkSourceFileGraphWithRuntime};
-import ir::managed::link::{buildManagedProgram};
+import ir::managed::link::{linkManagedRuntime};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage};
+import ir::managed::roots::{lowerManagedRoots};
 import ir::{IRProgram};
-import ir::lower::{lowerProgram, setLowerTargetOS};
+import ir::lower::{lowerManagedProgram, lowerProgram, setLowerTargetOS};
 import ir::verify::{verifyProgram};
 import ir::analysis::{inferEffects};
 import native::x64::{emitProgram};
 import native::image::x64::{buildElfX64};
 import native::bytes::{byteString};
+import typecheck::{CheckedProgram};
 
 func require(ok: bool, message: string): void {
     if !ok { eprintln("FAIL checked-allocator driver: " + message); exit(1); }
@@ -17,6 +20,44 @@ func writeImage(path: string, bytes: Vec<int>): void {
     require(encoded.isOk(), "byte conversion failed");
     writeFile(path, encoded.unwrap());
     require(fileExists(path), "image write failed");
+}
+
+func lowerStaticManagedFixture(checked: CheckedProgram, runtimeRoot: string,
+                               compilerSourceDirectory: string): Result<IRProgram, string> {
+    var input = lowerManagedProgram(checked);
+    if input.isErr() { return Result.Err(input.unwrapErr()); }
+    var runtimeEntry = runtimeRoot + "/main.rey";
+    var runtimeUnits: Vec<string> = [
+        runtimeRoot + "/layout/main.rey",
+        runtimeRoot + "/heap/main.rey",
+        runtimeRoot + "/gc/main.rey",
+        runtimeRoot + "/regions/main.rey",
+        runtimeRoot + "/managed/main.rey",
+        runtimeRoot + "/containers/main.rey",
+        runtimeRoot + "/task/main.rey",
+        runtimeRoot + "/host/main.rey",
+        runtimeEntry,
+    ];
+    var runtimeChecked = checkSourceFileGraphWithRuntime(runtimeEntry, compilerSourceDirectory, runtimeUnits);
+    if runtimeChecked.isErr() { return Result.Err(runtimeChecked.unwrapErr()); }
+    var runtimeProgram = lowerProgram(runtimeChecked.unwrap());
+    if runtimeProgram.isErr() { return Result.Err(runtimeProgram.unwrapErr()); }
+    var linked = linkManagedRuntime(input.unwrap(), runtimeProgram.unwrap(), runtimeRoot);
+    if linked.isErr() { return Result.Err(linked.unwrapErr()); }
+    var module = linked.unwrap().module;
+    var allocations: Vec<ManagedAllocationPlacement> = [];
+    var allocationIndex = 0;
+    while allocationIndex < module.allocations.len() {
+        var item = module.allocations[allocationIndex];
+        allocations.push(ManagedAllocationPlacement {
+            functionId: item.functionId,
+            resultId: item.resultId,
+            storage: ManagedStorage::Heap,
+        });
+        allocationIndex += 1;
+    }
+    var placements = ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [] };
+    return lowerManagedRoots(module, linked.unwrap().bindings, placements, false);
 }
 
 func main(): void {
@@ -47,7 +88,7 @@ func main(): void {
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
     var lowered: Result<IRProgram, string> = Result.Err("lowering path was not selected");
     if argv.len() == 5 {
-        lowered = buildManagedProgram(checked.unwrap(), sourceDirectory, compilerSourceDirectory, false, false);
+        lowered = lowerStaticManagedFixture(checked.unwrap(), sourceDirectory, compilerSourceDirectory);
     } else {
         lowered = lowerProgram(checked.unwrap());
     }
