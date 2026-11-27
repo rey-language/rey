@@ -17,7 +17,7 @@ func factJoin(left: Fact, right: Fact): Fact {
 }
 
 func typeIsScalar(ty: IRType): bool {
-    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool;
+    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool || ty.kind == IRTypeKind::F64;
 }
 
 func typeIsSupportedValue(ty: IRType): bool {
@@ -44,10 +44,13 @@ func markUnknown(effects: EffectSummary): EffectSummary {
 }
 
 func supportedInstruction(program: IRProgram, instruction: Instruction): bool {
-    if instruction.kind == InstructionKind::ConstI64 || instruction.kind == InstructionKind::ConstBool {
+    if instruction.kind == InstructionKind::ConstI64 || instruction.kind == InstructionKind::ConstBool || instruction.kind == InstructionKind::ConstF64 {
         return instruction.resultId >= 0 && instruction.operands.len() == 0;
     }
-    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 || instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool {
+    if instruction.kind == InstructionKind::NegF64 || instruction.kind == InstructionKind::I64ToF64 || instruction.kind == InstructionKind::F64ToI64Checked {
+        return instruction.resultId >= 0 && instruction.operands.len() == 1;
+    }
+    if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 || instruction.kind == InstructionKind::CompareI64 || instruction.kind == InstructionKind::CompareBool || instruction.kind == InstructionKind::AddF64 || instruction.kind == InstructionKind::SubF64 || instruction.kind == InstructionKind::MulF64 || instruction.kind == InstructionKind::DivF64 || instruction.kind == InstructionKind::RemF64 || instruction.kind == InstructionKind::CompareF64 {
         return instruction.resultId >= 0 && instruction.operands.len() == 2;
     }
     if instruction.kind == InstructionKind::RawNull { return instruction.resultId >= 0 && instruction.operands.len() == 0; }

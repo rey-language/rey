@@ -804,6 +804,31 @@ func appendStub(emitter: Emitter, targetOS: string, entryFunction: IRFunction): 
     return overflowOffset;
 }
 
+func armProgramHasF64(program: IRProgram): bool {
+    var functionIndex = 0;
+    while functionIndex < program.functions.len() {
+        var function = program.functions[functionIndex];
+        if function.signature.returnType.kind == IRTypeKind::F64 { return true; }
+        var index = 0;
+        while index < function.signature.parameterTypes.len() { if function.signature.parameterTypes[index].kind == IRTypeKind::F64 { return true; } index += 1; }
+        var blockIndex = 0;
+        while blockIndex < function.blocks.len() {
+            var block = function.blocks[blockIndex];
+            index = 0;
+            while index < block.params.len() { if block.params[index].ty.kind == IRTypeKind::F64 { return true; } index += 1; }
+            index = 0;
+            while index < block.instructions.len() {
+                var instruction = block.instructions[index];
+                if instruction.ty.kind == IRTypeKind::F64 || instruction.kind == InstructionKind::CompareF64 { return true; }
+                index += 1;
+            }
+            blockIndex += 1;
+        }
+        functionIndex += 1;
+    }
+    return false;
+}
+
 func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Result<Arm64Code, string> {
     if targetOS != "darwin" && targetOS != "linux" {
         return Result.Err("native arm64: target OS must be darwin or linux");
@@ -813,6 +838,7 @@ func emitArm64Internal(program: IRProgram, targetOS: string, reuse: bool): Resul
         if verification.errors.len() > 0 { return Result.Err("native arm64: invalid IR: " + verification.errors[0]); }
         return Result.Err("native arm64: invalid IR program");
     }
+    if armProgramHasF64(program) { return Result.Err("native arm64: f64 scalar ABI and instructions are not implemented"); }
     var entryIndex = 0;
     loop {
         if entryIndex >= program.functions.len() { break; }

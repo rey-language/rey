@@ -5,6 +5,7 @@ pub struct EvalResult {
     pub ok: bool,
     pub value: int,
     pub isBool: bool,
+    pub isF64: bool,
     pub isVoid: bool,
     pub error: string,
     pub steps: int,
@@ -13,11 +14,13 @@ pub struct EvalResult {
 struct ValueLookup {
     pub found: bool,
     pub value: int,
+    pub isF64: bool,
 }
 
 struct EvalFrame {
     pub ids: Vec<int>,
     pub values: Vec<int>,
+    pub floatFlags: Vec<int>,
 }
 
 struct RawAddressCell {
@@ -44,15 +47,20 @@ struct EdgeTransfer {
     pub ok: bool,
     pub block: BasicBlock,
     pub values: Vec<int>,
+    pub floatFlags: Vec<int>,
     pub error: string,
 }
 
 func evalSuccess(value: int, isBool: bool, isVoid: bool, steps: int): EvalResult {
-    return EvalResult { ok: true, value: value, isBool: isBool, isVoid: isVoid, error: "", steps: steps };
+    return EvalResult { ok: true, value: value, isBool: isBool, isF64: false, isVoid: isVoid, error: "", steps: steps };
+}
+
+func evalF64Success(bits: int, steps: int): EvalResult {
+    return EvalResult { ok: true, value: bits, isBool: false, isF64: true, isVoid: false, error: "", steps: steps };
 }
 
 func evalFailure(error: string, steps: int): EvalResult {
-    return EvalResult { ok: false, value: 0, isBool: false, isVoid: false, error: error, steps: steps };
+    return EvalResult { ok: false, value: 0, isBool: false, isF64: false, isVoid: false, error: error, steps: steps };
 }
 
 func sourceLocation(source: SourceRef): string {
@@ -67,10 +75,13 @@ func readValue(frame: EvalFrame, valueId: int): ValueLookup {
     var i = 0;
     loop {
         if i >= frame.ids.len() { break; }
-        if frame.ids[i] == valueId { return ValueLookup { found: true, value: frame.values[i] }; }
+        if frame.ids[i] == valueId {
+            if frame.floatFlags[i] != 0 { return ValueLookup { found: true, value: frame.values[i], isF64: true }; }
+            return ValueLookup { found: true, value: frame.values[i], isF64: false };
+        }
         i = i + 1;
     }
-    return ValueLookup { found: false, value: 0 };
+    return ValueLookup { found: false, value: 0, isF64: false };
 }
 
 func writeValue(frame: EvalFrame, valueId: int, value: int) {
@@ -79,12 +90,29 @@ func writeValue(frame: EvalFrame, valueId: int, value: int) {
         if i >= frame.ids.len() { break; }
         if frame.ids[i] == valueId {
             frame.values.set(i, value);
+            frame.floatFlags.set(i, 0);
             return;
         }
         i = i + 1;
     }
     frame.ids.push(valueId);
     frame.values.push(value);
+    frame.floatFlags.push(0);
+}
+
+func writeFloatValue(frame: EvalFrame, valueId: int, bits: int) {
+    var i = 0;
+    while i < frame.ids.len() {
+        if frame.ids[i] == valueId {
+            frame.values.set(i, bits);
+            frame.floatFlags.set(i, 1);
+            return;
+        }
+        i += 1;
+    }
+    frame.ids.push(valueId);
+    frame.values.push(bits);
+    frame.floatFlags.push(1);
 }
 
 func emptyRawMapping(): RawMapping {
@@ -200,15 +228,15 @@ func rawLoadAddress(mapping: RawMapping, byteOffset: int): ValueLookup {
     var cellIndex = findRawAddressCell(mapping, byteOffset);
     if cellIndex >= 0 {
         var cell = mapping.addressCells[cellIndex];
-        if cell.valid { return ValueLookup { found: true, value: cell.value }; }
+        if cell.valid { return ValueLookup { found: true, value: cell.value, isF64: false }; }
     }
     var i = 0;
     loop {
         if i >= 8 { break; }
-        if mapping.written[byteOffset + i] != 0 { return ValueLookup { found: false, value: 0 }; }
+        if mapping.written[byteOffset + i] != 0 { return ValueLookup { found: false, value: 0, isF64: false }; }
         i = i + 1;
     }
-    return ValueLookup { found: true, value: 0 };
+    return ValueLookup { found: true, value: 0, isF64: false };
 }
 
 func rawStoreI64(mapping: RawMapping, byteOffset: int, value: int): RawMapping {
@@ -273,26 +301,31 @@ func findBlockIndex(function: IRFunction, blockId: int): int {
 
 func transferEdge(function: IRFunction, frame: EvalFrame, targetBlockId: int, argumentIds: Vec<int>): EdgeTransfer {
     var targetIndex = findBlockIndex(function, targetBlockId);
-    if targetIndex < 0 { return EdgeTransfer { ok: false, block: basicBlock(-1, [], [], returnVoid(sourceRef("", 0, 0))), values: [], error: "edge references a missing block" }; }
+    if targetIndex < 0 { return EdgeTransfer { ok: false, block: basicBlock(-1, [], [], returnVoid(sourceRef("", 0, 0))), values: [], floatFlags: [], error: "edge references a missing block" }; }
     var target = function.blocks[targetIndex];
-    if argumentIds.len() != target.params.len() { return EdgeTransfer { ok: false, block: target, values: [], error: "edge argument count does not match block parameters" }; }
+    if argumentIds.len() != target.params.len() { return EdgeTransfer { ok: false, block: target, values: [], floatFlags: [], error: "edge argument count does not match block parameters" }; }
     var edgeValues: Vec<int> = [];
+    var edgeFloatFlags: Vec<int> = [];
     var i = 0;
     loop {
         if i >= argumentIds.len() { break; }
         var found = readValue(frame, argumentIds[i]);
-        if !found.found { return EdgeTransfer { ok: false, block: target, values: [], error: "edge references an unavailable SSA value" }; }
+        if !found.found { return EdgeTransfer { ok: false, block: target, values: [], floatFlags: [], error: "edge references an unavailable SSA value" }; }
         edgeValues.push(found.value);
+        var isFloat = 0;
+        if found.isF64 { isFloat = 1; }
+        edgeFloatFlags.push(isFloat);
         i = i + 1;
     }
-    return EdgeTransfer { ok: true, block: target, values: edgeValues, error: "" };
+    return EdgeTransfer { ok: true, block: target, values: edgeValues, floatFlags: edgeFloatFlags, error: "" };
 }
 
 func assignEdge(frame: EvalFrame, edge: EdgeTransfer) {
     var i = 0;
     loop {
         if i >= edge.block.params.len() { break; }
-        writeValue(frame, edge.block.params[i].id, edge.values[i]);
+        if edge.floatFlags[i] != 0 { writeFloatValue(frame, edge.block.params[i].id, edge.values[i]); }
+        else { writeValue(frame, edge.block.params[i].id, edge.values[i]); }
         i = i + 1;
     }
 }
@@ -306,7 +339,367 @@ func comparisonResult(predicate: CompareI64Predicate, left: int, right: int): bo
     return left >= right;
 }
 
-func evalFunction(program: IRProgram, state: RawState, functionId: int, arguments: Vec<int>, depth: int, steps: int, maxSteps: int, maxDepth: int): EvalResult {
+struct F64Parts {
+    pub negative: bool,
+    pub exponent: int,
+    pub fraction: int,
+    pub significand: int,
+    pub exponent2: int,
+    pub category: int,
+}
+
+struct BigDivision {
+    pub quotient: Vec<int>,
+    pub remainder: Vec<int>,
+}
+
+func bigZero(): Vec<int> { return [0]; }
+
+func bigCopy(value: Vec<int>): Vec<int> {
+    var copy: Vec<int> = [];
+    var index = 0;
+    while index < value.len() { copy.push(value[index]); index += 1; }
+    return copy;
+}
+
+func bigNormalize(value: Vec<int>): Vec<int> {
+    var normalized = bigCopy(value);
+    while normalized.len() > 1 && normalized[normalized.len() - 1] == 0 { normalized.pop(); }
+    return normalized;
+}
+
+func bigFromSmall(value: int): Vec<int> {
+    var result: Vec<int> = [];
+    var remaining = value;
+    while remaining > 0 {
+        result.push(remaining % 65536);
+        remaining = remaining / 65536;
+    }
+    if result.len() == 0 { result.push(0); }
+    return result;
+}
+
+func bigCompare(left: Vec<int>, right: Vec<int>): int {
+    var a = bigNormalize(left);
+    var b = bigNormalize(right);
+    if a.len() < b.len() { return -1; }
+    if a.len() > b.len() { return 1; }
+    var index = a.len() - 1;
+    loop {
+        if index < 0 { break; }
+        if a[index] < b[index] { return -1; }
+        if a[index] > b[index] { return 1; }
+        index -= 1;
+    }
+    return 0;
+}
+
+func bigAdd(left: Vec<int>, right: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var length = left.len();
+    if right.len() > length { length = right.len(); }
+    var carry = 0;
+    var index = 0;
+    while index < length {
+        var sum = carry;
+        if index < left.len() { sum += left[index]; }
+        if index < right.len() { sum += right[index]; }
+        result.push(sum % 65536);
+        carry = sum / 65536;
+        index += 1;
+    }
+    if carry != 0 { result.push(carry); }
+    return bigNormalize(result);
+}
+
+func bigSubtract(left: Vec<int>, right: Vec<int>): Vec<int> {
+    var result = bigCopy(left);
+    var borrow = 0;
+    var index = 0;
+    while index < result.len() {
+        var digit = result[index] - borrow;
+        if index < right.len() { digit -= right[index]; }
+        borrow = 0;
+        if digit < 0 { digit += 65536; borrow = 1; }
+        result.set(index, digit);
+        index += 1;
+    }
+    return bigNormalize(result);
+}
+
+func bigShiftLeft(value: Vec<int>, amount: int): Vec<int> {
+    var result = bigCopy(value);
+    var count = 0;
+    while count < amount {
+        var carry = 0;
+        var index = 0;
+        while index < result.len() {
+            var expanded = result[index] * 2 + carry;
+            result.set(index, expanded % 65536);
+            carry = expanded / 65536;
+            index += 1;
+        }
+        if carry != 0 { result.push(carry); }
+        count += 1;
+    }
+    return bigNormalize(result);
+}
+
+func bigMultiply(left: Vec<int>, right: Vec<int>): Vec<int> {
+    var result: Vec<int> = [];
+    var targetLength = left.len() + right.len() + 1;
+    while result.len() < targetLength { result.push(0); }
+    var i = 0;
+    while i < left.len() {
+        var carry = 0;
+        var j = 0;
+        while j < right.len() {
+            var position = i + j;
+            var expanded = result[position] + left[i] * right[j] + carry;
+            result.set(position, expanded % 65536);
+            carry = expanded / 65536;
+            j += 1;
+        }
+        var position = i + right.len();
+        while carry > 0 {
+            var expanded = result[position] + carry;
+            result.set(position, expanded % 65536);
+            carry = expanded / 65536;
+            position += 1;
+        }
+        i += 1;
+    }
+    return bigNormalize(result);
+}
+
+func bigBitLength(value: Vec<int>): int {
+    var normalized = bigNormalize(value);
+    var high = normalized[normalized.len() - 1];
+    var bits = (normalized.len() - 1) * 16;
+    while high > 0 { bits += 1; high = high / 2; }
+    return bits;
+}
+
+func bigBit(value: Vec<int>, index: int): bool {
+    if index < 0 || index / 16 >= value.len() { return false; }
+    var digit = value[index / 16];
+    var bit = index % 16;
+    while bit > 0 { digit = digit / 2; bit -= 1; }
+    return digit % 2 != 0;
+}
+
+func bigSetBit(value: Vec<int>, index: int) {
+    while value.len() <= index / 16 { value.push(0); }
+    var scale = 1;
+    var bit = 0;
+    while bit < index % 16 { scale *= 2; bit += 1; }
+    value.set(index / 16, value[index / 16] + scale);
+}
+
+func bigDivide(numerator: Vec<int>, denominator: Vec<int>): BigDivision {
+    var quotient: Vec<int> = [0];
+    var remainder: Vec<int> = [0];
+    var bit = bigBitLength(numerator) - 1;
+    while bit >= 0 {
+        remainder = bigShiftLeft(remainder, 1);
+        if bigBit(numerator, bit) { remainder[0] = remainder[0] + 1; }
+        if bigCompare(remainder, denominator) >= 0 {
+            remainder = bigSubtract(remainder, denominator);
+            bigSetBit(quotient, bit);
+        }
+        bit -= 1;
+    }
+    return BigDivision { quotient: bigNormalize(quotient), remainder: bigNormalize(remainder) };
+}
+
+func bigToSmall(value: Vec<int>): int {
+    var result = 0;
+    var index = value.len() - 1;
+    while index >= 0 { result = result * 65536 + value[index]; index -= 1; }
+    return result;
+}
+
+func roundedRatioSmall(numerator: Vec<int>, denominator: Vec<int>): int {
+    var division = bigDivide(numerator, denominator);
+    var quotient = bigToSmall(division.quotient);
+    var twiceRemainder = bigShiftLeft(division.remainder, 1);
+    var halfway = bigCompare(twiceRemainder, denominator);
+    if halfway > 0 || (halfway == 0 && quotient % 2 != 0) { quotient += 1; }
+    return quotient;
+}
+
+func f64MagnitudeBits(magnitude: int, negative: bool): int {
+    if negative { return -9223372036854775807 - 1 + magnitude; }
+    return magnitude;
+}
+
+func binary64FromRatio(numerator: Vec<int>, denominator: Vec<int>, exponent2: int, negative: bool): int {
+    if bigCompare(numerator, bigZero()) == 0 { return f64MagnitudeBits(0, negative); }
+    var numeratorBits = bigBitLength(numerator);
+    var denominatorBits = bigBitLength(denominator);
+    var bitDifference = numeratorBits - denominatorBits;
+    var exponent = bitDifference + exponent2;
+    if bitDifference >= 0 {
+        if bigCompare(numerator, bigShiftLeft(denominator, bitDifference)) < 0 { exponent -= 1; }
+    } else if bigCompare(bigShiftLeft(numerator, -bitDifference), denominator) < 0 { exponent -= 1; }
+    if exponent > 1023 { return f64MagnitudeBits(9218868437227405312, negative); }
+    var shift = exponent2 + 52 - exponent;
+    var scaledNumerator = numerator;
+    var scaledDenominator = denominator;
+    if exponent < -1022 {
+        shift = exponent2 + 1074;
+        if shift >= 0 { scaledNumerator = bigShiftLeft(numerator, shift); }
+        else { scaledDenominator = bigShiftLeft(denominator, -shift); }
+        var subnormal = roundedRatioSmall(scaledNumerator, scaledDenominator);
+        return f64MagnitudeBits(subnormal, negative);
+    }
+    if shift >= 0 { scaledNumerator = bigShiftLeft(numerator, shift); }
+    else { scaledDenominator = bigShiftLeft(denominator, -shift); }
+    var significand = roundedRatioSmall(scaledNumerator, scaledDenominator);
+    if significand >= 9007199254740992 { significand = significand / 2; exponent += 1; }
+    if exponent > 1023 { return f64MagnitudeBits(9218868437227405312, negative); }
+    var magnitude = (exponent + 1023) * 4503599627370496 + significand - 4503599627370496;
+    return f64MagnitudeBits(magnitude, negative);
+}
+
+func decodeF64(bits: int): F64Parts {
+    var top = bits / 4503599627370496;
+    if bits < 0 {
+        top += 4096;
+        if bits % 4503599627370496 != 0 { top -= 1; }
+    }
+    var exponent = top % 2048;
+    var fraction = bits % 4503599627370496;
+    if fraction < 0 { fraction += 4503599627370496; }
+    var negative = bits < 0;
+    if exponent == 2047 {
+        var category = 1;
+        if fraction != 0 { category = 2; }
+        return F64Parts { negative: negative, exponent: exponent, fraction: fraction, significand: 0, exponent2: 0, category: category };
+    }
+    if exponent == 0 { return F64Parts { negative: negative, exponent: exponent, fraction: fraction, significand: fraction, exponent2: -1074, category: 0 }; }
+    return F64Parts { negative: negative, exponent: exponent, fraction: fraction, significand: 4503599627370496 + fraction, exponent2: exponent - 1075, category: 0 };
+}
+
+func f64IsZero(bits: int): bool { var value = decodeF64(bits); return value.category == 0 && value.significand == 0; }
+
+func f64AddBits(leftBits: int, rightBits: int, subtractRight: bool): int {
+    var left = decodeF64(leftBits);
+    var right = decodeF64(rightBits);
+    if subtractRight { right.negative = !right.negative; }
+    if left.category == 2 || right.category == 2 { return 9221120237041090560; }
+    if left.category == 1 || right.category == 1 {
+        if left.category == 1 && right.category == 1 && left.negative != right.negative { return 9221120237041090560; }
+        if left.category == 1 { return f64MagnitudeBits(9218868437227405312, left.negative); }
+        return f64MagnitudeBits(9218868437227405312, right.negative);
+    }
+    if left.significand == 0 && right.significand == 0 { return f64MagnitudeBits(0, left.negative && right.negative); }
+    if left.significand == 0 { return f64MagnitudeBits(right.exponent * 4503599627370496 + right.fraction, right.negative); }
+    if right.significand == 0 { return leftBits; }
+    var commonExponent = left.exponent2;
+    if right.exponent2 < commonExponent { commonExponent = right.exponent2; }
+    var leftMagnitude = bigShiftLeft(bigFromSmall(left.significand), left.exponent2 - commonExponent);
+    var rightMagnitude = bigShiftLeft(bigFromSmall(right.significand), right.exponent2 - commonExponent);
+    if left.negative == right.negative { return binary64FromRatio(bigAdd(leftMagnitude, rightMagnitude), [1], commonExponent, left.negative); }
+    var order = bigCompare(leftMagnitude, rightMagnitude);
+    if order == 0 { return 0; }
+    if order > 0 { return binary64FromRatio(bigSubtract(leftMagnitude, rightMagnitude), [1], commonExponent, left.negative); }
+    return binary64FromRatio(bigSubtract(rightMagnitude, leftMagnitude), [1], commonExponent, right.negative);
+}
+
+func f64MultiplyBits(leftBits: int, rightBits: int): int {
+    var left = decodeF64(leftBits);
+    var right = decodeF64(rightBits);
+    var negative = left.negative != right.negative;
+    if left.category == 2 || right.category == 2 { return 9221120237041090560; }
+    if (left.category == 1 && right.category == 0 && right.significand == 0) || (right.category == 1 && left.category == 0 && left.significand == 0) { return 9221120237041090560; }
+    if left.category == 1 || right.category == 1 { return f64MagnitudeBits(9218868437227405312, negative); }
+    if left.significand == 0 || right.significand == 0 { return f64MagnitudeBits(0, negative); }
+    var product = bigMultiply(bigFromSmall(left.significand), bigFromSmall(right.significand));
+    return binary64FromRatio(product, [1], left.exponent2 + right.exponent2, negative);
+}
+
+func f64DivideBits(leftBits: int, rightBits: int): int {
+    var left = decodeF64(leftBits);
+    var right = decodeF64(rightBits);
+    var negative = left.negative != right.negative;
+    if left.category == 2 || right.category == 2 { return 9221120237041090560; }
+    if (left.category == 1 && right.category == 1) || (left.category == 0 && left.significand == 0 && right.category == 0 && right.significand == 0) { return 9221120237041090560; }
+    if left.category == 1 || (right.category == 0 && right.significand == 0) { return f64MagnitudeBits(9218868437227405312, negative); }
+    if right.category == 1 || (left.category == 0 && left.significand == 0) { return f64MagnitudeBits(0, negative); }
+    return binary64FromRatio(bigFromSmall(left.significand), bigFromSmall(right.significand), left.exponent2 - right.exponent2, negative);
+}
+
+func f64RemainderBits(leftBits: int, rightBits: int): int {
+    var left = decodeF64(leftBits);
+    var right = decodeF64(rightBits);
+    if left.category == 2 || right.category == 2 || left.category == 1 || (right.category == 0 && right.significand == 0) { return 9221120237041090560; }
+    if right.category == 1 || (left.category == 0 && left.significand == 0) { return leftBits; }
+    var commonExponent = left.exponent2;
+    if right.exponent2 < commonExponent { commonExponent = right.exponent2; }
+    var numerator = bigShiftLeft(bigFromSmall(left.significand), left.exponent2 - commonExponent);
+    var denominator = bigShiftLeft(bigFromSmall(right.significand), right.exponent2 - commonExponent);
+    var division = bigDivide(numerator, denominator);
+    return binary64FromRatio(division.remainder, [1], commonExponent, left.negative);
+}
+
+func f64Compare(predicate: CompareI64Predicate, leftBits: int, rightBits: int): bool {
+    var left = decodeF64(leftBits);
+    var right = decodeF64(rightBits);
+    if left.category == 2 || right.category == 2 { return predicate == CompareI64Predicate::Ne; }
+    var equal = false;
+    var less = false;
+    if f64IsZero(leftBits) && f64IsZero(rightBits) { equal = true; }
+    else if left.negative != right.negative { less = left.negative; }
+    else {
+        var leftMagnitude = leftBits;
+        var rightMagnitude = rightBits;
+        if left.negative { leftMagnitude = leftBits - (-9223372036854775807 - 1); }
+        if right.negative { rightMagnitude = rightBits - (-9223372036854775807 - 1); }
+        equal = leftMagnitude == rightMagnitude;
+        less = leftMagnitude < rightMagnitude;
+        if left.negative { less = leftMagnitude > rightMagnitude; }
+    }
+    if predicate == CompareI64Predicate::Eq { return equal; }
+    if predicate == CompareI64Predicate::Ne { return !equal; }
+    if predicate == CompareI64Predicate::Slt { return less; }
+    if predicate == CompareI64Predicate::Sle { return less || equal; }
+    if predicate == CompareI64Predicate::Sgt { return !less && !equal; }
+    return !less || equal;
+}
+
+func i64ToF64Bits(value: int): int {
+    var negative = value < 0;
+    var magnitude: Vec<int> = [];
+    if value == -9223372036854775807 - 1 { magnitude = bigShiftLeft([1], 63); }
+    else if negative { magnitude = bigFromSmall(-value); }
+    else { magnitude = bigFromSmall(value); }
+    return binary64FromRatio(magnitude, [1], 0, negative);
+}
+
+func f64ToI64(valueBits: int): Result<int, string> {
+    var value = decodeF64(valueBits);
+    if value.category != 0 { return Result.Err("f64 to i64 conversion is not finite"); }
+    if value.significand == 0 { return Result.Ok(0); }
+    var magnitude: Vec<int> = [];
+    if value.exponent2 >= 0 { magnitude = bigShiftLeft(bigFromSmall(value.significand), value.exponent2); }
+    else {
+        var shift = -value.exponent2;
+        if shift >= 54 { return Result.Ok(0); }
+        var reduced = value.significand;
+        while shift > 0 { reduced = reduced / 2; shift -= 1; }
+        magnitude = bigFromSmall(reduced);
+    }
+    var limit = bigShiftLeft([1], 63);
+    var order = bigCompare(magnitude, limit);
+    if order > 0 || (order == 0 && !value.negative) { return Result.Err("f64 to i64 conversion is out of range"); }
+    if order == 0 { return Result.Ok(-9223372036854775807 - 1); }
+    var integerMagnitude = bigToSmall(magnitude);
+    if value.negative { return Result.Ok(-integerMagnitude); }
+    return Result.Ok(integerMagnitude);
+}
+
+func evalFunction(program: IRProgram, state: RawState, functionId: int, arguments: Vec<int>, floatFlags: Vec<int>, depth: int, steps: int, maxSteps: int, maxDepth: int): EvalResult {
     var functionIndex = findFunctionIndex(program, functionId);
     if functionIndex < 0 { return evalFailure("call references a missing function", steps); }
     var function = program.functions[functionIndex];
@@ -314,11 +707,14 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
     if arguments.len() != function.parameters.len() { return evalFailure("call argument count does not match function parameters in " + functionKeyName(function.key), steps); }
     if function.blocks.len() == 0 { return evalFailure("function has no entry block: " + functionKeyName(function.key), steps); }
 
-    var frame = EvalFrame { ids: [], values: [] };
+    var frame = EvalFrame { ids: [], values: [], floatFlags: [] };
     var parameterIndex = 0;
     loop {
         if parameterIndex >= function.parameters.len() { break; }
-        writeValue(frame, function.parameters[parameterIndex].id, arguments[parameterIndex]);
+        if function.parameters[parameterIndex].ty.kind == IRTypeKind::F64 {
+            if parameterIndex >= floatFlags.len() || floatFlags[parameterIndex] == 0 { return evalFailure("f64 call argument representation is missing", steps); }
+            writeFloatValue(frame, function.parameters[parameterIndex].id, arguments[parameterIndex]);
+        } else { writeValue(frame, function.parameters[parameterIndex].id, arguments[parameterIndex]); }
         parameterIndex = parameterIndex + 1;
     }
 
@@ -341,6 +737,45 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
                 var boolValue = 0;
                 if instruction.immediate != 0 { boolValue = 1; }
                 writeValue(frame, instruction.resultId, boolValue);
+            } else if instruction.kind == InstructionKind::ConstF64 {
+                writeFloatValue(frame, instruction.resultId, instruction.immediate);
+            } else if instruction.kind == InstructionKind::NegF64 {
+                var negOperand = readValue(frame, instruction.operands[0]);
+                if !negOperand.found || !negOperand.isF64 { return failAt("f64 negation references a non-f64 or unavailable SSA value", instruction.source, currentSteps); }
+                var negatedBits = negOperand.value;
+                if negatedBits < 0 { negatedBits = negatedBits - (-9223372036854775807 - 1); }
+                else { negatedBits = -9223372036854775807 - 1 + negatedBits; }
+                writeFloatValue(frame, instruction.resultId, negatedBits);
+            } else if instruction.kind == InstructionKind::AddF64 || instruction.kind == InstructionKind::SubF64 || instruction.kind == InstructionKind::MulF64 || instruction.kind == InstructionKind::DivF64 || instruction.kind == InstructionKind::RemF64 {
+                var leftF64 = readValue(frame, instruction.operands[0]);
+                var rightF64 = readValue(frame, instruction.operands[1]);
+                if !leftF64.found || !rightF64.found || !leftF64.isF64 || !rightF64.isF64 { return failAt("f64 arithmetic references a non-f64 or unavailable SSA value", instruction.source, currentSteps); }
+                if (instruction.kind == InstructionKind::DivF64 || instruction.kind == InstructionKind::RemF64) && f64IsZero(rightF64.value) { return failAt("f64 division or remainder by zero", instruction.source, currentSteps); }
+                var f64ResultBits = 0;
+                if instruction.kind == InstructionKind::AddF64 { f64ResultBits = f64AddBits(leftF64.value, rightF64.value, false); }
+                else if instruction.kind == InstructionKind::SubF64 { f64ResultBits = f64AddBits(leftF64.value, rightF64.value, true); }
+                else if instruction.kind == InstructionKind::MulF64 { f64ResultBits = f64MultiplyBits(leftF64.value, rightF64.value); }
+                else if instruction.kind == InstructionKind::DivF64 { f64ResultBits = f64DivideBits(leftF64.value, rightF64.value); }
+                else { f64ResultBits = f64RemainderBits(leftF64.value, rightF64.value); }
+                writeFloatValue(frame, instruction.resultId, f64ResultBits);
+            } else if instruction.kind == InstructionKind::CompareF64 {
+                var leftFloatCompare = readValue(frame, instruction.operands[0]);
+                var rightFloatCompare = readValue(frame, instruction.operands[1]);
+                if !leftFloatCompare.found || !rightFloatCompare.found || !leftFloatCompare.isF64 || !rightFloatCompare.isF64 { return failAt("f64 comparison references a non-f64 or unavailable SSA value", instruction.source, currentSteps); }
+                var floatCompared = f64Compare(instruction.comparison, leftFloatCompare.value, rightFloatCompare.value);
+                var floatCompareValue = 0;
+                if floatCompared { floatCompareValue = 1; }
+                writeValue(frame, instruction.resultId, floatCompareValue);
+            } else if instruction.kind == InstructionKind::I64ToF64 {
+                var intToFloat = readValue(frame, instruction.operands[0]);
+                if !intToFloat.found || intToFloat.isF64 { return failAt("i64 to f64 conversion references a non-i64 or unavailable SSA value", instruction.source, currentSteps); }
+                writeFloatValue(frame, instruction.resultId, i64ToF64Bits(intToFloat.value));
+            } else if instruction.kind == InstructionKind::F64ToI64Checked {
+                var floatToInt = readValue(frame, instruction.operands[0]);
+                if !floatToInt.found || !floatToInt.isF64 { return failAt("f64 to i64 conversion references a non-f64 or unavailable SSA value", instruction.source, currentSteps); }
+                var convertedToI64 = f64ToI64(floatToInt.value);
+                if convertedToI64.isErr() { return failAt(convertedToI64.unwrapErr(), instruction.source, currentSteps); }
+                writeValue(frame, instruction.resultId, convertedToI64.unwrap());
             } else if instruction.kind == InstructionKind::AddCheckedI64 {
                 if instruction.operands.len() != 2 { return failAt("checked addition has malformed operands", instruction.source, currentSteps); }
                 var left = readValue(frame, instruction.operands[0]);
@@ -556,19 +991,24 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
                 return failAt("host arguments are unavailable in the evaluator", instruction.source, currentSteps);
             } else if instruction.kind == InstructionKind::Call {
                 var callArguments: Vec<int> = [];
+                var callFloatFlags: Vec<int> = [];
                 var argumentIndex = 0;
                 loop {
                     if argumentIndex >= instruction.operands.len() { break; }
                     var callArgument = readValue(frame, instruction.operands[argumentIndex]);
                     if !callArgument.found { return failAt("call references an unavailable SSA value", instruction.source, currentSteps); }
                     callArguments.push(callArgument.value);
+                    var argumentIsFloat = 0;
+                    if callArgument.isF64 { argumentIsFloat = 1; }
+                    callFloatFlags.push(argumentIsFloat);
                     argumentIndex = argumentIndex + 1;
                 }
                 if depth + 1 > maxDepth { return failAt("call depth limit exceeded", instruction.source, currentSteps); }
-                var callResult = evalFunction(program, state, instruction.functionId, callArguments, depth + 1, currentSteps, maxSteps, maxDepth);
+                var callResult = evalFunction(program, state, instruction.functionId, callArguments, callFloatFlags, depth + 1, currentSteps, maxSteps, maxDepth);
                 if !callResult.ok { return callResult; }
                 currentSteps = callResult.steps;
-                if !callResult.isVoid { writeValue(frame, instruction.resultId, callResult.value); }
+                if callResult.isF64 { writeFloatValue(frame, instruction.resultId, callResult.value); }
+                else if !callResult.isVoid { writeValue(frame, instruction.resultId, callResult.value); }
             } else {
                 return failAt("unsupported IR instruction", instruction.source, currentSteps);
             }
@@ -599,6 +1039,7 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
             var returnValue = readValue(frame, terminator.valueId);
             if !returnValue.found { return failAt("return references an unavailable SSA value", terminator.source, currentSteps); }
             if function.signature.returnType.kind == IRTypeKind::Bool { return evalSuccess(returnValue.value, true, false, currentSteps); }
+            if function.signature.returnType.kind == IRTypeKind::F64 && returnValue.isF64 { return evalF64Success(returnValue.value, currentSteps); }
             if function.signature.returnType.kind == IRTypeKind::I64 || function.signature.returnType.kind == IRTypeKind::RawAddress { return evalSuccess(returnValue.value, false, false, currentSteps); }
             return failAt("scalar return in void function", terminator.source, currentSteps);
         } else {
@@ -613,5 +1054,5 @@ pub func evaluateProgram(program: IRProgram, maxSteps: int, maxDepth: int): Eval
     if !verification.ok { return evalFailure("invalid IR program: verifier rejected the program", 0); }
     if maxSteps <= 0 { return evalFailure("maxSteps must be positive", 0); }
     if maxDepth < 0 { return evalFailure("maxDepth must be nonnegative", 0); }
-    return evalFunction(program, newRawState(), program.entryFunctionId, [], 0, 0, maxSteps, maxDepth);
+    return evalFunction(program, newRawState(), program.entryFunctionId, [], [], 0, 0, maxSteps, maxDepth);
 }

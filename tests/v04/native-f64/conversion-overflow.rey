@@ -1,0 +1,4 @@
+func main(): void {
+    var tooLarge: float = 9223372036854775808.0;
+    var converted: int = tooLarge.toInt();
+}

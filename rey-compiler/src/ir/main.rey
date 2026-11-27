@@ -4,6 +4,7 @@
 pub enum IRTypeKind {
     I64,
     Bool,
+    F64,
     Void,
     RawAddress,
 }
@@ -11,6 +12,16 @@ pub enum IRTypeKind {
 pub enum InstructionKind {
     ConstI64,
     ConstBool,
+    ConstF64,
+    NegF64,
+    AddF64,
+    SubF64,
+    MulF64,
+    DivF64,
+    RemF64,
+    CompareF64,
+    I64ToF64,
+    F64ToI64Checked,
     AddCheckedI64,
     CompareI64,
     Call,
@@ -161,6 +172,8 @@ pub func irBool(): IRType {
     return IRType { kind: IRTypeKind::Bool };
 }
 
+pub func irF64(): IRType { return IRType { kind: IRTypeKind::F64 }; }
+
 pub func irVoid(): IRType {
     return IRType { kind: IRTypeKind::Void };
 }
@@ -170,12 +183,13 @@ pub func irRawAddress(): IRType { return IRType { kind: IRTypeKind::RawAddress }
 pub func irTypeName(ty: IRType): string {
     if ty.kind == IRTypeKind::I64 { return "i64"; }
     if ty.kind == IRTypeKind::Bool { return "bool"; }
+    if ty.kind == IRTypeKind::F64 { return "f64"; }
     if ty.kind == IRTypeKind::RawAddress { return "raw.address"; }
     return "void";
 }
 
 pub func irTypeIsScalar(ty: IRType): bool {
-    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool;
+    return ty.kind == IRTypeKind::I64 || ty.kind == IRTypeKind::Bool || ty.kind == IRTypeKind::F64;
 }
 
 pub func factNo(): Fact {
@@ -277,6 +291,52 @@ pub func constBool(resultId: int, value: bool, source: SourceRef): Instruction {
     if value { encoded = 1; }
     var instruction = emptyInstruction(InstructionKind::ConstBool, resultId, irBool(), source);
     instruction.immediate = encoded;
+    return instruction;
+}
+
+pub func constF64Bits(resultId: int, bits: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::ConstF64, resultId, irF64(), source);
+    instruction.immediate = bits;
+    return instruction;
+}
+
+func f64Unary(kind: InstructionKind, resultId: int, valueId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(kind, resultId, irF64(), source);
+    instruction.operands.push(valueId);
+    return instruction;
+}
+
+func f64Binary(kind: InstructionKind, resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(kind, resultId, irF64(), source);
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func negF64(resultId: int, valueId: int, source: SourceRef): Instruction { return f64Unary(InstructionKind::NegF64, resultId, valueId, source); }
+pub func addF64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return f64Binary(InstructionKind::AddF64, resultId, leftId, rightId, source); }
+pub func subF64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return f64Binary(InstructionKind::SubF64, resultId, leftId, rightId, source); }
+pub func mulF64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return f64Binary(InstructionKind::MulF64, resultId, leftId, rightId, source); }
+pub func divF64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return f64Binary(InstructionKind::DivF64, resultId, leftId, rightId, source); }
+pub func remF64(resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction { return f64Binary(InstructionKind::RemF64, resultId, leftId, rightId, source); }
+
+pub func compareF64(resultId: int, comparison: CompareI64Predicate, leftId: int, rightId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::CompareF64, resultId, irBool(), source);
+    instruction.comparison = comparison;
+    instruction.operands.push(leftId);
+    instruction.operands.push(rightId);
+    return instruction;
+}
+
+pub func i64ToF64(resultId: int, valueId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::I64ToF64, resultId, irF64(), source);
+    instruction.operands.push(valueId);
+    return instruction;
+}
+
+pub func f64ToI64Checked(resultId: int, valueId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::F64ToI64Checked, resultId, irI64(), source);
+    instruction.operands.push(valueId);
     return instruction;
 }
 
@@ -536,6 +596,26 @@ func instructionText(instruction: Instruction): string {
         var value = "false";
         if instruction.immediate != 0 { value = "true"; }
         return prefix + "const.bool " + value + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::ConstF64 {
+        return prefix + "const.f64.bits " + instruction.immediate.toString() + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::NegF64 || instruction.kind == InstructionKind::I64ToF64 || instruction.kind == InstructionKind::F64ToI64Checked {
+        var operation = "neg.f64";
+        if instruction.kind == InstructionKind::I64ToF64 { operation = "i64.to.f64"; }
+        if instruction.kind == InstructionKind::F64ToI64Checked { operation = "f64.to.i64.checked"; }
+        return prefix + operation + " " + valueText(instruction.operands[0]) + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::AddF64 || instruction.kind == InstructionKind::SubF64 || instruction.kind == InstructionKind::MulF64 || instruction.kind == InstructionKind::DivF64 || instruction.kind == InstructionKind::RemF64 {
+        var operation = "add";
+        if instruction.kind == InstructionKind::SubF64 { operation = "sub"; }
+        if instruction.kind == InstructionKind::MulF64 { operation = "mul"; }
+        if instruction.kind == InstructionKind::DivF64 { operation = "div"; }
+        if instruction.kind == InstructionKind::RemF64 { operation = "rem"; }
+        return prefix + operation + ".f64 " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::CompareF64 {
+        return prefix + "compare.f64 " + comparePredicateName(instruction.comparison) + " " + valueText(instruction.operands[0]) + ", " + valueText(instruction.operands[1]) + " " + sourceText(instruction.source);
     }
     if instruction.kind == InstructionKind::AddCheckedI64 || instruction.kind == InstructionKind::SubCheckedI64 || instruction.kind == InstructionKind::MulCheckedI64 || instruction.kind == InstructionKind::DivCheckedI64 || instruction.kind == InstructionKind::RemCheckedI64 {
         var operation = "add";

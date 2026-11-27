@@ -1,0 +1,72 @@
+import ir;
+import ir::{CompareI64Predicate, EffectSummary, Escape, IRFunction, IRType, IRValue, Instruction};
+import ir::eval::{EvalResult, evaluateProgram};
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    while index < parameterCount { escapes.push(ir.escapeNoEscape()); index += 1; }
+    return ir.effectSummary(ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), ir.factNo(), escapes, ir.escapeNoEscape());
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, returnType: IRType, parameters: Vec<IRValue>, instructions: Vec<Instruction>, resultId: int): IRFunction {
+    var block = ir.basicBlock(0, [], instructions, ir.returnValue(resultId, ir.sourceRef("f64-evaluator.rey", 1, 2)));
+    return ir.irFunction(id, ir.functionKey("f64-evaluator", "", name), ir.functionSignature(parameterTypes, returnType), parameters, [block], effects(parameterTypes.len()));
+}
+
+func evalBinary(kind: string, left: int, right: int): EvalResult {
+    var instructions: Vec<Instruction> = [
+        ir.constF64Bits(0, left, ir.sourceRef("f64-evaluator.rey", 3, 4)),
+        ir.constF64Bits(1, right, ir.sourceRef("f64-evaluator.rey", 5, 6))
+    ];
+    if kind == "add" { instructions.push(ir.addF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 7, 8))); }
+    else if kind == "sub" { instructions.push(ir.subF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 7, 8))); }
+    else if kind == "mul" { instructions.push(ir.mulF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 7, 8))); }
+    else if kind == "div" { instructions.push(ir.divF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 7, 8))); }
+    else { instructions.push(ir.remF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 7, 8))); }
+    var function = makeFunction(0, kind, [], ir.irF64(), [], instructions, 2);
+    return evaluateProgram(ir.irProgram(0, [function]), 100, 8);
+}
+
+func evalComparison(predicate: CompareI64Predicate, left: int, right: int): EvalResult {
+    var instructions: Vec<Instruction> = [
+        ir.constF64Bits(0, left, ir.sourceRef("f64-evaluator.rey", 9, 10)),
+        ir.constF64Bits(1, right, ir.sourceRef("f64-evaluator.rey", 11, 12)),
+        ir.compareF64(2, predicate, 0, 1, ir.sourceRef("f64-evaluator.rey", 13, 14))
+    ];
+    var function = makeFunction(0, "compare", [], ir.irBool(), [], instructions, 2);
+    return evaluateProgram(ir.irProgram(0, [function]), 100, 8);
+}
+
+func main(): void {
+    var added = evalBinary("add", 4602678819172646912, 4609434218613702656);
+    assert(added.ok && added.isF64 && added.value == 4611686018427387904, "evaluator must retain correctly rounded binary64 result bits");
+    var remainder = evalBinary("rem", 4617878467915022336, 4611686018427387904);
+    assert(remainder.ok && remainder.isF64 && remainder.value == 4609434218613702656, "evaluator remainder must preserve the dividend sign and exact result");
+
+    var nanEqual = evalComparison(ir.compareEq(), 9221120237041090560, 9221120237041090560);
+    var nanDifferent = evalComparison(ir.compareNe(), 9221120237041090560, 9221120237041090560);
+    var zeroEqual = evalComparison(ir.compareEq(), 0, -9223372036854775807 - 1);
+    assert(nanEqual.ok && nanEqual.value == 0 && nanDifferent.ok && nanDifferent.value == 1, "evaluator comparisons must follow unordered NaN semantics");
+    assert(zeroEqual.ok && zeroEqual.value == 1, "evaluator equality must treat signed zero values as equal");
+
+    var zeroDivision = evalBinary("div", 4607182418800017408, 0);
+    assert(!zeroDivision.ok && zeroDivision.error.contains("division or remainder by zero"), "evaluator division by zero must trap");
+
+    var wideningInstructions: Vec<Instruction> = [ir.constI64(0, 42, ir.sourceRef("f64-evaluator.rey", 15, 16)), ir.i64ToF64(1, 0, ir.sourceRef("f64-evaluator.rey", 17, 18))];
+    var widening = makeFunction(0, "widen", [], ir.irF64(), [], wideningInstructions, 1);
+    var widened = evaluateProgram(ir.irProgram(0, [widening]), 100, 8);
+    assert(widened.ok && widened.isF64 && widened.value == 4631107791820423168, "evaluator i64 to f64 conversion must produce exact binary64 bits");
+
+    var truncationInstructions: Vec<Instruction> = [ir.constF64Bits(0, 4638417345121878016, ir.sourceRef("f64-evaluator.rey", 19, 20)), ir.f64ToI64Checked(1, 0, ir.sourceRef("f64-evaluator.rey", 21, 22))];
+    var truncation = makeFunction(0, "truncate", [], ir.irI64(), [], truncationInstructions, 1);
+    var truncated = evaluateProgram(ir.irProgram(0, [truncation]), 100, 8);
+    assert(truncated.ok && truncated.value == 123, "evaluator checked f64 to i64 conversion must truncate toward zero");
+
+    var calleeInstructions: Vec<Instruction> = [ir.constF64Bits(1, 4602678819172646912, ir.sourceRef("f64-evaluator.rey", 23, 24)), ir.addF64(2, 0, 1, ir.sourceRef("f64-evaluator.rey", 25, 26))];
+    var callee = makeFunction(0, "callee", [ir.irF64()], ir.irF64(), [ir.irValue(0, ir.irF64())], calleeInstructions, 2);
+    var callerInstructions: Vec<Instruction> = [ir.constF64Bits(0, 4609434218613702656, ir.sourceRef("f64-evaluator.rey", 27, 28)), ir.call(1, ir.irF64(), 0, [0], ir.sourceRef("f64-evaluator.rey", 29, 30))];
+    var caller = makeFunction(1, "caller", [], ir.irF64(), [], callerInstructions, 1);
+    var callResult = evaluateProgram(ir.irProgram(1, [callee, caller]), 100, 8);
+    assert(callResult.ok && callResult.isF64 && callResult.value == 4611686018427387904, "evaluator calls must preserve f64 arguments and return values as raw bits");
+}

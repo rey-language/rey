@@ -222,7 +222,7 @@ func spanRef(path: string, span: Span): SourceRef {
 }
 
 func checkedTypeIsValue(ty: Type): bool {
-    return ty.kind == kindInt || ty.kind == kindBool || ty.kind == kindRawAddress;
+    return ty.kind == kindInt || ty.kind == kindBool || ty.kind == "Float" || ty.kind == kindRawAddress;
 }
 
 func checkedTypeIsSupported(ty: Type): bool {
@@ -324,6 +324,7 @@ var litExit: string = "exit";
 var litVecNew: string = "Vec.new";
 var litHashMapNew: string = "HashMap.new";
 var litInt: string = "int";
+var litFloat: string = "float";
 var litChar: string = "char";
 var litString: string = "string";
 var litToString: string = "toString";
@@ -737,6 +738,9 @@ func lowerExprExpected(lowerer: FunctionLowerer, expression: Expr, expected: Typ
     lowerer.expectedType = expected;
     var value = lowerExpr(lowerer, expression);
     lowerer.expectedType = previous;
+    if lowerer.error == emptyString && !lowerer.managed && expected.kind == kindFloat && value.ty.kind == IRTypeKind::I64 {
+        return lowerScalarNumericConversion(lowerer, expression, value, ir.irF64(), spanRef(lowerer.sourcePath, exprSpan(expression)));
+    }
     return value;
 }
 
@@ -995,6 +999,7 @@ func buildManagedLayouts(checked: CheckedProgram): Result<ManagedCatalog, string
 func toIRType(ty: Type): IRType {
     if ty.kind == kindInt { return irI64(); }
     if ty.kind == kindBool { return irBool(); }
+    if ty.kind == kindFloat { return ir.irF64(); }
     if ty.kind == kindChar { return irI64(); }
     if ty.kind == kindRawAddress { return ir.irRawAddress(); }
     return irVoid();
@@ -3553,12 +3558,264 @@ func parseIntegerLiteral(text: string, negative: bool): Result<int, string> {
     return Result.Ok(value);
 }
 
+struct BigUnsigned {
+    pub limbs: Vec<int>,
+}
+
+func bigNormalize(value: BigUnsigned): BigUnsigned {
+    while value.limbs.len() > 1 && value.limbs[value.limbs.len() - 1] == 0 { value.limbs.pop(); }
+    return value;
+}
+
+func bigFromZero(): BigUnsigned { return BigUnsigned { limbs: [0] }; }
+
+func bigAddSmall(value: BigUnsigned, addend: int): BigUnsigned {
+    var carry = addend;
+    var index = 0;
+    while carry > 0 {
+        if index >= value.limbs.len() { value.limbs.push(0); }
+        var next = value.limbs[index] + carry;
+        value.limbs.set(index, next % 65536);
+        carry = next / 65536;
+        index += 1;
+    }
+    return value;
+}
+
+func bigMultiplySmall(value: BigUnsigned, factor: int): BigUnsigned {
+    var carry = 0;
+    var index = 0;
+    while index < value.limbs.len() {
+        var product = value.limbs[index] * factor + carry;
+        value.limbs.set(index, product % 65536);
+        carry = product / 65536;
+        index += 1;
+    }
+    while carry > 0 {
+        value.limbs.push(carry % 65536);
+        carry = carry / 65536;
+    }
+    return value;
+}
+
+func bigBitLength(value: BigUnsigned): int {
+    if value.limbs.len() == 0 { return 0; }
+    var top = value.limbs[value.limbs.len() - 1];
+    var bits = (value.limbs.len() - 1) * 16;
+    while top > 0 { bits += 1; top = top / 2; }
+    return bits;
+}
+
+func bigCompare(left: BigUnsigned, right: BigUnsigned): int {
+    var a = bigNormalize(left);
+    var b = bigNormalize(right);
+    if a.limbs.len() < b.limbs.len() { return -1; }
+    if a.limbs.len() > b.limbs.len() { return 1; }
+    var index = a.limbs.len() - 1;
+    while index >= 0 {
+        if a.limbs[index] < b.limbs[index] { return -1; }
+        if a.limbs[index] > b.limbs[index] { return 1; }
+        index -= 1;
+    }
+    return 0;
+}
+
+func bigShiftLeft(value: BigUnsigned, shift: int): BigUnsigned {
+    var shifted: Vec<int> = [];
+    var wordShift = shift / 16;
+    var bitShift = shift % 16;
+    var index = 0;
+    while index < wordShift { shifted.push(0); index += 1; }
+    var carry = 0;
+    var factor = 1;
+    while bitShift > 0 { factor *= 2; bitShift -= 1; }
+    index = 0;
+    while index < value.limbs.len() {
+        var next = value.limbs[index] * factor + carry;
+        shifted.push(next % 65536);
+        carry = next / 65536;
+        index += 1;
+    }
+    while carry > 0 { shifted.push(carry % 65536); carry = carry / 65536; }
+    if shifted.len() == 0 { shifted.push(0); }
+    return bigNormalize(BigUnsigned { limbs: shifted });
+}
+
+func bigSubtract(left: BigUnsigned, right: BigUnsigned): BigUnsigned {
+    var borrow = 0;
+    var index = 0;
+    while index < left.limbs.len() {
+        var rightLimb = 0;
+        if index < right.limbs.len() { rightLimb = right.limbs[index]; }
+        var difference = left.limbs[index] - rightLimb - borrow;
+        borrow = 0;
+        if difference < 0 { difference += 65536; borrow = 1; }
+        left.limbs.set(index, difference);
+        index += 1;
+    }
+    return bigNormalize(left);
+}
+
+func bigRoundedQuotient(numerator: BigUnsigned, denominator: BigUnsigned): int {
+    var remainder = numerator;
+    var quotient = 0;
+    var bit = bigBitLength(remainder) - bigBitLength(denominator);
+    while bit >= 0 {
+        var shiftedDenominator = bigShiftLeft(denominator, bit);
+        quotient *= 2;
+        if bigCompare(remainder, shiftedDenominator) >= 0 {
+            remainder = bigSubtract(remainder, shiftedDenominator);
+            quotient += 1;
+        }
+        bit -= 1;
+    }
+    var twiceRemainder = bigShiftLeft(remainder, 1);
+    var halfway = bigCompare(twiceRemainder, denominator);
+    if halfway > 0 || (halfway == 0 && quotient % 2 != 0) { quotient += 1; }
+    return quotient;
+}
+
+func signedF64Bits(magnitudeBits: int, negative: bool): int {
+    if negative { return -9223372036854775807 - 1 + magnitudeBits; }
+    return magnitudeBits;
+}
+
+func parseF64LiteralBits(text: string): Result<int, string> {
+    if text.len() == 0 || text.len() > 8192 { return Result.Err("floating literal has unsupported length"); }
+    var mantissaEnd = text.len();
+    var exponentAt = -1;
+    var scan = 0;
+    while scan < text.len() {
+        if text[scan] == 'e' || text[scan] == 'E' { exponentAt = scan; mantissaEnd = scan; break; }
+        scan += 1;
+    }
+    var decimalExponent = 0;
+    if exponentAt >= 0 {
+        if exponentAt + 1 >= text.len() { return Result.Err("floating literal exponent has no digits"); }
+        var exponentText = text.slice(exponentAt + 1, text.len());
+        var exponentNegative = false;
+        if exponentText.slice(0, 1) == "+" || exponentText.slice(0, 1) == "-" {
+            exponentNegative = exponentText.slice(0, 1) == "-";
+            exponentText = exponentText.slice(1, exponentText.len());
+        }
+        var parsedExponent = parseIntegerLiteral(exponentText, exponentNegative);
+        if parsedExponent.isErr() { return Result.Err("floating literal exponent is outside the supported range"); }
+        decimalExponent = parsedExponent.unwrap();
+        if decimalExponent > 10000 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
+        if decimalExponent < -10000 { return Result.Ok(0); }
+    }
+    var numerator = bigFromZero();
+    var fractionDigits = 0;
+    var digitCount = 0;
+    var sawDot = false;
+    var previousDigit = false;
+    scan = 0;
+    while scan < mantissaEnd {
+        var current = text.slice(scan, scan + 1);
+        if current == "." {
+            if sawDot { return Result.Err("floating literal has more than one decimal point"); }
+            sawDot = true;
+            previousDigit = false;
+        } else if current == "_" {
+            if !previousDigit || scan + 1 >= mantissaEnd { return Result.Err("misplaced underscore in floating literal"); }
+            var nextDigit = digitValue(text.slice(scan + 1, scan + 2));
+            if nextDigit < 0 || nextDigit > 9 { return Result.Err("misplaced underscore in floating literal"); }
+            previousDigit = false;
+        } else {
+            var digit = digitValue(current);
+            if digit < 0 || digit > 9 { return Result.Err("invalid digit in floating literal"); }
+            numerator = bigMultiplySmall(numerator, 10);
+            numerator = bigAddSmall(numerator, digit);
+            digitCount += 1;
+            if sawDot { fractionDigits += 1; }
+            previousDigit = true;
+        }
+        scan += 1;
+    }
+    if digitCount == 0 || !previousDigit { return Result.Err("floating literal has an incomplete decimal value"); }
+    var order = digitCount - fractionDigits + decimalExponent - 1;
+    if order > 309 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
+    if order < -400 { return Result.Ok(0); }
+    var decimalScale = fractionDigits - decimalExponent;
+    var denominator = bigFromZero();
+    if decimalScale >= 0 {
+        denominator.limbs.set(0, 1);
+        var tenIndex = 0;
+        while tenIndex < decimalScale { denominator = bigMultiplySmall(denominator, 10); tenIndex += 1; }
+    } else {
+        var numeratorScale = 0 - decimalScale;
+        var tenMultiply = 0;
+        while tenMultiply < numeratorScale { numerator = bigMultiplySmall(numerator, 10); tenMultiply += 1; }
+        denominator.limbs.set(0, 1);
+    }
+    if bigCompare(numerator, bigFromZero()) == 0 { return Result.Ok(0); }
+    var exponent = bigBitLength(numerator) - bigBitLength(denominator);
+    if exponent >= 0 {
+        if bigCompare(numerator, bigShiftLeft(denominator, exponent)) < 0 { exponent -= 1; }
+    } else if bigCompare(bigShiftLeft(numerator, 0 - exponent), denominator) < 0 { exponent -= 1; }
+    if exponent > 1023 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
+    var rounded = 0;
+    var magnitude = 0;
+    if exponent < -1022 {
+        rounded = bigRoundedQuotient(bigShiftLeft(numerator, 1074), denominator);
+        magnitude = rounded;
+    } else {
+        var significandShift = 52 - exponent;
+        var scaledNumerator = numerator;
+        var scaledDenominator = denominator;
+        if significandShift >= 0 { scaledNumerator = bigShiftLeft(numerator, significandShift); }
+        else { scaledDenominator = bigShiftLeft(denominator, 0 - significandShift); }
+        rounded = bigRoundedQuotient(scaledNumerator, scaledDenominator);
+        if rounded >= 9007199254740992 { rounded = rounded / 2; exponent += 1; }
+        if exponent > 1023 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
+        magnitude = (exponent + 1023) * 4503599627370496 + rounded - 4503599627370496;
+    }
+    return Result.Ok(signedF64Bits(magnitude, false));
+}
+
 func checkedArithmeticInstruction(op: string, resultId: int, leftId: int, rightId: int, source: SourceRef): Instruction {
     if op == opAdd { return addCheckedI64(resultId, leftId, rightId, source); }
     if op == opSub { return subCheckedI64(resultId, leftId, rightId, source); }
     if op == opMul { return mulCheckedI64(resultId, leftId, rightId, source); }
     if op == opDiv { return divCheckedI64(resultId, leftId, rightId, source); }
     return remCheckedI64(resultId, leftId, rightId, source);
+}
+
+func lowerScalarNumericConversion(lowerer: FunctionLowerer, expression: Expr, argument: LowerValue, targetType: IRType, source: SourceRef): LowerValue {
+    if argument.id < 0 { return failExpression(lowerer, expression, "numeric conversion operand did not lower to a value"); }
+    if argument.ty.kind == targetType.kind { return argument; }
+    if argument.ty.kind == IRTypeKind::I64 && targetType.kind == IRTypeKind::F64 {
+        var converted = allocateValue(lowerer, ir.irF64());
+        appendInstruction(lowerer, ir.i64ToF64(converted.id, argument.id, source));
+        return LowerValue { id: converted.id, ty: converted.ty };
+    }
+    if argument.ty.kind == IRTypeKind::F64 && targetType.kind == IRTypeKind::I64 {
+        var convertedInt = allocateValue(lowerer, irI64());
+        appendInstruction(lowerer, ir.f64ToI64Checked(convertedInt.id, argument.id, source));
+        return LowerValue { id: convertedInt.id, ty: convertedInt.ty };
+    }
+    return failExpression(lowerer, expression, "numeric conversion requires an int or float scalar");
+}
+
+func lowerScalarBuiltinConversion(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr, info: CheckedExprInfo, intrinsic: string): LowerValue {
+    var argumentExpression: Expr? = null;
+    if intrinsic == litInt || intrinsic == litFloat {
+        if callExpr.args.len() != 1 { return failExpression(lowerer, expression, "scalar numeric conversion requires exactly one argument"); }
+        argumentExpression = callExpr.args[0];
+    } else {
+        if callExpr.args.len() != 0 { return failExpression(lowerer, expression, "numeric conversion method takes no arguments"); }
+        match callExpr.callee {
+            Expr::FieldAccess(access) => { argumentExpression = access.object; },
+            _ => { return failExpression(lowerer, expression, "numeric conversion method requires a scalar receiver"); },
+        }
+    }
+    if argumentExpression == null { return failExpression(lowerer, expression, "numeric conversion argument is missing"); }
+    var actualArgument: Expr = expression;
+    if argumentExpression != null { actualArgument = argumentExpression; }
+    var argument = lowerExpr(lowerer, actualArgument);
+    if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+    var targetType = toIRType(info.ty);
+    return lowerScalarNumericConversion(lowerer, expression, argument, targetType, spanRef(lowerer.sourcePath, exprSpan(expression)));
 }
 
 func appendInstruction(lowerer: FunctionLowerer, instruction: Instruction) {
@@ -3966,6 +4223,16 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     var maybeInfo = findExprInfo(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, expression);
     if maybeInfo != null {
     var info = requiredCheckedExprInfo(maybeInfo, lowerer.checked.expressions[0]);
+    if !lowerer.managed {
+        match callExpr.callee {
+            Expr::FieldAccess(access) => {
+                if access.name == "toInt" || access.name == "toFloat" {
+                    return lowerScalarBuiltinConversion(lowerer, expression, callExpr, info, access.name);
+                }
+            },
+            _ => {},
+        }
+    }
     var maybeSymbol = info.symbol;
     if maybeSymbol != null {
     var symbol = requiredResolvedSymbol(maybeSymbol, lowerer.checked.symbols[0]);
@@ -3978,6 +4245,9 @@ func lowerCall(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr): 
     }
     if lowerer.managed && symbol.kind == litBuiltin {
         return lowerManagedBuiltinCall(lowerer, expression, callExpr, info, symbol);
+    }
+    if !lowerer.managed && symbol.kind == litBuiltin && (symbol.intrinsicId == litInt || symbol.intrinsicId == litFloat || symbol.intrinsicId == litToInt || symbol.intrinsicId == "toFloat") {
+        return lowerScalarBuiltinConversion(lowerer, expression, callExpr, info, symbol.intrinsicId);
     }
     if symbol.kind != kindFunction || symbol.receiverPassing != litNone || symbol.intrinsicId != emptyString {
         return failExpression(lowerer, expression, "only calls to top-level source functions are supported");
@@ -4281,6 +4551,11 @@ func lowerUnary(lowerer: FunctionLowerer, expression: Expr, unary: UnaryExpr, re
         }
         var operand = lowerExpr(lowerer, unary.right);
         if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+        if operand.id >= 0 && operand.ty.kind == IRTypeKind::F64 && resultType.kind == IRTypeKind::F64 {
+            var negatedFloat = allocateValue(lowerer, ir.irF64());
+            appendInstruction(lowerer, ir.negF64(negatedFloat.id, operand.id, spanRef(lowerer.sourcePath, unary.span)));
+            return LowerValue { id: negatedFloat.id, ty: negatedFloat.ty };
+        }
         if operand.id < 0 || operand.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::I64 {
             return failExpression(lowerer, expression, "unary negation requires an i64 operand");
         }
@@ -4314,6 +4589,13 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
                 appendInstruction(lowerer, constBool(value.id, literal.text == boolTrue, spanRef(lowerer.sourcePath, span)));
                 return LowerValue { id: value.id, ty: resultType };
             }
+            if literal.kind == LiteralKind::Float {
+                if lowerer.managed { return failExpression(lowerer, expression, "managed float literals are outside the supported aggregate ABI"); }
+                var floatBits = parseF64LiteralBits(literal.text);
+                if floatBits.isErr() { return failExpression(lowerer, expression, floatBits.unwrapErr()); }
+                appendInstruction(lowerer, ir.constF64Bits(value.id, floatBits.unwrap(), spanRef(lowerer.sourcePath, span)));
+                return LowerValue { id: value.id, ty: resultType };
+            }
             if lowerer.managed && literal.kind == LiteralKind::Char {
                 if literal.text.len() != 1 { return failExpression(lowerer, expression, "checked char literal does not contain exactly one byte"); }
                 appendInstruction(lowerer, constI64(value.id, literal.text.hash(), spanRef(lowerer.sourcePath, span)));
@@ -4323,7 +4605,7 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
                 appendInstruction(lowerer, ir.rawNull(value.id, spanRef(lowerer.sourcePath, span)));
                 return LowerValue { id: value.id, ty: resultType };
             }
-            return failExpression(lowerer, expression, "only integer and boolean literals are supported");
+            return failExpression(lowerer, expression, "only integer, boolean, and scalar float literals are supported");
         },
         Expr::Identifier(identifier) => {
             var maybeLocal = findLocal(lowerer, identifier.name);
@@ -4409,6 +4691,21 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
                 }
             }
             if binary.op == opAdd || binary.op == opSub || binary.op == opMul || binary.op == opDiv || binary.op == opRem {
+                if resultType.kind == IRTypeKind::F64 {
+                    var floatSource = spanRef(lowerer.sourcePath, binary.span);
+                    left = lowerScalarNumericConversion(lowerer, binary.left, left, ir.irF64(), floatSource);
+                    if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+                    right = lowerScalarNumericConversion(lowerer, binary.right, right, ir.irF64(), floatSource);
+                    if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+                    var floatResult = allocateValue(lowerer, ir.irF64());
+                    var floatInstruction = ir.addF64(floatResult.id, left.id, right.id, floatSource);
+                    if binary.op == opSub { floatInstruction = ir.subF64(floatResult.id, left.id, right.id, floatSource); }
+                    if binary.op == opMul { floatInstruction = ir.mulF64(floatResult.id, left.id, right.id, floatSource); }
+                    if binary.op == opDiv { floatInstruction = ir.divF64(floatResult.id, left.id, right.id, floatSource); }
+                    if binary.op == opRem { floatInstruction = ir.remF64(floatResult.id, left.id, right.id, floatSource); }
+                    appendInstruction(lowerer, floatInstruction);
+                    return LowerValue { id: floatResult.id, ty: floatResult.ty };
+                }
                 if left.ty.kind != IRTypeKind::I64 || right.ty.kind != IRTypeKind::I64 || resultType.kind != IRTypeKind::I64 {
                     return failExpression(lowerer, expression, "checked arithmetic lowering requires i64 operands and result");
                 }
@@ -4419,6 +4716,20 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
             if binary.op == opEq || binary.op == opNe || binary.op == opLt || binary.op == opLe || binary.op == opGt || binary.op == opGe {
                 var predicate = ir.compareEq();
                 if binary.op == opNe { predicate = ir.compareNe(); }
+                if (left.ty.kind == IRTypeKind::F64 || right.ty.kind == IRTypeKind::F64) && resultType.kind == IRTypeKind::Bool {
+                    var comparisonSource = spanRef(lowerer.sourcePath, binary.span);
+                    left = lowerScalarNumericConversion(lowerer, binary.left, left, ir.irF64(), comparisonSource);
+                    if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+                    right = lowerScalarNumericConversion(lowerer, binary.right, right, ir.irF64(), comparisonSource);
+                    if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
+                    if binary.op == opLt { predicate = ir.compareSlt(); }
+                    if binary.op == opLe { predicate = ir.compareSle(); }
+                    if binary.op == opGt { predicate = ir.compareSgt(); }
+                    if binary.op == opGe { predicate = ir.compareSge(); }
+                    var floatCompared = allocateValue(lowerer, irBool());
+                    appendInstruction(lowerer, ir.compareF64(floatCompared.id, predicate, left.id, right.id, comparisonSource));
+                    return LowerValue { id: floatCompared.id, ty: floatCompared.ty };
+                }
                 if lowerer.managed && left.ty.kind == IRTypeKind::RawAddress && right.ty.kind == IRTypeKind::RawAddress && resultType.kind == IRTypeKind::Bool && (binary.op == opEq || binary.op == opNe) && managedTypeUsesIdentityEquality(leftType) && managedTypeKey(leftType) == managedTypeKey(rightType) {
                     var equal = allocateValue(lowerer, irBool());
                     appendInstruction(lowerer, ir.rawEqual(equal.id, left.id, right.id, spanRef(lowerer.sourcePath, binary.span)));

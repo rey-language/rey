@@ -450,6 +450,13 @@ func checkI64Operand(errors: Vec<string>, table: DefinitionTable, valueId: int, 
     }
 }
 
+func checkF64Operand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
+    var definition = findDefinition(table, valueId);
+    if definition.id >= 0 && definition.ty.kind != IRTypeKind::F64 {
+        errors.push(context + ": operand must have type f64");
+    }
+}
+
 func checkBoolOperand(errors: Vec<string>, table: DefinitionTable, valueId: int, context: string): void {
     var definition = findDefinition(table, valueId);
     if definition.id >= 0 && definition.ty.kind != IRTypeKind::Bool {
@@ -479,6 +486,28 @@ func checkCheckedI64Instruction(errors: Vec<string>, table: DefinitionTable, ins
         if operandIndex >= instruction.operands.len() { break; }
         checkI64Operand(errors, table, instruction.operands[operandIndex], context);
         operandIndex = operandIndex + 1;
+    }
+}
+
+func checkF64UnaryInstruction(errors: Vec<string>, table: DefinitionTable, instruction: Instruction, context: string, name: string): void {
+    if instruction.ty.kind != IRTypeKind::F64 || instruction.resultId < 0 { errors.push(context + ": " + name + " requires an f64 result"); }
+    if instruction.operands.len() != 1 { errors.push(context + ": " + name + " requires exactly one operand"); }
+    if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": " + name + " has invalid unused fields"); }
+    var operandIndex = 0;
+    while operandIndex < instruction.operands.len() {
+        checkF64Operand(errors, table, instruction.operands[operandIndex], context);
+        operandIndex += 1;
+    }
+}
+
+func checkF64BinaryInstruction(errors: Vec<string>, table: DefinitionTable, instruction: Instruction, context: string, name: string): void {
+    if instruction.ty.kind != IRTypeKind::F64 || instruction.resultId < 0 { errors.push(context + ": " + name + " requires an f64 result"); }
+    if instruction.operands.len() != 2 { errors.push(context + ": " + name + " requires exactly two operands"); }
+    if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": " + name + " has invalid unused fields"); }
+    var operandIndex = 0;
+    while operandIndex < instruction.operands.len() {
+        checkF64Operand(errors, table, instruction.operands[operandIndex], context);
+        operandIndex += 1;
     }
 }
 
@@ -706,6 +735,34 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
                 if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": const.bool requires a bool result"); }
                 if instruction.immediate != 0 && instruction.immediate != 1 { errors.push(context + ": bool immediate must be 0 or 1"); }
                 if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.bool has invalid unused fields"); }
+            } else if instruction.kind == InstructionKind::ConstF64 {
+                if instruction.ty.kind != IRTypeKind::F64 || instruction.resultId < 0 { errors.push(context + ": const.f64 requires an f64 result"); }
+                if operandCount != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": const.f64 has invalid unused fields"); }
+            } else if instruction.kind == InstructionKind::NegF64 {
+                checkF64UnaryInstruction(errors, definitionTable, instruction, context, "neg.f64");
+            } else if instruction.kind == InstructionKind::AddF64 || instruction.kind == InstructionKind::SubF64 || instruction.kind == InstructionKind::MulF64 || instruction.kind == InstructionKind::DivF64 || instruction.kind == InstructionKind::RemF64 {
+                var f64Name = "add.f64";
+                if instruction.kind == InstructionKind::SubF64 { f64Name = "sub.f64"; }
+                if instruction.kind == InstructionKind::MulF64 { f64Name = "mul.f64"; }
+                if instruction.kind == InstructionKind::DivF64 { f64Name = "div.f64"; }
+                if instruction.kind == InstructionKind::RemF64 { f64Name = "rem.f64"; }
+                checkF64BinaryInstruction(errors, definitionTable, instruction, context, f64Name);
+            } else if instruction.kind == InstructionKind::CompareF64 {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": compare.f64 requires a bool result"); }
+                if operandCount != 2 { errors.push(context + ": compare.f64 requires exactly two operands"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 { errors.push(context + ": compare.f64 has invalid unused fields"); }
+                var compareF64Index = 0;
+                while compareF64Index < operandCount { checkF64Operand(errors, definitionTable, instruction.operands[compareF64Index], context); compareF64Index += 1; }
+            } else if instruction.kind == InstructionKind::I64ToF64 {
+                if instruction.ty.kind != IRTypeKind::F64 || instruction.resultId < 0 { errors.push(context + ": i64.to.f64 requires an f64 result"); }
+                if operandCount != 1 { errors.push(context + ": i64.to.f64 requires exactly one operand"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": i64.to.f64 has invalid unused fields"); }
+                if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind.F64ToI64Checked {
+                if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": f64.to.i64.checked requires an i64 result"); }
+                if operandCount != 1 { errors.push(context + ": f64.to.i64.checked requires exactly one operand"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": f64.to.i64.checked has invalid unused fields"); }
+                if operandCount > 0 { checkF64Operand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind::AddCheckedI64 {
                 checkCheckedI64Instruction(errors, definitionTable, instruction, context, "add.checked.i64");
             } else if instruction.kind == InstructionKind::SubCheckedI64 {
