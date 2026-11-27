@@ -559,6 +559,65 @@ func containersPrepareByteVector(context: __rey_raw_address, directory: __rey_ra
     return prepared;
 }
 
+func containersPrepareStringRange(context: __rey_raw_address, directory: __rey_raw_address, otherDirectory: __rey_raw_address, content: __rey_raw_address, start: int, requestedLength: int, mode: int): __rey_raw_address {
+    var invalid = containersPreparedOutputMake(-1, 0, 0, 0, false);
+    var contentLength = managedStringLength(context, content);
+    if start < 0 || requestedLength < 0 || start > contentLength || requestedLength > contentLength - start { return invalid; }
+    var source = containersPathData(content);
+    var prepared = containersCreatePreparedOutput(context, directory, otherDirectory, mode);
+    if !containersPreparedValid(prepared) { return invalid; }
+    var staging = __reyRawMap(4096);
+    if __reyRawToInt(staging) < 0 { hostClose(containersPreparedFd(prepared)); containersDiscardPreparedOutput(directory, prepared); return invalid; }
+    var length = requestedLength;
+    var offset = 0;
+    var writeOk = true;
+    while offset < length && writeOk {
+        var count = 4096;
+        if length - offset < count { count = length - offset; }
+        var index = 0;
+        while index < count {
+            __reyRawStoreByte(containersAddressAt(staging, index), __reyRawLoadByte(containersAddressAt(source, start + offset + index)));
+            index += 1;
+        }
+        if !containersWriteStaging(context, containersPreparedFd(prepared), staging, count) { writeOk = false; }
+        offset += count;
+    }
+    if writeOk && hostFchmod(containersPreparedFd(prepared), mode) != 0 { writeOk = false; }
+    if writeOk && hostLseek(containersPreparedFd(prepared), 0, 0) != 0 { writeOk = false; }
+    offset = 0;
+    while offset < length && writeOk {
+        var expected = 4096;
+        if length - offset < expected { expected = length - offset; }
+        var received = 0;
+        while received < expected && writeOk {
+            var count = hostRead(containersPreparedFd(prepared), staging, expected - received);
+            if count == -4 { continue; }
+            if count <= 0 { writeOk = false; }
+            else {
+                var index = 0;
+                while index < count {
+                    if __reyRawLoadByte(containersAddressAt(staging, index)) != __reyRawLoadByte(containersAddressAt(source, start + offset + received + index)) { writeOk = false; break; }
+                    index += 1;
+                }
+                received += count;
+            }
+        }
+        offset += received;
+    }
+    if writeOk {
+        var extra = -4;
+        loop { extra = hostRead(containersPreparedFd(prepared), staging, 1); if extra != -4 { break; } }
+        if extra != 0 { writeOk = false; }
+    }
+    var closeResult = hostClose(containersPreparedFd(prepared));
+    __reyRawUnmap(staging, 4096);
+    if !writeOk || closeResult != 0 {
+        containersDiscardPreparedOutput(directory, prepared);
+        return invalid;
+    }
+    return prepared;
+}
+
 func containersOutputDestinationsSafe(context: __rey_raw_address, imageDirectory: __rey_raw_address, imageIdentity: __rey_raw_address, mapDirectory: __rey_raw_address, mapIdentity: __rey_raw_address): bool {
     if containersOutputDevice(imageDirectory) == containersOutputDevice(mapDirectory) && containersOutputInode(imageDirectory) == containersOutputInode(mapDirectory) && containersCStringEqual(containersOutputName(imageDirectory), containersOutputName(mapDirectory)) { return false; }
     if containersTargetState(imageIdentity) < 0 || containersTargetState(mapIdentity) < 0 { return false; }
@@ -613,6 +672,11 @@ pub func managedDeleteFile(context: __rey_raw_address, path: __rey_raw_address):
 }
 
 pub func managedWriteFile(context: __rey_raw_address, path: __rey_raw_address, content: __rey_raw_address): void {
+    var pairedStatus = containersPublishCompilerOutputPairFromString(context, path, content);
+    if pairedStatus >= 0 {
+        if pairedStatus != 0 { containersFail(2208); }
+        return;
+    }
     var fd = hostOpen(containersPathData(path), 577, 420);
     if fd < 0 { containersFail(2208); return; }
     var length = managedStringLength(context, content);
@@ -850,6 +914,125 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
     var preparedImage = containersPrepareByteVector(context, imageDirectory, mapDirectory, vector, dataLayoutId, 0, imageLength, 493);
     if !containersPreparedValid(preparedImage) { containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1; }
     var preparedMap = containersPrepareByteVector(context, mapDirectory, imageDirectory, vector, dataLayoutId, imageLength, mapLength, 420);
+    if !containersPreparedValid(preparedMap) {
+        containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    if !containersPublishPreparedOutput(context, mapDirectory, preparedMap) {
+        containersDiscardPreparedOutput(mapDirectory, preparedMap); containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    containersDiscardPreparedOutput(mapDirectory, preparedMap);
+    if !containersPublishPreparedOutput(context, imageDirectory, preparedImage) {
+        containersDiscardPreparedOutput(imageDirectory, preparedImage);
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);
+        containersWarnMapMayBeFromFailedBuild();
+        return 2;
+    }
+    containersDiscardPreparedOutput(imageDirectory, preparedImage);
+    containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);
+    return 0;
+}
+
+func containersPublishCompilerOutputPairFromString(context: __rey_raw_address, protocol: __rey_raw_address, content: __rey_raw_address): int {
+    var protocolLength = managedStringLength(context, protocol);
+    var protocolData = containersPathData(protocol);
+    if protocolLength < 20 { return -1; }
+    if __reyRawLoadByte(containersAddressAt(protocolData, 0)) != 0 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 2)) != 101 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 4)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 5)) != 111 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 7)) != 116 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 8)) != 112 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 10)) != 116 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 12)) != 112 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 13)) != 97 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 15)) != 114 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 18)) != 49 ||
+        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 { return -1; }
+    var separator = 20;
+    while separator < protocolLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 { separator += 1; }
+    if separator == 20 || separator >= protocolLength { return 1; }
+    var imagePathLength = separator - 20;
+    var mapPathStart = separator + 1;
+    var mapPathLength = protocolLength - mapPathStart;
+    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 { return 1; }
+    var imagePath = __reyRawMap(4096);
+    var mapPath = __reyRawMap(4096);
+    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 {
+        if __reyRawToInt(imagePath) >= 0 { __reyRawUnmap(imagePath, 4096); }
+        if __reyRawToInt(mapPath) >= 0 { __reyRawUnmap(mapPath, 4096); }
+        return 1;
+    }
+    var index = 0;
+    while index < imagePathLength { __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; }
+    __reyRawStoreByte(containersAddressAt(imagePath, imagePathLength), 0);
+    index = 0;
+    while index < mapPathLength { __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocolData, mapPathStart + index))); index += 1; }
+    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);
+
+    var contentLength = managedStringLength(context, content);
+    var contentData = containersPathData(content);
+    if contentLength < 20 {
+        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+    }
+    var trailer = contentLength - 20;
+    if __reyRawLoadByte(containersAddressAt(contentData, trailer)) != 82 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 1)) != 89 ||
+        __reyRawLoadByte(containersAddressAt(contentData, trailer + 2)) != 80 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 3)) != 49 {
+        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+    }
+    var imageLength = 0;
+    var mapLength = 0;
+    var factor = 1;
+    index = 0;
+    while index < 4 {
+        var imagePart = __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index));
+        var mapPart = __reyRawLoadByte(containersAddressAt(contentData, trailer + 12 + index));
+        if index == 3 && (imagePart > 127 || mapPart > 127) {
+            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+        }
+        imageLength += imagePart * factor;
+        mapLength += mapPart * factor;
+        factor *= 256;
+        index += 1;
+    }
+    index = 4;
+    while index < 8 {
+        if __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index)) != 0 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 12 + index)) != 0 {
+            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+        }
+        index += 1;
+    }
+    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + 20 != contentLength {
+        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
+    }
+
+    var imageDirectory = containersOpenOutputDirectory(imagePath);
+    var mapDirectory = containersOpenOutputDirectory(mapPath);
+    __reyRawUnmap(imagePath, 4096);
+    __reyRawUnmap(mapPath, 4096);
+    if !containersOutputValid(imageDirectory) || !containersOutputValid(mapDirectory) {
+        containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirectory(mapDirectory); return 1;
+    }
+    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));
+    var mapIdentity = containersTargetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));
+    var destinationsSafe = containersOutputDestinationsSafe(context, imageDirectory, imageIdentity, mapDirectory, mapIdentity);
+    containersReleaseTargetIdentity(imageIdentity);
+    containersReleaseTargetIdentity(mapIdentity);
+    if !destinationsSafe {
+        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
+    }
+    var preparedImage = containersPrepareStringRange(context, imageDirectory, mapDirectory, content, 0, imageLength, 493);
+    if !containersPreparedValid(preparedImage) { containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1; }
+    var preparedMap = containersPrepareStringRange(context, mapDirectory, imageDirectory, content, imageLength, mapLength, 420);
     if !containersPreparedValid(preparedMap) {
         containersDiscardPreparedOutput(imageDirectory, preparedImage);
         containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;
