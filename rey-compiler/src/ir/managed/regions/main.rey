@@ -1232,7 +1232,7 @@ pub func lowerManagedRegionsWithPromotionStress(module: ManagedProgram, bindings
     var activeHookAt = 0;
     loop { if activeHookAt >= module.hooks.len() { break; } var key = module.hooks[activeHookAt].functionId.toString(); if !activeHookIndices.has(key) { activeHookIndices.set(key, activeHookAt); } activeHookAt += 1; }
     var verification = verifyProgram(module.program);
-    if !verification.ok { return Result.Err("managed regions: linked input IR verification failed"); }
+    if !verification.ok { return Result.Err("managed regions: linked input IR verification failed: " + verification.errors.join("\n")); }
     var bindingError = validateBindings(module.program, bindings);
     if bindingError != "" { return Result.Err(bindingError); }
     var separationError = validateHookSeparation(module, bindings);
