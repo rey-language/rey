@@ -1,0 +1,200 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRType, IRValue, Instruction, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram};
+import ir::managed::completion::{CohortSite, MemoryCompletion, completeManagedMemory, verifyMemoryCompletion};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("compiler-scratch.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    loop { if index >= parameterCount { break; } escapes.push(Escape::Unknown); index += 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, result: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("compiler-scratch", "", name), ir.functionSignature(parameterTypes, result), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func allocateHook(): IRFunction {
+    return makeFunction(9000, "allocate", [ir.irI64()], ir.irRawAddress(), [ir.irValue(900, ir.irI64())], [ir.basicBlock(0, [], [ir.rawNull(901, source())], ir.returnValue(901, source()))]);
+}
+
+func storeHook(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(910, ir.irRawAddress()), ir.irValue(911, ir.irI64()), ir.irValue(912, ir.irRawAddress())];
+    return makeFunction(9001, "store", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), parameters, [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func collectHook(): IRFunction {
+    return makeFunction(9002, "collect", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func unknownHook(): IRFunction {
+    return makeFunction(9003, "unknownEffect", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func targetFunction(mode: int): IRFunction {
+    if mode == 3 {
+        var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 9000, [0], source())];
+        return makeFunction(1, "destinationBuilder", [], ir.irRawAddress(), [], [ir.basicBlock(0, [], instructions, ir.returnValue(1, source()))]);
+    }
+    var entry = ir.basicBlock(0, [], [], ir.jump(1, [], source()));
+    var bodyInstructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 9000, [0], source())];
+    if mode == 0 {
+        bodyInstructions.push(ir.rawNull(2, source()));
+        bodyInstructions.push(ir.rawEqual(3, 1, 2, source()));
+    } else if mode == 1 {
+        bodyInstructions.push(ir.call(-1, ir.irVoid(), 9003, [], source()));
+    } else {
+        bodyInstructions.push(ir.rawNull(2, source()));
+        bodyInstructions.push(ir.rawStoreAddress(2, 1, source()));
+    }
+    bodyInstructions.push(ir.constBool(4, true, source()));
+    var body = ir.basicBlock(1, [], bodyInstructions, ir.branch(4, 1, [], 2, [], source()));
+    var exit = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    return makeFunction(1, "boundedScratch", [], ir.irVoid(), [], [entry, body, exit]);
+}
+
+func layout(): ManagedLayout {
+    var fields: Vec<ManagedField> = [];
+    return ManagedLayout { id: 1, key: "compiler-scratch::Cell", payloadBytes: 8, fields: fields };
+}
+
+func filler(id: int): IRFunction {
+    return makeFunction(id, "filler" + id.toString(), [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func moduleWithCounts(programCount: int, managedCount: int, mode: int): ManagedProgram {
+    var programFunctions: Vec<IRFunction> = [targetFunction(mode)];
+    var nextId = 2;
+    while programFunctions.len() < programCount - 4 {
+        programFunctions.push(filler(nextId));
+        nextId += 1;
+    }
+    programFunctions.push(allocateHook());
+    programFunctions.push(storeHook());
+    programFunctions.push(collectHook());
+    programFunctions.push(unknownHook());
+
+    var managedFunctions: Vec<ManagedFunction> = [];
+    var index = 1;
+    while index <= managedCount {
+        var references: Vec<int> = [];
+        var returnLayout = 0;
+        if index == 1 {
+            if mode == 0 { references = [1, 2]; }
+            else if mode == 2 { references = [1, 2]; }
+            else { references = [1]; }
+            if mode == 3 { returnLayout = 1; }
+        }
+        managedFunctions.push(ManagedFunction { functionId: index, referenceValues: references, parameterLayouts: [], returnLayout: returnLayout });
+        index += 1;
+    }
+    var allocationBlock = 1;
+    if mode == 3 { allocationBlock = 0; }
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 1, blockId: allocationBlock, resultId: 1, layoutId: 1 }];
+    return ManagedProgram { program: ir.irProgram(1, programFunctions), layouts: [layout()], functions: managedFunctions, allocations: allocations, derived: [], allocateFunctionId: 9000, storeReferenceFunctionId: 9001, collectFunctionId: 9002, variableLayouts: [], hooks: [] };
+}
+
+func allocationStorage(placement: ManagedPlacement, functionId: int, resultId: int): ManagedStorage {
+    var index = 0;
+    while index < placement.allocations.len() {
+        var item = placement.allocations[index];
+        if item.functionId == functionId && item.resultId == resultId { return item.storage; }
+        index += 1;
+    }
+    return ManagedStorage::Heap;
+}
+
+func cohortAt(completion: MemoryCompletion, functionId: int, resultId: int): int {
+    var index = 0;
+    while index < completion.cohorts.len() {
+        var site = completion.cohorts[index];
+        if site.functionId == functionId && site.resultId == resultId { return index; }
+        index += 1;
+    }
+    return -1;
+}
+
+func checkIteration(module: ManagedProgram, managedCount: int): void {
+    var completed = completeManagedMemory(module);
+    if completed.isErr() { require(false, "bounded iteration completion: " + completed.unwrapErr()); }
+    var memory = completed.unwrap();
+    require(verifyMemoryCompletion(module, memory).isOk(), "bounded iteration completion independently verifies");
+    require(allocationStorage(memory.placement, 1, 1) == ManagedStorage::Heap, "iteration scratch keeps conservative program placement");
+    var at = cohortAt(memory, 1, 1);
+    require(at >= 0, "bounded iteration allocation receives a local cohort");
+    var site = memory.cohorts[at];
+    require(site.kind == 1 && site.blockId == 1, "cohort is scoped to the repeated allocation block");
+    require(site.scratchBudget >= 8 && site.scratchBudget <= 65536, "cohort budget covers only the fixed allocation bound");
+    if managedCount > 512 { require(site.scratchBudget == 8, "large-program budget equals the fixed payload"); }
+    var unsound = memory;
+    var corrupted = unsound.cohorts[at];
+    corrupted.scratchBudget = 7;
+    unsound.cohorts.set(at, corrupted);
+    require(verifyMemoryCompletion(module, unsound).isErr(), "completion independently rejects an undersized scratch budget");
+    var misplaced = memory;
+    misplaced.placement.allocations.set(0, ManagedAllocationPlacement { functionId: 1, resultId: 1, storage: ManagedStorage::Region });
+    misplaced.placement.regionFunctions.push(1);
+    require(verifyMemoryCompletion(module, misplaced).isErr(), "completion independently rejects scratch detached from program placement");
+    println("RESULT semantic=bounded-scratch outcome=preserved");
+}
+
+func checkConservative(module: ManagedProgram, label: string, managedCount: int): void {
+    var completed = completeManagedMemory(module);
+    require(completed.isOk(), label + " plan completes conservatively");
+    var memory = completed.unwrap();
+    require(verifyMemoryCompletion(module, memory).isOk(), label + " conservative plan verifies");
+    require(allocationStorage(memory.placement, 1, 1) == ManagedStorage::Heap, label + " retains program lifetime");
+    require(cohortAt(memory, 1, 1) < 0, label + " does not receive a scratch cohort");
+    if managedCount > 512 {
+        var unsound = memory;
+        unsound.placement.allocations.set(0, ManagedAllocationPlacement { functionId: 1, resultId: 1, storage: ManagedStorage::Region });
+        unsound.placement.regionFunctions.push(1);
+        require(verifyMemoryCompletion(module, unsound).isErr(), label + " is independently rejected when demoted to a region");
+    }
+    if label == "unknown call" { println("RESULT conservative=unknown-effect placement=program"); }
+    else { println("RESULT conservative=uncertain-alias placement=program"); }
+}
+
+func checkDestination(module: ManagedProgram): void {
+    var completed = completeManagedMemory(module);
+    require(completed.isOk(), "returned construction completion succeeds");
+    var memory = completed.unwrap();
+    require(allocationStorage(memory.placement, 1, 1) == ManagedStorage::Destination, "returned construction selects a checked destination");
+    require(verifyMemoryCompletion(module, memory).isOk(), "completion independently verifies destination construction");
+    var unsound = memory;
+    unsound.placement.allocations.set(0, ManagedAllocationPlacement { functionId: 1, resultId: 1, storage: ManagedStorage::Region });
+    require(verifyMemoryCompletion(module, unsound).isErr(), "completion independently rejects an unproven region for a returned construction");
+    println("RESULT construction=returned destination=checked");
+}
+
+func main(): void {
+    var counts: Vec<int> = [511, 512, 513];
+    var index = 0;
+    while index < counts.len() {
+        var count = counts[index];
+        checkIteration(moduleWithCounts(count, 1, 0), 1);
+        checkConservative(moduleWithCounts(count, 1, 1), "unknown call", 1);
+        checkConservative(moduleWithCounts(count, 1, 2), "uncertain alias", 1);
+        checkDestination(moduleWithCounts(count, 1, 3));
+        println("RESULT cutoffs=ir:" + count.toString() + " managed:1 bounded=ok");
+        index += 1;
+    }
+    index = 0;
+    while index < counts.len() {
+        var count = counts[index];
+        checkIteration(moduleWithCounts(517, count, 0), count);
+        checkConservative(moduleWithCounts(517, count, 1), "unknown call", count);
+        checkConservative(moduleWithCounts(517, count, 2), "uncertain alias", count);
+        if count <= 512 { checkDestination(moduleWithCounts(517, count, 3)); }
+        println("RESULT cutoffs=ir:517 managed:" + count.toString() + " bounded=ok");
+        index += 1;
+    }
+
+}

@@ -1004,7 +1004,11 @@ func lowerUserFunction(env: LowerEnv, managed: ManagedFunction): Result<IRFuncti
                 if cohorts.len() > 0 { requestedCohortKind = allocationCohortKind(cohorts, input.id, originalBlock.id, instruction.resultId); }
                 if containerRegions { cohortKind = requestedCohortKind; }
                 else if requestedCohortKind != 0 {
-                    if requestedCohortKind != 2 || storage != ManagedStorage::Region || regionId < 0 { return Result.Err("managed regions: large-program cohort is not a parented phase site"); }
+                    if requestedCohortKind == 1 {
+                        if storage != ManagedStorage::Heap { return Result.Err("managed regions: large-program iteration scratch must retain program placement"); }
+                    } else if requestedCohortKind != 2 || storage != ManagedStorage::Region || regionId < 0 {
+                        return Result.Err("managed regions: large-program phase cohort is not parented to a proven function region");
+                    }
                     cohortKind = requestedCohortKind;
                 }
                 if cohortKind != 0 && blockCohortId < 0 {
@@ -1012,8 +1016,12 @@ func lowerUserFunction(env: LowerEnv, managed: ManagedFunction): Result<IRFuncti
                     if summary[0] < 0 { return Result.Err("managed regions: block cohort is mixed or its scratch budget is invalid"); }
                     var cohortParent = cohortParentFor(containerRegions, regionId, stackRegionId, nullId);
                     if !containerRegions {
-                        if summary[0] != 2 || regionId < 0 { return Result.Err("managed regions: large-program block cohort has no region parent"); }
-                        cohortParent = regionId;
+                        if summary[0] == 2 {
+                            if regionId < 0 { return Result.Err("managed regions: large-program phase cohort has no region parent"); }
+                            cohortParent = regionId;
+                        } else if summary[0] != 1 {
+                            return Result.Err("managed regions: large-program cohort kind is unsupported");
+                        }
                     }
                     var createdBlock = emitCohort(instructions, next, bindings, contextId, cohortParent, summary[0], summary[1], instruction.source);
                     if createdBlock.isErr() { return Result.Err(createdBlock.unwrapErr()); }

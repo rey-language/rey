@@ -1,0 +1,160 @@
+import ir;
+import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef};
+import ir::managed::{ManagedAllocation, ManagedField, ManagedFunction, ManagedLayout, ManagedProgram};
+import ir::managed::completion::{MemoryCompletion, completeManagedMemory, verifyMemoryCompletion};
+import ir::managed::placement::{ManagedStorage};
+import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegionsCompleted};
+
+func require(ok: bool, message: string): void {
+    if !ok { eprintln("FAIL " + message); exit(1); }
+}
+
+func source(): SourceRef { return ir.sourceRef("compiler-scratch-region.rey", 0, 1); }
+
+func effects(parameterCount: int): EffectSummary {
+    var escapes: Vec<Escape> = [];
+    var index = 0;
+    while index < parameterCount { escapes.push(Escape::Unknown); index += 1; }
+    return ir.effectSummary(Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::Unknown, Fact::No, escapes, Escape::Unknown);
+}
+
+func makeFunction(id: int, name: string, parameterTypes: Vec<IRType>, result: IRType, parameters: Vec<IRValue>, blocks: Vec<BasicBlock>): IRFunction {
+    return ir.irFunction(id, ir.functionKey("compiler-scratch", "", name), ir.functionSignature(parameterTypes, result), parameters, blocks, effects(parameterTypes.len()));
+}
+
+func allocateHook(): IRFunction {
+    return makeFunction(9000, "allocate", [ir.irI64()], ir.irRawAddress(), [ir.irValue(900, ir.irI64())], [ir.basicBlock(0, [], [ir.rawNull(901, source())], ir.returnValue(901, source()))]);
+}
+
+func storeHook(): IRFunction {
+    var parameters: Vec<IRValue> = [ir.irValue(910, ir.irRawAddress()), ir.irValue(911, ir.irI64()), ir.irValue(912, ir.irRawAddress())];
+    return makeFunction(9001, "store", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid(), parameters, [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func collectHook(): IRFunction {
+    return makeFunction(9002, "collect", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func unknownHook(): IRFunction {
+    return makeFunction(9003, "unknownEffect", [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func boundedLoop(): IRFunction {
+    var entry = ir.basicBlock(0, [], [], ir.jump(1, [], source()));
+    var instructions: Vec<Instruction> = [ir.constI64(0, 1, source()), ir.call(1, ir.irRawAddress(), 9000, [0], source()), ir.rawNull(2, source()), ir.rawEqual(3, 1, 2, source()), ir.constBool(4, true, source())];
+    var body = ir.basicBlock(1, [], instructions, ir.branch(4, 1, [], 2, [], source()));
+    var exit = ir.basicBlock(2, [], [], ir.returnVoid(source()));
+    return makeFunction(1, "boundedScratch", [], ir.irVoid(), [], [entry, body, exit]);
+}
+
+func layout(): ManagedLayout {
+    var fields: Vec<ManagedField> = [];
+    return ManagedLayout { id: 1, key: "compiler-scratch::Cell", payloadBytes: 8, fields: fields };
+}
+
+func filler(id: int): IRFunction {
+    return makeFunction(id, "filler" + id.toString(), [], ir.irVoid(), [], [ir.basicBlock(0, [], [], ir.returnVoid(source()))]);
+}
+
+func moduleWithCounts(): ManagedProgram {
+    var programFunctions: Vec<IRFunction> = [boundedLoop()];
+    var nextId = 2;
+    while programFunctions.len() < 513 { programFunctions.push(filler(nextId)); nextId += 1; }
+    programFunctions.push(allocateHook());
+    programFunctions.push(storeHook());
+    programFunctions.push(collectHook());
+    programFunctions.push(unknownHook());
+    var managedFunctions: Vec<ManagedFunction> = [];
+    var index = 1;
+    while index <= 513 {
+        var references: Vec<int> = [];
+        if index == 1 { references = [1, 2]; }
+        managedFunctions.push(ManagedFunction { functionId: index, referenceValues: references, parameterLayouts: [], returnLayout: 0 });
+        index += 1;
+    }
+    var allocations: Vec<ManagedAllocation> = [ManagedAllocation { functionId: 1, blockId: 1, resultId: 1, layoutId: 1 }];
+    return ManagedProgram { program: ir.irProgram(1, programFunctions), layouts: [layout()], functions: managedFunctions, allocations: allocations, derived: [], allocateFunctionId: 9000, storeReferenceFunctionId: 9001, collectFunctionId: 9002, variableLayouts: [], hooks: [] };
+}
+
+func bindingStub(id: int, name: string, parameterTypes: Vec<IRType>, result: IRType): IRFunction {
+    var parameters: Vec<IRValue> = [];
+    var index = 0;
+    while index < parameterTypes.len() { parameters.push(ir.irValue(100 + index, parameterTypes[index])); index += 1; }
+    var instructions: Vec<Instruction> = [];
+    var returnId = -1;
+    if result.kind == IRTypeKind::RawAddress { instructions.push(ir.rawNull(0, source())); returnId = 0; }
+    else if result.kind == IRTypeKind::I64 { instructions.push(ir.constI64(0, 0, source())); returnId = 0; }
+    else if result.kind == IRTypeKind::Bool { instructions.push(ir.constBool(0, false, source())); returnId = 0; }
+    var term = ir.returnVoid(source());
+    if returnId >= 0 { term = ir.returnValue(returnId, source()); }
+    return makeFunction(id, name, parameterTypes, result, parameters, [ir.basicBlock(0, [], instructions, term)]);
+}
+
+func addLoweringBindings(module: ManagedProgram): ManagedProgram {
+    var functions: Vec<IRFunction> = [];
+    var index = 0;
+    while index < module.program.functions.len() { functions.push(module.program.functions[index]); index += 1; }
+    functions.push(bindingStub(9100, "managedCreate", [ir.irRawAddress()], ir.irRawAddress()));
+    functions.push(bindingStub(9101, "managedDestroy", [ir.irRawAddress()], ir.irVoid()));
+    functions.push(bindingStub(9102, "managedStoreReference", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irRawAddress()], ir.irVoid()));
+    functions.push(bindingStub(9103, "managedRegionCreate", [ir.irRawAddress()], ir.irRawAddress()));
+    functions.push(bindingStub(9104, "managedRegionEnd", [ir.irRawAddress(), ir.irRawAddress()], ir.irVoid()));
+    functions.push(bindingStub(9105, "managedRegionAllocate", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    functions.push(bindingStub(9106, "managedAllocateDestination", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    functions.push(bindingStub(9107, "managedAllocateProgram", [ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    functions.push(bindingStub(9108, "managedPromoteReference", [ir.irRawAddress(), ir.irRawAddress(), ir.irRawAddress()], ir.irRawAddress()));
+    functions.push(bindingStub(9109, "managedPromotionCount", [ir.irRawAddress()], ir.irI64()));
+    functions.push(bindingStub(9110, "layoutRegistryCreate", [ir.irI64()], ir.irRawAddress()));
+    functions.push(bindingStub(9111, "layoutRegisterFixed", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64()], ir.irI64()));
+    functions.push(bindingStub(9112, "layoutRegisterVariable", [ir.irRawAddress(), ir.irI64(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irI64()));
+    functions.push(bindingStub(9113, "layoutRegistryRelease", [ir.irRawAddress()], ir.irVoid()));
+    functions.push(bindingStub(9114, "managedRegionCreateCohort", [ir.irRawAddress(), ir.irRawAddress(), ir.irI64(), ir.irI64()], ir.irRawAddress()));
+    module.program = ir.irProgram(module.program.entryFunctionId, functions);
+    return module;
+}
+
+func runtimeBindings(): RegionBindings {
+    var hooks: Vec<RegionHookBinding> = [];
+    return RegionBindings { create: 9100, destroy: 9101, storeReference: 9102, regionCreate: 9103, regionEnd: 9104, regionAllocate: 9105, allocateDestination: 9106, allocateProgram: 9107, promoteReference: 9108, promotionCount: 9109, layoutCreate: 9110, layoutRegister: 9111, layoutRegisterVariable: 9112, layoutRelease: 9113, cohortCreate: 9114, hooks: hooks };
+}
+
+func countCalls(function: IRFunction, target: int): int {
+    var count = 0;
+    var blockAt = 0;
+    while blockAt < function.blocks.len() {
+        var instructionAt = 0;
+        while instructionAt < function.blocks[blockAt].instructions.len() {
+            var instruction = function.blocks[blockAt].instructions[instructionAt];
+            if instruction.kind == InstructionKind::Call && instruction.functionId == target { count += 1; }
+            instructionAt += 1;
+        }
+        blockAt += 1;
+    }
+    return count;
+}
+
+func functionById(program: IRProgram, functionId: int): IRFunction {
+    var index = 0;
+    while index < program.functions.len() { if program.functions[index].id == functionId { return program.functions[index]; } index += 1; }
+    return program.functions[0];
+}
+
+func main(): void {
+    var module = moduleWithCounts();
+    require(module.program.functions.len() == 517 && module.functions.len() == 513, "region lowering cutoff fixture crosses both program cutoffs");
+    var completed = completeManagedMemory(module);
+    require(completed.isOk(), "large bounded iteration plan completes");
+    var memory: MemoryCompletion = completed.unwrap();
+    require(verifyMemoryCompletion(module, memory).isOk(), "large bounded iteration plan independently verifies");
+    var at = 0;
+    while at < memory.cohorts.len() && !(memory.cohorts[at].functionId == 1 && memory.cohorts[at].resultId == 1) { at += 1; }
+    require(at < memory.cohorts.len() && memory.cohorts[at].kind == 1 && memory.cohorts[at].scratchBudget == 8, "bounded iteration cohort has an exact payload budget");
+    require(memory.placement.allocations[0].storage == ManagedStorage::Heap, "iteration cohort keeps conservative program placement");
+    var lowered = lowerManagedRegionsCompleted(addLoweringBindings(module), runtimeBindings(), memory, false);
+    require(lowered.isOk(), "completed large-program iteration cohort lowers");
+    var user = functionById(lowered.unwrap(), 1);
+    require(countCalls(user, 9114) == 1, "lowering creates one bounded iteration cohort");
+    require(countCalls(user, 9105) == 1, "scratch allocation uses the region allocator");
+    require(countCalls(user, 9104) == 1, "lowering ends the cohort at the loop block boundary");
+    println("RESULT region-lowering=bounded-cohort end=verified");
+}

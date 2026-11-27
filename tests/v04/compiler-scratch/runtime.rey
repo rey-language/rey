@@ -1,0 +1,71 @@
+import layout::{layoutRegisterFixed, layoutRegistryCreate, layoutRegistryRelease};
+import managed::{managedCreate, managedDestroy, managedLivePayloadBytes, managedProgramRegion, managedRegionAllocate, managedRegionCreateCohort, managedRegionEnd, managedRegionScratchUsed};
+
+func require(ok: bool, code: int): void {
+    if !ok { __reyRawFail(code); }
+}
+
+func scratchPeak(context: __rey_raw_address, layoutId: int, iterations: int): int {
+    var peak = 0;
+    var iteration = 0;
+    while iteration < iterations {
+        var cohort = managedRegionCreateCohort(context, managedProgramRegion(context), 1, 8);
+        var object = managedRegionAllocate(context, cohort, layoutId, 1);
+        var used = managedRegionScratchUsed(context, cohort);
+        require(used > 0 && __reyRawLoadI64(object) == 8589934592 + layoutId, 20);
+        if used > peak { peak = used; }
+        managedRegionEnd(context, cohort);
+        require(managedLivePayloadBytes(context) == 0, 21);
+        iteration += 1;
+    }
+    return peak;
+}
+
+func appendNumber(buffer: __rey_raw_address, offset: int, value: int): int {
+    require(value >= 0, 22);
+    var width = 1;
+    var remaining = value;
+    while remaining >= 10 {
+        width += 1;
+        remaining = remaining / 10;
+    }
+    var index = width - 1;
+    remaining = value;
+    while index >= 0 {
+        __reyRawStoreByte(__reyRawOffset(buffer, offset + index), 48 + remaining % 10);
+        remaining = remaining / 10;
+        index -= 1;
+    }
+    return offset + width;
+}
+
+func writeResult(warmedOne: int, ten: int): void {
+    var buffer = __reyRawMap(128);
+    __reyRawStoreI64(buffer, 8295723200442221906);
+    __reyRawStoreI64(__reyRawOffset(buffer, 8), 8097305431399035491);
+    __reyRawStoreI64(__reyRawOffset(buffer, 16), 7078935626903745633);
+    __reyRawStoreI64(__reyRawOffset(buffer, 24), 7157174619461285231);
+    __reyRawStoreI64(__reyRawOffset(buffer, 32), 7023117776624836978);
+    __reyRawStoreI64(__reyRawOffset(buffer, 40), 4429344519294905714);
+    var cursor = appendNumber(buffer, 48, warmedOne);
+    __reyRawStoreI64(__reyRawOffset(buffer, cursor), 7598805615237163296);
+    __reyRawStoreI64(__reyRawOffset(buffer, cursor + 8), 4429343222131813999);
+    cursor = appendNumber(buffer, cursor + 16, ten);
+    __reyRawStoreByte(__reyRawOffset(buffer, cursor), 10);
+    cursor += 1;
+    var written = __reyRawHostSyscall(1, __reyRawFromInt(1), buffer, __reyRawFromInt(cursor), __reyRawNull(), __reyRawNull(), __reyRawNull());
+    require(__reyRawToInt(written) == cursor, 23);
+}
+
+func main(): void {
+    var registry = layoutRegistryCreate(1);
+    var layoutId = layoutRegisterFixed(registry, 8, __reyRawNull(), 0);
+    var context = managedCreate(registry);
+    scratchPeak(context, layoutId, 1);
+    var warmedOne = scratchPeak(context, layoutId, 1);
+    var ten = scratchPeak(context, layoutId, 10);
+    require(warmedOne > 0 && ten * 10 <= warmedOne * 11, 24);
+    managedDestroy(context);
+    layoutRegistryRelease(registry);
+    writeResult(warmedOne, ten);
+}

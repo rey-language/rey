@@ -546,7 +546,7 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
                     regionFunctions = addSorted(regionFunctions, allocation.functionId);
                 }
             }
-            if experimentalEscapeSummary && storage == ManagedStorage::Region && functionIndices.has(functionKey) && hasInt(regionFunctions, allocation.functionId) {
+            if storage == ManagedStorage::Region && functionIndices.has(functionKey) && hasInt(regionFunctions, allocation.functionId) {
                 var function = module.program.functions[functionIndices.get(functionKey)];
                 var payload = layoutPayload(module, allocation.layoutId);
                 if fixedLayout(module, allocation.layoutId) && payload <= 65536 && localRegionPlacementRejection(module, function, allocation, ambientSafe) == "" {
@@ -556,6 +556,16 @@ pub func completeManagedMemory(module: ManagedProgram): Result<MemoryCompletion,
                     }
                 }
             }
+                if storage == ManagedStorage::Heap && functionIndices.has(functionKey) {
+                    var function = module.program.functions[functionIndices.get(functionKey)];
+                    var payload = layoutPayload(module, allocation.layoutId);
+                    if fixedLayout(module, allocation.layoutId) && payload <= 65536 {
+                        var carriers = managedCarriers(function, allocation.resultId);
+                        if iterationProof(module, function, allocation, carriers) == "" && cohortBudgetAvailable(cohorts, allocation.functionId, allocation.blockId, payload) {
+                            cohorts.push(CohortSite { functionId: allocation.functionId, blockId: allocation.blockId, resultId: allocation.resultId, kind: 1, scratchBudget: payload, reason: "bounded large-program iteration scratch" });
+                        }
+                    }
+                }
             allocations.push(ManagedAllocationPlacement { functionId: item.functionId, resultId: item.resultId, storage: storage });
             at = at + 1;
         }
@@ -746,8 +756,7 @@ pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryComple
         var verified = verifyManagedRegionPlan(module, completion.placement);
         if verified.isErr() { return Result.Err(verified.unwrapErr()); }
     } else {
-        // Large-program region and stack placements receive individual proofs below.
-        if completion.cohorts.len() != 0 && !experimentalEscapeSummary { return Result.Err("completion: large-program phase cohorts require the experimental proof gate"); }
+        // Large-program region, stack, and scratch placements receive individual proofs below.
         if completion.placement.allocations.len() != module.allocations.len() { return Result.Err("completion: allocation placement count does not match metadata"); }
         var expected = planManagedPlacement(module);
         if expected.isErr() { return Result.Err(expected.unwrapErr()); }
@@ -878,7 +887,7 @@ pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryComple
         var siteKey = site.functionId.toString() + ":" + site.blockId.toString() + ":" + site.resultId.toString();
         if seenCohorts.has(siteKey) { return Result.Err("completion: duplicate cohort site"); }
         seenCohorts.set(siteKey, true);
-        if module.functions.len() > 512 && site.kind != 2 { return Result.Err("completion: large-program cohort kind is not a phase cohort"); }
+        if module.functions.len() > 512 && site.kind != 1 && site.kind != 2 { return Result.Err("completion: large-program cohort kind is not bounded scratch"); }
         var functionKey = site.functionId.toString();
         if !functionIndices.has(functionKey) { return Result.Err("completion: cohort function is missing"); }
         var irIndex = functionIndices.get(functionKey);
@@ -890,9 +899,11 @@ pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryComple
             if !allocationIndices.has(itemKey) { return Result.Err("completion: cohort allocation annotation is missing"); }
             var allocation = module.allocations[allocationIndices.get(itemKey)];
             if site.blockId != allocation.blockId { return Result.Err("completion: cohort block does not match its allocation"); }
-            if module.functions.len() > 512 {
-                if !experimentalEscapeSummary || !placementAllocationIndices.has(itemKey) { return Result.Err("completion: large-program phase cohort placement is missing"); }
-                var placementItem = completion.placement.allocations[placementAllocationIndices.get(itemKey)];
+            if !placementAllocationIndices.has(itemKey) { return Result.Err("completion: scratch placement is missing"); }
+            var placementItem = completion.placement.allocations[placementAllocationIndices.get(itemKey)];
+            if site.kind == 1 {
+                if placementItem.storage != ManagedStorage::Heap { return Result.Err("completion: iteration scratch must retain program placement"); }
+            } else if module.functions.len() > 512 {
                 if placementItem.storage != ManagedStorage::Region || !hasInt(completion.placement.regionFunctions, site.functionId) { return Result.Err("completion: phase cohort has no parent region placement"); }
                 if !fixedLayout(module, allocation.layoutId) || localRegionPlacementRejection(module, function, allocation, ambientSafe) != "" { return Result.Err("completion: large-program phase cohort region proof does not hold"); }
             }
@@ -903,7 +914,7 @@ pub func verifyMemoryCompletion(module: ManagedProgram, completion: MemoryComple
             if reason != "" { return Result.Err("completion: cohort proof does not hold: " + reason); }
             var payload = layoutPayload(module, allocation.layoutId);
             if site.scratchBudget <= 0 || site.scratchBudget > 65536 || payload <= 0 || payload > site.scratchBudget { return Result.Err("completion: cohort scratch budget is outside its bound"); }
-            if module.functions.len() > 512 && site.scratchBudget != payload { return Result.Err("completion: large-program phase cohort budget does not match its fixed allocation"); }
+            if module.functions.len() > 512 && site.scratchBudget != payload { return Result.Err("completion: large-program scratch budget does not match its fixed allocation"); }
             var blockKey = site.functionId.toString() + ":" + site.blockId.toString();
             var total = 0;
             if cohortBlockBudgets.has(blockKey) { total = cohortBlockBudgets.get(blockKey); }
