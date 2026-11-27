@@ -146,6 +146,7 @@ class Runner:
                 "linker": sha256(self.stage / "ir/managed/link/main.rey"),
                 "output": sha256(self.stage / "native/output/main.rey"),
                 "containers": sha256(self.runtime / "containers/main.rey"),
+                "regions": sha256(self.runtime / "regions/main.rey"),
             },
         })
         self.save()
@@ -153,7 +154,21 @@ class Runner:
     def make_runtime_faults(self) -> None:
         source = self.runtime / "containers/main.rey"
         text = source.read_text()
-        require("var containersOutputTempSequence: int = 1;" in text, "O02 output runtime marker is missing")
+        require("func containersNextOutputTempSequence(context: __rey_raw_address): int {" in text,
+                "O02 context-backed output state marker is missing")
+        region_source = self.runtime / "regions/main.rey"
+        region_text = region_source.read_text()
+        context_size_anchor = "var context = __reyRawMap(336);"
+        context_sequence_anchor = "__reyRawStoreI64(regionAddressAt(context, 328), 1);"
+        require(context_size_anchor in region_text and context_sequence_anchor in region_text,
+                "O02 region context extension marker is missing")
+        region_text = region_text.replace(context_size_anchor, "var context = __reyRawMap(360);", 1)
+        region_text = region_text.replace("__reyRawUnmap(context, 336);", "__reyRawUnmap(context, 360);")
+        region_text = region_text.replace(context_sequence_anchor,
+            context_sequence_anchor + "\n    __reyRawStoreI64(regionAddressAt(context, 336), -1);" +
+            "\n    __reyRawStoreI64(regionAddressAt(context, 344), 0);" +
+            "\n    __reyRawStoreI64(regionAddressAt(context, 352), 0);", 1)
+        region_source.write_text(region_text)
         protected_input_path = str(self.inputs / "fixture.rey")
         protected_input_bytes = protected_input_path.encode()
         protected_input_storage = len(protected_input_bytes) + 1
@@ -179,40 +194,41 @@ func containersO02ProtectedInputPath(): __rey_raw_address {
     return value;
 }
 """ % (protected_input_storage, protected_input_stores, len(protected_input_bytes))
-        text = text.replace("var containersOutputTempSequence: int = 1;",
-                            "var containersOutputTempSequence: int = 1;\nvar containersO02FailWriteCountdown = -1;\n" +
-                            "var containersO02RacedImage = false;\nvar containersO02RacedMap = false;", 1)
-        text = text.replace("var containersO02FailWriteCountdown = -1;",
-                            "var containersO02FailWriteCountdown = -1;\n" + helper, 1)
-        write_anchor = "func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {\n    var offset = 0;"
+        sequence_anchor = "func containersNextOutputTempSequence(context: __rey_raw_address): int {"
+        text = text.replace(sequence_anchor, helper + "\n" + sequence_anchor, 1)
+        write_anchor = "func containersWriteStaging(context: __rey_raw_address, fd: int, staging: __rey_raw_address, count: int): bool {\n    var offset = 0;"
         require(write_anchor in text, "O02 bounded writer hook is missing")
         text = text.replace(write_anchor,
-                            "func containersWriteStaging(fd: int, staging: __rey_raw_address, count: int): bool {\n"
-                            "    if containersO02FailWriteCountdown == 0 { containersO02FailWriteCountdown = -1; return false; }\n"
-                            "    if containersO02FailWriteCountdown > 0 { containersO02FailWriteCountdown -= 1; }\n"
+                            "func containersWriteStaging(context: __rey_raw_address, fd: int, staging: __rey_raw_address, count: int): bool {\n"
+                            "    if __reyRawToInt(context) > 0 {\n"
+                            "        var countdownAddress = containersAddressAt(context, 336);\n"
+                            "        var countdown = __reyRawLoadI64(countdownAddress);\n"
+                            "        if countdown == 0 { __reyRawStoreI64(countdownAddress, -1); return false; }\n"
+                            "        if countdown > 0 { __reyRawStoreI64(countdownAddress, countdown - 1); }\n"
+                            "    }\n"
                             "    var offset = 0;", 1)
         image_path = str(self.out / "faults/write-failure/image")
         map_failure_image = str(self.out / "faults/map-write-failure/image")
         path_anchor = "__reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);"
         require(path_anchor in text, "O02 pair path parser is missing")
         text = text.replace(path_anchor,
-                            path_anchor + "\n    if " + cstring_match("imagePath", image_path) + " { containersO02FailWriteCountdown = 0; }" +
-                            "\n    if " + cstring_match("imagePath", map_failure_image) + " { containersO02FailWriteCountdown = 2; }", 1)
-        rename_start = "func containersHostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {\n    return hostRenameat2(oldDirectory, oldPath, newDirectory, newPath, flags);\n}"
+                            path_anchor + "\n    if " + cstring_match("imagePath", image_path) + " { __reyRawStoreI64(containersAddressAt(context, 336), 0); }" +
+                            "\n    if " + cstring_match("imagePath", map_failure_image) + " { __reyRawStoreI64(containersAddressAt(context, 336), 2); }", 1)
+        rename_start = "func containersHostRenameat2(context: __rey_raw_address, oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {\n    return hostRenameat2(oldDirectory, oldPath, newDirectory, newPath, flags);\n}"
         require(rename_start in text, "O02 rename hook is missing")
-        rename_injected = f'''func containersHostRenameat2(oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {{
+        rename_injected = f'''func containersHostRenameat2(context: __rey_raw_address, oldDirectory: int, oldPath: __rey_raw_address, newDirectory: int, newPath: __rey_raw_address, flags: int): int {{
     if flags == 2 && {cstring_match("newPath", "fail-map")} {{ return -5; }}
     if flags == 2 && {cstring_match("newPath", "rename-image")} {{ return -5; }}
-    if flags == 2 && !containersO02RacedImage && {cstring_match("newPath", "race-image")} {{
-        containersO02RacedImage = true;
+    if flags == 2 && __reyRawLoadI64(containersAddressAt(context, 344)) == 0 && {cstring_match("newPath", "race-image")} {{
+        __reyRawStoreI64(containersAddressAt(context, 344), 1);
         containersHostUnlinkat(newDirectory, newPath, 0);
         var protectedInput = containersO02ProtectedInputPath();
         var linked = __reyRawToInt(__reyRawHostSyscall(265, __reyRawFromInt(-100), protectedInput, __reyRawFromInt(newDirectory), newPath, __reyRawFromInt(0), __reyRawNull()));
         __reyRawUnmap(protectedInput, {protected_input_storage});
         if linked != 0 {{ return -5; }}
     }}
-    if flags == 2 && !containersO02RacedMap && {cstring_match("newPath", "race-map")} {{
-        containersO02RacedMap = true;
+    if flags == 2 && __reyRawLoadI64(containersAddressAt(context, 352)) == 0 && {cstring_match("newPath", "race-map")} {{
+        __reyRawStoreI64(containersAddressAt(context, 352), 1);
         containersHostUnlinkat(newDirectory, newPath, 0);
         var protectedInput = containersO02ProtectedInputPath();
         var linked = __reyRawToInt(__reyRawHostSyscall(265, __reyRawFromInt(-100), protectedInput, __reyRawFromInt(newDirectory), newPath, __reyRawFromInt(0), __reyRawNull()));

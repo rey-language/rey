@@ -774,8 +774,18 @@ func regionContextValidate(context: __rey_raw_address): void {
     }
     var count = __reyRawLoadI64(regionAddressAt(context, 32));
     var nextSerial = __reyRawLoadI64(regionAddressAt(context, 256));
+    var protectedInputs = __reyRawLoadAddress(regionAddressAt(context, 304));
+    var protectedInputCount = __reyRawLoadI64(regionAddressAt(context, 312));
+    var protectedInputCapacity = __reyRawLoadI64(regionAddressAt(context, 320));
+    var outputTempSequence = __reyRawLoadI64(regionAddressAt(context, 328));
     var contextId = __reyRawToInt(__reyRawLoadAddress(regionAddressAt(context, 8))) / 4096;
     if count < 1 || nextSerial < 1 || nextSerial > 134217727 || __reyRawLoadI64(regionAddressAt(program, 24)) > nextSerial || contextId < 1 || contextId >= 68719476736 || __reyRawLoadI64(regionAddressAt(context, 40)) < 0 || __reyRawLoadI64(regionAddressAt(context, 48)) < 0 || __reyRawLoadI64(regionAddressAt(context, 56)) < 0 || __reyRawLoadI64(regionAddressAt(context, 64)) < 0 || __reyRawLoadI64(regionAddressAt(context, 200)) < 0 || !regionDirectMetricsValid(context) {
+        regionFail(2202);
+        return;
+    }
+    if protectedInputCount < 0 || protectedInputCapacity < 0 || protectedInputCapacity > 134217727 || protectedInputCount > protectedInputCapacity ||
+        (protectedInputCapacity == 0 && (!__reyRawEqual(protectedInputs, __reyRawNull()) || protectedInputCount != 0)) ||
+        (protectedInputCapacity > 0 && __reyRawEqual(protectedInputs, __reyRawNull())) || outputTempSequence < 1 {
         regionFail(2202);
         return;
     }
@@ -2014,11 +2024,11 @@ pub func regionContextCreate(registry: __rey_raw_address): __rey_raw_address {
     if __reyRawEqual(registry, __reyRawNull()) || layoutCountFast(registry) < 0 { regionFail(2202); return __reyRawNull(); }
     var programSerial = layoutNextRegionSerial(registry);
     if programSerial < 1 || programSerial > 134217727 { regionFail(2201); return __reyRawNull(); }
-    // The opaque context tail stores requested bytes/count at 272/280 and the independent direct-map owner list at 288/296.
-    var context = __reyRawMap(304);
+    // The context tail stores allocator metrics, direct-map ownership, and output publication state.
+    var context = __reyRawMap(336);
     if __reyRawEqual(context, __reyRawNull()) { regionFail(2202); return __reyRawNull(); }
     var contextId = __reyRawToInt(registry) / 4096;
-    if contextId < 1 || contextId > 68719476735 || __reyRawToInt(registry) % 4096 != 0 || __reyRawToInt(registry) >= 281474976710656 { __reyRawUnmap(context, 304); regionFail(2201); return __reyRawNull(); }
+    if contextId < 1 || contextId > 68719476735 || __reyRawToInt(registry) % 4096 != 0 || __reyRawToInt(registry) >= 281474976710656 { __reyRawUnmap(context, 336); regionFail(2201); return __reyRawNull(); }
     var program = __reyRawMap(128);
     __reyRawStoreI64(context, 1380272220);
     __reyRawStoreAddress(regionAddressAt(context, 8), registry);
@@ -2058,6 +2068,10 @@ pub func regionContextCreate(registry: __rey_raw_address): __rey_raw_address {
     __reyRawStoreI64(regionAddressAt(context, 280), 0);
     __reyRawStoreAddress(regionAddressAt(context, 288), __reyRawNull());
     __reyRawStoreI64(regionAddressAt(context, 296), 0);
+    __reyRawStoreAddress(regionAddressAt(context, 304), __reyRawNull());
+    __reyRawStoreI64(regionAddressAt(context, 312), 0);
+    __reyRawStoreI64(regionAddressAt(context, 320), 0);
+    __reyRawStoreI64(regionAddressAt(context, 328), 1);
     __reyRawStoreI64(program, 1380272221);
     __reyRawStoreAddress(regionAddressAt(program, 8), __reyRawNull());
     __reyRawStoreAddress(regionAddressAt(program, 16), context);
@@ -2078,13 +2092,17 @@ pub func regionContextDestroy(context: __rey_raw_address): void {
     regionContextValidate(context);
     if !regionBlockCacheValidate(context) { return; }
     if !regionDestroyChunkSweep(context) { return; }
-    if !regionDirectMetricsValid(context) || __reyRawLoadI64(regionAddressAt(context, 272)) != 0 || __reyRawLoadI64(regionAddressAt(context, 280)) != 0 || __reyRawLoadI64(regionAddressAt(context, 296)) != 0 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(context, 288)), __reyRawNull()) { regionFail(2202); return; }
+    var protectedInputs = __reyRawLoadAddress(regionAddressAt(context, 304));
+    var protectedInputCount = __reyRawLoadI64(regionAddressAt(context, 312));
+    var protectedInputCapacity = __reyRawLoadI64(regionAddressAt(context, 320));
+    if !regionDirectMetricsValid(context) || __reyRawLoadI64(regionAddressAt(context, 272)) != 0 || __reyRawLoadI64(regionAddressAt(context, 280)) != 0 || __reyRawLoadI64(regionAddressAt(context, 296)) != 0 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(context, 288)), __reyRawNull()) || protectedInputCount < 0 || protectedInputCapacity < 0 || protectedInputCapacity > 134217727 || protectedInputCount > protectedInputCapacity || (protectedInputCapacity == 0 && (!__reyRawEqual(protectedInputs, __reyRawNull()) || protectedInputCount != 0)) || (protectedInputCapacity > 0 && __reyRawEqual(protectedInputs, __reyRawNull())) || __reyRawLoadI64(regionAddressAt(context, 328)) < 1 { regionFail(2202); return; }
     if !regionBlockCacheRelease(context) { return; }
+    if protectedInputCapacity > 0 { __reyRawUnmap(protectedInputs, protectedInputCapacity * 16); }
     var program = __reyRawLoadAddress(regionAddressAt(context, 16));
     __reyRawStoreI64(program, 0);
     __reyRawUnmap(program, 128);
     __reyRawStoreI64(context, 0);
-    __reyRawUnmap(context, 304);
+    __reyRawUnmap(context, 336);
 }
 
 pub func regionProgram(context: __rey_raw_address): __rey_raw_address {

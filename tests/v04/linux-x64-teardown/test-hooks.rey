@@ -25,7 +25,7 @@ pub func regionTestPrintDirectObject(object: __rey_raw_address): void {
 }
 
 pub func regionTestPrintContextMaps(context: __rey_raw_address): void {
-    regionTestPrintMap("context", context, 304);
+    regionTestPrintMap("context", context, 336);
     regionTestPrintMap("program", __reyRawLoadAddress(regionAddressAt(context, 16)), 128);
     var slab = __reyRawLoadAddress(regionAddressAt(context, 208));
     var slabCount = __reyRawLoadI64(regionAddressAt(context, 216));
