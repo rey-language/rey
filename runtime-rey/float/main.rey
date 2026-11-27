@@ -1,0 +1,626 @@
+// Exact binary64 decimal parsing and shortest-round-trip formatting.
+// The routines use checked integer arithmetic and raw scratch buffers only.
+
+var floatBigBase = 65536;
+var floatBigCapacity = 2048;
+var floatBigBytes = 16392;
+var floatWorkspaceBytes = 180000;
+var floatDigitsOffset = 163920;
+var floatGroupsOffset = 168016;
+var floatCandidateOffset = 172112;
+
+func floatOverflowValue(): float {
+    var infinity: float = 1.0;
+    var step = 0;
+    while step < 1024 { infinity = infinity * 2.0; step += 1; }
+    return infinity;
+}
+
+func floatAddress(base: __rey_raw_address, offset: int): __rey_raw_address {
+    return __reyRawOffset(base, offset);
+}
+
+func floatBigAt(workspace: __rey_raw_address, index: int): __rey_raw_address {
+    return floatAddress(workspace, index * floatBigBytes);
+}
+
+func floatBigLength(value: __rey_raw_address): int {
+    return __reyRawLoadI64(value);
+}
+
+func floatBigSetLength(value: __rey_raw_address, length: int) {
+    __reyRawStoreI64(value, length);
+}
+
+func floatBigLimb(value: __rey_raw_address, index: int): int {
+    return __reyRawLoadI64(floatAddress(value, 8 + index * 8));
+}
+
+func floatBigSetLimb(value: __rey_raw_address, index: int, limb: int) {
+    __reyRawStoreI64(floatAddress(value, 8 + index * 8), limb);
+}
+
+func floatBigNormalize(value: __rey_raw_address) {
+    var length = floatBigLength(value);
+    while length > 0 && floatBigLimb(value, length - 1) == 0 { length -= 1; }
+    floatBigSetLength(value, length);
+}
+
+func floatBigZero(value: __rey_raw_address) {
+    floatBigSetLength(value, 0);
+}
+
+func floatBigCopy(source: __rey_raw_address, destination: __rey_raw_address) {
+    var length = floatBigLength(source);
+    var index = 0;
+    while index < length {
+        floatBigSetLimb(destination, index, floatBigLimb(source, index));
+        index += 1;
+    }
+    floatBigSetLength(destination, length);
+}
+
+func floatBigFromInt(value: __rey_raw_address, number: int) {
+    floatBigZero(value);
+    var remaining = number;
+    while remaining > 0 {
+        floatBigSetLimb(value, floatBigLength(value), remaining % floatBigBase);
+        floatBigSetLength(value, floatBigLength(value) + 1);
+        remaining /= floatBigBase;
+    }
+}
+
+func floatBigMultiplySmall(value: __rey_raw_address, factor: int) {
+    if factor == 0 || floatBigLength(value) == 0 { floatBigZero(value); return; }
+    var length = floatBigLength(value);
+    var carry = 0;
+    var index = 0;
+    while index < length {
+        var product = floatBigLimb(value, index) * factor + carry;
+        floatBigSetLimb(value, index, product % floatBigBase);
+        carry = product / floatBigBase;
+        index += 1;
+    }
+    while carry > 0 {
+        if length >= floatBigCapacity { __reyRawFail(2205); return; }
+        floatBigSetLimb(value, length, carry % floatBigBase);
+        carry /= floatBigBase;
+        length += 1;
+    }
+    floatBigSetLength(value, length);
+}
+
+func floatBigAddSmall(value: __rey_raw_address, number: int) {
+    var carry = number;
+    var index = 0;
+    var length = floatBigLength(value);
+    while carry > 0 {
+        if index >= floatBigCapacity { __reyRawFail(2205); return; }
+        var prior = 0;
+        if index < length { prior = floatBigLimb(value, index); }
+        var sum = prior + carry;
+        floatBigSetLimb(value, index, sum % floatBigBase);
+        carry = sum / floatBigBase;
+        if index >= length { length = index + 1; }
+        index += 1;
+    }
+    floatBigSetLength(value, length);
+}
+
+func floatBigShiftLeft(source: __rey_raw_address, destination: __rey_raw_address, shift: int) {
+    if shift < 0 { __reyRawFail(2205); return; }
+    var sourceLength = floatBigLength(source);
+    if sourceLength == 0 { floatBigZero(destination); return; }
+    var wordShift = shift / 16;
+    var bitShift = shift % 16;
+    var factor = 1;
+    while bitShift > 0 { factor *= 2; bitShift -= 1; }
+    var index = 0;
+    while index < wordShift {
+        floatBigSetLimb(destination, index, 0);
+        index += 1;
+    }
+    var carry = 0;
+    index = 0;
+    while index < sourceLength {
+        var product = floatBigLimb(source, index) * factor + carry;
+        floatBigSetLimb(destination, wordShift + index, product % floatBigBase);
+        carry = product / floatBigBase;
+        index += 1;
+    }
+    var resultLength = wordShift + sourceLength;
+    while carry > 0 {
+        if resultLength >= floatBigCapacity { __reyRawFail(2205); return; }
+        floatBigSetLimb(destination, resultLength, carry % floatBigBase);
+        carry /= floatBigBase;
+        resultLength += 1;
+    }
+    floatBigSetLength(destination, resultLength);
+    floatBigNormalize(destination);
+}
+
+func floatBigCompare(left: __rey_raw_address, right: __rey_raw_address): int {
+    var leftLength = floatBigLength(left);
+    var rightLength = floatBigLength(right);
+    if leftLength < rightLength { return -1; }
+    if leftLength > rightLength { return 1; }
+    var index = leftLength - 1;
+    while index >= 0 {
+        var a = floatBigLimb(left, index);
+        var b = floatBigLimb(right, index);
+        if a < b { return -1; }
+        if a > b { return 1; }
+        index -= 1;
+    }
+    return 0;
+}
+
+func floatBigSubtract(left: __rey_raw_address, right: __rey_raw_address) {
+    var borrow = 0;
+    var index = 0;
+    var length = floatBigLength(left);
+    while index < length {
+        var b = 0;
+        if index < floatBigLength(right) { b = floatBigLimb(right, index); }
+        var difference = floatBigLimb(left, index) - b - borrow;
+        borrow = 0;
+        if difference < 0 { difference += floatBigBase; borrow = 1; }
+        floatBigSetLimb(left, index, difference);
+        index += 1;
+    }
+    floatBigNormalize(left);
+}
+
+func floatBigBitLength(value: __rey_raw_address): int {
+    var length = floatBigLength(value);
+    if length == 0 { return 0; }
+    var top = floatBigLimb(value, length - 1);
+    var bits = (length - 1) * 16;
+    while top > 0 { top /= 2; bits += 1; }
+    return bits;
+}
+
+func floatBigRoundedQuotient(numerator: __rey_raw_address, denominator: __rey_raw_address,
+    remainder: __rey_raw_address, shifted: __rey_raw_address, twice: __rey_raw_address): int {
+    if floatBigLength(denominator) == 0 { __reyRawFail(2205); return 0; }
+    floatBigCopy(numerator, remainder);
+    var quotient = 0;
+    var bit = floatBigBitLength(remainder) - floatBigBitLength(denominator);
+    while bit >= 0 {
+        floatBigShiftLeft(denominator, shifted, bit);
+        quotient *= 2;
+        if floatBigCompare(remainder, shifted) >= 0 {
+            floatBigSubtract(remainder, shifted);
+            quotient += 1;
+        }
+        bit -= 1;
+    }
+    floatBigShiftLeft(remainder, twice, 1);
+    var halfway = floatBigCompare(twice, denominator);
+    if halfway > 0 || (halfway == 0 && quotient % 2 != 0) { quotient += 1; }
+    return quotient;
+}
+
+func floatAppendByte(output: __rey_raw_address, position: int, byte: int): int {
+    __reyRawStoreByte(floatAddress(output, position), byte);
+    return position + 1;
+}
+
+func floatAppendUnsigned(output: __rey_raw_address, position: int, number: int, width: int): int {
+    var digits = 1;
+    var probe = number;
+    while probe >= 10 { probe /= 10; digits += 1; }
+    if width > digits { digits = width; }
+    var divisor = 1;
+    var count = 1;
+    while count < digits { divisor *= 10; count += 1; }
+    var result = position;
+    while divisor > 0 {
+        var digit = number / divisor;
+        result = floatAppendByte(output, result, 48 + digit);
+        number %= divisor;
+        divisor /= 10;
+    }
+    return result;
+}
+
+func floatAppendSigned(output: __rey_raw_address, position: int, number: int): int {
+    var result = position;
+    var magnitude = number;
+    if number < 0 { result = floatAppendByte(output, result, 45); magnitude = -number; }
+    return floatAppendUnsigned(output, result, magnitude, 0);
+}
+
+func floatBigToDecimal(value: __rey_raw_address, working: __rey_raw_address,
+    groups: __rey_raw_address, output: __rey_raw_address): int {
+    floatBigCopy(value, working);
+    var groupCount = 0;
+    while floatBigLength(working) > 0 {
+        var carry = 0;
+        var index = floatBigLength(working) - 1;
+        while index >= 0 {
+            var current = carry * 65536 + floatBigLimb(working, index);
+            floatBigSetLimb(working, index, current / 1000000000);
+            carry = current % 1000000000;
+            index -= 1;
+        }
+        floatBigNormalize(working);
+        __reyRawStoreI64(floatAddress(groups, groupCount * 8), carry);
+        groupCount += 1;
+    }
+    if groupCount == 0 { return floatAppendByte(output, 0, 48); }
+    var position = 0;
+    var groupIndex = groupCount - 1;
+    position = floatAppendUnsigned(output, position, __reyRawLoadI64(floatAddress(groups, groupIndex * 8)), 0);
+    groupIndex -= 1;
+    while groupIndex >= 0 {
+        position = floatAppendUnsigned(output, position, __reyRawLoadI64(floatAddress(groups, groupIndex * 8)), 9);
+        groupIndex -= 1;
+    }
+    return position;
+}
+
+func floatFailConversion(): float {
+    __reyRawFail(2205);
+    return 0.0;
+}
+
+func floatScalePowerOfTwo(value: float, exponent: int): float {
+    var scaled = value;
+    if exponent >= 0 {
+        var index = 0;
+        while index < exponent { scaled = scaled * 2.0; index += 1; }
+    } else {
+        var index = 0;
+        while index < 0 - exponent { scaled = scaled / 2.0; index += 1; }
+    }
+    return scaled;
+}
+
+func floatRationalToValue(workspace: __rey_raw_address, negative: bool, failOnRange: bool): float {
+    var numerator = floatBigAt(workspace, 0);
+    var denominator = floatBigAt(workspace, 1);
+    if floatBigLength(numerator) == 0 {
+        if negative { return -0.0; }
+        return 0.0;
+    }
+    if floatBigLength(denominator) == 0 { if failOnRange { return floatFailConversion(); } return floatOverflowValue(); }
+    var shifted = floatBigAt(workspace, 2);
+    var scaledNumerator = floatBigAt(workspace, 3);
+    var scaledDenominator = floatBigAt(workspace, 4);
+    var remainder = floatBigAt(workspace, 5);
+    var twice = floatBigAt(workspace, 6);
+    var exponent = floatBigBitLength(numerator) - floatBigBitLength(denominator);
+    if exponent >= 0 {
+        floatBigShiftLeft(denominator, shifted, exponent);
+        if floatBigCompare(numerator, shifted) < 0 { exponent -= 1; }
+    } else {
+        floatBigShiftLeft(numerator, shifted, 0 - exponent);
+        if floatBigCompare(shifted, denominator) < 0 { exponent -= 1; }
+    }
+    if exponent > 1023 {
+        if failOnRange { return floatFailConversion(); }
+        return floatOverflowValue();
+    }
+    var significand = 0;
+    var power = 0;
+    if exponent < -1022 {
+        floatBigShiftLeft(numerator, scaledNumerator, 1074);
+        floatBigCopy(denominator, scaledDenominator);
+        significand = floatBigRoundedQuotient(scaledNumerator, scaledDenominator, remainder, shifted, twice);
+        power = -1074;
+    } else {
+        var shift = 52 - exponent;
+        if shift >= 0 {
+            floatBigShiftLeft(numerator, scaledNumerator, shift);
+            floatBigCopy(denominator, scaledDenominator);
+        } else {
+            floatBigCopy(numerator, scaledNumerator);
+            floatBigShiftLeft(denominator, scaledDenominator, 0 - shift);
+        }
+        significand = floatBigRoundedQuotient(scaledNumerator, scaledDenominator, remainder, shifted, twice);
+        if significand >= 9007199254740992 { significand /= 2; exponent += 1; }
+        if exponent > 1023 {
+            if failOnRange { return floatFailConversion(); }
+            return floatOverflowValue();
+        }
+        power = exponent - 52;
+    }
+    if significand == 0 {
+        if failOnRange { return floatFailConversion(); }
+        if negative { return -0.0; }
+        return 0.0;
+    }
+    var result = floatScalePowerOfTwo(float(significand), power);
+    if negative { result = -result; }
+    return result;
+}
+
+func floatParseCoefficient(workspace: __rey_raw_address, coefficient: int, decimalExponent: int, negative: bool): float {
+    var numerator = floatBigAt(workspace, 0);
+    var denominator = floatBigAt(workspace, 1);
+    floatBigFromInt(numerator, coefficient);
+    floatBigFromInt(denominator, 1);
+    if decimalExponent > 0 {
+        var index = 0;
+        while index < decimalExponent { floatBigMultiplySmall(numerator, 10); index += 1; }
+    } else if decimalExponent < 0 {
+        var index = 0;
+        while index < 0 - decimalExponent { floatBigMultiplySmall(denominator, 10); index += 1; }
+    }
+    return floatRationalToValue(workspace, negative, false);
+}
+
+func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, length: int): float {
+    if length <= 0 || length > 8192 { return floatFailConversion(); }
+    var index = 0;
+    var negative = false;
+    var first = __reyRawLoadByte(bytes);
+    if first == 45 || first == 43 { negative = first == 45; index += 1; }
+    var numerator = floatBigAt(workspace, 0);
+    var denominator = floatBigAt(workspace, 1);
+    floatBigZero(numerator);
+    var sawDigit = false;
+    var started = false;
+    var significantDigits = 0;
+    var fractionDigits = 0;
+    var sawDot = false;
+    while index < length {
+        var byte = __reyRawLoadByte(floatAddress(bytes, index));
+        if byte == 101 || byte == 69 { break; }
+        if byte >= 48 && byte <= 57 {
+            var digit = byte - 48;
+            floatBigMultiplySmall(numerator, 10);
+            floatBigAddSmall(numerator, digit);
+            sawDigit = true;
+            if sawDot { fractionDigits += 1; }
+            if digit != 0 { started = true; }
+            if started { significantDigits += 1; }
+            index += 1;
+        } else if byte == 46 && !sawDot {
+            sawDot = true;
+            index += 1;
+        } else {
+            return floatFailConversion();
+        }
+    }
+    if !sawDigit { return floatFailConversion(); }
+    var decimalExponent = 0;
+    if index < length {
+        index += 1;
+        var exponentNegative = false;
+        if index < length {
+            var signByte = __reyRawLoadByte(floatAddress(bytes, index));
+            if signByte == 45 || signByte == 43 { exponentNegative = signByte == 45; index += 1; }
+        }
+        var exponentDigits = 0;
+        while index < length {
+            var byte = __reyRawLoadByte(floatAddress(bytes, index));
+            if byte < 48 || byte > 57 { return floatFailConversion(); }
+            if decimalExponent < 10000000 { decimalExponent = decimalExponent * 10 + byte - 48; }
+            exponentDigits += 1;
+            index += 1;
+        }
+        if exponentDigits == 0 { return floatFailConversion(); }
+        if exponentNegative { decimalExponent = 0 - decimalExponent; }
+    }
+    if floatBigLength(numerator) == 0 {
+        if negative { return -0.0; }
+        return 0.0;
+    }
+    var decimalOrder = significantDigits - 1 - fractionDigits + decimalExponent;
+    if decimalOrder > 308 || decimalOrder < -324 { return floatFailConversion(); }
+    var decimalScale = fractionDigits - decimalExponent;
+    floatBigFromInt(denominator, 1);
+    if decimalScale > 0 {
+        var scaleIndex = 0;
+        while scaleIndex < decimalScale { floatBigMultiplySmall(denominator, 10); scaleIndex += 1; }
+    } else if decimalScale < 0 {
+        var scaleIndex = 0;
+        while scaleIndex < 0 - decimalScale { floatBigMultiplySmall(numerator, 10); scaleIndex += 1; }
+    }
+    return floatRationalToValue(workspace, negative, true);
+}
+
+pub func floatParseF64String(value: __rey_raw_address, length: int): float {
+    var workspace = __reyRawMap(floatWorkspaceBytes);
+    if __reyRawToInt(workspace) < 0 { return floatFailConversion(); }
+    var bytes = floatAddress(value, 24);
+    var result = floatParseF64Bytes(workspace, bytes, length);
+    __reyRawUnmap(workspace, floatWorkspaceBytes);
+    return result;
+}
+
+func floatCandidateFromDigits(digits: __rey_raw_address, digitsLength: int, precision: int,
+    order: int, candidate: __rey_raw_address): int {
+    var used = precision;
+    if used > digitsLength { used = digitsLength; }
+    var value = 0;
+    var index = 0;
+    while index < used {
+        value = value * 10 + __reyRawLoadByte(floatAddress(digits, index)) - 48;
+        index += 1;
+    }
+    if precision < digitsLength {
+        var next = __reyRawLoadByte(floatAddress(digits, precision)) - 48;
+        var roundUp = next > 5;
+        if next == 5 {
+            var rest = false;
+            var scan = precision + 1;
+            while scan < digitsLength { if __reyRawLoadByte(floatAddress(digits, scan)) != 48 { rest = true; } scan += 1; }
+            roundUp = rest || value % 2 != 0;
+        }
+        if roundUp { value += 1; }
+    }
+    var limit = 1;
+    index = 0;
+    while index < precision { limit *= 10; index += 1; }
+    var adjustedOrder = order;
+    if value >= limit { value /= 10; adjustedOrder += 1; }
+    while value > 10 && value % 10 == 0 { value /= 10; }
+    var resultLength = floatAppendUnsigned(candidate, 0, value, 0);
+    __reyRawStoreI64(floatAddress(candidate, 256), adjustedOrder);
+    return resultLength;
+}
+
+func floatRenderCandidate(candidate: __rey_raw_address, digitsLength: int, order: int,
+    negative: bool, output: __rey_raw_address): int {
+    var position = 0;
+    if negative { position = floatAppendByte(output, position, 45); }
+    if order < -4 || order >= 16 {
+        position = floatAppendByte(output, position, __reyRawLoadByte(candidate));
+        if digitsLength > 1 {
+            position = floatAppendByte(output, position, 46);
+            var index = 1;
+            while index < digitsLength {
+                position = floatAppendByte(output, position, __reyRawLoadByte(floatAddress(candidate, index)));
+                index += 1;
+            }
+        }
+        position = floatAppendByte(output, position, 101);
+        return floatAppendSigned(output, position, order);
+    }
+    if order >= digitsLength - 1 {
+        var index = 0;
+        while index < digitsLength {
+            position = floatAppendByte(output, position, __reyRawLoadByte(floatAddress(candidate, index)));
+            index += 1;
+        }
+        var zeros = order + 1 - digitsLength;
+        while zeros > 0 { position = floatAppendByte(output, position, 48); zeros -= 1; }
+        return position;
+    }
+    if order >= 0 {
+        var index = 0;
+        while index <= order {
+            position = floatAppendByte(output, position, __reyRawLoadByte(floatAddress(candidate, index)));
+            index += 1;
+        }
+        position = floatAppendByte(output, position, 46);
+        while index < digitsLength {
+            position = floatAppendByte(output, position, __reyRawLoadByte(floatAddress(candidate, index)));
+            index += 1;
+        }
+        return position;
+    }
+    position = floatAppendByte(output, position, 48);
+    position = floatAppendByte(output, position, 46);
+    var zeros = 0 - order - 1;
+    while zeros > 0 { position = floatAppendByte(output, position, 48); zeros -= 1; }
+    var index = 0;
+    while index < digitsLength {
+        position = floatAppendByte(output, position, __reyRawLoadByte(floatAddress(candidate, index)));
+        index += 1;
+    }
+    return position;
+}
+
+func floatDecompose(value: float, negativeZeroHint: bool, output: __rey_raw_address): bool {
+    var nan = value != value;
+    if nan { __reyRawStoreI64(output, 1); return false; }
+    var negative = value < 0.0;
+    var magnitude = value;
+    if negative { magnitude = -magnitude; }
+    var infinityCheck = magnitude * 0.0;
+    if infinityCheck != infinityCheck {
+        __reyRawStoreI64(output, 2);
+        __reyRawStoreI64(floatAddress(output, 8), 0);
+        if negative { __reyRawStoreI64(floatAddress(output, 8), 1); }
+        return false;
+    }
+    if magnitude == 0.0 {
+        __reyRawStoreI64(output, 3);
+        __reyRawStoreI64(floatAddress(output, 8), 0);
+        if negative || negativeZeroHint { __reyRawStoreI64(floatAddress(output, 8), 1); }
+        return false;
+    }
+    var significand = 0;
+    var exponent = 0;
+    var normalized = magnitude;
+        while normalized >= 2.0 { normalized = normalized / 2.0; exponent += 1; }
+        while normalized < 1.0 { normalized = normalized * 2.0; exponent -= 1; }
+    significand = (normalized * 4503599627370496.0).toInt();
+    exponent -= 52;
+    __reyRawStoreI64(output, 0);
+    __reyRawStoreI64(floatAddress(output, 8), 0);
+    if negative { __reyRawStoreI64(floatAddress(output, 8), 1); }
+    __reyRawStoreI64(floatAddress(output, 16), significand);
+    __reyRawStoreI64(floatAddress(output, 24), exponent);
+    return true;
+}
+
+pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __rey_raw_address): int {
+    var parts = __reyRawMap(32);
+    var workspace = __reyRawMap(floatWorkspaceBytes);
+    if __reyRawToInt(parts) < 0 || __reyRawToInt(workspace) < 0 { return -1; }
+    var finite = floatDecompose(value, negativeZeroHint, parts);
+    if !finite {
+        var kind = __reyRawLoadI64(parts);
+        var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;
+        var position = 0;
+        if kind == 1 {
+            position = floatAppendByte(output, position, 78);
+            position = floatAppendByte(output, position, 97);
+            position = floatAppendByte(output, position, 78);
+        } else if kind == 2 {
+            if negative { position = floatAppendByte(output, position, 45); }
+            position = floatAppendByte(output, position, 105);
+            position = floatAppendByte(output, position, 110);
+            position = floatAppendByte(output, position, 102);
+        } else {
+            if negative { position = floatAppendByte(output, position, 45); }
+            position = floatAppendByte(output, position, 48);
+        }
+        __reyRawUnmap(parts, 32);
+        __reyRawUnmap(workspace, floatWorkspaceBytes);
+        return position;
+    }
+    var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;
+    var significand = __reyRawLoadI64(floatAddress(parts, 16));
+    var binaryExponent = __reyRawLoadI64(floatAddress(parts, 24));
+    var exact = floatBigAt(workspace, 0);
+    floatBigFromInt(exact, significand);
+    var decimalPower = 0;
+    if binaryExponent >= 0 {
+        floatBigShiftLeft(exact, floatBigAt(workspace, 7), binaryExponent);
+        floatBigCopy(floatBigAt(workspace, 7), exact);
+    } else {
+        var count = 0;
+        while count < 0 - binaryExponent { floatBigMultiplySmall(exact, 5); count += 1; }
+        decimalPower = binaryExponent;
+    }
+    var exactDigits = floatAddress(workspace, floatDigitsOffset);
+    var groups = floatAddress(workspace, floatGroupsOffset);
+    var digitLength = floatBigToDecimal(exact, floatBigAt(workspace, 8), groups, exactDigits);
+    var order = digitLength - 1 + decimalPower;
+    var candidate = floatAddress(workspace, floatCandidateOffset);
+    var precision = 1;
+    var found = false;
+    var finalLength = 0;
+    while precision <= 17 && !found {
+        var candidateLength = floatCandidateFromDigits(exactDigits, digitLength, precision, order, candidate);
+        var candidateOrder = __reyRawLoadI64(floatAddress(candidate, 256));
+        var candidateExponent = candidateOrder - candidateLength + 1;
+        var candidateValue = floatParseCoefficient(workspace, 0, 0, false);
+        var coefficient = 0;
+        var candidateIndex = 0;
+        while candidateIndex < candidateLength {
+            coefficient = coefficient * 10 + __reyRawLoadByte(floatAddress(candidate, candidateIndex)) - 48;
+            candidateIndex += 1;
+        }
+        candidateValue = floatParseCoefficient(workspace, coefficient, candidateExponent, false);
+        var magnitude = value;
+        if magnitude < 0.0 { magnitude = -magnitude; }
+        if candidateValue == magnitude {
+            finalLength = floatRenderCandidate(candidate, candidateLength, candidateOrder, negative, output);
+            found = true;
+        }
+        precision += 1;
+    }
+    if !found { __reyRawFail(2205); finalLength = 0; }
+    __reyRawUnmap(parts, 32);
+    __reyRawUnmap(workspace, floatWorkspaceBytes);
+    return finalLength;
+}
+
+func main(): void {}
