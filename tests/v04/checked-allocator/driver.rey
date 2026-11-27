@@ -1,5 +1,5 @@
 import frontend::graph::{checkSourceFileGraphWithRuntime};
-import ir::managed::link::{buildRegionProgram};
+import ir::managed::link::{buildManagedProgram};
 import ir::{IRProgram};
 import ir::lower::{lowerProgram, setLowerTargetOS};
 import ir::verify::{verifyProgram};
@@ -47,7 +47,7 @@ func main(): void {
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
     var lowered: Result<IRProgram, string> = Result.Err("lowering path was not selected");
     if argv.len() == 5 {
-        lowered = buildRegionProgram(checked.unwrap(), sourceDirectory, compilerSourceDirectory, false);
+        lowered = buildManagedProgram(checked.unwrap(), sourceDirectory, compilerSourceDirectory, false, false);
     } else {
         lowered = lowerProgram(checked.unwrap());
     }
