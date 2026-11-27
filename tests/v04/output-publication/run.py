@@ -288,7 +288,8 @@ func containersO02ProtectedInputPath(): __rey_raw_address {
 
     def build_candidate(self) -> None:
         self.build("seed-build-native-compiler", [str(self.seed), "build", str(self.compiler_source), "-o", str(self.candidate),
-                   "--target", "linux-x64", "--managed", "--regions", "--runtime-root", str(self.runtime)])
+                   "--target", "linux-x64", "--managed", "--regions", "--checked-packed-output",
+                   "--runtime-root", str(self.runtime)])
         self.candidate = self.out / "bin/rey-native"
         self.results["candidate_sha256"] = sha256(self.candidate)
         self.save()
