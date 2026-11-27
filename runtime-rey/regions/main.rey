@@ -1230,7 +1230,9 @@ func regionWriteObject(chunk: __rey_raw_address, group: __rey_raw_address, regio
     __reyRawStoreAddress(regionAddressAt(data, aligned + 64), record);
     __reyRawStoreI64(object, 8589934592 + layoutId);
     __reyRawStoreI64(regionAddressAt(object, 8), payload);
-    var byteIndex = 0;
+    var wordBytes = payload / 8 * 8;
+    regionStoreZero(object, 16, wordBytes);
+    var byteIndex = wordBytes;
     while byteIndex < payload {
         __reyRawStoreByte(regionAddressAt(object, 16 + byteIndex), 0);
         byteIndex = byteIndex + 1;
