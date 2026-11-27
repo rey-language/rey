@@ -67,7 +67,17 @@ class Runner:
         self.workspace = Path(workspace).resolve(strict=True)
         self.seed = Path(seed).resolve(strict=True)
         self.source = Path(source).resolve(strict=True)
-        self.out = Path(out).resolve()
+        requested_out = Path(out).resolve()
+        self.acceptance_output_root = requested_out
+        self.acceptance_attempt = 1
+        if requested_out.exists() and any(requested_out.iterdir()):
+            self.acceptance_attempt = 2
+            self.out = requested_out / ("attempt-%02d" % self.acceptance_attempt)
+            while self.out.exists():
+                self.acceptance_attempt += 1
+                self.out = requested_out / ("attempt-%02d" % self.acceptance_attempt)
+        else:
+            self.out = requested_out
         self.repeats = repeats
         self.logs = self.out / "logs"
         self.runtime = self.out / "runtime-rey"
@@ -104,9 +114,12 @@ class Runner:
             "seed_sha256": sha256(self.seed),
             "source": str(self.source),
             "source_revision": self.git_revision(),
+            "acceptance_output_root": str(self.acceptance_output_root),
+            "acceptance_attempt": self.acceptance_attempt,
             "runtime_source_hashes": tree_hashes(self.source / "runtime-rey"),
             "staged_runtime_hashes": tree_hashes(self.runtime),
             "functional_fixture_sha256": sha256(FUNCTIONAL_FIXTURE),
+            "trusted_driver_source_sha256": sha256(HERE / "driver.rey"),
             "repeats": self.repeats,
             "compiler_builds": self.commands,
             "functional_cases": {},
@@ -220,8 +233,10 @@ class Runner:
         stdout_path = self.logs / "repeat-gates.stdout"
         stderr_path = self.logs / "repeat-gates.stderr"
         command = ["python3", "-B", str(REPEAT_GATES), str(self.seed), str(self.source), str(gates_out)]
+        run_env = dict(os.environ)
+        run_env["REY_CHECKED_ALLOCATOR_DRIVER"] = str(self.driver)
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-            result = limited(command, 18000, stdout=stdout, stderr=stderr)
+            result = limited(command, 18000, stdout=stdout, stderr=stderr, env=run_env)
         self.results["repeat_gates"] = {
             "status": result.returncode,
             "stdout": str(stdout_path),

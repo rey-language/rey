@@ -19,12 +19,19 @@ func writeImage(path: string, bytes: Vec<int>): void {
 
 func main(): void {
     var argv = args();
-    require(argv.len() == 4, "usage: checked-allocator-driver fixture.rey sourceDir outputBinary");
+    require(argv.len() == 4 || argv.len() == 5,
+            "usage: checked-allocator-driver fixture.rey runtimeDir outputBinary [compilerSourceDir]");
     var fixture = argv[1];
     var sourceDirectory = argv[2];
     var outputBinary = argv[3];
+    var compilerSourceDirectory = "";
+    if argv.len() == 5 { compilerSourceDirectory = argv[4]; }
     var entryPath = sourceDirectory + "/main.rey";
-    writeFile(entryPath, readFile(fixture));
+    if argv.len() == 5 {
+        entryPath = fixture;
+    } else {
+        writeFile(entryPath, readFile(fixture));
+    }
     var units: Vec<string> = [
         sourceDirectory + "/layout/main.rey",
         sourceDirectory + "/regions/main.rey",
@@ -33,7 +40,7 @@ func main(): void {
         sourceDirectory + "/host/main.rey",
         entryPath,
     ];
-    var checked = checkSourceFileGraphWithRuntime(entryPath, "", units);
+    var checked = checkSourceFileGraphWithRuntime(entryPath, compilerSourceDirectory, units);
     if checked.isErr() { eprintln(checked.unwrapErr()); exit(1); }
     var lowered = lowerProgram(checked.unwrap());
     if lowered.isErr() { eprintln(lowered.unwrapErr()); exit(1); }

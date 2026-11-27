@@ -103,6 +103,7 @@ class UncappedRegionGate:
         self.ir_driver = None
         self.runtime_evaluator_driver = None
         self.fixture_paths = None
+        self.trusted_driver = None
 
     def __getattr__(self, name):
         member = getattr(self.module.RegionGate, name, None)
@@ -114,6 +115,11 @@ class UncappedRegionGate:
         self.module.require(platform.system() == "Linux" and platform.machine().lower() in ("x86_64", "amd64"),
                             "R01 requires native Linux x64")
         check_lock()
+        driver_path = os.environ.get("REY_CHECKED_ALLOCATOR_DRIVER", "")
+        self.module.require(bool(driver_path), "R03 trusted runtime compiler driver was not provided")
+        self.trusted_driver = Path(driver_path).resolve(strict=True)
+        self.module.require(os.access(self.trusted_driver, os.X_OK),
+                            "R03 trusted runtime compiler driver is not executable")
         self.module.require(self.engine.is_file() and os.access(self.engine, os.X_OK),
                             "engine must be an executable native seed")
         self.module.require(self.source.is_dir() and (self.source / "rey-compiler/src").is_dir(),
@@ -148,8 +154,27 @@ class UncappedRegionGate:
         self.results["harness_hashes"] = {
             str(path.relative_to(self.source)): self.module.digest_file(path) for path in harness_files
         }
+        self.results["trusted_runtime_driver"] = {
+            "path": str(self.trusted_driver), "sha256": self.module.digest_file(self.trusted_driver),
+        }
         self.results["manifests"] = self.module.RegionGate.validate_manifests(self)
         self.save()
+
+    def build_executable(self, label, source_file, output, *, runtime_root=None,
+                         heavy=True, timeout=600):
+        if label.startswith("build-static-"):
+            compiler_source = Path(source_file).resolve().parent
+            runtime = Path(runtime_root or self.runtime).resolve()
+            command = [str(self.trusted_driver), str(source_file), str(runtime),
+                       str(output), str(compiler_source)]
+            self.command(label, command, timeout=timeout, build=True, heavy=heavy)
+            self.module.require(Path(output).is_file(),
+                                label + ": trusted compiler driver emitted no image")
+            Path(output).chmod(Path(output).stat().st_mode | 0o111)
+            return Path(output)
+        return self.module.RegionGate.build_executable(
+            self, label, source_file, output, runtime_root=runtime_root,
+            heavy=heavy, timeout=timeout)
 
     def save(self):
         self.module.write_json(self.out / "results.json", self.results)
@@ -322,6 +347,25 @@ def run_r02(seed, source, out):
             }
             self.save()
             self.build_fixture()
+
+        def build_fixture(self):
+            driver_path = os.environ.get("REY_CHECKED_ALLOCATOR_DRIVER", "")
+            module.require(bool(driver_path),
+                           "R03 trusted runtime compiler driver was not provided")
+            driver = Path(driver_path).resolve(strict=True)
+            module.require(driver.is_file() and os.access(driver, os.X_OK),
+                           "R03 trusted runtime compiler driver is not executable")
+            self.binary.parent.mkdir(parents=True, exist_ok=True)
+            command = [str(driver), str(self.fixture_source), str(self.runtime), str(self.binary)]
+            self.invoke("build-current-source-teardown-fixture", command, 600, build=True)
+            module.require(self.binary.is_file(), "trusted runtime driver emitted no fixture image")
+            self.binary.chmod(self.binary.stat().st_mode | 0o111)
+            self.results["fixture_sha256"] = module.sha256(self.binary)
+            self.results["trusted_runtime_driver"] = {
+                "path": str(driver), "sha256": module.sha256(driver),
+            }
+            self.fixture_image = self.binary
+            self.save()
 
         def invoke(self, label, argv, timeout, *, build=False, expected_status=0):
             self.counter += 1
