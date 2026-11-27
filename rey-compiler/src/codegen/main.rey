@@ -8003,7 +8003,7 @@ func clangPathArgument(path: string): string {
     return "\"" + path + "\"";
 }
 
-pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: string) {
+pub func compileLLVM(ir: string, outputPath: string, release: bool, rtDir: string): Result<string, string> {
     var errorMarker = "; REY_CODEGEN_ERROR: ";
     if ir.startsWith(errorMarker) {
         var end = ir.indexOf("\n");
