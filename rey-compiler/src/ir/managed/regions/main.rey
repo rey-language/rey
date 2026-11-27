@@ -1292,7 +1292,10 @@ pub func lowerManagedRegionsWithPromotionStress(module: ManagedProgram, bindings
     var output = appendFunction(IRProgram { entryFunctionId: wrapperId, functions: lowered.functions }, wrapperResult.unwrap());
     output.entryFunctionId = wrapperId;
     var outputVerification = verifyProgram(output);
-    if !outputVerification.ok { return Result.Err("managed regions: lowered IR verification failed"); }
+    if !outputVerification.ok {
+        if outputVerification.errors.len() > 0 { return Result.Err("managed regions: lowered IR verification failed: " + outputVerification.errors[0]); }
+        return Result.Err("managed regions: lowered IR verification failed");
+    }
     return pruneUnreachableImageFunctions(output);
 }
 
@@ -1375,6 +1378,9 @@ pub func lowerManagedRegionsCompleted(module: ManagedProgram, bindings: RegionBi
     output.functions.push(wrapperResult.unwrap());
     output.entryFunctionId = wrapperId;
     var outputVerification = verifyProgram(output);
-    if !outputVerification.ok { return Result.Err("managed regions: lowered IR verification failed"); }
+    if !outputVerification.ok {
+        if outputVerification.errors.len() > 0 { return Result.Err("managed regions: lowered IR verification failed: " + outputVerification.errors[0]); }
+        return Result.Err("managed regions: lowered IR verification failed");
+    }
     return pruneUnreachableImageFunctions(output);
 }
