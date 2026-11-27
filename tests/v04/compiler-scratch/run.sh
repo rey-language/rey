@@ -82,11 +82,11 @@ ANALYSIS_DRIVER="$OUT/bin/compiler-scratch-analysis"
 REGION_LOWERING_DRIVER="$OUT/bin/compiler-scratch-region-lowering"
 run_build P02-build-scratch-analysis "$OUT/rss/build-analysis.time" \
     "$SEED" build "$STAGE/main.rey" -o "$ANALYSIS_DRIVER" --target linux-x64 \
-    --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-driver.stdout" 2>"$OUT/logs/build-driver.stderr"
+    --no-regions --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-driver.stdout" 2>"$OUT/logs/build-driver.stderr"
 test -x "$ANALYSIS_DRIVER"
 run_build P02-build-scratch-region-lowering "$OUT/rss/build-region-lowering.time" \
     "$SEED" build "$REGION_STAGE/main.rey" -o "$REGION_LOWERING_DRIVER" --target linux-x64 \
-    --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-region-lowering.stdout" 2>"$OUT/logs/build-region-lowering.stderr"
+    --no-regions --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-region-lowering.stdout" 2>"$OUT/logs/build-region-lowering.stderr"
 test -x "$REGION_LOWERING_DRIVER"
 find "$SRC/rey-compiler/src" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/compiler-source.sha256"
 find "$SRC/runtime-rey" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/runtime-source.sha256"
