@@ -619,7 +619,7 @@ func formatImportCycle(stack: Vec<string>, repeated: string): string {
     return "Circular import detected: " + chain;
 }
 
-func loadSourceGraphUnit(path: string, graph: SourceGraph, visited: HashMap<string, bool>, stack: Vec<string>, originPath: string, originLine: int, originColumn: int, projectRoot: string, cycleChain: string) {
+func loadSourceGraphUnit(path: string, graph: SourceGraph, visited: HashMap<string, bool>, stack: Vec<string>, originPath: string, originLine: int, originColumn: int, projectRoot: string, cycleChain: string): Result<bool, string> {
     var normalizedPath = normalizePath(path);
     var chainHere = normalizedPath;
     if cycleChain.len() > 0 { chainHere = cycleChain + " -> " + normalizedPath; }
