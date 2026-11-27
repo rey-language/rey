@@ -48,6 +48,7 @@ struct LocalBinding {
     pub isConst: bool,
     pub layoutId: int,
     pub value: IRValue,
+    pub negativeZero: bool,
 }
 
 struct LocalScope {
@@ -661,8 +662,15 @@ func managedLayoutId(layouts: Vec<ManagedLayout>, ty: Type): int {
 }
 
 func managedTypeIsSupported(checked: CheckedProgram, layouts: Vec<ManagedLayout>, ty: Type, allowNull: bool): bool {
-    if ty.kind == kindInt || ty.kind == kindBool || ty.kind == kindChar || ty.kind == kindVoid { return true; }
+    if ty.kind == kindInt || ty.kind == kindBool || ty.kind == kindChar || ty.kind == kindFloat || ty.kind == kindVoid { return true; }
     if ty.kind == kindNull { return allowNull; }
+    if allowNull && ty.kind == kindNullable {
+        var maybeInner = ty.inner;
+        if maybeInner != null {
+            var inner = requiredType(maybeInner, ty);
+            if inner.kind == kindInt || inner.kind == kindBool || inner.kind == kindChar || inner.kind == kindFloat { return true; }
+        }
+    }
     return managedLayoutId(layouts, ty) > 0;
 }
 
@@ -827,7 +835,7 @@ func nominalLayoutForType(checked: CheckedProgram, ty: Type): CheckedNominalLayo
 
 func catalogEnsureType(checked: CheckedProgram, catalog: ManagedCatalog, ty: Type): int {
     if catalog.error != emptyString { return -1; }
-    if ty.kind == kindInt || ty.kind == kindBool || ty.kind == kindChar || ty.kind == kindVoid || ty.kind == kindNull { return 0; }
+    if ty.kind == kindInt || ty.kind == kindBool || ty.kind == kindChar || ty.kind == kindFloat || ty.kind == kindVoid || ty.kind == kindNull { return 0; }
     if ty.kind == kindNullable { var inner = ty.inner; if inner != null { return catalogEnsureType(checked, catalog, inner); } catalog.error = "nullable managed type has no checked inner type"; return -1; }
     if ty.kind == kindString {
         var key = managedTypeKey(ty);
@@ -2708,7 +2716,69 @@ func lowerManagedPrintable(lowerer: FunctionLowerer, expression: Expr, argument:
         var layoutValue = managedI64Constant(lowerer, managedStringLayoutId(lowerer), source);
         return managedCallHook(lowerer, "managedStringFromInt", ir.irRawAddress(), [layoutValue.id, argument.id], source);
     }
-    return failExpression(lowerer, expression, "managed print supports string, bool, int, and char arguments");
+    if argumentInfo.ty.kind == kindFloat {
+        var zeroHint = allocateValue(lowerer, irBool());
+        appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, expression), source));
+        return lowerManagedFloatString(lowerer, argument, zeroHint, source);
+    }
+    return failExpression(lowerer, expression, "managed print supports string, bool, int, char, and float arguments");
+}
+
+func lowerManagedFloatString(lowerer: FunctionLowerer, value: LowerValue, negativeZeroHint: IRValue, source: SourceRef): LowerValue {
+    var stringLayout = managedI64Constant(lowerer, managedStringLayoutId(lowerer), source);
+    return managedCallHook(lowerer, "managedFloatToString", ir.irRawAddress(), [stringLayout.id, value.id, negativeZeroHint.id], source);
+}
+
+func managedNegativeZeroHint(lowerer: FunctionLowerer, expression: Expr): bool {
+    match expression {
+        Expr::Identifier(identifier) => {
+            var location = findLocalLocation(lowerer.scopes, identifier.name);
+            if location.found { return location.binding.negativeZero; }
+        },
+        Expr::Unary(unary) => {
+            if unary.op == opSub {
+                match unary.right {
+                    Expr::Literal(literal) => {
+                        if literal.kind == LiteralKind::Float {
+                            var bits = parseF64LiteralBits(literal.text);
+                            if bits.isOk() && bits.unwrap() == 0 { return true; }
+                        }
+                    },
+                    _ => {},
+                }
+            }
+        },
+        Expr::Call(callExpr) => {
+            var access: FieldAccessExpr? = null;
+            match callExpr.callee { Expr::FieldAccess(fieldAccess) => { access = fieldAccess; }, _ => {} }
+            if access != null {
+                var fieldAccess = requiredFieldAccess(access, fallbackFieldAccess(callExpr.callee));
+                if fieldAccess.name == "toFloat" {
+                    match fieldAccess.object {
+                        Expr::Literal(literal) => {
+                            if literal.kind == LiteralKind::String {
+                                var text = literal.text;
+                                if text.startsWith("-") {
+                                    var index = 1;
+                                    var sawZero = false;
+                                    while index < text.len() {
+                                        var byte = text.slice(index, index + 1);
+                                        if byte == "0" { sawZero = true; }
+                                        else if byte != "." && byte != "e" && byte != "E" && byte != "+" && byte != "-" { return false; }
+                                        index += 1;
+                                    }
+                                    if sawZero { return true; }
+                                }
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        },
+        _ => {},
+    }
+    return false;
 }
 
 func lowerManagedAssert(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr, source: SourceRef): LowerValue {
@@ -2880,7 +2950,7 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         var bucketsValue = managedI64Constant(lowerer, bucketsId, source);
         return managedCallHook(lowerer, "managedMapCreate", ir.irRawAddress(), [mapValue.id, bucketsValue.id], source);
     }
-    if intrinsic == litInt || intrinsic == litChar || intrinsic == litString {
+    if intrinsic == litInt || intrinsic == litChar || intrinsic == litFloat || intrinsic == litString {
         if callExpr.args.len() != 1 { return failExpression(lowerer, expression, "managed conversion requires exactly one argument"); }
         var argumentInfo = findExprInfo(lowerer.checked, lowerer.sourcePath, lowerer.moduleId, callExpr.args[0]);
         if argumentInfo == null { return failExpression(lowerer, expression, "managed conversion argument has no checked type"); }
@@ -2889,11 +2959,19 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
         if intrinsic == litInt && argInfo.ty.kind == kindChar { return argument; }
         if intrinsic == litInt && argInfo.ty.kind == kindString { return managedCallHook(lowerer, "managedStringToInt", irI64(), [argument.id], source); }
+        if intrinsic == litInt && argInfo.ty.kind == kindFloat { return lowerScalarNumericConversion(lowerer, expression, argument, irI64(), source); }
+        if intrinsic == litFloat && argInfo.ty.kind == kindString { return managedCallHook(lowerer, "managedStringToFloat", ir.irF64(), [argument.id], source); }
+        if intrinsic == litFloat && (argInfo.ty.kind == kindInt || argInfo.ty.kind == kindFloat) { return lowerScalarNumericConversion(lowerer, expression, argument, ir.irF64(), source); }
         if intrinsic == litChar && argInfo.ty.kind == kindInt { if !lowerManagedCharRange(lowerer, argument, exprSpan(expression)) { return LowerValue { id: -1, ty: irVoid() }; } return argument; }
         if intrinsic == litChar && argInfo.ty.kind == kindChar { return argument; }
         if intrinsic == litString && argInfo.ty.kind == kindString { return argument; }
         if intrinsic == litString && argInfo.ty.kind == kindChar { return lowerManagedStringCharValue(lowerer, argument, source); }
         if intrinsic == litString && argInfo.ty.kind == kindBool { return lowerManagedBoolString(lowerer, argument, expression); }
+        if intrinsic == litString && argInfo.ty.kind == kindFloat {
+            var zeroHint = allocateValue(lowerer, irBool());
+            appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, callExpr.args[0]), source));
+            return lowerManagedFloatString(lowerer, argument, zeroHint, source);
+        }
         if intrinsic == litString && (argInfo.ty.kind == kindInt || argInfo.ty.kind == kindChar) {
             var layoutId = managedStringLayoutId(lowerer);
             var layoutValue = managedI64Constant(lowerer, layoutId, source);
@@ -2913,6 +2991,11 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         if receiverTypeForString.kind == kindString { return value; }
         if receiverTypeForString.kind == kindBool { return lowerManagedBoolString(lowerer, value, expression); }
         if receiverTypeForString.kind == kindChar { return lowerManagedStringCharValue(lowerer, value, source); }
+        if receiverTypeForString.kind == kindFloat {
+            var zeroHint = allocateValue(lowerer, irBool());
+            appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, receiverAccess.object), source));
+            return lowerManagedFloatString(lowerer, value, zeroHint, source);
+        }
         if receiverTypeForString.kind == kindInt {
             var stringLayoutValue = managedI64Constant(lowerer, managedStringLayoutId(lowerer), source);
             return managedCallHook(lowerer, "managedStringFromInt", ir.irRawAddress(), [stringLayoutValue.id, value.id], source);
@@ -2928,8 +3011,12 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
     if receiverType.kind == kindUnknown { return failExpression(lowerer, expression, "managed method call has no exact checked receiver type"); }
     var receiver = lowerExprExpected(lowerer, access.object, receiverType);
     if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
-    if receiver.id < 0 || receiver.ty.kind != IRTypeKind::RawAddress { return failExpression(lowerer, expression, "managed collection/string method receiver is not a canonical reference"); }
     var method = access.name;
+    if receiverType.kind == kindFloat {
+        if method == litToInt { return lowerScalarNumericConversion(lowerer, expression, receiver, irI64(), source); }
+        if method == "toFloat" { return receiver; }
+    }
+    if receiver.id < 0 || receiver.ty.kind != IRTypeKind::RawAddress { return failExpression(lowerer, expression, "managed collection/string method receiver is not a canonical reference"); }
     var args: Vec<LowerValue> = [];
     var argIndex = 0;
     loop {
@@ -2951,6 +3038,7 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         if method == litLen { return managedCallHook(lowerer, "managedStringLength", irI64(), [receiver.id], source); }
         if method == litHash { return managedCallHook(lowerer, "managedStringHash", irI64(), [receiver.id], source); }
         if method == litToInt { return managedCallHook(lowerer, "managedStringToInt", irI64(), [receiver.id], source); }
+        if method == "toFloat" { return managedCallHook(lowerer, "managedStringToFloat", ir.irF64(), [receiver.id], source); }
         if method == litContains { return managedCallHook(lowerer, "managedStringContains", irBool(), [receiver.id, args[0].id], source); }
         if method == litStartsWith { return managedCallHook(lowerer, "managedStringStartsWith", irBool(), [receiver.id, args[0].id], source); }
         if method == litEndsWith { return managedCallHook(lowerer, "managedStringEndsWith", irBool(), [receiver.id, args[0].id], source); }
@@ -3299,7 +3387,7 @@ func findLocalLocation(scopes: Vec<LocalScope>, name: string): LocalLocation {
         }
         scopeIndex = scopeIndex - 1;
     }
-    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()) } };
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()), negativeZero: false } };
 }
 
 func findLocal(lowerer: FunctionLowerer, name: string): IRValue? {
@@ -3317,6 +3405,7 @@ func updateLocal(lowerer: FunctionLowerer, location: LocalLocation, value: IRVal
         isConst: binding.isConst,
         layoutId: binding.layoutId,
         value: value,
+        negativeZero: binding.negativeZero,
     });
     lowerer.scopes.set(location.scopeIndex, scope);
 }
@@ -3328,8 +3417,23 @@ func bindLocal(lowerer: FunctionLowerer, name: string, identity: string, isConst
     }
     var scopeIndex = lowerer.scopes.len() - 1;
     var scope = lowerer.scopes[scopeIndex];
-    scope.bindings.push(LocalBinding { name: name, identity: identity, isConst: isConst, layoutId: layoutId, value: value });
+    scope.bindings.push(LocalBinding { name: name, identity: identity, isConst: isConst, layoutId: layoutId, value: value, negativeZero: false });
     lowerer.scopes.set(scopeIndex, scope);
+}
+
+func setLocalNegativeZero(lowerer: FunctionLowerer, location: LocalLocation, negativeZero: bool) {
+    if !location.found { return; }
+    var scope = lowerer.scopes[location.scopeIndex];
+    var binding = scope.bindings[location.bindingIndex];
+    scope.bindings.set(location.bindingIndex, LocalBinding {
+        name: binding.name,
+        identity: binding.identity,
+        isConst: binding.isConst,
+        layoutId: binding.layoutId,
+        value: binding.value,
+        negativeZero: negativeZero,
+    });
+    lowerer.scopes.set(location.scopeIndex, scope);
 }
 
 func allocateValue(lowerer: FunctionLowerer, ty: IRType): IRValue {
@@ -3355,6 +3459,7 @@ func cloneScopes(scopes: Vec<LocalScope>): Vec<LocalScope> {
                 isConst: sourceBinding.isConst,
                 layoutId: sourceBinding.layoutId,
                 value: sourceBinding.value,
+                negativeZero: sourceBinding.negativeZero,
             });
             bindingIndex = bindingIndex + 1;
         }
@@ -3380,7 +3485,7 @@ func findBindingIdentity(scopes: Vec<LocalScope>, identity: string): LocalLocati
         }
         scopeIndex = scopeIndex - 1;
     }
-    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()) } };
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()), negativeZero: false } };
 }
 
 func makeBlockEnvironment(lowerer: FunctionLowerer, sourceScopes: Vec<LocalScope>): BlockEnvironment {
@@ -3408,6 +3513,7 @@ func makeBlockEnvironment(lowerer: FunctionLowerer, sourceScopes: Vec<LocalScope
                 isConst: targetBinding.isConst,
                 layoutId: targetBinding.layoutId,
                 value: parameter,
+                negativeZero: targetBinding.negativeZero,
             });
             bindingIndex = bindingIndex + 1;
         }
@@ -4590,7 +4696,6 @@ func lowerExpr(lowerer: FunctionLowerer, expression: Expr): LowerValue {
                 return LowerValue { id: value.id, ty: resultType };
             }
             if literal.kind == LiteralKind::Float {
-                if lowerer.managed { return failExpression(lowerer, expression, "managed float literals are outside the supported aggregate ABI"); }
                 var floatBits = parseF64LiteralBits(literal.text);
                 if floatBits.isErr() { return failExpression(lowerer, expression, floatBits.unwrapErr()); }
                 appendInstruction(lowerer, ir.constF64Bits(value.id, floatBits.unwrap(), spanRef(lowerer.sourcePath, span)));
@@ -4859,7 +4964,14 @@ func lowerDeclaration(lowerer: FunctionLowerer, statement: Stmt, name: string, i
     if maybeBinding != null {
         var binding = requiredCheckedBindingInfo(maybeBinding, lowerer.checked.bindings[0]);
         if lowerer.managed {
-            if !managedTypeIsSupported(lowerer.checked, lowerer.managedLayouts, binding.ty, false) {
+            var nullOnlyNullable = false;
+            if binding.ty.kind == kindNullable {
+                match initializer {
+                    Expr::Literal(literal) => { nullOnlyNullable = literal.kind == LiteralKind::Null; },
+                    _ => {},
+                }
+            }
+            if !managedTypeIsSupported(lowerer.checked, lowerer.managedLayouts, binding.ty, nullOnlyNullable) {
                 lowerer.error = lowerError(lowerer.sourcePath, span.start, "local '" + name + "' has unsupported managed type " + binding.ty.kind);
                 return;
             }
@@ -4895,6 +5007,8 @@ func lowerDeclaration(lowerer: FunctionLowerer, statement: Stmt, name: string, i
         var layoutId = 0;
         if lowerer.managed { layoutId = managedLayoutId(lowerer.managedLayouts, binding.ty); }
         bindLocal(lowerer, name, identity, binding.isConst, layoutId, irValue(initializerValue.id, initializerValue.ty));
+        var location = findLocalLocation(lowerer.scopes, name);
+        setLocalNegativeZero(lowerer, location, managedNegativeZeroHint(lowerer, initializer));
         return;
     }
     lowerer.error = lowerError(lowerer.sourcePath, span.start, "checked local binding metadata is missing");
@@ -5310,6 +5424,7 @@ func lowerAssignment(lowerer: FunctionLowerer, statement: AssignStmt) {
                 }
             }
             updateLocal(lowerer, location, irValue(newValue.id, newValue.ty));
+            setLocalNegativeZero(lowerer, findLocalLocation(lowerer.scopes, identifier.name), managedNegativeZeroHint(lowerer, statement.value));
         },
         Expr::FieldAccess(access) => {
             if !lowerer.managed {
@@ -5843,7 +5958,7 @@ func managedHookNames(): Vec<string> {
     var names: Vec<string> = [
         "managedAllocateSized",
         "managedStringLength", "managedStringByte", "managedStringEqual", "managedStringCompare", "managedStringHash",
-        "managedStringConcat", "managedStringSlice", "managedStringFromInt", "managedStringToInt", "managedStringContains",
+        "managedStringConcat", "managedStringSlice", "managedStringFromInt", "managedStringToInt", "managedStringToFloat", "managedFloatToString", "managedStringContains",
         "managedStringIndexOf", "managedStringStartsWith", "managedStringEndsWith", "managedStringCase", "managedStringTrim",
         "managedStringRepeat", "managedStringReplace", "managedStringPad", "managedWriteString",
         "managedArgsCreate", "managedExit", "managedFileExists", "managedDeleteFile", "managedWriteFile", "managedAppendFile",
@@ -5858,7 +5973,7 @@ func managedHookNames(): Vec<string> {
 }
 
 func managedHookCollects(name: string): bool {
-    return name == litManagedAllocateSized || name == litManagedStringConcat || name == litManagedStringSlice || name == litManagedStringFromInt || name == litManagedStringCase || name == litManagedStringTrim || name == litManagedStringRepeat || name == litManagedStringReplace || name == litManagedStringPad || name == litManagedVecCreate || name == litManagedVecPushI64 || name == litManagedVecPushReference || name == litManagedMapCreate || name == litManagedMapKeys || name == litManagedMapSetI64 || name == litManagedMapSetReference;
+    return name == litManagedAllocateSized || name == litManagedStringConcat || name == litManagedStringSlice || name == litManagedStringFromInt || name == "managedFloatToString" || name == litManagedStringCase || name == litManagedStringTrim || name == litManagedStringRepeat || name == litManagedStringReplace || name == litManagedStringPad || name == litManagedVecCreate || name == litManagedVecPushI64 || name == litManagedVecPushReference || name == litManagedMapCreate || name == litManagedMapKeys || name == litManagedMapSetI64 || name == litManagedMapSetReference;
 }
 
 func buildManagedHooks(firstId: int): Vec<ManagedHook> {
@@ -5879,6 +5994,8 @@ func managedHookParameters(name: string): Vec<IRType> {
     var raw = ir.irRawAddress();
     if name == litManagedAllocateSized { return [irI64(), irI64()]; }
     if name == litManagedStringLength || name == litManagedStringToInt || name == litManagedStringHash { return [raw]; }
+    if name == "managedStringToFloat" { return [raw]; }
+    if name == "managedFloatToString" { return [irI64(), ir.irF64(), irBool()]; }
     if name == litManagedStringByte || name == litManagedVecGetI64 || name == litManagedVecGetReference { return [raw, irI64()]; }
     if name == litManagedVecPopI64 || name == litManagedVecPopReference || name == litManagedVecLength || name == litManagedVecCapacity || name == litManagedMapLength { return [raw]; }
     if name == litManagedStringEqual || name == litManagedStringCompare || name == litManagedStringContains || name == litManagedStringIndexOf || name == litManagedStringStartsWith || name == litManagedStringEndsWith || name == litManagedMapHas || name == litManagedMapGetI64 || name == litManagedMapGetReference || name == litManagedMapDelete { return [raw, raw]; }
@@ -5914,7 +6031,8 @@ func managedHookParameters(name: string): Vec<IRType> {
 }
 
 func managedHookResult(name: string): IRType {
-    if name == litManagedAllocateSized || name == litManagedStringConcat || name == litManagedStringSlice || name == litManagedStringFromInt || name == litManagedStringCase || name == litManagedStringTrim || name == litManagedStringRepeat || name == litManagedStringReplace || name == litManagedStringPad || name == litManagedArgsCreate || name == litManagedReadFile || name == litManagedListDir || name == litManagedVecCreate || name == litManagedVecJoin || name == litManagedVecGetReference || name == litManagedVecPopReference || name == litManagedMapCreate || name == litManagedMapKeys || name == litManagedMapGetReference { return ir.irRawAddress(); }
+    if name == litManagedAllocateSized || name == litManagedStringConcat || name == litManagedStringSlice || name == litManagedStringFromInt || name == "managedFloatToString" || name == litManagedStringCase || name == litManagedStringTrim || name == litManagedStringRepeat || name == litManagedStringReplace || name == litManagedStringPad || name == litManagedArgsCreate || name == litManagedReadFile || name == litManagedListDir || name == litManagedVecCreate || name == litManagedVecJoin || name == litManagedVecGetReference || name == litManagedVecPopReference || name == litManagedMapCreate || name == litManagedMapKeys || name == litManagedMapGetReference { return ir.irRawAddress(); }
+    if name == "managedStringToFloat" { return ir.irF64(); }
     if name == litManagedVecSetI64 || name == litManagedVecSetReference || name == litManagedVecPushI64 || name == litManagedVecPushReference || name == litManagedVecTruncate || name == litManagedMapSetI64 || name == litManagedMapSetReference { return irVoid(); }
     if name == litManagedStringEqual || name == litManagedStringContains || name == litManagedStringStartsWith || name == litManagedStringEndsWith || name == litManagedFileExists || name == litManagedMapHas || name == litManagedMapDelete || name == litManagedVecContainsI64 || name == litManagedVecContainsReference || name == litManagedVecContainsString || name == litManagedWriteBytes || name == litManagedWritePackedSegments { return irBool(); }
     if name == litManagedStringLength || name == litManagedStringByte || name == litManagedStringCompare || name == litManagedStringHash || name == litManagedStringIndexOf || name == litManagedStringToInt || name == litManagedVecLength || name == litManagedVecCapacity || name == litManagedVecGetI64 || name == litManagedVecPopI64 || name == litManagedMapLength || name == litManagedMapGetI64 { return irI64(); }
@@ -5945,6 +6063,10 @@ func managedHookStub(hook: ManagedHook): IRFunction {
         var resultBool = irValue(parameters.len() + 1, resultType);
         instructions.push(constBool(resultBool.id, false, source));
         terminator = returnValue(resultBool.id, source);
+    } else if resultType.kind == IRTypeKind::F64 {
+        var resultFloat = irValue(parameters.len() + 1, resultType);
+        instructions.push(ir.constF64Bits(resultFloat.id, 0, source));
+        terminator = returnValue(resultFloat.id, source);
     }
     var block = basicBlock(0, [], instructions, terminator);
     return irFunction(hook.functionId, functionKey("__rey_managed_hook", "", hook.runtimeName), functionSignature(parameterTypes, resultType), parameters, [block], unknownEffectsFor(parameters.len()));

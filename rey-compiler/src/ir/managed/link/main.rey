@@ -459,7 +459,7 @@ pub func loadManagedRuntime(runtimeRoot: string, stdRoot: string): Result<IRProg
         while sourceAt < embeddedStd.len() { graphSources.push(embeddedStd[sourceAt]); sourceAt += 1; }
     }
     var entry = root + "/main.rey";
-    var units: Vec<string> = [root + "/layout/main.rey", root + "/heap/main.rey", root + "/gc/main.rey", root + "/managed/main.rey", root + "/containers/main.rey", root + "/host/main.rey"];
+    var units: Vec<string> = [root + "/layout/main.rey", root + "/heap/main.rey", root + "/gc/main.rey", root + "/managed/main.rey", root + "/containers/main.rey", root + "/float/main.rey", root + "/host/main.rey"];
     var checked = checkSourceFileGraphWithEmbedded(entry, stdRoot, units, graphSources);
     if checked.isErr() { return Result.Err(checked.unwrapErr()); }
     return lowerProgram(checked.unwrap());
@@ -474,7 +474,7 @@ pub func requiresManagedLowering(checked: CheckedProgram): bool {
     index = 0;
     while index < checked.expressions.len() {
         var kind = checked.expressions[index].ty.kind;
-        if kind == "Struct" || kind == "Nullable" || kind == "String" || kind == "Char" || kind == "Tuple" || kind == "Enum" || kind == "Option" || kind == "Result" || kind == "Array" || kind == "Vec" || kind == "HashMap" || kind == "Map" || kind == "Dict" { return true; }
+        if kind == "Struct" || kind == "Nullable" || kind == "String" || kind == "Char" || kind == "Float" || kind == "Tuple" || kind == "Enum" || kind == "Option" || kind == "Result" || kind == "Array" || kind == "Vec" || kind == "HashMap" || kind == "Map" || kind == "Dict" { return true; }
         index += 1;
     }
     return false;
@@ -515,6 +515,7 @@ pub func regionRuntimeUnits(runtimeRoot: string): Vec<string> {
     units.push(root + "/managed/main.rey");
     units.push(root + "/layout/main.rey");
     units.push(root + "/containers/main.rey");
+    units.push(root + "/float/main.rey");
     units.push(root + "/task/main.rey");
     units.push(root + "/host/main.rey");
     return units;

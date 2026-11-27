@@ -1,6 +1,7 @@
 import host::{hostAccess, hostArg, hostArgCount, hostArgRelease, hostClose, hostExit, hostFchmod, hostFstat, hostGetdirentries, hostLseek, hostOpen, hostOpenat, hostOutputSafetySupported, hostRead, hostRenameat2, hostUnlink, hostUnlinkat, hostWrite};
 import layout::{layoutPayloadBytes, layoutPayloadSizeValid, layoutReferenceCount, layoutReferenceOffset, layoutTailKind};
 import managed::{managedAllocateSized, managedLiveObjects, managedStoreReference};
+import float::{floatFormatF64ToBuffer, floatParseF64String};
 
 func containersAddressAt(base: __rey_raw_address, offset: int): __rey_raw_address {
     return __reyRawOffset(base, offset);
@@ -169,6 +170,27 @@ func containersNewString(context: __rey_raw_address, stringLayoutId: int, length
     __reyRawStoreI64(containersAddressAt(value, 16), length);
     __reyRawStoreByte(containersAddressAt(value, 24 + length), 0);
     return value;
+}
+
+pub func managedFloatToString(context: __rey_raw_address, stringLayoutId: int, value: float, negativeZeroHint: bool): __rey_raw_address {
+    var capacity = 512;
+    var bytes = __reyRawMap(capacity);
+    if __reyRawToInt(bytes) < 0 { containersFail(2201); return __reyRawNull(); }
+    var length = floatFormatF64ToBuffer(value, negativeZeroHint, bytes);
+    if length < 0 || length >= capacity { __reyRawUnmap(bytes, capacity); containersFail(2201); return __reyRawNull(); }
+    var result = containersNewString(context, stringLayoutId, length);
+    var index = 0;
+    while index < length {
+        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(bytes, index)));
+        index = index + 1;
+    }
+    __reyRawUnmap(bytes, capacity);
+    return result;
+}
+
+pub func managedStringToFloat(context: __rey_raw_address, value: __rey_raw_address): float {
+    var length = managedStringLength(context, value);
+    return floatParseF64String(value, length);
 }
 
 pub func managedStringLength(context: __rey_raw_address, value: __rey_raw_address): int {

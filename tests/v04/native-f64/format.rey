@@ -1,0 +1,70 @@
+func expect(condition: bool): void {
+    if !condition {
+        var one = 1;
+        var zero = 0;
+        var trap = one / zero;
+    }
+}
+
+func main(): void {
+    var positiveZero: float = 0.0;
+    var negativeZero: float = -0.0;
+    var one: float = 1.0;
+    var negativeOne: float = -1.0;
+    var oneAndHalf: float = 1.5;
+    var tenth: float = 0.1;
+    var fixedLimit: float = 0.0001;
+    var exponentLimit: float = 0.00001;
+    var largeFixedLimit: float = 10000000000000000.0;
+    var two53: float = 9007199254740992.0;
+    var two70: float = 1180591620717411303424.0;
+    var largest: float = "1.7976931348623157e308".toFloat();
+    var smallestNormal: float = "2.2250738585072014e-308".toFloat();
+    var largestSubnormal: float = "2.225073858507201e-308".toFloat();
+    var smallestSubnormal: float = "5e-324".toFloat();
+    var positiveInfinity: float = largest * 2.0;
+    var negativeInfinity: float = -positiveInfinity;
+    var nan: float = positiveInfinity - positiveInfinity;
+
+    expect(positiveZero.toString() == "0");
+    expect(negativeZero.toString() == "-0");
+    expect("-0.0".toFloat().toString() == "-0");
+    expect(one.toString() == "1");
+    expect(negativeOne.toString() == "-1");
+    expect(oneAndHalf.toString() == "1.5");
+    expect(tenth.toString() == "0.1");
+    expect(fixedLimit.toString() == "0.0001");
+    expect(exponentLimit.toString() == "1e-5");
+    expect(largeFixedLimit.toString() == "1e16");
+    expect(two53.toString() == "9007199254740992");
+    expect(two70.toString() == "1.1805916207174113e21");
+    expect(largest.toString() == "1.7976931348623157e308");
+    expect(smallestNormal.toString() == "2.2250738585072014e-308");
+    expect(largestSubnormal.toString() == "2.225073858507201e-308");
+    expect(smallestSubnormal.toString() == "5e-324");
+    expect(positiveInfinity.toString() == "inf");
+    expect(negativeInfinity.toString() == "-inf");
+    expect(nan.toString() == "NaN");
+
+    expect("0.1".toFloat() == tenth);
+    expect("1e-4".toFloat() == fixedLimit);
+    expect("1e-5".toFloat() == exponentLimit);
+    expect("9007199254740992".toFloat() == two53);
+    expect("1.1805916207174113e21".toFloat() == two70);
+    expect("1.7976931348623157e308".toFloat() == largest);
+    expect("2.2250738585072014e-308".toFloat() == smallestNormal);
+    expect("2.225073858507201e-308".toFloat() == largestSubnormal);
+    expect("5e-324".toFloat() == smallestSubnormal);
+
+    var pi: float = 3.14;
+    println(pi.toString());
+    println(pi);
+    println("pi = {pi}");
+    println(negativeZero);
+    println("negative zero = {negativeZero}");
+    println("-0.0".toFloat());
+    println(10.0 / 3.0);
+    println(positiveInfinity);
+    println(negativeInfinity);
+    println(nan);
+}
