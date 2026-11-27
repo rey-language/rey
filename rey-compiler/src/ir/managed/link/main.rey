@@ -235,6 +235,15 @@ func copyFunction(value: IRFunction, shift: int): IRFunction {
         copyValues(value.parameters), blocks, copiedEffects);
 }
 
+func copyLinkedRuntimeFunction(value: IRFunction, shift: int, runtimeRoot: string): IRFunction {
+    var copied = copyFunction(value, shift);
+    if copied.key.module == "__rey_global" {
+        copied.key = ir.functionKey(canonicalSourcePath(runtimeRoot) + "/__rey_global",
+            copied.key.owner, copied.key.name);
+    }
+    return copied;
+}
+
 var runtimeExactIndex: HashMap<string, Vec<int>> = HashMap.new();
 var runtimeNameIndex: HashMap<string, Vec<int>> = HashMap.new();
 
@@ -392,7 +401,7 @@ pub func linkManagedRuntime(input: ManagedProgram, runtimeProgram: IRProgram, ru
     while index < runtimeProgram.functions.len() {
         var function = runtimeProgram.functions[index];
         if function.id > 9223372036854775807 - shift { return Result.Err("managed linker: exhausted function IDs"); }
-        functions.push(copyFunction(function, shift)); index += 1;
+        functions.push(copyLinkedRuntimeFunction(function, shift, runtimeRoot)); index += 1;
     }
     var root = canonicalSourcePath(runtimeRoot);
     var managedModule = root + "/managed/main.rey";
@@ -762,7 +771,7 @@ pub func linkRegionRuntime(input: ManagedProgram, runtimeProgram: IRProgram, run
     while index < runtimeProgram.functions.len() {
         var function = runtimeProgram.functions[index];
         if function.id > 9223372036854775807 - shift { return Result.Err("region linker: exhausted function IDs"); }
-        functions.push(copyFunction(function, shift));
+        functions.push(copyLinkedRuntimeFunction(function, shift, root));
         index += 1;
     }
     var runtimeCopiedPayloadBytes = retentionCopiedPayloadBytes - runtimeCopyBytesBefore;
