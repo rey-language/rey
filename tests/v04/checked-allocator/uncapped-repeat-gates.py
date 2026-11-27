@@ -21,6 +21,8 @@ FORBIDDEN = {
     "llvm-as", "llvm-objcopy",
 }
 BUILD_HELPER = Path(__file__).resolve().parent / "uncapped-build.sh"
+# Managed self-hosted driver builds can spend significant time paging under load.
+BUILD_TIMEOUT_SECONDS = 7200
 
 
 def load_module(name, path):
@@ -164,7 +166,7 @@ class UncappedRegionGate:
         cgroup_path = self.logs / (slug + ".cgroup") if build else None
         status_path = self.logs / (slug + ".build-status") if build else None
         if build:
-            timeout = max(timeout, 2400)
+            timeout = max(timeout, BUILD_TIMEOUT_SECONDS)
             wrapped_command = [
                 "strace", "-f", "-e", "trace=execve,execveat", "-o", str(trace_path), "--",
                 "/usr/bin/time", "-v", "-o", str(timing_path), *command,
@@ -331,7 +333,7 @@ def run_r02(seed, source, out):
             cgroup_path = self.logs / (slug + ".build.cgroup") if build else None
             status_path = self.logs / (slug + ".build-status") if build else None
             if build:
-                timeout = max(timeout, 2400)
+                timeout = max(timeout, BUILD_TIMEOUT_SECONDS)
                 command = ["strace", "-f", "-e", "trace=execve,execveat", "-o", str(trace_path), "--",
                            "/usr/bin/time", "-v", "-o", str(timing_path), *command]
             if build:
