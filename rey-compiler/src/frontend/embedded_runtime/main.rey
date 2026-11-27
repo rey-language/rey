@@ -270,468 +270,490 @@ func embeddedRuntimeSource1Part5(): string {
     ("tainersAddressAt(message, 69), 110);\n    __reyRawStoreByte(containersAddressAt(message, 70), 32);\n    __reyRawStoreByte(containersAddressAt(message, 71), 102);\n    __reyRawStoreByte(containers" +
     ("AddressAt(message, 72), 97);\n    __reyRawStoreByte(containersAddressAt(message, 73), 105);\n    __reyRawStoreByte(containersAddressAt(message, 74), 108);\n    __reyRawStoreByte(containersAddress" +
     "At(message, 75), 101);\n    __reyRawStoreByte(containersAddressAt(message, 76), 100);\n    __reyRawStoreByte(containersAddressAt(message, 77), 10);\n    containersWriteStaging(__reyRawNull(), 2, "))) +
-    (("message, 78);\n    __reyRawUnmap(message, 78);\n    return;\n\x7D\n\nfunc containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: __rey_raw_address, dataLa" +
-    "youtId: int): int \x7B\n    var protocolLength = managedStringLength(context, protocol);\n    var protocolData = containersPathData(protocol);\n    if protocolLength < 20 \x7B return -1; \x7D\n    if __rey") +
-    ("RawLoadByte(containersAddressAt(protocolData, 0)) != 0 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 2)" +
-    (") != 101 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 4)) != 45 ||\n        __reyRawLoadByte(containers" +
-    "AddressAt(protocolData, 5)) != 111 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 7)) != 116 ||\n        ")))) +
-    ((("__reyRawLoadByte(containersAddressAt(protocolData, 8)) != 112 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||\n        __reyRawLoadByte(containersAddressAt(protocolD" +
-    "ata, 10)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 12)) != 112 ||\n        __reyRawLoadByte(") +
-    ("containersAddressAt(protocolData, 13)) != 97 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 15)) != 114" +
-    (" ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||\n        __reyRawLoadByte(containersAddres" +
-    "sAt(protocolData, 18)) != 49 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 \x7B return -1; \x7D\n    var separator = 20;\n    while separator < protocolLength && __reyRawLoad"))) +
-    (("Byte(containersAddressAt(protocolData, separator)) != 0 \x7B separator += 1; \x7D\n    if separator == 20 || separator >= protocolLength \x7B return 1; \x7D\n    var imagePathLength = separator - 20;\n    va" +
-    ("r mapPathStart = separator + 1;\n    var mapPathLength = protocolLength - mapPathStart;\n    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 \x7B r" +
-    "eturn 1; \x7D\n    var imagePath = __reyRawMap(4096);\n    var mapPath = __reyRawMap(4096);\n    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 \x7B\n        if __reyRawToInt(imagePath) >")) +
-    ("= 0 \x7B __reyRawUnmap(imagePath, 4096); \x7D\n        if __reyRawToInt(mapPath) >= 0 \x7B __reyRawUnmap(mapPath, 4096); \x7D\n        return 1;\n    \x7D\n    var index = 0;\n    while index < imagePathLength \x7B " +
-    ("__reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(imagePath, im" +
-    "agePathLength), 0);\n    index = 0;\n    while index < mapPathLength \x7B __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocolData, mapPathStart + in"))))) +
-    (((("dex))); index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);\n\n    var backing = containersVecBacking(context, vector, 1);\n    if containersVecRequireKind(contex" +
-    "t, backing, 1) != dataLayoutId \x7B containersFail(2203); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; \x7D\n    var totalLength = __reyRawLoadI64(containersAddressAt(backi") +
-    ("ng, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if totalLength < 20 || totalLength > capacity \x7B containersFail(2205); __reyRawUnmap(imagePath, 4096" +
-    ("); __reyRawUnmap(mapPath, 4096); return 1; \x7D\n    var trailer = totalLength - 20;\n    if __reyRawLoadI64(containersVecTailAddress(backing, trailer)) != 82 || __reyRawLoadI64(containersVecTailAd" +
-    "dress(backing, trailer + 1)) != 89 ||\n        __reyRawLoadI64(containersVecTailAddress(backing, trailer + 2)) != 80 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 3)) != 49 \x7B\n "))) +
-    (("       __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n    var imageLength = 0;\n    var mapLength = 0;\n    var factor = 1;\n    index = 0;\n    while index < 4 \x7B\n  " +
-    ("      var imagePart = __reyRawLoadI64(containersVecTailAddress(backing, trailer + 4 + index));\n        var mapPart = __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index));\n " +
-    "       if imagePart < 0 || imagePart > 255 || mapPart < 0 || mapPart > 255 || (index == 3 && (imagePart > 127 || mapPart > 127)) \x7B\n            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(map")) +
-    ("Path, 4096); return 1;\n        \x7D\n        imageLength += imagePart * factor;\n        mapLength += mapPart * factor;\n        factor *= 256;\n        index += 1;\n    \x7D\n    index = 4;\n    while ind" +
-    ("ex < 8 \x7B\n        if __reyRawLoadI64(containersVecTailAddress(backing, trailer + 4 + index)) != 0 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index)) != 0 \x7B\n            " +
-    "__reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n        \x7D\n        index += 1;\n    \x7D\n    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + 20 != totalLeng")))) +
-    ((("th \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    var mapDirectory = containers" +
-    "OpenOutputDirectory(mapPath);\n    __reyRawUnmap(imagePath, 4096);\n    __reyRawUnmap(mapPath, 4096);\n    if !containersOutputValid(imageDirectory) || !containersOutputValid(mapDirectory) \x7B\n    ") +
-    ("    containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirectory(mapDirectory); return 1;\n    \x7D\n    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirec" +
-    ("tory), containersOutputName(imageDirectory));\n    var mapIdentity = containersTargetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));\n    var destinationsSafe = c" +
-    "ontainersOutputDestinationsSafe(context, imageDirectory, imageIdentity, mapDirectory, mapIdentity);\n    containersReleaseTargetIdentity(imageIdentity);\n    containersReleaseTargetIdentity(mapI"))) +
-    (("dentity);\n    if !destinationsSafe \x7B\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    var preparedImage = containersPre" +
-    ("pareByteVector(context, imageDirectory, mapDirectory, vector, dataLayoutId, 0, imageLength, 493);\n    if !containersPreparedValid(preparedImage) \x7B containersCloseOutputDirectory(mapDirectory);" +
-    " containersCloseOutputDirectory(imageDirectory); return 1; \x7D\n    var preparedMap = containersPrepareByteVector(context, mapDirectory, imageDirectory, vector, dataLayoutId, imageLength, mapLeng")) +
-    ("th, 420);\n    if !containersPreparedValid(preparedMap) \x7B\n        containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); container" +
-    ("sCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    if !containersPublishPreparedOutput(context, mapDirectory, preparedMap) \x7B\n        containersDiscardPreparedOutput(mapDirectory, prepa" +
-    "redMap); containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); c"))))));
+    (("message, 78);\n    __reyRawUnmap(message, 78);\n    return;\n\x7D\n\nfunc containersPublishCompilerOutputImageVector(context: __rey_raw_address, imagePath: __rey_raw_address, vector: __rey_raw_address" +
+    ", dataLayoutId: int, imageLength: int): bool \x7B\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    if !containersOutputValid(imageDirectory) \x7B return false; \x7D\n    var imageI") +
+    ("dentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));\n    var state = containersTargetState(imageIdentity);\n    var safe = state >= 0 &&" +
+    (" !(state == 1 && containersInputIdentityProtected(context, containersTargetDevice(imageIdentity), containersTargetInode(imageIdentity)));\n    containersReleaseTargetIdentity(imageIdentity);\n  " +
+    "  if !safe \x7B\n        containersCloseOutputDirectory(imageDirectory);\n        return false;\n    \x7D\n    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);\n    var prepared")))) +
+    (((" = containersPrepareByteVector(context, imageDirectory, otherDirectory, vector, dataLayoutId, 0, imageLength, 493);\n    if !containersPreparedValid(prepared) \x7B\n        containersCloseOutputDir" +
+    "ectory(imageDirectory);\n        return false;\n    \x7D\n    var published = containersPublishPreparedOutput(context, imageDirectory, prepared);\n    containersDiscardPreparedOutput(imageDirectory, ") +
+    ("prepared);\n    containersCloseOutputDirectory(imageDirectory);\n    return published;\n\x7D\n\nfunc containersPublishCompilerOutputImageString(context: __rey_raw_address, imagePath: __rey_raw_address" +
+    (", content: __rey_raw_address, imageLength: int): bool \x7B\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    if !containersOutputValid(imageDirectory) \x7B return false; \x7D\n    v" +
+    "ar imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));\n    var state = containersTargetState(imageIdentity);\n    var safe = stat"))) +
+    (("e >= 0 && !(state == 1 && containersInputIdentityProtected(context, containersTargetDevice(imageIdentity), containersTargetInode(imageIdentity)));\n    containersReleaseTargetIdentity(imageIden" +
+    ("tity);\n    if !safe \x7B\n        containersCloseOutputDirectory(imageDirectory);\n        return false;\n    \x7D\n    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);\n    var" +
+    " prepared = containersPrepareStringRange(context, imageDirectory, otherDirectory, content, 0, imageLength, 493);\n    if !containersPreparedValid(prepared) \x7B\n        containersCloseOutputDirect")) +
+    ("ory(imageDirectory);\n        return false;\n    \x7D\n    var published = containersPublishPreparedOutput(context, imageDirectory, prepared);\n    containersDiscardPreparedOutput(imageDirectory, pre" +
+    ("pared);\n    containersCloseOutputDirectory(imageDirectory);\n    return published;\n\x7D\n\nfunc containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: _" +
+    "_rey_raw_address, dataLayoutId: int): int \x7B\n    var protocolLength = managedStringLength(context, protocol);\n    var protocolData = containersPathData(protocol);\n    if protocolLength < 20 \x7B r"))))) +
+    (((("eturn -1; \x7D\n    if __reyRawLoadByte(containersAddressAt(protocolData, 0)) != 0 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||\n        __reyRawLoadByte(containersAd" +
+    "dressAt(protocolData, 2)) != 101 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 4)) != 45 ||\n        __r") +
+    ("eyRawLoadByte(containersAddressAt(protocolData, 5)) != 111 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||\n        __reyRawLoadByte(containersAddressAt(protocolData" +
+    (", 7)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 8)) != 112 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||\n        __reyRawLoadByte(conta" +
+    "inersAddressAt(protocolData, 10)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 12)) != 112 ||\n "))) +
+    (("       __reyRawLoadByte(containersAddressAt(protocolData, 13)) != 97 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||\n        __reyRawLoadByte(containersAddressAt(p" +
+    ("rotocolData, 15)) != 114 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||\n        __reyRawL" +
+    "oadByte(containersAddressAt(protocolData, 18)) != 49 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 \x7B return -1; \x7D\n    var separator = 20;\n    while separator < protoc")) +
+    ("olLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 \x7B separator += 1; \x7D\n    if separator == 20 || separator >= protocolLength \x7B return 1; \x7D\n    var imagePathLength " +
+    ("= separator - 20;\n    var mapPathStart = separator + 1;\n    var mapPathLength = protocolLength - mapPathStart;\n    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength < 0 || ma" +
+    "pPathLength >= 4096 \x7B return 1; \x7D\n    var imagePath = __reyRawMap(4096);\n    var mapPath = __reyRawMap(4096);\n    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 \x7B\n        if __r")))) +
+    ((("eyRawToInt(imagePath) >= 0 \x7B __reyRawUnmap(imagePath, 4096); \x7D\n        if __reyRawToInt(mapPath) >= 0 \x7B __reyRawUnmap(mapPath, 4096); \x7D\n        return 1;\n    \x7D\n    var index = 0;\n    while ind" +
+    "ex < imagePathLength \x7B __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; \x7D\n    __reyRawStoreByte(containers") +
+    ("AddressAt(imagePath, imagePathLength), 0);\n    index = 0;\n    while index < mapPathLength \x7B __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocol" +
+    ("Data, mapPathStart + index))); index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);\n\n    var backing = containersVecBacking(context, vector, 1);\n    if containe" +
+    "rsVecRequireKind(context, backing, 1) != dataLayoutId \x7B containersFail(2203); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; \x7D\n    var totalLength = __reyRawLoadI64(co"))) +
+    (("ntainersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if totalLength < 0 || totalLength > capacity \x7B containersFail(2205); __reyRa" +
+    ("wUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; \x7D\n    if mapPathLength == 0 \x7B\n        var published = containersPublishCompilerOutputImageVector(context, imagePath, vector, da" +
+    "taLayoutId, totalLength);\n        __reyRawUnmap(imagePath, 4096);\n        __reyRawUnmap(mapPath, 4096);\n        if published \x7B return 0; \x7D\n        return 1;\n    \x7D\n    if totalLength < 20 \x7B con")) +
+    ("tainersFail(2205); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; \x7D\n    var trailer = totalLength - 20;\n    if __reyRawLoadI64(containersVecTailAddress(backing, traile" +
+    ("r)) != 82 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 1)) != 89 ||\n        __reyRawLoadI64(containersVecTailAddress(backing, trailer + 2)) != 80 || __reyRawLoadI64(container" +
+    "sVecTailAddress(backing, trailer + 3)) != 49 \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n "))))));
 }
 
 func embeddedRuntimeSource1Part6(): string {
-    return ((((("ontainersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    containersDiscardPreparedOutput(mapDirectory, preparedMap);\n    if !containersPublishPreparedOutput(context, imageDirectory, " +
-    "preparedImage) \x7B\n        containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n ") +
-    ("       containersWarnMapMayBeFromFailedBuild();\n        return 2;\n    \x7D\n    containersDiscardPreparedOutput(imageDirectory, preparedImage);\n    containersCloseOutputDirectory(mapDirectory); co" +
-    ("ntainersCloseOutputDirectory(imageDirectory);\n    return 0;\n\x7D\n\nfunc containersPublishCompilerOutputPairFromString(context: __rey_raw_address, protocol: __rey_raw_address, content: __rey_raw_ad" +
-    "dress): int \x7B\n    var protocolLength = managedStringLength(context, protocol);\n    var protocolData = containersPathData(protocol);\n    if protocolLength < 20 \x7B return -1; \x7D\n    if __reyRawLoa"))) +
-    (("dByte(containersAddressAt(protocolData, 0)) != 0 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 2)) != 1" +
-    "01 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 4)) != 45 ||\n        __reyRawLoadByte(containersAddres") +
-    ("sAt(protocolData, 5)) != 111 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 7)) != 116 ||\n        __reyR" +
-    ("awLoadByte(containersAddressAt(protocolData, 8)) != 112 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 1" +
-    "0)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 12)) != 112 ||\n        __reyRawLoadByte(contai")))) +
-    ((("nersAddressAt(protocolData, 13)) != 97 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 15)) != 114 ||\n  " +
-    "      __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||\n        __reyRawLoadByte(containersAddressAt(pr") +
-    ("otocolData, 18)) != 49 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 \x7B return -1; \x7D\n    var separator = 20;\n    while separator < protocolLength && __reyRawLoadByte(c" +
-    ("ontainersAddressAt(protocolData, separator)) != 0 \x7B separator += 1; \x7D\n    if separator == 20 || separator >= protocolLength \x7B return 1; \x7D\n    var imagePathLength = separator - 20;\n    var mapP" +
-    "athStart = separator + 1;\n    var mapPathLength = protocolLength - mapPathStart;\n    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 \x7B return "))) +
-    (("1; \x7D\n    var imagePath = __reyRawMap(4096);\n    var mapPath = __reyRawMap(4096);\n    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 \x7B\n        if __reyRawToInt(imagePath) >= 0 \x7B " +
-    ("__reyRawUnmap(imagePath, 4096); \x7D\n        if __reyRawToInt(mapPath) >= 0 \x7B __reyRawUnmap(mapPath, 4096); \x7D\n        return 1;\n    \x7D\n    var index = 0;\n    while index < imagePathLength \x7B __reyR" +
-    "awStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(imagePath, imagePat")) +
-    ("hLength), 0);\n    index = 0;\n    while index < mapPathLength \x7B __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containersAddressAt(protocolData, mapPathStart + index)))" +
-    ("; index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);\n\n    var contentLength = managedStringLength(context, content);\n    var contentData = containersPathData(" +
-    "content);\n    if contentLength < 20 \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n    var trailer = contentLength - 20;\n    if __reyRawLoadByte(contai"))))) +
-    (((("nersAddressAt(contentData, trailer)) != 82 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 1)) != 89 ||\n        __reyRawLoadByte(containersAddressAt(contentData, trailer + 2)) !" +
-    "= 80 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 3)) != 49 \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n    var imageLength = 0;\n ") +
-    ("   var mapLength = 0;\n    var factor = 1;\n    index = 0;\n    while index < 4 \x7B\n        var imagePart = __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index));\n        var mapP" +
-    ("art = __reyRawLoadByte(containersAddressAt(contentData, trailer + 12 + index));\n        if index == 3 && (imagePart > 127 || mapPart > 127) \x7B\n            __reyRawUnmap(imagePath, 4096); __reyR" +
-    "awUnmap(mapPath, 4096); return 1;\n        \x7D\n        imageLength += imagePart * factor;\n        mapLength += mapPart * factor;\n        factor *= 256;\n        index += 1;\n    \x7D\n    index = 4;\n  "))) +
-    (("  while index < 8 \x7B\n        if __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index)) != 0 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 12 + index)) != 0 \x7B\n " +
-    ("           __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n        \x7D\n        index += 1;\n    \x7D\n    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + 20 !" +
-    "= contentLength \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    var mapDirectory")) +
-    (" = containersOpenOutputDirectory(mapPath);\n    __reyRawUnmap(imagePath, 4096);\n    __reyRawUnmap(mapPath, 4096);\n    if !containersOutputValid(imageDirectory) || !containersOutputValid(mapDire" +
-    ("ctory) \x7B\n        containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirectory(mapDirectory); return 1;\n    \x7D\n    var imageIdentity = containersTargetIdentity(containersOutput" +
-    "Fd(imageDirectory), containersOutputName(imageDirectory));\n    var mapIdentity = containersTargetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));\n    var destina")))) +
-    ((("tionsSafe = containersOutputDestinationsSafe(context, imageDirectory, imageIdentity, mapDirectory, mapIdentity);\n    containersReleaseTargetIdentity(imageIdentity);\n    containersReleaseTarget" +
-    "Identity(mapIdentity);\n    if !destinationsSafe \x7B\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    var preparedImage = ") +
-    ("containersPrepareStringRange(context, imageDirectory, mapDirectory, content, 0, imageLength, 493);\n    if !containersPreparedValid(preparedImage) \x7B containersCloseOutputDirectory(mapDirectory)" +
-    ("; containersCloseOutputDirectory(imageDirectory); return 1; \x7D\n    var preparedMap = containersPrepareStringRange(context, mapDirectory, imageDirectory, content, imageLength, mapLength, 420);\n " +
-    "   if !containersPreparedValid(preparedMap) \x7B\n        containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutpu"))) +
-    (("tDirectory(imageDirectory); return 1;\n    \x7D\n    if !containersPublishPreparedOutput(context, mapDirectory, preparedMap) \x7B\n        containersDiscardPreparedOutput(mapDirectory, preparedMap); co" +
-    ("ntainersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    containe" +
-    "rsDiscardPreparedOutput(mapDirectory, preparedMap);\n    if !containersPublishPreparedOutput(context, imageDirectory, preparedImage) \x7B\n        containersDiscardPreparedOutput(imageDirectory, pr")) +
-    ("eparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n        containersWarnMapMayBeFromFailedBuild();\n        return 2;\n    \x7D\n   " +
-    (" containersDiscardPreparedOutput(imageDirectory, preparedImage);\n    containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n    return 0;\n\x7D\n\nfunc contain" +
-    "ersPackedByte(lane: int, slot: int): int \x7B\n    var factor = 1;\n    var index = 0;\n    while index < slot \x7B factor = factor * 256"))))));
+    return ((((("   \x7D\n    var imageLength = 0;\n    var mapLength = 0;\n    var factor = 1;\n    index = 0;\n    while index < 4 \x7B\n        var imagePart = __reyRawLoadI64(containersVecTailAddress(backing, trailer " +
+    "+ 4 + index));\n        var mapPart = __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index));\n        if imagePart < 0 || imagePart > 255 || mapPart < 0 || mapPart > 255 || (i") +
+    ("ndex == 3 && (imagePart > 127 || mapPart > 127)) \x7B\n            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n        \x7D\n        imageLength += imagePart * factor;\n    " +
+    ("    mapLength += mapPart * factor;\n        factor *= 256;\n        index += 1;\n    \x7D\n    index = 4;\n    while index < 8 \x7B\n        if __reyRawLoadI64(containersVecTailAddress(backing, trailer + " +
+    "4 + index)) != 0 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 12 + index)) != 0 \x7B\n            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n        "))) +
+    (("\x7D\n        index += 1;\n    \x7D\n    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + 20 != totalLength \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); retur" +
+    "n 1;\n    \x7D\n\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    var mapDirectory = containersOpenOutputDirectory(mapPath);\n    __reyRawUnmap(imagePath, 4096);\n    __reyRawUn") +
+    ("map(mapPath, 4096);\n    if !containersOutputValid(imageDirectory) || !containersOutputValid(mapDirectory) \x7B\n        containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirecto" +
+    ("ry(mapDirectory); return 1;\n    \x7D\n    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));\n    var mapIdentity = containersTa" +
+    "rgetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));\n    var destinationsSafe = containersOutputDestinationsSafe(context, imageDirectory, imageIdentity, mapDirec")))) +
+    ((("tory, mapIdentity);\n    containersReleaseTargetIdentity(imageIdentity);\n    containersReleaseTargetIdentity(mapIdentity);\n    if !destinationsSafe \x7B\n        containersCloseOutputDirectory(mapD" +
+    "irectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    var preparedImage = containersPrepareByteVector(context, imageDirectory, mapDirectory, vector, dataLayoutId, 0, i") +
+    ("mageLength, 493);\n    if !containersPreparedValid(preparedImage) \x7B containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1; \x7D\n    var preparedMap" +
+    (" = containersPrepareByteVector(context, mapDirectory, imageDirectory, vector, dataLayoutId, imageLength, mapLength, 420);\n    if !containersPreparedValid(preparedMap) \x7B\n        containersDisca" +
+    "rdPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    if !containersPublish"))) +
+    (("PreparedOutput(context, mapDirectory, preparedMap) \x7B\n        containersDiscardPreparedOutput(mapDirectory, preparedMap); containersDiscardPreparedOutput(imageDirectory, preparedImage);\n       " +
+    (" containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    containersDiscardPreparedOutput(mapDirectory, preparedMap);\n    if !container" +
+    "sPublishPreparedOutput(context, imageDirectory, preparedImage) \x7B\n        containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); c")) +
+    ("ontainersCloseOutputDirectory(imageDirectory);\n        containersWarnMapMayBeFromFailedBuild();\n        return 2;\n    \x7D\n    containersDiscardPreparedOutput(imageDirectory, preparedImage);\n    " +
+    ("containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n    return 0;\n\x7D\n\nfunc containersPublishCompilerOutputPairFromString(context: __rey_raw_address, pr" +
+    "otocol: __rey_raw_address, content: __rey_raw_address): int \x7B\n    var protocolLength = managedStringLength(context, protocol);\n    var protocolData = containersPathData(protocol);\n    if proto"))))) +
+    (((("colLength < 20 \x7B return -1; \x7D\n    if __reyRawLoadByte(containersAddressAt(protocolData, 0)) != 0 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 1)) != 114 ||\n        __reyRawLoa" +
+    "dByte(containersAddressAt(protocolData, 2)) != 101 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 3)) != 121 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 4)) !=") +
+    (" 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 5)) != 111 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 6)) != 117 ||\n        __reyRawLoadByte(containersAddr" +
+    ("essAt(protocolData, 7)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 8)) != 112 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 9)) != 117 ||\n        __re" +
+    "yRawLoadByte(containersAddressAt(protocolData, 10)) != 116 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 11)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData"))) +
+    ((", 12)) != 112 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 13)) != 97 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 14)) != 105 ||\n        __reyRawLoadByte(con" +
+    ("tainersAddressAt(protocolData, 15)) != 114 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 16)) != 45 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 17)) != 118 ||" +
+    "\n        __reyRawLoadByte(containersAddressAt(protocolData, 18)) != 49 ||\n        __reyRawLoadByte(containersAddressAt(protocolData, 19)) != 0 \x7B return -1; \x7D\n    var separator = 20;\n    while ")) +
+    ("separator < protocolLength && __reyRawLoadByte(containersAddressAt(protocolData, separator)) != 0 \x7B separator += 1; \x7D\n    if separator == 20 || separator >= protocolLength \x7B return 1; \x7D\n    va" +
+    ("r imagePathLength = separator - 20;\n    var mapPathStart = separator + 1;\n    var mapPathLength = protocolLength - mapPathStart;\n    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPa" +
+    "thLength < 0 || mapPathLength >= 4096 \x7B return 1; \x7D\n    var imagePath = __reyRawMap(4096);\n    var mapPath = __reyRawMap(4096);\n    if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < ")))) +
+    ((("0 \x7B\n        if __reyRawToInt(imagePath) >= 0 \x7B __reyRawUnmap(imagePath, 4096); \x7D\n        if __reyRawToInt(mapPath) >= 0 \x7B __reyRawUnmap(mapPath, 4096); \x7D\n        return 1;\n    \x7D\n    var index " +
+    "= 0;\n    while index < imagePathLength \x7B __reyRawStoreByte(containersAddressAt(imagePath, index), __reyRawLoadByte(containersAddressAt(protocolData, 20 + index))); index += 1; \x7D\n    __reyRawSt") +
+    ("oreByte(containersAddressAt(imagePath, imagePathLength), 0);\n    index = 0;\n    while index < mapPathLength \x7B __reyRawStoreByte(containersAddressAt(mapPath, index), __reyRawLoadByte(containers" +
+    ("AddressAt(protocolData, mapPathStart + index))); index += 1; \x7D\n    __reyRawStoreByte(containersAddressAt(mapPath, mapPathLength), 0);\n\n    var contentLength = managedStringLength(context, cont" +
+    "ent);\n    var contentData = containersPathData(content);\n    if mapPathLength == 0 \x7B\n        var published = containersPublishCompilerOutputImageString(context, imagePath, content, contentLeng"))) +
+    (("th);\n        __reyRawUnmap(imagePath, 4096);\n        __reyRawUnmap(mapPath, 4096);\n        if published \x7B return 0; \x7D\n        return 1;\n    \x7D\n    if contentLength < 20 \x7B\n        __reyRawUnmap(" +
+    ("imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n    var trailer = contentLength - 20;\n    if __reyRawLoadByte(containersAddressAt(contentData, trailer)) != 82 || __reyRawLoadBy" +
+    "te(containersAddressAt(contentData, trailer + 1)) != 89 ||\n        __reyRawLoadByte(containersAddressAt(contentData, trailer + 2)) != 80 || __reyRawLoadByte(containersAddressAt(contentData, tr")) +
+    ("ailer + 3)) != 49 \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n    var imageLength = 0;\n    var mapLength = 0;\n    var factor = 1;\n    index = 0;\n   " +
+    (" while index < 4 \x7B\n        var imagePart = __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index));\n        var mapPart = __reyRawLoadByte(containersAddressAt(contentData, trai" +
+    "ler + 12 + index));\n        if index == 3 && (imagePart > 127 || mapPart > 127) \x7B\n            __reyRawUnmap(imagePath, 4096); __"))))));
 }
 
 func embeddedRuntimeSource1Part7(): string {
-    return ((((("; index = index + 1; \x7D\n    return (lane / factor) % 256;\n\x7D\n\n// The compiler supplies the checked layouts for its private packed buffer.\nfunc containersPreparePackedOutput(context: __rey_raw_ad" +
-    "dress, directory: __rey_raw_address, header: __rey_raw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var invalid = containersPreparedOutputMa") +
-    ("ke(-1, 0, 0, 0, false);\n    if containersHeapLayout(context, body) != bodyLayoutId \x7B containersFail(2205); return invalid; \x7D\n    var registry = containersRegistry(context);\n    if layoutPayloa" +
-    ("dBytes(registry, bodyLayoutId) != 24 || layoutTailKind(registry, bodyLayoutId) != 0 || layoutReferenceCount(registry, bodyLayoutId) != 1 || layoutReferenceOffset(registry, bodyLayoutId, 0) != " +
-    "0 \x7B\n        containersFail(2205);\n        return invalid;\n    \x7D\n    var length = __reyRawLoadI64(containersAddressAt(body, 24));\n    if __reyRawLoadI64(containersAddressAt(body, 32)) != 134645"))) +
-    (("8188 || length < 0 || length > 1073741823 \x7B return invalid; \x7D\n    var lanes = __reyRawLoadAddress(containersAddressAt(body, 16));\n    var headerBacking = containersVecBacking(context, header, " +
-    "1);\n    var laneBacking = containersVecBacking(context, lanes, 1);\n    if containersVecRequireKind(context, headerBacking, 1) != dataLayoutId || containersVecRequireKind(context, laneBacking, ") +
-    ("1) != dataLayoutId \x7B containersFail(2203); return invalid; \x7D\n    var headerLength = __reyRawLoadI64(containersAddressAt(headerBacking, 16));\n    var laneLength = __reyRawLoadI64(containersAddr" +
-    ("essAt(laneBacking, 16));\n    var headerCapacity = (__reyRawLoadI64(containersAddressAt(headerBacking, 8)) - 8) / 8;\n    var laneCapacity = (__reyRawLoadI64(containersAddressAt(laneBacking, 8))" +
-    " - 8) / 8;\n    var usedLanes = (length + 6) / 7;\n    if headerLength < 0 || headerLength > 65536 || headerLength > headerCapacity || laneLength < usedLanes || laneLength > laneCapacity || lane")))) +
-    ((("Length > 153391689 \x7B return invalid; \x7D\n    var index = 0;\n    while index < headerLength \x7B\n        var value = __reyRawLoadI64(containersVecTailAddress(headerBacking, index));\n        if value" +
-    " < 0 || value > 255 \x7B return invalid; \x7D\n        index += 1;\n    \x7D\n    index = 0;\n    while index < usedLanes \x7B\n        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));") +
-    ("\n        if lane < 0 || lane >= 72057594037927936 \x7B return invalid; \x7D\n        if index == usedLanes - 1 && length % 7 != 0 \x7B\n            var limit = 1;\n            var tail = length % 7;\n     " +
-    ("       while tail > 0 \x7B limit = limit * 256; tail -= 1; \x7D\n            if lane >= limit \x7B return invalid; \x7D\n        \x7D\n        index += 1;\n    \x7D\n    var otherDirectory = containersOutputDirector" +
-    "yMake(-1, 0, 0, 0, 0, false);\n    var prepared = containersCreatePreparedOutput(context, directory, otherDirectory, 493);\n    if !containersPreparedValid(prepared) \x7B return invalid; \x7D\n    var "))) +
-    (("staging = __reyRawMap(4096);\n    if __reyRawToInt(staging) < 0 \x7B hostClose(containersPreparedFd(prepared)); containersDiscardPreparedOutput(directory, prepared); return invalid; \x7D\n    var stag" +
-    ("ed = 0;\n    var writeOk = true;\n    index = 0;\n    while index < headerLength && writeOk \x7B\n        __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddr" +
-    "ess(headerBacking, index)));\n        staged += 1;\n        index += 1;\n        if staged == 4096 \x7B\n            if !containersWriteStaging(context, containersPreparedFd(prepared), staging, stage")) +
-    ("d) \x7B writeOk = false; \x7D\n            else \x7B staged = 0; \x7D\n        \x7D\n    \x7D\n    index = 0;\n    var remaining = length;\n    while index < usedLanes && writeOk \x7B\n        var lane = __reyRawLoadI64(" +
-    ("containersVecTailAddress(laneBacking, index));\n        var count = 7;\n        if remaining < count \x7B count = remaining; \x7D\n        var byteAt = 0;\n        while byteAt < count && writeOk \x7B\n    " +
-    "        __reyRawStoreByte(containersAddressAt(staging, staged), lane % 256);\n            lane = lane / 256;\n            staged += 1;\n            byteAt += 1;\n            if staged == 4096 && w"))))) +
-    (((("riteOk \x7B\n                if !containersWriteStaging(context, containersPreparedFd(prepared), staging, staged) \x7B writeOk = false; \x7D\n                else \x7B staged = 0; \x7D\n            \x7D\n        \x7D\n" +
-    "        remaining -= count;\n        index += 1;\n    \x7D\n    if staged > 0 && writeOk && !containersWriteStaging(context, containersPreparedFd(prepared), staging, staged) \x7B writeOk = false; \x7D\n   ") +
-    (" if writeOk && hostFchmod(containersPreparedFd(prepared), 493) != 0 \x7B writeOk = false; \x7D\n    if writeOk && hostLseek(containersPreparedFd(prepared), 0, 0) != 0 \x7B writeOk = false; \x7D\n    var tot" +
-    ("alLength = headerLength + length;\n    var verified = 0;\n    while verified < totalLength && writeOk \x7B\n        var expected = 4096;\n        if totalLength - verified < expected \x7B expected = tot" +
-    "alLength - verified; \x7D\n        var received = 0;\n        while received < expected && writeOk \x7B\n            var count = hostRead(containersPreparedFd(prepared), staging, expected - received);\n"))) +
-    (("            if count == -4 \x7B continue; \x7D\n            if count <= 0 \x7B writeOk = false; \x7D\n            else \x7B\n                var byteIndex = 0;\n                while byteIndex < count \x7B\n        " +
-    ("            var absoluteIndex = verified + received + byteIndex;\n                    var wanted = 0;\n                    if absoluteIndex < headerLength \x7B wanted = __reyRawLoadI64(containersVe" +
-    "cTailAddress(headerBacking, absoluteIndex)); \x7D\n                    else \x7B\n                        var bodyIndex = absoluteIndex - headerLength;\n                        var lane = __reyRawLoadI")) +
-    ("64(containersVecTailAddress(laneBacking, bodyIndex / 7));\n                        wanted = containersPackedByte(lane, bodyIndex % 7);\n                    \x7D\n                    if __reyRawLoadB" +
-    ("yte(containersAddressAt(staging, byteIndex)) != wanted \x7B writeOk = false; break; \x7D\n                    byteIndex += 1;\n                \x7D\n                received += count;\n            \x7D\n      " +
-    "  \x7D\n        verified += received;\n    \x7D\n    if writeOk \x7B\n        var extra = -4;\n        loop \x7B extra = hostRead(containersPreparedFd(prepared), staging, 1); if extra != -4 \x7B break; \x7D \x7D\n      ")))) +
-    ((("  if extra != 0 \x7B writeOk = false; \x7D\n    \x7D\n    var closeResult = hostClose(containersPreparedFd(prepared));\n    __reyRawUnmap(staging, 4096);\n    if !writeOk || closeResult != 0 \x7B containersDi" +
-    "scardPreparedOutput(directory, prepared); return invalid; \x7D\n    return prepared;\n\x7D\n\npub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_address, header: __rey_raw_a") +
-    ("ddress, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): bool \x7B\n    containersStringLayout(context, path);\n    var directory = containersOpenOutputDirectory(containersPathData(p" +
-    ("ath));\n    if !containersOutputValid(directory) \x7B return false; \x7D\n    var prepared = containersPreparePackedOutput(context, directory, header, body, bodyLayoutId, dataLayoutId);\n    var ok = c" +
-    "ontainersPreparedValid(prepared) && containersPublishPreparedOutput(context, directory, prepared);\n    if containersPreparedValid(prepared) \x7B containersDiscardPreparedOutput(directory, prepare"))) +
-    (("d); \x7D\n    containersCloseOutputDirectory(directory);\n    return ok;\n\x7D\n\nfunc containersIsProcEnviron(path: __rey_raw_address): bool \x7B\n    return __reyRawLoadByte(containersAddressAt(path, 0)) =" +
-    ("= 47 &&\n        __reyRawLoadByte(containersAddressAt(path, 1)) == 112 &&\n        __reyRawLoadByte(containersAddressAt(path, 2)) == 114 &&\n        __reyRawLoadByte(containersAddressAt(path, 3))" +
-    " == 111 &&\n        __reyRawLoadByte(containersAddressAt(path, 4)) == 99 &&\n        __reyRawLoadByte(containersAddressAt(path, 5)) == 47 &&\n        __reyRawLoadByte(containersAddressAt(path, 6)")) +
-    (") == 115 &&\n        __reyRawLoadByte(containersAddressAt(path, 7)) == 101 &&\n        __reyRawLoadByte(containersAddressAt(path, 8)) == 108 &&\n        __reyRawLoadByte(containersAddressAt(path," +
-    (" 9)) == 102 &&\n        __reyRawLoadByte(containersAddressAt(path, 10)) == 47 &&\n        __reyRawLoadByte(containersAddressAt(path, 11)) == 101 &&\n        __reyRawLoadByte(containersAddressAt(p" +
-    "ath, 12)) == 110 &&\n        __reyRawLoadByte(containersAddressAt(path, 13)) == 118 &&\n        __reyRawLoadByte(containersAddress"))))));
+    return ((((("reyRawUnmap(mapPath, 4096); return 1;\n        \x7D\n        imageLength += imagePart * factor;\n        mapLength += mapPart * factor;\n        factor *= 256;\n        index += 1;\n    \x7D\n    index = 4" +
+    ";\n    while index < 8 \x7B\n        if __reyRawLoadByte(containersAddressAt(contentData, trailer + 4 + index)) != 0 || __reyRawLoadByte(containersAddressAt(contentData, trailer + 12 + index)) != 0") +
+    (" \x7B\n            __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n        \x7D\n        index += 1;\n    \x7D\n    if imageLength < 0 || mapLength < 0 || imageLength + mapLength + " +
+    ("20 != contentLength \x7B\n        __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;\n    \x7D\n\n    var imageDirectory = containersOpenOutputDirectory(imagePath);\n    var mapDirec" +
+    "tory = containersOpenOutputDirectory(mapPath);\n    __reyRawUnmap(imagePath, 4096);\n    __reyRawUnmap(mapPath, 4096);\n    if !containersOutputValid(imageDirectory) || !containersOutputValid(map"))) +
+    (("Directory) \x7B\n        containersCloseOutputDirectory(imageDirectory); containersCloseOutputDirectory(mapDirectory); return 1;\n    \x7D\n    var imageIdentity = containersTargetIdentity(containersOu" +
+    "tputFd(imageDirectory), containersOutputName(imageDirectory));\n    var mapIdentity = containersTargetIdentity(containersOutputFd(mapDirectory), containersOutputName(mapDirectory));\n    var des") +
+    ("tinationsSafe = containersOutputDestinationsSafe(context, imageDirectory, imageIdentity, mapDirectory, mapIdentity);\n    containersReleaseTargetIdentity(imageIdentity);\n    containersReleaseTa" +
+    ("rgetIdentity(mapIdentity);\n    if !destinationsSafe \x7B\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    var preparedImag" +
+    "e = containersPrepareStringRange(context, imageDirectory, mapDirectory, content, 0, imageLength, 493);\n    if !containersPreparedValid(preparedImage) \x7B containersCloseOutputDirectory(mapDirect")))) +
+    ((("ory); containersCloseOutputDirectory(imageDirectory); return 1; \x7D\n    var preparedMap = containersPrepareStringRange(context, mapDirectory, imageDirectory, content, imageLength, mapLength, 420" +
+    ");\n    if !containersPreparedValid(preparedMap) \x7B\n        containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseO") +
+    ("utputDirectory(imageDirectory); return 1;\n    \x7D\n    if !containersPublishPreparedOutput(context, mapDirectory, preparedMap) \x7B\n        containersDiscardPreparedOutput(mapDirectory, preparedMap)" +
+    ("; containersDiscardPreparedOutput(imageDirectory, preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory); return 1;\n    \x7D\n    cont" +
+    "ainersDiscardPreparedOutput(mapDirectory, preparedMap);\n    if !containersPublishPreparedOutput(context, imageDirectory, preparedImage) \x7B\n        containersDiscardPreparedOutput(imageDirectory"))) +
+    ((", preparedImage);\n        containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n        containersWarnMapMayBeFromFailedBuild();\n        return 2;\n    \x7D" +
+    ("\n    containersDiscardPreparedOutput(imageDirectory, preparedImage);\n    containersCloseOutputDirectory(mapDirectory); containersCloseOutputDirectory(imageDirectory);\n    return 0;\n\x7D\n\nfunc con" +
+    "tainersPackedByte(lane: int, slot: int): int \x7B\n    var factor = 1;\n    var index = 0;\n    while index < slot \x7B factor = factor * 256; index = index + 1; \x7D\n    return (lane / factor) % 256;\n\x7D\n\n")) +
+    ("// The compiler supplies the checked layouts for its private packed buffer.\nfunc containersPreparePackedOutput(context: __rey_raw_address, directory: __rey_raw_address, header: __rey_raw_addre" +
+    ("ss, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var invalid = containersPreparedOutputMake(-1, 0, 0, 0, false);\n    if containersHeapLayout(context," +
+    " body) != bodyLayoutId \x7B containersFail(2205); return invalid; \x7D\n    var registry = containersRegistry(context);\n    if layoutPayloadBytes(registry, bodyLayoutId) != 24 || layoutTailKind(regis"))))) +
+    (((("try, bodyLayoutId) != 0 || layoutReferenceCount(registry, bodyLayoutId) != 1 || layoutReferenceOffset(registry, bodyLayoutId, 0) != 0 \x7B\n        containersFail(2205);\n        return invalid;\n  " +
+    "  \x7D\n    var length = __reyRawLoadI64(containersAddressAt(body, 24));\n    if __reyRawLoadI64(containersAddressAt(body, 32)) != 1346458188 || length < 0 || length > 1073741823 \x7B return invalid; ") +
+    ("\x7D\n    var lanes = __reyRawLoadAddress(containersAddressAt(body, 16));\n    var headerBacking = containersVecBacking(context, header, 1);\n    var laneBacking = containersVecBacking(context, lane" +
+    ("s, 1);\n    if containersVecRequireKind(context, headerBacking, 1) != dataLayoutId || containersVecRequireKind(context, laneBacking, 1) != dataLayoutId \x7B containersFail(2203); return invalid; \x7D" +
+    "\n    var headerLength = __reyRawLoadI64(containersAddressAt(headerBacking, 16));\n    var laneLength = __reyRawLoadI64(containersAddressAt(laneBacking, 16));\n    var headerCapacity = (__reyRawL"))) +
+    (("oadI64(containersAddressAt(headerBacking, 8)) - 8) / 8;\n    var laneCapacity = (__reyRawLoadI64(containersAddressAt(laneBacking, 8)) - 8) / 8;\n    var usedLanes = (length + 6) / 7;\n    if head" +
+    ("erLength < 0 || headerLength > 65536 || headerLength > headerCapacity || laneLength < usedLanes || laneLength > laneCapacity || laneLength > 153391689 \x7B return invalid; \x7D\n    var index = 0;\n  " +
+    "  while index < headerLength \x7B\n        var value = __reyRawLoadI64(containersVecTailAddress(headerBacking, index));\n        if value < 0 || value > 255 \x7B return invalid; \x7D\n        index += 1;\n")) +
+    ("    \x7D\n    index = 0;\n    while index < usedLanes \x7B\n        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));\n        if lane < 0 || lane >= 72057594037927936 \x7B return i" +
+    ("nvalid; \x7D\n        if index == usedLanes - 1 && length % 7 != 0 \x7B\n            var limit = 1;\n            var tail = length % 7;\n            while tail > 0 \x7B limit = limit * 256; tail -= 1; \x7D\n  " +
+    "          if lane >= limit \x7B return invalid; \x7D\n        \x7D\n        index += 1;\n    \x7D\n    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);\n    var prepared = containersC")))) +
+    ((("reatePreparedOutput(context, directory, otherDirectory, 493);\n    if !containersPreparedValid(prepared) \x7B return invalid; \x7D\n    var staging = __reyRawMap(4096);\n    if __reyRawToInt(staging) <" +
+    " 0 \x7B hostClose(containersPreparedFd(prepared)); containersDiscardPreparedOutput(directory, prepared); return invalid; \x7D\n    var staged = 0;\n    var writeOk = true;\n    index = 0;\n    while ind") +
+    ("ex < headerLength && writeOk \x7B\n        __reyRawStoreByte(containersAddressAt(staging, staged), __reyRawLoadI64(containersVecTailAddress(headerBacking, index)));\n        staged += 1;\n        in" +
+    ("dex += 1;\n        if staged == 4096 \x7B\n            if !containersWriteStaging(context, containersPreparedFd(prepared), staging, staged) \x7B writeOk = false; \x7D\n            else \x7B staged = 0; \x7D\n   " +
+    "     \x7D\n    \x7D\n    index = 0;\n    var remaining = length;\n    while index < usedLanes && writeOk \x7B\n        var lane = __reyRawLoadI64(containersVecTailAddress(laneBacking, index));\n        var c"))) +
+    (("ount = 7;\n        if remaining < count \x7B count = remaining; \x7D\n        var byteAt = 0;\n        while byteAt < count && writeOk \x7B\n            __reyRawStoreByte(containersAddressAt(staging, stage" +
+    ("d), lane % 256);\n            lane = lane / 256;\n            staged += 1;\n            byteAt += 1;\n            if staged == 4096 && writeOk \x7B\n                if !containersWriteStaging(context," +
+    " containersPreparedFd(prepared), staging, staged) \x7B writeOk = false; \x7D\n                else \x7B staged = 0; \x7D\n            \x7D\n        \x7D\n        remaining -= count;\n        index += 1;\n    \x7D\n    if")) +
+    (" staged > 0 && writeOk && !containersWriteStaging(context, containersPreparedFd(prepared), staging, staged) \x7B writeOk = false; \x7D\n    if writeOk && hostFchmod(containersPreparedFd(prepared), 49" +
+    ("3) != 0 \x7B writeOk = false; \x7D\n    if writeOk && hostLseek(containersPreparedFd(prepared), 0, 0) != 0 \x7B writeOk = false; \x7D\n    var totalLength = headerLength + length;\n    var verified = 0;\n    " +
+    "while verified < totalLength && writeOk \x7B\n        var expected = 4096;\n        if totalLength - verified < expected \x7B expected ="))))));
 }
 
 func embeddedRuntimeSource1Part8(): string {
-    return ((((("At(path, 14)) == 105 &&\n        __reyRawLoadByte(containersAddressAt(path, 15)) == 114 &&\n        __reyRawLoadByte(containersAddressAt(path, 16)) == 111 &&\n        __reyRawLoadByte(containersA" +
-    "ddressAt(path, 17)) == 110 &&\n        __reyRawLoadByte(containersAddressAt(path, 18)) == 0;\n\x7D\n\nfunc containersReadZeroSizedProcFile(context: __rey_raw_address, fd: int, stringLayoutId: int): _") +
-    ("_rey_raw_address \x7B\n    var capacity = 4194304;\n    var staging = __reyRawMap(capacity);\n    if __reyRawToInt(staging) < 0 \x7B hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n    va" +
-    ("r total = 0;\n    var done = false;\n    while !done && total < capacity \x7B\n        var count = hostRead(fd, containersAddressAt(staging, total), capacity - total);\n        if count == -4 \x7B conti" +
-    "nue; \x7D\n        if count < 0 \x7B __reyRawUnmap(staging, capacity); hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n        if count == 0 \x7B done = true; \x7D\n        else \x7B total += cou"))) +
-    (("nt; \x7D\n    \x7D\n    if !done \x7B\n        var extra = hostRead(fd, staging, 1);\n        if extra != 0 \x7B __reyRawUnmap(staging, capacity); hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D" +
-    "\n    \x7D\n    var result = containersNewString(context, stringLayoutId, total);\n    var index = 0;\n    while index < total \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __r") +
-    ("eyRawLoadByte(containersAddressAt(staging, index)));\n        index += 1;\n    \x7D\n    var closeResult = hostClose(fd);\n    __reyRawUnmap(staging, capacity);\n    if closeResult != 0 \x7B containersFa" +
-    ("il(2208); return __reyRawNull(); \x7D\n    return result;\n\x7D\n\npub func managedReadFile(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: int): __rey_raw_address \x7B\n    var fd = ho" +
-    "stOpen(containersPathData(path), 0, 0);\n    if fd < 0 \x7B containersFail(2208); return __reyRawNull(); \x7D\n    if !containersRememberInput(context, fd) \x7B hostClose(fd); containersFail(2210); retur")))) +
-    ((("n __reyRawNull(); \x7D\n    var size = hostLseek(fd, 0, 2);\n    if size < 0 || hostLseek(fd, 0, 0) < 0 \x7B hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n    if size == 0 && container" +
-    "sIsProcEnviron(containersPathData(path)) \x7B return containersReadZeroSizedProcFile(context, fd, stringLayoutId); \x7D\n    var result = containersNewString(context, stringLayoutId, size);\n    var o") +
-    ("ffset = 0;\n    while offset < size \x7B\n        var count = hostRead(fd, containersAddressAt(result, 24 + offset), size - offset);\n        if count <= 0 \x7B hostClose(fd); containersFail(2208); ret" +
-    ("urn __reyRawNull(); \x7D\n        offset = offset + count;\n    \x7D\n    if hostClose(fd) != 0 \x7B containersFail(2208); return __reyRawNull(); \x7D\n    return result;\n\x7D\n\npub func managedListDir(context: _" +
-    "_rey_raw_address, path: __rey_raw_address, stringLayoutId: int, headerLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var fd = hostOpen(containersPathData(path), 0, 0);\n    if fd < "))) +
-    (("0 \x7B containersFail(2209); return __reyRawNull(); \x7D\n    var buffer = __reyRawMap(8192);\n    var offsetCell = __reyRawMap(8);\n    var result = managedVecCreate(context, headerLayoutId, dataLayou" +
-    ("tId, 8);\n    var done = false;\n    while !done \x7B\n        var count = hostGetdirentries(fd, buffer, 8192, offsetCell);\n        if count < 0 \x7B __reyRawUnmap(buffer, 8192); __reyRawUnmap(offsetCe" +
-    "ll, 8); hostClose(fd); containersFail(2209); return __reyRawNull(); \x7D\n        if count == 0 \x7B done = true; \x7D\n        var cursor = 0;\n        while cursor < count \x7B\n            var recordLength")) +
-    (" = __reyRawLoadByte(containersAddressAt(buffer, cursor + 16)) + __reyRawLoadByte(containersAddressAt(buffer, cursor + 17)) * 256;\n            if recordLength < 20 || cursor + recordLength > co" +
-    ("unt \x7B cursor = count; \x7D\n            else \x7B\n                var nameLength = 0;\n                while 19 + nameLength + 1 < recordLength && __reyRawLoadByte(containersAddressAt(buffer, cursor +" +
-    " 19 + nameLength)) != 0 \x7B\n                    nameLength = nameLength + 1;\n                \x7D\n                var isCurrent = nameLength == 1 && __reyRawLoadByte(containersAddressAt(buffer, cur"))))) +
-    (((("sor + 19)) == 46;\n                var isParent = nameLength == 2 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19)) == 46 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 20" +
-    ")) == 46;\n                if !isCurrent && !isParent \x7B\n                    var name = containersNewString(context, stringLayoutId, nameLength);\n                    var index = 0;\n             ") +
-    ("       while index < nameLength \x7B\n                        __reyRawStoreByte(containersAddressAt(name, 24 + index), __reyRawLoadByte(containersAddressAt(buffer, cursor + 19 + index)));\n        " +
-    ("                index = index + 1;\n                    \x7D\n                    managedVecPushReference(context, result, dataLayoutId, name);\n                \x7D\n                cursor = cursor + r" +
-    "ecordLength;\n            \x7D\n        \x7D\n    \x7D\n    __reyRawUnmap(buffer, 8192);\n    __reyRawUnmap(offsetCell, 8);\n    if hostClose(fd) != 0 \x7B containersFail(2209); \x7D\n    return result;\n\x7D\n\npub func"))) +
-    ((" managedStringByte(context: __rey_raw_address, value: __rey_raw_address, index: int): int \x7B\n    var length = managedStringLength(context, value);\n    if index < 0 || index >= length \x7B containe" +
-    ("rsFail(2205); return 0; \x7D\n    return __reyRawLoadByte(containersAddressAt(value, 24 + index));\n\x7D\n\npub func managedStringEqual(context: __rey_raw_address, left: __rey_raw_address, right: __rey_" +
-    "raw_address): bool \x7B\n    containersStringLayout(context, left);\n    containersStringLayout(context, right);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rightLe")) +
-    ("ngth = __reyRawLoadI64(containersAddressAt(right, 16));\n    return containersStringEqualValidated(left, leftLength, right, rightLength);\n\x7D\n\nfunc containersStringEqualValidated(left: __rey_raw_" +
-    ("address, leftLength: int, right: __rey_raw_address, rightLength: int): bool \x7B\n    if __reyRawEqual(left, right) \x7B return true; \x7D\n    if leftLength != rightLength \x7B return false; \x7D\n    var inde" +
-    "x = 0;\n    while index < leftLength \x7B\n        if __reyRawLoadByte(containersAddressAt(left, 24 + index)) != __reyRawLoadByte(containersAddressAt(right, 24 + index)) \x7B return false; \x7D\n        i")))) +
-    ((("ndex = index + 1;\n    \x7D\n    return true;\n\x7D\n\npub func managedStringCompare(context: __rey_raw_address, left: __rey_raw_address, right: __rey_raw_address): int \x7B\n    containersStringLayout(conte" +
-    "xt, left);\n    containersStringLayout(context, right);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rightLength = __reyRawLoadI64(containersAddressAt(right, 16)") +
-    (");\n    var common = leftLength;\n    if rightLength < common \x7B common = rightLength; \x7D\n    var index = 0;\n    while index < common \x7B\n        var leftByte = __reyRawLoadByte(containersAddressAt(" +
-    ("left, 24 + index));\n        var rightByte = __reyRawLoadByte(containersAddressAt(right, 24 + index));\n        if leftByte < rightByte \x7B return -1; \x7D\n        if leftByte > rightByte \x7B return 1;" +
-    " \x7D\n        index = index + 1;\n    \x7D\n    if leftLength < rightLength \x7B return -1; \x7D\n    if leftLength > rightLength \x7B return 1; \x7D\n    return 0;\n\x7D\n\npub func managedStringHash(context: __rey_raw_"))) +
-    (("address, value: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, value);\n    if length == 0 \x7B containersFail(2205); return 0; \x7D\n    return __reyRawLoadByte(containersAdd" +
-    ("ressAt(value, 24));\n\x7D\n\npub func managedStringIndexOf(context: __rey_raw_address, value: __rey_raw_address, needle: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, value" +
-    ");\n    var needleLength = managedStringLength(context, needle);\n    if needleLength == 0 \x7B return 0; \x7D\n    if needleLength > length \x7B return -1; \x7D\n    var index = 0;\n    while index <= length ")) +
-    ("- needleLength \x7B\n        var offset = 0;\n        var equal = true;\n        while offset < needleLength \x7B\n            if __reyRawLoadByte(containersAddressAt(value, 24 + index + offset)) != __r" +
-    ("eyRawLoadByte(containersAddressAt(needle, 24 + offset)) \x7B equal = false; break; \x7D\n            offset = offset + 1;\n        \x7D\n        if equal \x7B return index; \x7D\n        index = index + 1;\n    \x7D" +
-    "\n    return -1;\n\x7D\n\npub func managedStringContains(context: __rey_raw_address, value: __rey_raw_address, needle: __rey_raw_addres"))))));
+    return (((((" totalLength - verified; \x7D\n        var received = 0;\n        while received < expected && writeOk \x7B\n            var count = hostRead(containersPreparedFd(prepared), staging, expected - receive" +
+    "d);\n            if count == -4 \x7B continue; \x7D\n            if count <= 0 \x7B writeOk = false; \x7D\n            else \x7B\n                var byteIndex = 0;\n                while byteIndex < count \x7B\n    ") +
+    ("                var absoluteIndex = verified + received + byteIndex;\n                    var wanted = 0;\n                    if absoluteIndex < headerLength \x7B wanted = __reyRawLoadI64(containe" +
+    ("rsVecTailAddress(headerBacking, absoluteIndex)); \x7D\n                    else \x7B\n                        var bodyIndex = absoluteIndex - headerLength;\n                        var lane = __reyRawL" +
+    "oadI64(containersVecTailAddress(laneBacking, bodyIndex / 7));\n                        wanted = containersPackedByte(lane, bodyIndex % 7);\n                    \x7D\n                    if __reyRawL"))) +
+    (("oadByte(containersAddressAt(staging, byteIndex)) != wanted \x7B writeOk = false; break; \x7D\n                    byteIndex += 1;\n                \x7D\n                received += count;\n            \x7D\n  " +
+    "      \x7D\n        verified += received;\n    \x7D\n    if writeOk \x7B\n        var extra = -4;\n        loop \x7B extra = hostRead(containersPreparedFd(prepared), staging, 1); if extra != -4 \x7B break; \x7D \x7D\n  ") +
+    ("      if extra != 0 \x7B writeOk = false; \x7D\n    \x7D\n    var closeResult = hostClose(containersPreparedFd(prepared));\n    __reyRawUnmap(staging, 4096);\n    if !writeOk || closeResult != 0 \x7B containe" +
+    ("rsDiscardPreparedOutput(directory, prepared); return invalid; \x7D\n    return prepared;\n\x7D\n\npub func managedWritePackedSegments(context: __rey_raw_address, path: __rey_raw_address, header: __rey_r" +
+    "aw_address, body: __rey_raw_address, bodyLayoutId: int, dataLayoutId: int): bool \x7B\n    containersStringLayout(context, path);\n    var directory = containersOpenOutputDirectory(containersPathDa")))) +
+    ((("ta(path));\n    if !containersOutputValid(directory) \x7B return false; \x7D\n    var prepared = containersPreparePackedOutput(context, directory, header, body, bodyLayoutId, dataLayoutId);\n    var ok" +
+    " = containersPreparedValid(prepared) && containersPublishPreparedOutput(context, directory, prepared);\n    if containersPreparedValid(prepared) \x7B containersDiscardPreparedOutput(directory, pre") +
+    ("pared); \x7D\n    containersCloseOutputDirectory(directory);\n    return ok;\n\x7D\n\nfunc containersIsProcEnviron(path: __rey_raw_address): bool \x7B\n    return __reyRawLoadByte(containersAddressAt(path, 0" +
+    (")) == 47 &&\n        __reyRawLoadByte(containersAddressAt(path, 1)) == 112 &&\n        __reyRawLoadByte(containersAddressAt(path, 2)) == 114 &&\n        __reyRawLoadByte(containersAddressAt(path," +
+    " 3)) == 111 &&\n        __reyRawLoadByte(containersAddressAt(path, 4)) == 99 &&\n        __reyRawLoadByte(containersAddressAt(path, 5)) == 47 &&\n        __reyRawLoadByte(containersAddressAt(path"))) +
+    ((", 6)) == 115 &&\n        __reyRawLoadByte(containersAddressAt(path, 7)) == 101 &&\n        __reyRawLoadByte(containersAddressAt(path, 8)) == 108 &&\n        __reyRawLoadByte(containersAddressAt(p" +
+    ("ath, 9)) == 102 &&\n        __reyRawLoadByte(containersAddressAt(path, 10)) == 47 &&\n        __reyRawLoadByte(containersAddressAt(path, 11)) == 101 &&\n        __reyRawLoadByte(containersAddress" +
+    "At(path, 12)) == 110 &&\n        __reyRawLoadByte(containersAddressAt(path, 13)) == 118 &&\n        __reyRawLoadByte(containersAddressAt(path, 14)) == 105 &&\n        __reyRawLoadByte(containersA")) +
+    ("ddressAt(path, 15)) == 114 &&\n        __reyRawLoadByte(containersAddressAt(path, 16)) == 111 &&\n        __reyRawLoadByte(containersAddressAt(path, 17)) == 110 &&\n        __reyRawLoadByte(conta" +
+    ("inersAddressAt(path, 18)) == 0;\n\x7D\n\nfunc containersReadZeroSizedProcFile(context: __rey_raw_address, fd: int, stringLayoutId: int): __rey_raw_address \x7B\n    var capacity = 4194304;\n    var stagi" +
+    "ng = __reyRawMap(capacity);\n    if __reyRawToInt(staging) < 0 \x7B hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n    var total = 0;\n    var done = false;\n    while !done && total "))))) +
+    (((("< capacity \x7B\n        var count = hostRead(fd, containersAddressAt(staging, total), capacity - total);\n        if count == -4 \x7B continue; \x7D\n        if count < 0 \x7B __reyRawUnmap(staging, capacit" +
+    "y); hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n        if count == 0 \x7B done = true; \x7D\n        else \x7B total += count; \x7D\n    \x7D\n    if !done \x7B\n        var extra = hostRead(fd, ") +
+    ("staging, 1);\n        if extra != 0 \x7B __reyRawUnmap(staging, capacity); hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n    \x7D\n    var result = containersNewString(context, stringL" +
+    ("ayoutId, total);\n    var index = 0;\n    while index < total \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(staging, index)));\n       " +
+    " index += 1;\n    \x7D\n    var closeResult = hostClose(fd);\n    __reyRawUnmap(staging, capacity);\n    if closeResult != 0 \x7B containersFail(2208); return __reyRawNull(); \x7D\n    return result;\n\x7D\n\npub"))) +
+    ((" func managedReadFile(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: int): __rey_raw_address \x7B\n    var fd = hostOpen(containersPathData(path), 0, 0);\n    if fd < 0 \x7B cont" +
+    ("ainersFail(2208); return __reyRawNull(); \x7D\n    if !containersRememberInput(context, fd) \x7B hostClose(fd); containersFail(2210); return __reyRawNull(); \x7D\n    var size = hostLseek(fd, 0, 2);\n    " +
+    "if size < 0 || hostLseek(fd, 0, 0) < 0 \x7B hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n    if size == 0 && containersIsProcEnviron(containersPathData(path)) \x7B return containers")) +
+    ("ReadZeroSizedProcFile(context, fd, stringLayoutId); \x7D\n    var result = containersNewString(context, stringLayoutId, size);\n    var offset = 0;\n    while offset < size \x7B\n        var count = hos" +
+    ("tRead(fd, containersAddressAt(result, 24 + offset), size - offset);\n        if count <= 0 \x7B hostClose(fd); containersFail(2208); return __reyRawNull(); \x7D\n        offset = offset + count;\n    \x7D" +
+    "\n    if hostClose(fd) != 0 \x7B containersFail(2208); return __reyRawNull(); \x7D\n    return result;\n\x7D\n\npub func managedListDir(context: __rey_raw_address, path: __rey_raw_address, stringLayoutId: i")))) +
+    ((("nt, headerLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var fd = hostOpen(containersPathData(path), 0, 0);\n    if fd < 0 \x7B containersFail(2209); return __reyRawNull(); \x7D\n    var b" +
+    "uffer = __reyRawMap(8192);\n    var offsetCell = __reyRawMap(8);\n    var result = managedVecCreate(context, headerLayoutId, dataLayoutId, 8);\n    var done = false;\n    while !done \x7B\n        var") +
+    (" count = hostGetdirentries(fd, buffer, 8192, offsetCell);\n        if count < 0 \x7B __reyRawUnmap(buffer, 8192); __reyRawUnmap(offsetCell, 8); hostClose(fd); containersFail(2209); return __reyRaw" +
+    ("Null(); \x7D\n        if count == 0 \x7B done = true; \x7D\n        var cursor = 0;\n        while cursor < count \x7B\n            var recordLength = __reyRawLoadByte(containersAddressAt(buffer, cursor + 16)" +
+    ") + __reyRawLoadByte(containersAddressAt(buffer, cursor + 17)) * 256;\n            if recordLength < 20 || cursor + recordLength > count \x7B cursor = count; \x7D\n            else \x7B\n                v"))) +
+    (("ar nameLength = 0;\n                while 19 + nameLength + 1 < recordLength && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19 + nameLength)) != 0 \x7B\n                    nameLength = n" +
+    ("ameLength + 1;\n                \x7D\n                var isCurrent = nameLength == 1 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19)) == 46;\n                var isParent = nameLength " +
+    "== 2 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 19)) == 46 && __reyRawLoadByte(containersAddressAt(buffer, cursor + 20)) == 46;\n                if !isCurrent && !isParent \x7B\n     ")) +
+    ("               var name = containersNewString(context, stringLayoutId, nameLength);\n                    var index = 0;\n                    while index < nameLength \x7B\n                        __" +
+    ("reyRawStoreByte(containersAddressAt(name, 24 + index), __reyRawLoadByte(containersAddressAt(buffer, cursor + 19 + index)));\n                        index = index + 1;\n                    \x7D\n   " +
+    "                 managedVecPushReference(context, result, dataLayoutId, name);\n                \x7D\n                cursor = cursor"))))));
 }
 
 func embeddedRuntimeSource1Part9(): string {
-    return ((((("s): bool \x7B\n    return managedStringIndexOf(context, value, needle) >= 0;\n\x7D\n\npub func managedStringStartsWith(context: __rey_raw_address, value: __rey_raw_address, prefix: __rey_raw_address): b" +
-    "ool \x7B\n    var length = managedStringLength(context, value);\n    var prefixLength = managedStringLength(context, prefix);\n    if prefixLength > length \x7B return false; \x7D\n    var index = 0;\n    w") +
-    ("hile index < prefixLength \x7B\n        if __reyRawLoadByte(containersAddressAt(value, 24 + index)) != __reyRawLoadByte(containersAddressAt(prefix, 24 + index)) \x7B return false; \x7D\n        index = i" +
-    ("ndex + 1;\n    \x7D\n    return true;\n\x7D\n\npub func managedStringEndsWith(context: __rey_raw_address, value: __rey_raw_address, suffix: __rey_raw_address): bool \x7B\n    var length = managedStringLength" +
-    "(context, value);\n    var suffixLength = managedStringLength(context, suffix);\n    if suffixLength > length \x7B return false; \x7D\n    var index = 0;\n    while index < suffixLength \x7B\n        if __r"))) +
-    (("eyRawLoadByte(containersAddressAt(value, 24 + length - suffixLength + index)) != __reyRawLoadByte(containersAddressAt(suffix, 24 + index)) \x7B return false; \x7D\n        index = index + 1;\n    \x7D\n  " +
-    "  return true;\n\x7D\n\npub func managedStringSlice(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, start: int, end: int): __rey_raw_address \x7B\n    var length = managedStri") +
-    ("ngLength(context, value);\n    if start < 0 || end < 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var lo = start;\n    var hi = end;\n    if lo > length \x7B lo = length; \x7D\n    if hi > len" +
-    ("gth \x7B hi = length; \x7D\n    var resultLength = 0;\n    if hi > lo \x7B resultLength = hi - lo; \x7D\n    var result = containersNewString(context, stringLayoutId, resultLength);\n    var index = 0;\n    wh" +
-    "ile index < resultLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + lo + index)));\n        index = index + 1;\n    \x7D\n ")))) +
-    ((("   return result;\n\x7D\n\npub func managedStringConcat(context: __rey_raw_address, stringLayoutId: int, left: __rey_raw_address, right: __rey_raw_address): __rey_raw_address \x7B\n    containersStringL" +
-    "ayout(context, left);\n    containersStringLayout(context, right);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rightLength = __reyRawLoadI64(containersAddressAt") +
-    ("(right, 16));\n    if leftLength > 9223372036854775798 - rightLength \x7B containersFail(2201); return __reyRawNull(); \x7D\n    var length = leftLength + rightLength;\n    var result = containersNewSt" +
-    ("ring(context, stringLayoutId, length);\n    var index = 0;\n    while index < leftLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt" +
-    "(left, 24 + index)));\n        index = index + 1;\n    \x7D\n    index = 0;\n    while index < rightLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + leftLength + index), __reyRawLo"))) +
-    (("adByte(containersAddressAt(right, 24 + index)));\n        index = index + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringFromInt(context: __rey_raw_address, stringLayoutId: int, value: in" +
-    ("t): __rey_raw_address \x7B\n    var countValue = value;\n    var digitCount = 0;\n    if countValue == 0 \x7B digitCount = 1; \x7D\n    else \x7B\n        while countValue != 0 \x7B\n            countValue = count" +
-    "Value / 10;\n            digitCount = digitCount + 1;\n        \x7D\n    \x7D\n    var negative = value < 0;\n    var length = digitCount;\n    if negative \x7B length = length + 1; \x7D\n    var result = contai")) +
-    ("nersNewString(context, stringLayoutId, length);\n    var cursor = length;\n    var remaining = value;\n    if remaining > 0 \x7B remaining = -remaining; \x7D\n    if remaining == 0 \x7B\n        cursor = cu" +
-    ("rsor - 1;\n        __reyRawStoreByte(containersAddressAt(result, 24 + cursor), 48);\n    \x7D else \x7B\n        while remaining != 0 \x7B\n            var digit = -(remaining % 10);\n            cursor = c" +
-    "ursor - 1;\n            __reyRawStoreByte(containersAddressAt(result, 24 + cursor), 48 + digit);\n            remaining = remaining / 10;\n        \x7D\n    \x7D\n    if negative \x7B __reyRawStoreByte(cont"))))) +
-    (((("ainersAddressAt(result, 24), 45); \x7D\n    return result;\n\x7D\n\nfunc containersBinaryExponent(high: int, low: int): int \x7B\n    var probe = low;\n    var base = 0;\n    if high > 0 \x7B probe = high; base " +
-    "= 32; \x7D\n    var exponent = -1;\n    while probe > 0 \x7B\n        probe = probe / 2;\n        exponent = exponent + 1;\n    \x7D\n    if exponent < 0 \x7B return -1; \x7D\n    return base + exponent;\n\x7D\n\nfunc co") +
-    ("ntainersCompareFraction(context: __rey_raw_address, value: __rey_raw_address, start: int, end: int, denominator: int): int \x7B\n    var remainder = denominator - 1;\n    var comparison = 0;\n    va" +
-    ("r index = start;\n    while index < end \x7B\n        var byte = __reyRawLoadByte(containersAddressAt(value, 24 + index));\n        if byte >= 48 && byte <= 57 \x7B\n            remainder = remainder * " +
-    "10;\n            var thresholdDigit = remainder / denominator;\n            remainder = remainder % denominator;\n            if comparison == 0 \x7B\n                var digit = byte - 48;\n         "))) +
-    (("       if digit < thresholdDigit \x7B comparison = -1; \x7D\n                else if digit > thresholdDigit \x7B comparison = 1; \x7D\n            \x7D\n        \x7D\n        index = index + 1;\n    \x7D\n    if compari" +
-    ("son == 0 && remainder != 0 \x7B return -1; \x7D\n    return comparison;\n\x7D\n\n// Keep v0.3 decimal-to-f64 rounding before truncation without a float backend.\npub func managedStringToInt(context: __rey_r" +
-    "aw_address, value: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, value);\n    if length == 0 \x7B containersFail(2205); return 0; \x7D\n    var index = 0;\n    var negative = ")) +
-    ("false;\n    var first = __reyRawLoadByte(containersAddressAt(value, 24));\n    if first == 45 || first == 43 \x7B negative = first == 45; index = 1; \x7D\n    var high = 0;\n    var low = 0;\n    var saw" +
-    ("Digit = false;\n    var previousDigit = false;\n    while index < length \x7B\n        var byte = __reyRawLoadByte(containersAddressAt(value, 24 + index));\n        if byte >= 48 && byte <= 57 \x7B\n    " +
-    "        var digit = byte - 48;\n            var lowProduct = low * 10 + digit;\n            var carry = lowProduct / 4294967296;\n            low = lowProduct % 4294967296;\n            if high > ")))) +
-    ((("(4294967295 - carry) / 10 \x7B containersFail(2205); return 0; \x7D\n            high = high * 10 + carry;\n            sawDigit = true;\n            previousDigit = true;\n            index = index + 1" +
-    ";\n        \x7D else if byte == 95 \x7B\n            if !previousDigit || index + 1 >= length \x7B containersFail(2205); return 0; \x7D\n            var after = __reyRawLoadByte(containersAddressAt(value, 25") +
-    (" + index));\n            if after < 48 || after > 57 \x7B containersFail(2205); return 0; \x7D\n            previousDigit = false;\n            index = index + 1;\n        \x7D else \x7B break; \x7D\n    \x7D\n    if" +
-    (" !sawDigit \x7B containersFail(2205); return 0; \x7D\n    var fractionStart = length;\n    var fractionEnd = length;\n    var fractionNonzero = false;\n    if index < length && __reyRawLoadByte(containe" +
-    "rsAddressAt(value, 24 + index)) == 46 \x7B\n        index = index + 1;\n        fractionStart = index;\n        previousDigit = false;\n        while index < length \x7B\n            var byte = __reyRawL"))) +
-    (("oadByte(containersAddressAt(value, 24 + index));\n            if byte >= 48 && byte <= 57 \x7B\n                if byte != 48 \x7B fractionNonzero = true; \x7D\n                previousDigit = true;\n     " +
-    ("           index = index + 1;\n            \x7D else if byte == 95 \x7B\n                if !previousDigit || index + 1 >= length \x7B containersFail(2205); return 0; \x7D\n                var after = __reyR" +
-    "awLoadByte(containersAddressAt(value, 25 + index));\n                if after < 48 || after > 57 \x7B containersFail(2205); return 0; \x7D\n                previousDigit = false;\n                index")) +
-    (" = index + 1;\n            \x7D else \x7B containersFail(2205); return 0; \x7D\n        \x7D\n        fractionEnd = index;\n    \x7D\n    if index != length \x7B containersFail(2205); return 0; \x7D\n\n    var exponent =" +
-    (" containersBinaryExponent(high, low);\n    if exponent < 52 \x7B\n        var integerPart = high * 4294967296 + low;\n        var denominator = 1;\n        var denominatorBits = 53 - exponent;\n      " +
-    "  while denominatorBits > 0 \x7B denominator = denominator * 2; denominatorBits = denominatorBits - 1; \x7D\n        var comparison = c"))))));
+    return (((((" + recordLength;\n            \x7D\n        \x7D\n    \x7D\n    __reyRawUnmap(buffer, 8192);\n    __reyRawUnmap(offsetCell, 8);\n    if hostClose(fd) != 0 \x7B containersFail(2209); \x7D\n    return result;\n\x7D\n\npub " +
+    "func managedStringByte(context: __rey_raw_address, value: __rey_raw_address, index: int): int \x7B\n    var length = managedStringLength(context, value);\n    if index < 0 || index >= length \x7B cont") +
+    ("ainersFail(2205); return 0; \x7D\n    return __reyRawLoadByte(containersAddressAt(value, 24 + index));\n\x7D\n\npub func managedStringEqual(context: __rey_raw_address, left: __rey_raw_address, right: __" +
+    ("rey_raw_address): bool \x7B\n    containersStringLayout(context, left);\n    containersStringLayout(context, right);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rig" +
+    "htLength = __reyRawLoadI64(containersAddressAt(right, 16));\n    return containersStringEqualValidated(left, leftLength, right, rightLength);\n\x7D\n\nfunc containersStringEqualValidated(left: __rey_"))) +
+    (("raw_address, leftLength: int, right: __rey_raw_address, rightLength: int): bool \x7B\n    if __reyRawEqual(left, right) \x7B return true; \x7D\n    if leftLength != rightLength \x7B return false; \x7D\n    var " +
+    "index = 0;\n    while index < leftLength \x7B\n        if __reyRawLoadByte(containersAddressAt(left, 24 + index)) != __reyRawLoadByte(containersAddressAt(right, 24 + index)) \x7B return false; \x7D\n     ") +
+    ("   index = index + 1;\n    \x7D\n    return true;\n\x7D\n\npub func managedStringCompare(context: __rey_raw_address, left: __rey_raw_address, right: __rey_raw_address): int \x7B\n    containersStringLayout(c" +
+    ("ontext, left);\n    containersStringLayout(context, right);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rightLength = __reyRawLoadI64(containersAddressAt(right," +
+    " 16));\n    var common = leftLength;\n    if rightLength < common \x7B common = rightLength; \x7D\n    var index = 0;\n    while index < common \x7B\n        var leftByte = __reyRawLoadByte(containersAddres")))) +
+    ((("sAt(left, 24 + index));\n        var rightByte = __reyRawLoadByte(containersAddressAt(right, 24 + index));\n        if leftByte < rightByte \x7B return -1; \x7D\n        if leftByte > rightByte \x7B retur" +
+    "n 1; \x7D\n        index = index + 1;\n    \x7D\n    if leftLength < rightLength \x7B return -1; \x7D\n    if leftLength > rightLength \x7B return 1; \x7D\n    return 0;\n\x7D\n\npub func managedStringHash(context: __rey_") +
+    ("raw_address, value: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, value);\n    if length == 0 \x7B containersFail(2205); return 0; \x7D\n    return __reyRawLoadByte(container" +
+    ("sAddressAt(value, 24));\n\x7D\n\npub func managedStringIndexOf(context: __rey_raw_address, value: __rey_raw_address, needle: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, v" +
+    "alue);\n    var needleLength = managedStringLength(context, needle);\n    if needleLength == 0 \x7B return 0; \x7D\n    if needleLength > length \x7B return -1; \x7D\n    var index = 0;\n    while index <= len"))) +
+    (("gth - needleLength \x7B\n        var offset = 0;\n        var equal = true;\n        while offset < needleLength \x7B\n            if __reyRawLoadByte(containersAddressAt(value, 24 + index + offset)) !=" +
+    (" __reyRawLoadByte(containersAddressAt(needle, 24 + offset)) \x7B equal = false; break; \x7D\n            offset = offset + 1;\n        \x7D\n        if equal \x7B return index; \x7D\n        index = index + 1;\n " +
+    "   \x7D\n    return -1;\n\x7D\n\npub func managedStringContains(context: __rey_raw_address, value: __rey_raw_address, needle: __rey_raw_address): bool \x7B\n    return managedStringIndexOf(context, value, n")) +
+    ("eedle) >= 0;\n\x7D\n\npub func managedStringStartsWith(context: __rey_raw_address, value: __rey_raw_address, prefix: __rey_raw_address): bool \x7B\n    var length = managedStringLength(context, value);\n" +
+    ("    var prefixLength = managedStringLength(context, prefix);\n    if prefixLength > length \x7B return false; \x7D\n    var index = 0;\n    while index < prefixLength \x7B\n        if __reyRawLoadByte(cont" +
+    "ainersAddressAt(value, 24 + index)) != __reyRawLoadByte(containersAddressAt(prefix, 24 + index)) \x7B return false; \x7D\n        index = index + 1;\n    \x7D\n    return true;\n\x7D\n\npub func managedStringEn"))))) +
+    (((("dsWith(context: __rey_raw_address, value: __rey_raw_address, suffix: __rey_raw_address): bool \x7B\n    var length = managedStringLength(context, value);\n    var suffixLength = managedStringLength" +
+    "(context, suffix);\n    if suffixLength > length \x7B return false; \x7D\n    var index = 0;\n    while index < suffixLength \x7B\n        if __reyRawLoadByte(containersAddressAt(value, 24 + length - suffi") +
+    ("xLength + index)) != __reyRawLoadByte(containersAddressAt(suffix, 24 + index)) \x7B return false; \x7D\n        index = index + 1;\n    \x7D\n    return true;\n\x7D\n\npub func managedStringSlice(context: __rey" +
+    ("_raw_address, stringLayoutId: int, value: __rey_raw_address, start: int, end: int): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    if start < 0 || end < 0 \x7B cont" +
+    "ainersFail(2205); return __reyRawNull(); \x7D\n    var lo = start;\n    var hi = end;\n    if lo > length \x7B lo = length; \x7D\n    if hi > length \x7B hi = length; \x7D\n    var resultLength = 0;\n    if hi > l"))) +
+    (("o \x7B resultLength = hi - lo; \x7D\n    var result = containersNewString(context, stringLayoutId, resultLength);\n    var index = 0;\n    while index < resultLength \x7B\n        __reyRawStoreByte(contain" +
+    ("ersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + lo + index)));\n        index = index + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringConcat(context: _" +
+    "_rey_raw_address, stringLayoutId: int, left: __rey_raw_address, right: __rey_raw_address): __rey_raw_address \x7B\n    containersStringLayout(context, left);\n    containersStringLayout(context, ri")) +
+    ("ght);\n    var leftLength = __reyRawLoadI64(containersAddressAt(left, 16));\n    var rightLength = __reyRawLoadI64(containersAddressAt(right, 16));\n    if leftLength > 9223372036854775798 - righ" +
+    ("tLength \x7B containersFail(2201); return __reyRawNull(); \x7D\n    var length = leftLength + rightLength;\n    var result = containersNewString(context, stringLayoutId, length);\n    var index = 0;\n  " +
+    "  while index < leftLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(left, 24 + index)));\n        index = index + 1;\n    \x7D\n    i")))) +
+    ((("ndex = 0;\n    while index < rightLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + leftLength + index), __reyRawLoadByte(containersAddressAt(right, 24 + index)));\n        ind" +
+    "ex = index + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringFromInt(context: __rey_raw_address, stringLayoutId: int, value: int): __rey_raw_address \x7B\n    var countValue = value;\n    var ") +
+    ("digitCount = 0;\n    if countValue == 0 \x7B digitCount = 1; \x7D\n    else \x7B\n        while countValue != 0 \x7B\n            countValue = countValue / 10;\n            digitCount = digitCount + 1;\n       " +
+    (" \x7D\n    \x7D\n    var negative = value < 0;\n    var length = digitCount;\n    if negative \x7B length = length + 1; \x7D\n    var result = containersNewString(context, stringLayoutId, length);\n    var curs" +
+    "or = length;\n    var remaining = value;\n    if remaining > 0 \x7B remaining = -remaining; \x7D\n    if remaining == 0 \x7B\n        cursor = cursor - 1;\n        __reyRawStoreByte(containersAddressAt(resu"))) +
+    (("lt, 24 + cursor), 48);\n    \x7D else \x7B\n        while remaining != 0 \x7B\n            var digit = -(remaining % 10);\n            cursor = cursor - 1;\n            __reyRawStoreByte(containersAddressAt" +
+    ("(result, 24 + cursor), 48 + digit);\n            remaining = remaining / 10;\n        \x7D\n    \x7D\n    if negative \x7B __reyRawStoreByte(containersAddressAt(result, 24), 45); \x7D\n    return result;\n\x7D\n\nfu" +
+    "nc containersBinaryExponent(high: int, low: int): int \x7B\n    var probe = low;\n    var base = 0;\n    if high > 0 \x7B probe = high; base = 32; \x7D\n    var exponent = -1;\n    while probe > 0 \x7B\n       ")) +
+    (" probe = probe / 2;\n        exponent = exponent + 1;\n    \x7D\n    if exponent < 0 \x7B return -1; \x7D\n    return base + exponent;\n\x7D\n\nfunc containersCompareFraction(context: __rey_raw_address, value: _" +
+    ("_rey_raw_address, start: int, end: int, denominator: int): int \x7B\n    var remainder = denominator - 1;\n    var comparison = 0;\n    var index = start;\n    while index < end \x7B\n        var byte = " +
+    "__reyRawLoadByte(containersAddressAt(value, 24 + index));\n        if byte >= 48 && byte <= 57 \x7B\n            remainder = remainde"))))));
 }
 
 func embeddedRuntimeSource1Part10(): string {
-    return ((((("ontainersCompareFraction(context, value, fractionStart, fractionEnd, denominator);\n        // At this boundary the next integer has an even binary64 significand.\n        // A tie therefore rou" +
-    "nds upward regardless of integerPart's parity.\n        if comparison >= 0 \x7B integerPart = integerPart + 1; \x7D\n        if negative \x7B return -integerPart; \x7D\n        return integerPart;\n    \x7D\n\n   ") +
-    (" var step = 1;\n    var stepBits = exponent - 52;\n    while stepBits > 0 \x7B step = step * 2; stepBits = stepBits - 1; \x7D\n    var units = high * (4294967296 / step) + low / step;\n    var remainder" +
-    (" = low % step;\n    var roundUp = false;\n    if step == 1 \x7B\n        var comparison = containersCompareFraction(context, value, fractionStart, fractionEnd, 2);\n        if comparison > 0 || (comp" +
-    "arison == 0 && units % 2 != 0) \x7B roundUp = true; \x7D\n    \x7D else \x7B\n        var halfStep = step / 2;\n        if remainder > halfStep \x7B roundUp = true; \x7D\n        else if remainder == halfStep && (f"))) +
-    (("ractionNonzero || units % 2 != 0) \x7B roundUp = true; \x7D\n    \x7D\n    if roundUp \x7B units = units + 1; \x7D\n    var maxPositiveUnits = 9223372036854775807 / step;\n    if units <= maxPositiveUnits \x7B\n    " +
-    "    var result = units * step;\n        if negative \x7B return -result; \x7D\n        return result;\n    \x7D\n    if negative && step > 1 && units == maxPositiveUnits + 1 \x7B\n        return -9223372036854") +
-    ("775807 - 1;\n    \x7D\n    containersFail(2205);\n    return 0;\n\x7D\n\npub func managedStringCase(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, upper: bool): __rey_raw_addre" +
-    ("ss \x7B\n    var length = managedStringLength(context, value);\n    var result = containersNewString(context, stringLayoutId, length);\n    var index = 0;\n    while index < length \x7B\n        var byte" +
-    " = __reyRawLoadByte(containersAddressAt(value, 24 + index));\n        if upper && byte >= 97 && byte <= 122 \x7B byte = byte - 32; \x7D\n        if !upper && byte >= 65 && byte <= 90 \x7B byte = byte + 3")))) +
-    ((("2; \x7D\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), byte);\n        index = index + 1;\n    \x7D\n    return result;\n\x7D\n\nfunc containersAsciiSpace(byte: int): bool \x7B\n    return by" +
-    "te == 32 || (byte >= 9 && byte <= 13);\n\x7D\n\npub func managedStringTrim(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address): __rey_raw_address \x7B\n    var length = managedStr") +
-    ("ingLength(context, value);\n    var lo = 0;\n    var hi = length;\n    while lo < hi && containersAsciiSpace(__reyRawLoadByte(containersAddressAt(value, 24 + lo))) \x7B lo = lo + 1; \x7D\n    while hi >" +
-    (" lo && containersAsciiSpace(__reyRawLoadByte(containersAddressAt(value, 23 + hi))) \x7B hi = hi - 1; \x7D\n    var resultLength = hi - lo;\n    var result = containersNewString(context, stringLayoutId" +
-    ", resultLength);\n    var index = 0;\n    while index < resultLength \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + lo + in"))) +
-    (("dex)));\n        index = index + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringRepeat(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, count: int): __rey_raw_ad" +
-    ("dress \x7B\n    var length = managedStringLength(context, value);\n    if count < 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    if length != 0 && count > 9223372036854775798 / length \x7B con" +
-    "tainersFail(2201); return __reyRawNull(); \x7D\n    var total = length * count;\n    var result = containersNewString(context, stringLayoutId, total);\n    var copy = 0;\n    while copy < count \x7B\n   ")) +
-    ("     var index = 0;\n        while index < length \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + copy * length + index), __reyRawLoadByte(containersAddressAt(value, 24 + index" +
-    (")));\n            index = index + 1;\n        \x7D\n        copy = copy + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringReplace(context: __rey_raw_address, stringLayoutId: int, value: __rey_r" +
-    "aw_address, from: __rey_raw_address, to: __rey_raw_address): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    var fromLength = managedStringLength(context, from);\n"))))) +
-    (((("    var toLength = managedStringLength(context, to);\n    var matches = 0;\n    if fromLength > 0 \x7B\n        var scan = 0;\n        while scan <= length - fromLength \x7B\n            var equal = true" +
-    ";\n            var offset = 0;\n            while offset < fromLength \x7B\n                if __reyRawLoadByte(containersAddressAt(value, 24 + scan + offset)) != __reyRawLoadByte(containersAddressA") +
-    ("t(from, 24 + offset)) \x7B equal = false; break; \x7D\n                offset = offset + 1;\n            \x7D\n            if equal \x7B matches = matches + 1; scan = scan + fromLength; \x7D\n            else \x7B " +
-    ("scan = scan + 1; \x7D\n        \x7D\n    \x7D else \x7B matches = length + 1; \x7D\n    if matches > 0 && toLength > 9223372036854775798 / matches \x7B containersFail(2201); return __reyRawNull(); \x7D\n    var replac" +
-    "edBytes = matches * toLength;\n    var removedBytes = 0;\n    if fromLength > 0 \x7B\n        if matches > 0 && fromLength > 9223372036854775807 / matches \x7B containersFail(2201); return __reyRawNull"))) +
-    (("(); \x7D\n        removedBytes = matches * fromLength;\n    \x7D\n    if removedBytes > length || length - removedBytes > 9223372036854775798 - replacedBytes \x7B containersFail(2201); return __reyRawNull" +
-    ("(); \x7D\n    var resultLength = length - removedBytes + replacedBytes;\n    var result = containersNewString(context, stringLayoutId, resultLength);\n    var source = 0;\n    var target = 0;\n    if " +
-    "fromLength == 0 \x7B\n        var boundary = 0;\n        while boundary <= length \x7B\n            var padIndex = 0;\n            while padIndex < toLength \x7B\n                __reyRawStoreByte(container")) +
-    ("sAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(to, 24 + padIndex)));\n                target = target + 1;\n                padIndex = padIndex + 1;\n            \x7D\n        " +
-    ("    if boundary < length \x7B\n                __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(value, 24 + boundary)));\n                target = ta" +
-    "rget + 1;\n            \x7D\n            boundary = boundary + 1;\n        \x7D\n        return result;\n    \x7D\n    while source <= length - fromLength \x7B\n        var equal = true;\n        var offset = 0;\n")))) +
-    ((("        while offset < fromLength \x7B\n            if __reyRawLoadByte(containersAddressAt(value, 24 + source + offset)) != __reyRawLoadByte(containersAddressAt(from, 24 + offset)) \x7B equal = fals" +
-    "e; break; \x7D\n            offset = offset + 1;\n        \x7D\n        if equal \x7B\n            offset = 0;\n            while offset < toLength \x7B\n                __reyRawStoreByte(containersAddressAt(re") +
-    ("sult, 24 + target), __reyRawLoadByte(containersAddressAt(to, 24 + offset)));\n                target = target + 1;\n                offset = offset + 1;\n            \x7D\n            source = source" +
-    (" + fromLength;\n        \x7D else \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(value, 24 + source)));\n            target = target " +
-    "+ 1;\n            source = source + 1;\n        \x7D\n    \x7D\n    while source < length \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(value"))) +
-    ((", 24 + source)));\n        target = target + 1;\n        source = source + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringPad(context: __rey_raw_address, stringLayoutId: int, value: __rey_" +
-    ("raw_address, width: int, pad: __rey_raw_address, left: bool): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    var padLength = managedStringLength(context, pad);\n " +
-    "   if width < 0 || padLength == 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var total = length;\n    if width > total \x7B total = width; \x7D\n    var padding = total - length;\n    var res")) +
-    ("ult = containersNewString(context, stringLayoutId, total);\n    var index = 0;\n    if left \x7B\n        while index < padding \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + index" +
-    ("), __reyRawLoadByte(containersAddressAt(pad, 24)));\n            index = index + 1;\n        \x7D\n        index = 0;\n        while index < length \x7B\n            __reyRawStoreByte(containersAddressAt" +
-    "(result, 24 + padding + index), __reyRawLoadByte(containersAddressAt(value, 24 + index)));\n            index = index + 1;\n      "))))));
+    return ((((("r * 10;\n            var thresholdDigit = remainder / denominator;\n            remainder = remainder % denominator;\n            if comparison == 0 \x7B\n                var digit = byte - 48;\n     " +
+    "           if digit < thresholdDigit \x7B comparison = -1; \x7D\n                else if digit > thresholdDigit \x7B comparison = 1; \x7D\n            \x7D\n        \x7D\n        index = index + 1;\n    \x7D\n    if com") +
+    ("parison == 0 && remainder != 0 \x7B return -1; \x7D\n    return comparison;\n\x7D\n\n// Keep v0.3 decimal-to-f64 rounding before truncation without a float backend.\npub func managedStringToInt(context: __r" +
+    ("ey_raw_address, value: __rey_raw_address): int \x7B\n    var length = managedStringLength(context, value);\n    if length == 0 \x7B containersFail(2205); return 0; \x7D\n    var index = 0;\n    var negativ" +
+    "e = false;\n    var first = __reyRawLoadByte(containersAddressAt(value, 24));\n    if first == 45 || first == 43 \x7B negative = first == 45; index = 1; \x7D\n    var high = 0;\n    var low = 0;\n    var"))) +
+    ((" sawDigit = false;\n    var previousDigit = false;\n    while index < length \x7B\n        var byte = __reyRawLoadByte(containersAddressAt(value, 24 + index));\n        if byte >= 48 && byte <= 57 \x7B\n" +
+    "            var digit = byte - 48;\n            var lowProduct = low * 10 + digit;\n            var carry = lowProduct / 4294967296;\n            low = lowProduct % 4294967296;\n            if hig") +
+    ("h > (4294967295 - carry) / 10 \x7B containersFail(2205); return 0; \x7D\n            high = high * 10 + carry;\n            sawDigit = true;\n            previousDigit = true;\n            index = index" +
+    (" + 1;\n        \x7D else if byte == 95 \x7B\n            if !previousDigit || index + 1 >= length \x7B containersFail(2205); return 0; \x7D\n            var after = __reyRawLoadByte(containersAddressAt(value" +
+    ", 25 + index));\n            if after < 48 || after > 57 \x7B containersFail(2205); return 0; \x7D\n            previousDigit = false;\n            index = index + 1;\n        \x7D else \x7B break; \x7D\n    \x7D\n  ")))) +
+    ((("  if !sawDigit \x7B containersFail(2205); return 0; \x7D\n    var fractionStart = length;\n    var fractionEnd = length;\n    var fractionNonzero = false;\n    if index < length && __reyRawLoadByte(cont" +
+    "ainersAddressAt(value, 24 + index)) == 46 \x7B\n        index = index + 1;\n        fractionStart = index;\n        previousDigit = false;\n        while index < length \x7B\n            var byte = __rey") +
+    ("RawLoadByte(containersAddressAt(value, 24 + index));\n            if byte >= 48 && byte <= 57 \x7B\n                if byte != 48 \x7B fractionNonzero = true; \x7D\n                previousDigit = true;\n " +
+    ("               index = index + 1;\n            \x7D else if byte == 95 \x7B\n                if !previousDigit || index + 1 >= length \x7B containersFail(2205); return 0; \x7D\n                var after = __" +
+    "reyRawLoadByte(containersAddressAt(value, 25 + index));\n                if after < 48 || after > 57 \x7B containersFail(2205); return 0; \x7D\n                previousDigit = false;\n                i"))) +
+    (("ndex = index + 1;\n            \x7D else \x7B containersFail(2205); return 0; \x7D\n        \x7D\n        fractionEnd = index;\n    \x7D\n    if index != length \x7B containersFail(2205); return 0; \x7D\n\n    var expone" +
+    ("nt = containersBinaryExponent(high, low);\n    if exponent < 52 \x7B\n        var integerPart = high * 4294967296 + low;\n        var denominator = 1;\n        var denominatorBits = 53 - exponent;\n  " +
+    "      while denominatorBits > 0 \x7B denominator = denominator * 2; denominatorBits = denominatorBits - 1; \x7D\n        var comparison = containersCompareFraction(context, value, fractionStart, frac")) +
+    ("tionEnd, denominator);\n        // At this boundary the next integer has an even binary64 significand.\n        // A tie therefore rounds upward regardless of integerPart's parity.\n        if co" +
+    ("mparison >= 0 \x7B integerPart = integerPart + 1; \x7D\n        if negative \x7B return -integerPart; \x7D\n        return integerPart;\n    \x7D\n\n    var step = 1;\n    var stepBits = exponent - 52;\n    while s" +
+    "tepBits > 0 \x7B step = step * 2; stepBits = stepBits - 1; \x7D\n    var units = high * (4294967296 / step) + low / step;\n    var remainder = low % step;\n    var roundUp = false;\n    if step == 1 \x7B\n "))))) +
+    (((("       var comparison = containersCompareFraction(context, value, fractionStart, fractionEnd, 2);\n        if comparison > 0 || (comparison == 0 && units % 2 != 0) \x7B roundUp = true; \x7D\n    \x7D els" +
+    "e \x7B\n        var halfStep = step / 2;\n        if remainder > halfStep \x7B roundUp = true; \x7D\n        else if remainder == halfStep && (fractionNonzero || units % 2 != 0) \x7B roundUp = true; \x7D\n    \x7D\n") +
+    ("    if roundUp \x7B units = units + 1; \x7D\n    var maxPositiveUnits = 9223372036854775807 / step;\n    if units <= maxPositiveUnits \x7B\n        var result = units * step;\n        if negative \x7B return " +
+    ("-result; \x7D\n        return result;\n    \x7D\n    if negative && step > 1 && units == maxPositiveUnits + 1 \x7B\n        return -9223372036854775807 - 1;\n    \x7D\n    containersFail(2205);\n    return 0;\n\x7D\n" +
+    "\npub func managedStringCase(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, upper: bool): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n "))) +
+    (("   var result = containersNewString(context, stringLayoutId, length);\n    var index = 0;\n    while index < length \x7B\n        var byte = __reyRawLoadByte(containersAddressAt(value, 24 + index));" +
+    ("\n        if upper && byte >= 97 && byte <= 122 \x7B byte = byte - 32; \x7D\n        if !upper && byte >= 65 && byte <= 90 \x7B byte = byte + 32; \x7D\n        __reyRawStoreByte(containersAddressAt(result, 2" +
+    "4 + index), byte);\n        index = index + 1;\n    \x7D\n    return result;\n\x7D\n\nfunc containersAsciiSpace(byte: int): bool \x7B\n    return byte == 32 || (byte >= 9 && byte <= 13);\n\x7D\n\npub func managedSt")) +
+    ("ringTrim(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    var lo = 0;\n    var hi = leng" +
+    ("th;\n    while lo < hi && containersAsciiSpace(__reyRawLoadByte(containersAddressAt(value, 24 + lo))) \x7B lo = lo + 1; \x7D\n    while hi > lo && containersAsciiSpace(__reyRawLoadByte(containersAddre" +
+    "ssAt(value, 23 + hi))) \x7B hi = hi - 1; \x7D\n    var resultLength = hi - lo;\n    var result = containersNewString(context, stringLayoutId, resultLength);\n    var index = 0;\n    while index < result")))) +
+    ((("Length \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + lo + index)));\n        index = index + 1;\n    \x7D\n    return result;\n" +
+    "\x7D\n\npub func managedStringRepeat(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, count: int): __rey_raw_address \x7B\n    var length = managedStringLength(context, value)") +
+    (";\n    if count < 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    if length != 0 && count > 9223372036854775798 / length \x7B containersFail(2201); return __reyRawNull(); \x7D\n    var total = " +
+    ("length * count;\n    var result = containersNewString(context, stringLayoutId, total);\n    var copy = 0;\n    while copy < count \x7B\n        var index = 0;\n        while index < length \x7B\n         " +
+    "   __reyRawStoreByte(containersAddressAt(result, 24 + copy * length + index), __reyRawLoadByte(containersAddressAt(value, 24 + index)));\n            index = index + 1;\n        \x7D\n        copy ="))) +
+    ((" copy + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringReplace(context: __rey_raw_address, stringLayoutId: int, value: __rey_raw_address, from: __rey_raw_address, to: __rey_raw_address):" +
+    (" __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    var fromLength = managedStringLength(context, from);\n    var toLength = managedStringLength(context, to);\n    var" +
+    " matches = 0;\n    if fromLength > 0 \x7B\n        var scan = 0;\n        while scan <= length - fromLength \x7B\n            var equal = true;\n            var offset = 0;\n            while offset < fro")) +
+    ("mLength \x7B\n                if __reyRawLoadByte(containersAddressAt(value, 24 + scan + offset)) != __reyRawLoadByte(containersAddressAt(from, 24 + offset)) \x7B equal = false; break; \x7D\n            " +
+    ("    offset = offset + 1;\n            \x7D\n            if equal \x7B matches = matches + 1; scan = scan + fromLength; \x7D\n            else \x7B scan = scan + 1; \x7D\n        \x7D\n    \x7D else \x7B matches = length +" +
+    " 1; \x7D\n    if matches > 0 && toLength > 9223372036854775798 / matches \x7B containersFail(2201); return __reyRawNull(); \x7D\n    var re"))))));
 }
 
 func embeddedRuntimeSource1Part11(): string {
-    return ((((("  \x7D\n    \x7D else \x7B\n        while index < length \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + index)));\n            in" +
-    "dex = index + 1;\n        \x7D\n        index = 0;\n        while index < padding \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + length + index), __reyRawLoadByte(containersAddress") +
-    ("At(pad, 24)));\n            index = index + 1;\n        \x7D\n    \x7D\n    return result;\n\x7D\n\nfunc containersVecHeader(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var layoutId = co" +
-    ("ntainersHeapLayout(context, vector);\n    var registry = containersRegistry(context);\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n    if __reyRawLoadI64(containersAddre" +
-    "ssAt(descriptor, 16)) != 0 || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 1 || __reyRawLoadI64(containersAddressAt(descriptor, 32)) != 0 \x7B\n      "))) +
-    (("  containersFail(2205);\n        return 0;\n    \x7D\n    return layoutId;\n\x7D\n\nfunc containersVecBacking(context: __rey_raw_address, vector: __rey_raw_address, expected: int): __rey_raw_address \x7B\n   " +
-    " containersVecHeader(context, vector);\n    var backing = __reyRawLoadAddress(containersAddressAt(vector, 16));\n    if __reyRawEqual(backing, __reyRawNull()) \x7B containersFail(2205); return __re") +
-    ("yRawNull(); \x7D\n    var layoutId = containersHeapLayout(context, backing);\n    var registry = containersRegistry(context);\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n  " +
-    ("  var tailMagic = __reyRawLoadI64(containersAddressAt(descriptor, 16));\n    if (tailMagic != 1380273301 && tailMagic != 1380273302) || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(conta" +
-    "inersAddressAt(descriptor, 8)) != 0 || (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) % 8 != 0 \x7B\n        containersFail(2205);\n        return __reyRawNull();\n    \x7D\n    if expected == 1")))) +
-    (((" && tailMagic != 1380273301 || expected == 2 && tailMagic != 1380273302 \x7B containersFail(2203); return __reyRawNull(); \x7D\n    return backing;\n\x7D\n\nfunc containersVecRequireKind(context: __rey_raw" +
-    "_address, backing: __rey_raw_address, expected: int): int \x7B\n    var registry = containersRegistry(context);\n    var header = __reyRawLoadI64(backing);\n    var layoutId = header;\n    if header ") +
-    (">= 8589934592 \x7B layoutId = header - 8589934592; \x7D\n    else if header >= 4294967296 \x7B layoutId = header - 4294967296; \x7D\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n    " +
-    ("var tailMagic = __reyRawLoadI64(containersAddressAt(descriptor, 16));\n    var expectedMagic = 1380273301;\n    if expected == 2 \x7B expectedMagic = 1380273302; \x7D\n    if tailMagic != expectedMagic" +
-    " || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 0 \x7B\n        containersFail(2203);\n        return 0;\n    \x7D\n    return layoutId;\n\x7D\n\nfunc containers"))) +
-    (("VecBounds(backing: __rey_raw_address, index: int): int \x7B\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if index < 0 || index >= length \x7B containersFail(2205); return " +
-    ("0; \x7D\n    return length;\n\x7D\n\nfunc containersVecTailAddress(backing: __rey_raw_address, index: int): __rey_raw_address \x7B\n    return containersAddressAt(backing, 24 + index * 8);\n\x7D\n\npub func manag" +
-    "edVecCreate(context: __rey_raw_address, headerLayoutId: int, dataLayoutId: int, capacity: int): __rey_raw_address \x7B\n    managedLiveObjects(context);\n    var registry = containersRegistry(conte")) +
-    ("xt);\n    if capacity < 0 || capacity > 1152921504606846966 \x7B containersFail(2201); return __reyRawNull(); \x7D\n    if layoutTailKind(registry, headerLayoutId) != 0 || layoutPayloadBytes(registry," +
-    (" headerLayoutId) != 8 || layoutReferenceCount(registry, headerLayoutId) != 1 || layoutReferenceOffset(registry, headerLayoutId, 0) != 0 \x7B\n        containersFail(2203);\n        return __reyRawN" +
-    "ull();\n    \x7D\n    var dataKind = layoutTailKind(registry, dataLayoutId);\n    if (dataKind != 1 && dataKind != 2) || layoutPayloadBytes(registry, dataLayoutId) != 8 || layoutReferenceCount(regis"))))) +
-    (((("try, dataLayoutId) != 0 \x7B\n        containersFail(2203);\n        return __reyRawNull();\n    \x7D\n    var vector = managedAllocateSized(context, headerLayoutId, 8);\n    var payloadBytes = 8 + capac" +
-    "ity * 8;\n    var backing = managedAllocateSized(context, dataLayoutId, payloadBytes);\n    __reyRawStoreI64(containersAddressAt(backing, 16), 0);\n    managedStoreReference(context, vector, 0, b") +
-    ("acking);\n    return vector;\n\x7D\n\npub func managedVecJoin(context: __rey_raw_address, vector: __rey_raw_address, separator: __rey_raw_address, stringLayoutId: int): __rey_raw_address \x7B\n    var ba" +
-    ("cking = containersVecBacking(context, vector, 0);\n    var count = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) /" +
-    " 8;\n    if count < 0 || count > capacity \x7B containersFail(2205); return __reyRawNull(); \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var separatorLength = 0;\n    i"))) +
-    (("f count > 1 \x7B separatorLength = managedStringLength(context, separator); \x7D\n    var total = 0;\n    var index = 0;\n    while index < count \x7B\n        var item = __reyRawLoadAddress(containersVecT" +
-    ("ailAddress(backing, index));\n        var length = managedStringLength(context, item);\n        if index > 0 \x7B\n            if separatorLength > 9223372036854774758 - total \x7B containersFail(2201)" +
-    "; return __reyRawNull(); \x7D\n            total = total + separatorLength;\n        \x7D\n        if length > 9223372036854774758 - total \x7B containersFail(2201); return __reyRawNull(); \x7D\n        total")) +
-    (" = total + length;\n        index = index + 1;\n    \x7D\n    var result = containersNewString(context, stringLayoutId, total);\n    var offset = 0;\n    index = 0;\n    while index < count \x7B\n        i" +
-    ("f index > 0 \x7B\n            var sepAt = 0;\n            while sepAt < separatorLength \x7B\n                __reyRawStoreByte(containersAddressAt(result, 24 + offset), __reyRawLoadByte(containersAddr" +
-    "essAt(separator, 24 + sepAt)));\n                offset = offset + 1;\n                sepAt = sepAt + 1;\n            \x7D\n        \x7D\n        var item = __reyRawLoadAddress(containersVecTailAddress(")))) +
-    ((("backing, index));\n        var length = managedStringLength(context, item);\n        var itemAt = 0;\n        while itemAt < length \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 " +
-    "+ offset), __reyRawLoadByte(containersAddressAt(item, 24 + itemAt)));\n            offset = offset + 1;\n            itemAt = itemAt + 1;\n        \x7D\n        index = index + 1;\n    \x7D\n    return re") +
-    ("sult;\n\x7D\n\npub func managedVecLength(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    return __reyRawLoadI64(containe" +
-    ("rsAddressAt(backing, 16));\n\x7D\n\npub func managedVecCapacity(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var payl" +
-    "oadBytes = __reyRawLoadI64(containersAddressAt(backing, 8));\n    return (payloadBytes - 8) / 8;\n\x7D\n\npub func managedVecGetI64(context: __rey_raw_address, vector: __rey_raw_address, index: int):"))) +
-    ((" int \x7B\n    var backing = containersVecBacking(context, vector, 1);\n    containersVecBounds(backing, index);\n    return __reyRawLoadI64(containersVecTailAddress(backing, index));\n\x7D\n\npub func ma" +
-    ("nagedVecGetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int): __rey_raw_address \x7B\n    var backing = containersVecBacking(context, vector, 2);\n    containersVecBounds" +
-    "(backing, index);\n    return __reyRawLoadAddress(containersVecTailAddress(backing, index));\n\x7D\n\npub func managedVecSetI64(context: __rey_raw_address, vector: __rey_raw_address, index: int, valu")) +
-    ("e: int): void \x7B\n    var backing = containersVecBacking(context, vector, 1);\n    containersVecBounds(backing, index);\n    __reyRawStoreI64(containersVecTailAddress(backing, index), value);\n\x7D\n\np" +
-    ("ub func managedVecSetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int, value: __rey_raw_address): void \x7B\n    var backing = containersVecBacking(context, vector, 2);\n" +
-    "    containersVecBounds(backing, index);\n    managedStoreReference(context, backing, 8 + index * 8, value);\n\x7D\n\nfunc containersVe"))))));
+    return ((((("placedBytes = matches * toLength;\n    var removedBytes = 0;\n    if fromLength > 0 \x7B\n        if matches > 0 && fromLength > 9223372036854775807 / matches \x7B containersFail(2201); return __reyRaw" +
+    "Null(); \x7D\n        removedBytes = matches * fromLength;\n    \x7D\n    if removedBytes > length || length - removedBytes > 9223372036854775798 - replacedBytes \x7B containersFail(2201); return __reyRaw") +
+    ("Null(); \x7D\n    var resultLength = length - removedBytes + replacedBytes;\n    var result = containersNewString(context, stringLayoutId, resultLength);\n    var source = 0;\n    var target = 0;\n   " +
+    (" if fromLength == 0 \x7B\n        var boundary = 0;\n        while boundary <= length \x7B\n            var padIndex = 0;\n            while padIndex < toLength \x7B\n                __reyRawStoreByte(conta" +
+    "inersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(to, 24 + padIndex)));\n                target = target + 1;\n                padIndex = padIndex + 1;\n            \x7D\n    "))) +
+    (("        if boundary < length \x7B\n                __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(value, 24 + boundary)));\n                target " +
+    "= target + 1;\n            \x7D\n            boundary = boundary + 1;\n        \x7D\n        return result;\n    \x7D\n    while source <= length - fromLength \x7B\n        var equal = true;\n        var offset =") +
+    (" 0;\n        while offset < fromLength \x7B\n            if __reyRawLoadByte(containersAddressAt(value, 24 + source + offset)) != __reyRawLoadByte(containersAddressAt(from, 24 + offset)) \x7B equal = " +
+    ("false; break; \x7D\n            offset = offset + 1;\n        \x7D\n        if equal \x7B\n            offset = 0;\n            while offset < toLength \x7B\n                __reyRawStoreByte(containersAddressA" +
+    "t(result, 24 + target), __reyRawLoadByte(containersAddressAt(to, 24 + offset)));\n                target = target + 1;\n                offset = offset + 1;\n            \x7D\n            source = so")))) +
+    ((("urce + fromLength;\n        \x7D else \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(value, 24 + source)));\n            target = tar" +
+    "get + 1;\n            source = source + 1;\n        \x7D\n    \x7D\n    while source < length \x7B\n        __reyRawStoreByte(containersAddressAt(result, 24 + target), __reyRawLoadByte(containersAddressAt(v") +
+    ("alue, 24 + source)));\n        target = target + 1;\n        source = source + 1;\n    \x7D\n    return result;\n\x7D\n\npub func managedStringPad(context: __rey_raw_address, stringLayoutId: int, value: __" +
+    ("rey_raw_address, width: int, pad: __rey_raw_address, left: bool): __rey_raw_address \x7B\n    var length = managedStringLength(context, value);\n    var padLength = managedStringLength(context, pad" +
+    ");\n    if width < 0 || padLength == 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var total = length;\n    if width > total \x7B total = width; \x7D\n    var padding = total - length;\n    var"))) +
+    ((" result = containersNewString(context, stringLayoutId, total);\n    var index = 0;\n    if left \x7B\n        while index < padding \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + i" +
+    ("ndex), __reyRawLoadByte(containersAddressAt(pad, 24)));\n            index = index + 1;\n        \x7D\n        index = 0;\n        while index < length \x7B\n            __reyRawStoreByte(containersAddre" +
+    "ssAt(result, 24 + padding + index), __reyRawLoadByte(containersAddressAt(value, 24 + index)));\n            index = index + 1;\n        \x7D\n    \x7D else \x7B\n        while index < length \x7B\n            ")) +
+    ("__reyRawStoreByte(containersAddressAt(result, 24 + index), __reyRawLoadByte(containersAddressAt(value, 24 + index)));\n            index = index + 1;\n        \x7D\n        index = 0;\n        while " +
+    ("index < padding \x7B\n            __reyRawStoreByte(containersAddressAt(result, 24 + length + index), __reyRawLoadByte(containersAddressAt(pad, 24)));\n            index = index + 1;\n        \x7D\n    " +
+    "\x7D\n    return result;\n\x7D\n\nfunc containersVecHeader(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var layoutId = containersHeapLayout(context, vector);\n    var registry = cont"))))) +
+    (((("ainersRegistry(context);\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n    if __reyRawLoadI64(containersAddressAt(descriptor, 16)) != 0 || __reyRawLoadI64(descriptor) !=" +
+    " 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 1 || __reyRawLoadI64(containersAddressAt(descriptor, 32)) != 0 \x7B\n        containersFail(2205);\n        return 0;\n    \x7D\n    return l") +
+    ("ayoutId;\n\x7D\n\nfunc containersVecBacking(context: __rey_raw_address, vector: __rey_raw_address, expected: int): __rey_raw_address \x7B\n    containersVecHeader(context, vector);\n    var backing = __r" +
+    ("eyRawLoadAddress(containersAddressAt(vector, 16));\n    if __reyRawEqual(backing, __reyRawNull()) \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var layoutId = containersHeapLayout(contex" +
+    "t, backing);\n    var registry = containersRegistry(context);\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n    var tailMagic = __reyRawLoadI64(containersAddressAt(descri"))) +
+    (("ptor, 16));\n    if (tailMagic != 1380273301 && tailMagic != 1380273302) || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(containersAddressAt(descriptor, 8)) != 0 || (__reyRawLoadI64(cont" +
+    ("ainersAddressAt(backing, 8)) - 8) % 8 != 0 \x7B\n        containersFail(2205);\n        return __reyRawNull();\n    \x7D\n    if expected == 1 && tailMagic != 1380273301 || expected == 2 && tailMagic !=" +
+    " 1380273302 \x7B containersFail(2203); return __reyRawNull(); \x7D\n    return backing;\n\x7D\n\nfunc containersVecRequireKind(context: __rey_raw_address, backing: __rey_raw_address, expected: int): int \x7B\n")) +
+    ("    var registry = containersRegistry(context);\n    var header = __reyRawLoadI64(backing);\n    var layoutId = header;\n    if header >= 8589934592 \x7B layoutId = header - 8589934592; \x7D\n    else i" +
+    ("f header >= 4294967296 \x7B layoutId = header - 4294967296; \x7D\n    var descriptor = containersLayoutDescriptor(registry, layoutId);\n    var tailMagic = __reyRawLoadI64(containersAddressAt(descript" +
+    "or, 16));\n    var expectedMagic = 1380273301;\n    if expected == 2 \x7B expectedMagic = 1380273302; \x7D\n    if tailMagic != expectedMagic || __reyRawLoadI64(descriptor) != 8 || __reyRawLoadI64(cont")))) +
+    ((("ainersAddressAt(descriptor, 8)) != 0 \x7B\n        containersFail(2203);\n        return 0;\n    \x7D\n    return layoutId;\n\x7D\n\nfunc containersVecBounds(backing: __rey_raw_address, index: int): int \x7B\n   " +
+    " var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if index < 0 || index >= length \x7B containersFail(2205); return 0; \x7D\n    return length;\n\x7D\n\nfunc containersVecTailAddress(bac") +
+    ("king: __rey_raw_address, index: int): __rey_raw_address \x7B\n    return containersAddressAt(backing, 24 + index * 8);\n\x7D\n\npub func managedVecCreate(context: __rey_raw_address, headerLayoutId: int," +
+    (" dataLayoutId: int, capacity: int): __rey_raw_address \x7B\n    managedLiveObjects(context);\n    var registry = containersRegistry(context);\n    if capacity < 0 || capacity > 1152921504606846966 \x7B" +
+    " containersFail(2201); return __reyRawNull(); \x7D\n    if layoutTailKind(registry, headerLayoutId) != 0 || layoutPayloadBytes(registry, headerLayoutId) != 8 || layoutReferenceCount(registry, head"))) +
+    (("erLayoutId) != 1 || layoutReferenceOffset(registry, headerLayoutId, 0) != 0 \x7B\n        containersFail(2203);\n        return __reyRawNull();\n    \x7D\n    var dataKind = layoutTailKind(registry, dat" +
+    ("aLayoutId);\n    if (dataKind != 1 && dataKind != 2) || layoutPayloadBytes(registry, dataLayoutId) != 8 || layoutReferenceCount(registry, dataLayoutId) != 0 \x7B\n        containersFail(2203);\n    " +
+    "    return __reyRawNull();\n    \x7D\n    var vector = managedAllocateSized(context, headerLayoutId, 8);\n    var payloadBytes = 8 + capacity * 8;\n    var backing = managedAllocateSized(context, dat")) +
+    ("aLayoutId, payloadBytes);\n    __reyRawStoreI64(containersAddressAt(backing, 16), 0);\n    managedStoreReference(context, vector, 0, backing);\n    return vector;\n\x7D\n\npub func managedVecJoin(conte" +
+    ("xt: __rey_raw_address, vector: __rey_raw_address, separator: __rey_raw_address, stringLayoutId: int): __rey_raw_address \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var co" +
+    "unt = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - "))))));
 }
 
 func embeddedRuntimeSource1Part12(): string {
-    return ((((("cGrow(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, required: int): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var oldLayoutId = contain" +
-    "ersVecRequireKind(context, backing, layoutTailKind(containersRegistry(context), dataLayoutId));\n    if oldLayoutId != dataLayoutId \x7B containersFail(2203); return; \x7D\n    var oldCapacity = (__re") +
-    ("yRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if required <= oldCapacity \x7B return; \x7D\n    if required < 0 || required > 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    va" +
-    ("r newCapacity = oldCapacity;\n    if newCapacity == 0 \x7B newCapacity = 8; \x7D\n    while newCapacity < required \x7B\n        if newCapacity > 1152921504606846966 / 2 \x7B containersFail(2201); return; \x7D\n" +
-    "        newCapacity = newCapacity * 2;\n    \x7D\n    var payloadBytes = 8 + newCapacity * 8;\n    var newBacking = managedAllocateSized(context, dataLayoutId, payloadBytes);\n    var length = __reyR"))) +
-    (("awLoadI64(containersAddressAt(backing, 16));\n    var index = 0;\n    if layoutTailKind(containersRegistry(context), dataLayoutId) == 1 \x7B\n        while index < length \x7B\n            __reyRawStore" +
-    "I64(containersVecTailAddress(newBacking, index), __reyRawLoadI64(containersVecTailAddress(backing, index)));\n            index = index + 1;\n        \x7D\n    \x7D else \x7B\n        while index < length ") +
-    ("\x7B\n            __reyRawStoreAddress(containersVecTailAddress(newBacking, index), __reyRawLoadAddress(containersVecTailAddress(backing, index)));\n            index = index + 1;\n        \x7D\n    \x7D\n " +
-    ("   __reyRawStoreI64(containersAddressAt(newBacking, 16), length);\n    managedStoreReference(context, vector, 0, newBacking);\n\x7D\n\npub func managedVecPushI64(context: __rey_raw_address, vector: _" +
-    "_rey_raw_address, dataLayoutId: int, value: int): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var actualLayoutId = containersVecRequireKind(context, backing, 1);\n   ")))) +
-    (((" if actualLayoutId != dataLayoutId \x7B containersFail(2203); return; \x7D\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt" +
-    "(backing, 8)) - 8) / 8;\n    if length < 0 || length > capacity \x7B containersFail(2205); return; \x7D\n    if length >= 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    if length >= capacit") +
-    ("y \x7B\n        containersVecGrow(context, vector, dataLayoutId, length + 1);\n        backing = containersVecBacking(context, vector, 0);\n    \x7D\n    __reyRawStoreI64(containersVecTailAddress(backin" +
-    ("g, length), value);\n    __reyRawStoreI64(containersAddressAt(backing, 16), length + 1);\n\x7D\n\npub func managedVecPushReference(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId:" +
-    " int, value: __rey_raw_address): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var actualLayoutId = containersVecRequireKind(context, backing, 2);\n    if actualLayoutI"))) +
-    (("d != dataLayoutId \x7B containersFail(2203); return; \x7D\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8" +
-    (") / 8;\n    if length < 0 || length > capacity \x7B containersFail(2205); return; \x7D\n    if length >= 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    if length >= capacity \x7B\n        conta" +
-    "inersVecGrow(context, vector, dataLayoutId, length + 1);\n        backing = containersVecBacking(context, vector, 0);\n    \x7D\n    managedStoreReference(context, backing, 8 + length * 8, value);\n\x7D")) +
-    ("\n\npub func managedVecContainsI64(context: __rey_raw_address, vector: __rey_raw_address, value: int): bool \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var count = __reyRaw" +
-    ("LoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(2205); return fa" +
-    "lse; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 1); \x7D\n    var index = 0;\n    while index < count \x7B\n        if __reyRawLoadI64(containersVecTailAddress(backing, index)) == "))))) +
-    (((("value \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    return false;\n\x7D\n\npub func managedVecContainsReference(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_addres" +
-    "s): bool \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var count = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressA") +
-    ("t(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(2205); return false; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var index = 0;\n   " +
-    (" while index < count \x7B\n        if __reyRawEqual(__reyRawLoadAddress(containersVecTailAddress(backing, index)), value) \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    return false;\n\x7D\n\npub" +
-    " func managedVecContainsString(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_address): bool \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var coun"))) +
-    (("t = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(2205" +
-    ("); return false; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var index = 0;\n    var valueLength = 0;\n    while index < count \x7B\n        var item = __reyRawLoadAddr" +
-    "ess(containersVecTailAddress(backing, index));\n        containersStringLayout(context, item);\n        if index == 0 \x7B\n            containersStringLayout(context, value);\n            valueLengt")) +
-    ("h = __reyRawLoadI64(containersAddressAt(value, 16));\n        \x7D\n        var itemLength = __reyRawLoadI64(containersAddressAt(item, 16));\n        if containersStringEqualValidated(item, itemLeng" +
-    ("th, value, valueLength) \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    return false;\n\x7D\n\npub func managedVecPopI64(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var b" +
-    "acking = containersVecBacking(context, vector, 0);\n    containersVecRequireKind(context, backing, 1);\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if length <= 0 \x7B c")))) +
-    ((("ontainersFail(2205); return 0; \x7D\n    var index = length - 1;\n    var value = __reyRawLoadI64(containersVecTailAddress(backing, index));\n    __reyRawStoreI64(containersVecTailAddress(backing, i" +
-    "ndex), 0);\n    __reyRawStoreI64(containersAddressAt(backing, 16), index);\n    return value;\n\x7D\n\npub func managedVecPopReference(context: __rey_raw_address, vector: __rey_raw_address): __rey_raw") +
-    ("_address \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    containersVecRequireKind(context, backing, 2);\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n  " +
-    ("  if length <= 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var index = length - 1;\n    var value = __reyRawLoadAddress(containersVecTailAddress(backing, index));\n    __reyRawStoreAd" +
-    "dress(containersVecTailAddress(backing, index), __reyRawNull());\n    __reyRawStoreI64(containersAddressAt(backing, 16), index);\n    return value;\n\x7D\n\npub func managedVecTruncate(context: __rey_"))) +
-    (("raw_address, vector: __rey_raw_address, length: int): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var kind = layoutTailKind(containersRegistry(context), containersHe" +
-    ("apLayout(context, backing));\n    var oldLength = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if length < 0 || length > oldLength \x7B containersFail(2205); return; \x7D\n    if kind == 2 \x7B" +
-    "\n        var index = length;\n        while index < oldLength \x7B\n            __reyRawStoreAddress(containersVecTailAddress(backing, index), __reyRawNull());\n            index = index + 1;\n      ")) +
-    ("  \x7D\n    \x7D else \x7B\n        var index = length;\n        while index < oldLength \x7B\n            __reyRawStoreI64(containersVecTailAddress(backing, index), 0);\n            index = index + 1;\n       " +
-    (" \x7D\n    \x7D\n    __reyRawStoreI64(containersAddressAt(backing, 16), length);\n\x7D\n\nfunc containersMapHeader(context: __rey_raw_address, map: __rey_raw_address): int \x7B\n    var layoutId = containersHea" +
-    "pLayout(context, map);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, layoutId) != 0 || layoutP"))))));
+    return ((((("8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(2205); return __reyRawNull(); \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var separatorLength = 0;\n " +
+    "   if count > 1 \x7B separatorLength = managedStringLength(context, separator); \x7D\n    var total = 0;\n    var index = 0;\n    while index < count \x7B\n        var item = __reyRawLoadAddress(containers") +
+    ("VecTailAddress(backing, index));\n        var length = managedStringLength(context, item);\n        if index > 0 \x7B\n            if separatorLength > 9223372036854774758 - total \x7B containersFail(2" +
+    ("201); return __reyRawNull(); \x7D\n            total = total + separatorLength;\n        \x7D\n        if length > 9223372036854774758 - total \x7B containersFail(2201); return __reyRawNull(); \x7D\n        t" +
+    "otal = total + length;\n        index = index + 1;\n    \x7D\n    var result = containersNewString(context, stringLayoutId, total);\n    var offset = 0;\n    index = 0;\n    while index < count \x7B\n     "))) +
+    (("   if index > 0 \x7B\n            var sepAt = 0;\n            while sepAt < separatorLength \x7B\n                __reyRawStoreByte(containersAddressAt(result, 24 + offset), __reyRawLoadByte(containers" +
+    "AddressAt(separator, 24 + sepAt)));\n                offset = offset + 1;\n                sepAt = sepAt + 1;\n            \x7D\n        \x7D\n        var item = __reyRawLoadAddress(containersVecTailAddr") +
+    ("ess(backing, index));\n        var length = managedStringLength(context, item);\n        var itemAt = 0;\n        while itemAt < length \x7B\n            __reyRawStoreByte(containersAddressAt(result," +
+    (" 24 + offset), __reyRawLoadByte(containersAddressAt(item, 24 + itemAt)));\n            offset = offset + 1;\n            itemAt = itemAt + 1;\n        \x7D\n        index = index + 1;\n    \x7D\n    retur" +
+    "n result;\n\x7D\n\npub func managedVecLength(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    return __reyRawLoadI64(cont")))) +
+    ((("ainersAddressAt(backing, 16));\n\x7D\n\npub func managedVecCapacity(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var " +
+    "payloadBytes = __reyRawLoadI64(containersAddressAt(backing, 8));\n    return (payloadBytes - 8) / 8;\n\x7D\n\npub func managedVecGetI64(context: __rey_raw_address, vector: __rey_raw_address, index: i") +
+    ("nt): int \x7B\n    var backing = containersVecBacking(context, vector, 1);\n    containersVecBounds(backing, index);\n    return __reyRawLoadI64(containersVecTailAddress(backing, index));\n\x7D\n\npub fun" +
+    ("c managedVecGetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int): __rey_raw_address \x7B\n    var backing = containersVecBacking(context, vector, 2);\n    containersVecBo" +
+    "unds(backing, index);\n    return __reyRawLoadAddress(containersVecTailAddress(backing, index));\n\x7D\n\npub func managedVecSetI64(context: __rey_raw_address, vector: __rey_raw_address, index: int, "))) +
+    (("value: int): void \x7B\n    var backing = containersVecBacking(context, vector, 1);\n    containersVecBounds(backing, index);\n    __reyRawStoreI64(containersVecTailAddress(backing, index), value);\n" +
+    ("\x7D\n\npub func managedVecSetReference(context: __rey_raw_address, vector: __rey_raw_address, index: int, value: __rey_raw_address): void \x7B\n    var backing = containersVecBacking(context, vector, " +
+    "2);\n    containersVecBounds(backing, index);\n    managedStoreReference(context, backing, 8 + index * 8, value);\n\x7D\n\nfunc containersVecGrow(context: __rey_raw_address, vector: __rey_raw_address,")) +
+    (" dataLayoutId: int, required: int): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var oldLayoutId = containersVecRequireKind(context, backing, layoutTailKind(container" +
+    ("sRegistry(context), dataLayoutId));\n    if oldLayoutId != dataLayoutId \x7B containersFail(2203); return; \x7D\n    var oldCapacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    i" +
+    "f required <= oldCapacity \x7B return; \x7D\n    if required < 0 || required > 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    var newCapacity = oldCapacity;\n    if newCapacity == 0 \x7B newCa"))))) +
+    (((("pacity = 8; \x7D\n    while newCapacity < required \x7B\n        if newCapacity > 1152921504606846966 / 2 \x7B containersFail(2201); return; \x7D\n        newCapacity = newCapacity * 2;\n    \x7D\n    var payload" +
+    "Bytes = 8 + newCapacity * 8;\n    var newBacking = managedAllocateSized(context, dataLayoutId, payloadBytes);\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var index =") +
+    (" 0;\n    if layoutTailKind(containersRegistry(context), dataLayoutId) == 1 \x7B\n        while index < length \x7B\n            __reyRawStoreI64(containersVecTailAddress(newBacking, index), __reyRawLoa" +
+    ("dI64(containersVecTailAddress(backing, index)));\n            index = index + 1;\n        \x7D\n    \x7D else \x7B\n        while index < length \x7B\n            __reyRawStoreAddress(containersVecTailAddress(" +
+    "newBacking, index), __reyRawLoadAddress(containersVecTailAddress(backing, index)));\n            index = index + 1;\n        \x7D\n    \x7D\n    __reyRawStoreI64(containersAddressAt(newBacking, 16), len"))) +
+    (("gth);\n    managedStoreReference(context, vector, 0, newBacking);\n\x7D\n\npub func managedVecPushI64(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: int): void \x7B\n   " +
+    (" var backing = containersVecBacking(context, vector, 0);\n    var actualLayoutId = containersVecRequireKind(context, backing, 1);\n    if actualLayoutId != dataLayoutId \x7B containersFail(2203); r" +
+    "eturn; \x7D\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if length < 0 || length > capaci")) +
+    ("ty \x7B containersFail(2205); return; \x7D\n    if length >= 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    if length >= capacity \x7B\n        containersVecGrow(context, vector, dataLayoutId," +
+    (" length + 1);\n        backing = containersVecBacking(context, vector, 0);\n    \x7D\n    __reyRawStoreI64(containersVecTailAddress(backing, length), value);\n    __reyRawStoreI64(containersAddressAt" +
+    "(backing, 16), length + 1);\n\x7D\n\npub func managedVecPushReference(context: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, value: __rey_raw_address): void \x7B\n    var backing = co")))) +
+    ((("ntainersVecBacking(context, vector, 0);\n    var actualLayoutId = containersVecRequireKind(context, backing, 2);\n    if actualLayoutId != dataLayoutId \x7B containersFail(2203); return; \x7D\n    var " +
+    "length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if length < 0 || length > capacity \x7B containersFa") +
+    ("il(2205); return; \x7D\n    if length >= 1152921504606846966 \x7B containersFail(2201); return; \x7D\n    if length >= capacity \x7B\n        containersVecGrow(context, vector, dataLayoutId, length + 1);\n   " +
+    ("     backing = containersVecBacking(context, vector, 0);\n    \x7D\n    managedStoreReference(context, backing, 8 + length * 8, value);\n\x7D\n\npub func managedVecContainsI64(context: __rey_raw_address," +
+    " vector: __rey_raw_address, value: int): bool \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var count = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity "))) +
+    (("= (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(2205); return false; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, " +
+    ("backing, 1); \x7D\n    var index = 0;\n    while index < count \x7B\n        if __reyRawLoadI64(containersVecTailAddress(backing, index)) == value \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    " +
+    "return false;\n\x7D\n\npub func managedVecContainsReference(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_address): bool \x7B\n    var backing = containersVecBacking(context, v")) +
+    ("ector, 0);\n    var count = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacit" +
+    ("y \x7B containersFail(2205); return false; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var index = 0;\n    while index < count \x7B\n        if __reyRawEqual(__reyRawLoad" +
+    "Address(containersVecTailAddress(backing, index)), value) \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    return false;\n\x7D\n"))))));
 }
 
 func embeddedRuntimeSource1Part13(): string {
-    return ((((("ayloadBytes(registry, layoutId) != 16 || layoutReferenceCount(registry, layoutId) != 1 || layoutReferenceOffset(registry, layoutId, 0) != 0 \x7B\n        containersFail(2205);\n        return 0;\n  " +
-    "  \x7D\n    if __reyRawLoadI64(containersAddressAt(map, 24)) < 0 \x7B containersFail(2205); return 0; \x7D\n    return layoutId;\n\x7D\n\nfunc containersMapBuckets(context: __rey_raw_address, map: __rey_raw_ad") +
-    ("dress): __rey_raw_address \x7B\n    containersMapHeader(context, map);\n    var buckets = __reyRawLoadAddress(containersAddressAt(map, 16));\n    if __reyRawEqual(buckets, __reyRawNull()) \x7B containe" +
-    ("rsFail(2205); return __reyRawNull(); \x7D\n    var layoutId = containersHeapLayout(context, buckets);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, layoutId) != 2" +
-    " || layoutPayloadBytes(registry, layoutId) != 8 || layoutReferenceCount(registry, layoutId) != 0 \x7B\n        containersFail(2205);\n        return __reyRawNull();\n    \x7D\n    var payloadBytes = __r"))) +
-    (("eyRawLoadI64(containersAddressAt(buckets, 8));\n    var capacity = (payloadBytes - 8) / 8;\n    if __reyRawLoadI64(containersAddressAt(buckets, 16)) != capacity \x7B containersFail(2205); return __" +
-    "reyRawNull(); \x7D\n    return buckets;\n\x7D\n\nfunc containersMapCapacity(context: __rey_raw_address, buckets: __rey_raw_address): int \x7B\n    containersHeapLayout(context, buckets);\n    return (__reyRa") +
-    ("wLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;\n\x7D\n\nfunc containersMapNodeIsReference(context: __rey_raw_address, node: __rey_raw_address): bool \x7B\n    var layoutId = containersHeapLayout(co" +
-    ("ntext, node);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, layoutId) != 0 || layoutPayloadBytes(registry, layoutId) != 24 \x7B containersFail(2203); return fals" +
-    "e; \x7D\n    var count = layoutReferenceCount(registry, layoutId);\n    if count != 2 && count != 3 \x7B containersFail(2203); return false; \x7D\n    if layoutReferenceOffset(registry, layoutId, 0) != 0 ")))) +
-    ((("|| layoutReferenceOffset(registry, layoutId, count - 1) != 16 \x7B containersFail(2203); return false; \x7D\n    if count == 3 \x7B return layoutReferenceOffset(registry, layoutId, 1) == 8; \x7D\n    return" +
-    " false;\n\x7D\n\nfunc containersMapValidateNodeLayout(context: __rey_raw_address, nodeLayoutId: int, referenceValue: bool): void \x7B\n    var registry = containersRegistry(context);\n    if layoutTailKi") +
-    ("nd(registry, nodeLayoutId) != 0 || layoutPayloadBytes(registry, nodeLayoutId) != 24 \x7B containersFail(2203); return; \x7D\n    var count = layoutReferenceCount(registry, nodeLayoutId);\n    if refer" +
-    ("enceValue \x7B\n        if count != 3 || layoutReferenceOffset(registry, nodeLayoutId, 0) != 0 || layoutReferenceOffset(registry, nodeLayoutId, 1) != 8 || layoutReferenceOffset(registry, nodeLayou" +
-    "tId, 2) != 16 \x7B containersFail(2203); return; \x7D\n    \x7D else \x7B\n        if count != 2 || layoutReferenceOffset(registry, nodeLayoutId, 0) != 0 || layoutReferenceOffset(registry, nodeLayoutId, 1) "))) +
-    (("!= 16 \x7B containersFail(2203); return; \x7D\n    \x7D\n\x7D\n\nfunc containersMapHash(key: __rey_raw_address, length: int): int \x7B\n    var hash = 0;\n    var index = 0;\n    while index < length \x7B\n        hash" +
-    (" = (hash * 31 + __reyRawLoadByte(containersAddressAt(key, 24 + index))) % 2147483647;\n        index = index + 1;\n    \x7D\n    return hash;\n\x7D\n\nfunc containersMapBucketValidated(key: __rey_raw_addr" +
-    "ess, length: int, capacity: int): int \x7B\n    if capacity <= 0 \x7B containersFail(2205); return 0; \x7D\n    return containersMapHash(key, length) % capacity;\n\x7D\n\nfunc containersMapBucket(context: __re")) +
-    ("y_raw_address, key: __rey_raw_address, capacity: int): int \x7B\n    containersStringLayout(context, key);\n    return containersMapBucketValidated(key, __reyRawLoadI64(containersAddressAt(key, 16)" +
-    ("), capacity);\n\x7D\n\nfunc containersMapFind(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): __rey_raw_address \x7B\n    containersStringLayout(context, key);\n    var keyLe" +
-    "ngth = __reyRawLoadI64(containersAddressAt(key, 16));\n    return containersMapFindValidated(context, map, key, keyLength);\n\x7D\n\nfunc containersMapFindValidated(context: __rey_raw_address, map: _"))))) +
-    (((("_rey_raw_address, key: __rey_raw_address, keyLength: int): __rey_raw_address \x7B\n    var buckets = containersMapBuckets(context, map);\n    var capacity = (__reyRawLoadI64(containersAddressAt(buc" +
-    "kets, 8)) - 8) / 8;\n    return containersMapFindInBuckets(context, map, buckets, capacity, key, keyLength);\n\x7D\n\nfunc containersMapFindInBuckets(context: __rey_raw_address, map: __rey_raw_addres") +
-    ("s, buckets: __rey_raw_address, capacity: int, key: __rey_raw_address, keyLength: int): __rey_raw_address \x7B\n    var index = containersMapBucketValidated(key, keyLength, capacity);\n    var node " +
-    ("= __reyRawLoadAddress(containersAddressAt(buckets, 24 + index * 8));\n    var steps = 0;\n    var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n    while !__reyRawEqual(node, __reyRawNu" +
-    "ll()) \x7B\n        if steps >= limit \x7B containersFail(2202); return __reyRawNull(); \x7D\n        containersMapNodeIsReference(context, node);\n        var nodeKey = __reyRawLoadAddress(containersAddr"))) +
-    (("essAt(node, 16));\n        containersStringLayout(context, nodeKey);\n        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));\n        if containersStringEqualValidated(nod" +
-    ("eKey, nodeKeyLength, key, keyLength) \x7B return node; \x7D\n        node = __reyRawLoadAddress(containersAddressAt(node, 32));\n        steps = steps + 1;\n    \x7D\n    return __reyRawNull();\n\x7D\n\nfunc con" +
-    "tainersMapInitializeBuckets(buckets: __rey_raw_address, capacity: int): void \x7B\n    var index = 0;\n    while index < capacity \x7B\n        __reyRawStoreAddress(containersAddressAt(buckets, 24 + in")) +
-    ("dex * 8), __reyRawNull());\n        index = index + 1;\n    \x7D\n    __reyRawStoreI64(containersAddressAt(buckets, 16), capacity);\n\x7D\n\nfunc containersMapGrow(context: __rey_raw_address, map: __rey_r" +
-    ("aw_address, oldBuckets: __rey_raw_address, bucketsLayoutId: int): void \x7B\n    var oldCapacity = containersMapCapacity(context, oldBuckets);\n    if oldCapacity <= 0 || oldCapacity > 115292150460" +
-    "6846966 / 2 \x7B containersFail(2201); return; \x7D\n    var newCapacity = oldCapacity * 2;\n    var payloadBytes = 8 + newCapacity * 8;\n    var newBuckets = managedAllocateSized(context, bucketsLayou")))) +
-    ((("tId, payloadBytes);\n    containersMapInitializeBuckets(newBuckets, newCapacity);\n    var oldIndex = 0;\n    while oldIndex < oldCapacity \x7B\n        var node = __reyRawLoadAddress(containersAddre" +
-    "ssAt(oldBuckets, 24 + oldIndex * 8));\n        var steps = 0;\n        var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n        while !__reyRawEqual(node, __reyRawNull()) \x7B\n           ") +
-    (" if steps >= limit \x7B containersFail(2202); return; \x7D\n            var next = __reyRawLoadAddress(containersAddressAt(node, 32));\n            var key = __reyRawLoadAddress(containersAddressAt(no" +
-    ("de, 16));\n            var target = containersMapBucket(context, key, newCapacity);\n            var previousHead = __reyRawLoadAddress(containersAddressAt(newBuckets, 24 + target * 8));\n       " +
-    "     managedStoreReference(context, node, 16, previousHead);\n            managedStoreReference(context, newBuckets, 8 + target * 8, node);\n            node = next;\n            steps = steps + "))) +
-    (("1;\n        \x7D\n        oldIndex = oldIndex + 1;\n    \x7D\n    managedStoreReference(context, map, 0, newBuckets);\n\x7D\n\npub func managedMapCreate(context: __rey_raw_address, mapLayoutId: int, bucketsLa" +
-    ("youtId: int): __rey_raw_address \x7B\n    managedLiveObjects(context);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, mapLayoutId) != 0 || layoutPayloadBytes(regis" +
-    "try, mapLayoutId) != 16 || layoutReferenceCount(registry, mapLayoutId) != 1 || layoutReferenceOffset(registry, mapLayoutId, 0) != 0 \x7B\n        containersFail(2203);\n        return __reyRawNull(")) +
-    (");\n    \x7D\n    if layoutTailKind(registry, bucketsLayoutId) != 2 || layoutPayloadBytes(registry, bucketsLayoutId) != 8 || layoutReferenceCount(registry, bucketsLayoutId) != 0 \x7B\n        container" +
-    ("sFail(2203);\n        return __reyRawNull();\n    \x7D\n    var map = managedAllocateSized(context, mapLayoutId, 16);\n    var buckets = managedAllocateSized(context, bucketsLayoutId, 8 + 8 * 8);\n   " +
-    " containersMapInitializeBuckets(buckets, 8);\n    managedStoreReference(context, map, 0, buckets);\n    return map;\n\x7D\n\npub func ma"))))));
+    return ((((("\npub func managedVecContainsString(context: __rey_raw_address, vector: __rey_raw_address, value: __rey_raw_address): bool \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var " +
+    "count = __reyRawLoadI64(containersAddressAt(backing, 16));\n    var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;\n    if count < 0 || count > capacity \x7B containersFail(") +
+    ("2205); return false; \x7D\n    if count > 0 \x7B containersVecRequireKind(context, backing, 2); \x7D\n    var index = 0;\n    var valueLength = 0;\n    while index < count \x7B\n        var item = __reyRawLoad" +
+    ("Address(containersVecTailAddress(backing, index));\n        containersStringLayout(context, item);\n        if index == 0 \x7B\n            containersStringLayout(context, value);\n            valueL" +
+    "ength = __reyRawLoadI64(containersAddressAt(value, 16));\n        \x7D\n        var itemLength = __reyRawLoadI64(containersAddressAt(item, 16));\n        if containersStringEqualValidated(item, item"))) +
+    (("Length, value, valueLength) \x7B return true; \x7D\n        index = index + 1;\n    \x7D\n    return false;\n\x7D\n\npub func managedVecPopI64(context: __rey_raw_address, vector: __rey_raw_address): int \x7B\n    v" +
+    "ar backing = containersVecBacking(context, vector, 0);\n    containersVecRequireKind(context, backing, 1);\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if length <= 0") +
+    (" \x7B containersFail(2205); return 0; \x7D\n    var index = length - 1;\n    var value = __reyRawLoadI64(containersVecTailAddress(backing, index));\n    __reyRawStoreI64(containersVecTailAddress(backin" +
+    ("g, index), 0);\n    __reyRawStoreI64(containersAddressAt(backing, 16), index);\n    return value;\n\x7D\n\npub func managedVecPopReference(context: __rey_raw_address, vector: __rey_raw_address): __rey" +
+    "_raw_address \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    containersVecRequireKind(context, backing, 2);\n    var length = __reyRawLoadI64(containersAddressAt(backing, 16))")))) +
+    (((";\n    if length <= 0 \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var index = length - 1;\n    var value = __reyRawLoadAddress(containersVecTailAddress(backing, index));\n    __reyRawSto" +
+    "reAddress(containersVecTailAddress(backing, index), __reyRawNull());\n    __reyRawStoreI64(containersAddressAt(backing, 16), index);\n    return value;\n\x7D\n\npub func managedVecTruncate(context: __") +
+    ("rey_raw_address, vector: __rey_raw_address, length: int): void \x7B\n    var backing = containersVecBacking(context, vector, 0);\n    var kind = layoutTailKind(containersRegistry(context), containe" +
+    ("rsHeapLayout(context, backing));\n    var oldLength = __reyRawLoadI64(containersAddressAt(backing, 16));\n    if length < 0 || length > oldLength \x7B containersFail(2205); return; \x7D\n    if kind ==" +
+    " 2 \x7B\n        var index = length;\n        while index < oldLength \x7B\n            __reyRawStoreAddress(containersVecTailAddress(backing, index), __reyRawNull());\n            index = index + 1;\n  "))) +
+    (("      \x7D\n    \x7D else \x7B\n        var index = length;\n        while index < oldLength \x7B\n            __reyRawStoreI64(containersVecTailAddress(backing, index), 0);\n            index = index + 1;\n   " +
+    ("     \x7D\n    \x7D\n    __reyRawStoreI64(containersAddressAt(backing, 16), length);\n\x7D\n\nfunc containersMapHeader(context: __rey_raw_address, map: __rey_raw_address): int \x7B\n    var layoutId = container" +
+    "sHeapLayout(context, map);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, layoutId) != 0 || layoutPayloadBytes(registry, layoutId) != 16 || layoutReferenceCoun")) +
+    ("t(registry, layoutId) != 1 || layoutReferenceOffset(registry, layoutId, 0) != 0 \x7B\n        containersFail(2205);\n        return 0;\n    \x7D\n    if __reyRawLoadI64(containersAddressAt(map, 24)) < 0" +
+    (" \x7B containersFail(2205); return 0; \x7D\n    return layoutId;\n\x7D\n\nfunc containersMapBuckets(context: __rey_raw_address, map: __rey_raw_address): __rey_raw_address \x7B\n    containersMapHeader(context," +
+    " map);\n    var buckets = __reyRawLoadAddress(containersAddressAt(map, 16));\n    if __reyRawEqual(buckets, __reyRawNull()) \x7B containersFail(2205); return __reyRawNull(); \x7D\n    var layoutId = co"))))) +
+    (((("ntainersHeapLayout(context, buckets);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, layoutId) != 2 || layoutPayloadBytes(registry, layoutId) != 8 || layoutRef" +
+    "erenceCount(registry, layoutId) != 0 \x7B\n        containersFail(2205);\n        return __reyRawNull();\n    \x7D\n    var payloadBytes = __reyRawLoadI64(containersAddressAt(buckets, 8));\n    var capac") +
+    ("ity = (payloadBytes - 8) / 8;\n    if __reyRawLoadI64(containersAddressAt(buckets, 16)) != capacity \x7B containersFail(2205); return __reyRawNull(); \x7D\n    return buckets;\n\x7D\n\nfunc containersMapCap" +
+    ("acity(context: __rey_raw_address, buckets: __rey_raw_address): int \x7B\n    containersHeapLayout(context, buckets);\n    return (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;\n\x7D\n\nfunc " +
+    "containersMapNodeIsReference(context: __rey_raw_address, node: __rey_raw_address): bool \x7B\n    var layoutId = containersHeapLayout(context, node);\n    var registry = containersRegistry(context)"))) +
+    ((";\n    if layoutTailKind(registry, layoutId) != 0 || layoutPayloadBytes(registry, layoutId) != 24 \x7B containersFail(2203); return false; \x7D\n    var count = layoutReferenceCount(registry, layoutId" +
+    (");\n    if count != 2 && count != 3 \x7B containersFail(2203); return false; \x7D\n    if layoutReferenceOffset(registry, layoutId, 0) != 0 || layoutReferenceOffset(registry, layoutId, count - 1) != 1" +
+    "6 \x7B containersFail(2203); return false; \x7D\n    if count == 3 \x7B return layoutReferenceOffset(registry, layoutId, 1) == 8; \x7D\n    return false;\n\x7D\n\nfunc containersMapValidateNodeLayout(context: __r")) +
+    ("ey_raw_address, nodeLayoutId: int, referenceValue: bool): void \x7B\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, nodeLayoutId) != 0 || layoutPayloadBytes(regist" +
+    ("ry, nodeLayoutId) != 24 \x7B containersFail(2203); return; \x7D\n    var count = layoutReferenceCount(registry, nodeLayoutId);\n    if referenceValue \x7B\n        if count != 3 || layoutReferenceOffset(r" +
+    "egistry, nodeLayoutId, 0) != 0 || layoutReferenceOffset(registry, nodeLayoutId, 1) != 8 || layoutReferenceOffset(registry, nodeLayoutId, 2) != 16 \x7B containersFail(2203); return; \x7D\n    \x7D else \x7B")))) +
+    ((("\n        if count != 2 || layoutReferenceOffset(registry, nodeLayoutId, 0) != 0 || layoutReferenceOffset(registry, nodeLayoutId, 1) != 16 \x7B containersFail(2203); return; \x7D\n    \x7D\n\x7D\n\nfunc contai" +
+    "nersMapHash(key: __rey_raw_address, length: int): int \x7B\n    var hash = 0;\n    var index = 0;\n    while index < length \x7B\n        hash = (hash * 31 + __reyRawLoadByte(containersAddressAt(key, 24") +
+    (" + index))) % 2147483647;\n        index = index + 1;\n    \x7D\n    return hash;\n\x7D\n\nfunc containersMapBucketValidated(key: __rey_raw_address, length: int, capacity: int): int \x7B\n    if capacity <= 0" +
+    (" \x7B containersFail(2205); return 0; \x7D\n    return containersMapHash(key, length) % capacity;\n\x7D\n\nfunc containersMapBucket(context: __rey_raw_address, key: __rey_raw_address, capacity: int): int \x7B" +
+    "\n    containersStringLayout(context, key);\n    return containersMapBucketValidated(key, __reyRawLoadI64(containersAddressAt(key, 16)), capacity);\n\x7D\n\nfunc containersMapFind(context: __rey_raw_a"))) +
+    (("ddress, map: __rey_raw_address, key: __rey_raw_address): __rey_raw_address \x7B\n    containersStringLayout(context, key);\n    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));\n    re" +
+    ("turn containersMapFindValidated(context, map, key, keyLength);\n\x7D\n\nfunc containersMapFindValidated(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address, keyLength: int): _" +
+    "_rey_raw_address \x7B\n    var buckets = containersMapBuckets(context, map);\n    var capacity = (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;\n    return containersMapFindInBuckets(co")) +
+    ("ntext, map, buckets, capacity, key, keyLength);\n\x7D\n\nfunc containersMapFindInBuckets(context: __rey_raw_address, map: __rey_raw_address, buckets: __rey_raw_address, capacity: int, key: __rey_raw" +
+    ("_address, keyLength: int): __rey_raw_address \x7B\n    var index = containersMapBucketValidated(key, keyLength, capacity);\n    var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + inde" +
+    "x * 8));\n    var steps = 0;\n    var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n    while !__reyRawEqual(node, __reyR"))))));
 }
 
 func embeddedRuntimeSource1Part14(): string {
-    return ((((("nagedMapLength(context: __rey_raw_address, map: __rey_raw_address): int \x7B\n    containersMapHeader(context, map);\n    return __reyRawLoadI64(containersAddressAt(map, 24));\n\x7D\n\npub func managedMa" +
-    "pHas(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): bool \x7B\n    return !__reyRawEqual(containersMapFind(context, map, key), __reyRawNull());\n\x7D\n\npub func managedMap") +
-    ("GetI64(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): int \x7B\n    var node = containersMapFind(context, map, key);\n    if __reyRawEqual(node, __reyRawNull()) \x7B cont" +
-    "ainersFail(2205); return 0; \x7D\n    if containersMapNodeIsReference(context, node) \x7B containersFail(2203); return 0; \x7D\n    return __reyRawLoadI64(containersAddressAt(node, 24));\n\x7D\n\npub func mana")) +
-    (("gedMapGetReference(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): __rey_raw_address \x7B\n    var node = containersMapFind(context, map, key);\n    if __reyRawEqual(no" +
-    "de, __reyRawNull()) \x7B containersFail(2205); return __reyRawNull(); \x7D\n    if !containersMapNodeIsReference(context, node) \x7B containersFail(2203); return __reyRawNull(); \x7D\n    return __reyRawLoa") +
-    ("dAddress(containersAddressAt(node, 24));\n\x7D\n\nfunc containersMapInsert(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, scalarValue: int, referenceV" +
-    "alue: __rey_raw_address, storesReference: bool): void \x7B\n    containersMapValidateNodeLayout(context, nodeLayoutId, storesReference);\n    containersStringLayout(context, key);\n    var keyLength"))) +
-    (((" = __reyRawLoadI64(containersAddressAt(key, 16));\n    var buckets = containersMapBuckets(context, map);\n    var capacity = (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;\n    var e" +
-    "xisting = containersMapFindInBuckets(context, map, buckets, capacity, key, keyLength);\n    if !__reyRawEqual(existing, __reyRawNull()) \x7B\n        if containersMapNodeIsReference(context, existi") +
-    ("ng) != storesReference \x7B containersFail(2203); return; \x7D\n        if storesReference \x7B managedStoreReference(context, existing, 8, referenceValue); \x7D\n        else \x7B __reyRawStoreI64(containersA" +
-    "ddressAt(existing, 24), scalarValue); \x7D\n        return;\n    \x7D\n    var length = __reyRawLoadI64(containersAddressAt(map, 24));\n    if length >= capacity / 2 \x7B\n        var bucketsHeader = __reyR")) +
-    (("awLoadI64(buckets);\n        var bucketsLayoutId = bucketsHeader;\n        if bucketsHeader >= 8589934592 \x7B bucketsLayoutId = bucketsHeader - 8589934592; \x7D\n        else if bucketsHeader >= 42949" +
-    "67296 \x7B bucketsLayoutId = bucketsHeader - 4294967296; \x7D\n        containersMapGrow(context, map, buckets, bucketsLayoutId);\n        buckets = containersMapBuckets(context, map);\n        capacit") +
-    ("y = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);\n    \x7D\n    var node = managedAllocateSized(context, nodeLayoutId, 24);\n    managedStoreReference(context, node, 0, key);\n    if" +
-    (" storesReference \x7B managedStoreReference(context, node, 8, referenceValue); \x7D\n    else \x7B __reyRawStoreI64(containersAddressAt(node, 24), scalarValue); \x7D\n    var bucket = containersMapBucketVal" +
-    "idated(key, keyLength, capacity);\n    var head = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucket * 8));\n    managedStoreReference(context, node, 16, head);\n    managedStoreReferen"))))) +
-    (((("ce(context, buckets, 8 + bucket * 8, node);\n    __reyRawStoreI64(containersAddressAt(map, 24), length + 1);\n\x7D\n\npub func managedMapSetI64(context: __rey_raw_address, map: __rey_raw_address, nod" +
-    "eLayoutId: int, key: __rey_raw_address, value: int): void \x7B\n    containersMapInsert(context, map, nodeLayoutId, key, value, __reyRawNull(), false);\n\x7D\n\npub func managedMapSetReference(context: ") +
-    ("__rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, value: __rey_raw_address): void \x7B\n    containersMapInsert(context, map, nodeLayoutId, key, 0, value, true)" +
-    ";\n\x7D\n\npub func managedMapKeys(context: __rey_raw_address, map: __rey_raw_address, headerLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var length = managedMapLength(context, map);\n ")) +
-    (("   var vector = managedVecCreate(context, headerLayoutId, dataLayoutId, length);\n    var buckets = containersMapBuckets(context, map);\n    var capacity = ((__reyRawLoadI64(containersAddressAt(" +
-    "buckets, 8)) - 8) / 8);\n    var bucketIndex = 0;\n    while bucketIndex < capacity \x7B\n        var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucketIndex * 8));\n        var step") +
-    ("s = 0;\n        var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n        while !__reyRawEqual(node, __reyRawNull()) \x7B\n            if steps >= limit \x7B containersFail(2202); return __re" +
-    ("yRawNull(); \x7D\n            containersMapNodeIsReference(context, node);\n            var key = __reyRawLoadAddress(containersAddressAt(node, 16));\n            managedVecPushReference(context, ve" +
-    "ctor, dataLayoutId, key);\n            node = __reyRawLoadAddress(containersAddressAt(node, 32));\n            steps = steps + 1;\n        \x7D\n        bucketIndex = bucketIndex + 1;\n    \x7D\n    retur")))) +
-    ((("n vector;\n\x7D\n\npub func managedMapDelete(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): bool \x7B\n    containersStringLayout(context, key);\n    var buckets = container" +
-    "sMapBuckets(context, map);\n    var capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);\n    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));\n    var bucket = ") +
-    ("containersMapBucketValidated(key, keyLength, capacity);\n    var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucket * 8));\n    var previous = __reyRawNull();\n    var steps = 0;" +
-    "\n    var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n    while !__reyRawEqual(node, __reyRawNull()) \x7B\n        if steps >= limit \x7B containersFail(2202); return false; \x7D\n        conta")) +
-    (("inersMapNodeIsReference(context, node);\n        var next = __reyRawLoadAddress(containersAddressAt(node, 32));\n        var nodeKey = __reyRawLoadAddress(containersAddressAt(node, 16));\n       " +
-    " containersStringLayout(context, nodeKey);\n        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));\n        if containersStringEqualValidated(nodeKey, nodeKeyLength, key,") +
-    (" keyLength) \x7B\n            if __reyRawEqual(previous, __reyRawNull()) \x7B managedStoreReference(context, buckets, 8 + bucket * 8, next); \x7D\n            else \x7B managedStoreReference(context, previo" +
-    ("us, 16, next); \x7D\n            __reyRawStoreI64(containersAddressAt(map, 24), limit - 1);\n            return true;\n        \x7D\n        previous = node;\n        node = next;\n        steps = steps +" +
-    " 1;\n    \x7D\n    return false;\n\x7D\n\nfunc main(): void \x7B\x7D\n"))))));
+    return ((((("awNull()) \x7B\n        if steps >= limit \x7B containersFail(2202); return __reyRawNull(); \x7D\n        containersMapNodeIsReference(context, node);\n        var nodeKey = __reyRawLoadAddress(containers" +
+    "AddressAt(node, 16));\n        containersStringLayout(context, nodeKey);\n        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));\n        if containersStringEqualValidated") +
+    ("(nodeKey, nodeKeyLength, key, keyLength) \x7B return node; \x7D\n        node = __reyRawLoadAddress(containersAddressAt(node, 32));\n        steps = steps + 1;\n    \x7D\n    return __reyRawNull();\n\x7D\n\nfunc" +
+    (" containersMapInitializeBuckets(buckets: __rey_raw_address, capacity: int): void \x7B\n    var index = 0;\n    while index < capacity \x7B\n        __reyRawStoreAddress(containersAddressAt(buckets, 24 " +
+    "+ index * 8), __reyRawNull());\n        index = index + 1;\n    \x7D\n    __reyRawStoreI64(containersAddressAt(buckets, 16), capacity);\n\x7D\n\nfunc containersMapGrow(context: __rey_raw_address, map: __r"))) +
+    (("ey_raw_address, oldBuckets: __rey_raw_address, bucketsLayoutId: int): void \x7B\n    var oldCapacity = containersMapCapacity(context, oldBuckets);\n    if oldCapacity <= 0 || oldCapacity > 11529215" +
+    "04606846966 / 2 \x7B containersFail(2201); return; \x7D\n    var newCapacity = oldCapacity * 2;\n    var payloadBytes = 8 + newCapacity * 8;\n    var newBuckets = managedAllocateSized(context, bucketsL") +
+    ("ayoutId, payloadBytes);\n    containersMapInitializeBuckets(newBuckets, newCapacity);\n    var oldIndex = 0;\n    while oldIndex < oldCapacity \x7B\n        var node = __reyRawLoadAddress(containersA" +
+    ("ddressAt(oldBuckets, 24 + oldIndex * 8));\n        var steps = 0;\n        var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n        while !__reyRawEqual(node, __reyRawNull()) \x7B\n       " +
+    "     if steps >= limit \x7B containersFail(2202); return; \x7D\n            var next = __reyRawLoadAddress(containersAddressAt(node, 32));\n            var key = __reyRawLoadAddress(containersAddressA")))) +
+    ((("t(node, 16));\n            var target = containersMapBucket(context, key, newCapacity);\n            var previousHead = __reyRawLoadAddress(containersAddressAt(newBuckets, 24 + target * 8));\n   " +
+    "         managedStoreReference(context, node, 16, previousHead);\n            managedStoreReference(context, newBuckets, 8 + target * 8, node);\n            node = next;\n            steps = step") +
+    ("s + 1;\n        \x7D\n        oldIndex = oldIndex + 1;\n    \x7D\n    managedStoreReference(context, map, 0, newBuckets);\n\x7D\n\npub func managedMapCreate(context: __rey_raw_address, mapLayoutId: int, bucke" +
+    ("tsLayoutId: int): __rey_raw_address \x7B\n    managedLiveObjects(context);\n    var registry = containersRegistry(context);\n    if layoutTailKind(registry, mapLayoutId) != 0 || layoutPayloadBytes(r" +
+    "egistry, mapLayoutId) != 16 || layoutReferenceCount(registry, mapLayoutId) != 1 || layoutReferenceOffset(registry, mapLayoutId, 0) != 0 \x7B\n        containersFail(2203);\n        return __reyRawN"))) +
+    (("ull();\n    \x7D\n    if layoutTailKind(registry, bucketsLayoutId) != 2 || layoutPayloadBytes(registry, bucketsLayoutId) != 8 || layoutReferenceCount(registry, bucketsLayoutId) != 0 \x7B\n        conta" +
+    ("inersFail(2203);\n        return __reyRawNull();\n    \x7D\n    var map = managedAllocateSized(context, mapLayoutId, 16);\n    var buckets = managedAllocateSized(context, bucketsLayoutId, 8 + 8 * 8);" +
+    "\n    containersMapInitializeBuckets(buckets, 8);\n    managedStoreReference(context, map, 0, buckets);\n    return map;\n\x7D\n\npub func managedMapLength(context: __rey_raw_address, map: __rey_raw_ad")) +
+    ("dress): int \x7B\n    containersMapHeader(context, map);\n    return __reyRawLoadI64(containersAddressAt(map, 24));\n\x7D\n\npub func managedMapHas(context: __rey_raw_address, map: __rey_raw_address, key" +
+    (": __rey_raw_address): bool \x7B\n    return !__reyRawEqual(containersMapFind(context, map, key), __reyRawNull());\n\x7D\n\npub func managedMapGetI64(context: __rey_raw_address, map: __rey_raw_address, k" +
+    "ey: __rey_raw_address): int \x7B\n    var node = containersMapFind(context, map, key);\n    if __reyRawEqual(node, __reyRawNull()) \x7B containersFail(2205); return 0; \x7D\n    if containersMapNodeIsRefe"))))) +
+    (((("rence(context, node) \x7B containersFail(2203); return 0; \x7D\n    return __reyRawLoadI64(containersAddressAt(node, 24));\n\x7D\n\npub func managedMapGetReference(context: __rey_raw_address, map: __rey_ra" +
+    "w_address, key: __rey_raw_address): __rey_raw_address \x7B\n    var node = containersMapFind(context, map, key);\n    if __reyRawEqual(node, __reyRawNull()) \x7B containersFail(2205); return __reyRawN") +
+    ("ull(); \x7D\n    if !containersMapNodeIsReference(context, node) \x7B containersFail(2203); return __reyRawNull(); \x7D\n    return __reyRawLoadAddress(containersAddressAt(node, 24));\n\x7D\n\nfunc containersM" +
+    ("apInsert(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, scalarValue: int, referenceValue: __rey_raw_address, storesReference: bool): void \x7B\n    " +
+    "containersMapValidateNodeLayout(context, nodeLayoutId, storesReference);\n    containersStringLayout(context, key);\n    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));\n    var bu"))) +
+    (("ckets = containersMapBuckets(context, map);\n    var capacity = (__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8;\n    var existing = containersMapFindInBuckets(context, map, buckets, " +
+    ("capacity, key, keyLength);\n    if !__reyRawEqual(existing, __reyRawNull()) \x7B\n        if containersMapNodeIsReference(context, existing) != storesReference \x7B containersFail(2203); return; \x7D\n   " +
+    "     if storesReference \x7B managedStoreReference(context, existing, 8, referenceValue); \x7D\n        else \x7B __reyRawStoreI64(containersAddressAt(existing, 24), scalarValue); \x7D\n        return;\n    ")) +
+    ("\x7D\n    var length = __reyRawLoadI64(containersAddressAt(map, 24));\n    if length >= capacity / 2 \x7B\n        var bucketsHeader = __reyRawLoadI64(buckets);\n        var bucketsLayoutId = bucketsHea" +
+    ("der;\n        if bucketsHeader >= 8589934592 \x7B bucketsLayoutId = bucketsHeader - 8589934592; \x7D\n        else if bucketsHeader >= 4294967296 \x7B bucketsLayoutId = bucketsHeader - 4294967296; \x7D\n    " +
+    "    containersMapGrow(context, map, buckets, bucketsLayoutId);\n        buckets = containersMapBuckets(context, map);\n        capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) ")))) +
+    ((("/ 8);\n    \x7D\n    var node = managedAllocateSized(context, nodeLayoutId, 24);\n    managedStoreReference(context, node, 0, key);\n    if storesReference \x7B managedStoreReference(context, node, 8, r" +
+    "eferenceValue); \x7D\n    else \x7B __reyRawStoreI64(containersAddressAt(node, 24), scalarValue); \x7D\n    var bucket = containersMapBucketValidated(key, keyLength, capacity);\n    var head = __reyRawLoa") +
+    ("dAddress(containersAddressAt(buckets, 24 + bucket * 8));\n    managedStoreReference(context, node, 16, head);\n    managedStoreReference(context, buckets, 8 + bucket * 8, node);\n    __reyRawStor" +
+    ("eI64(containersAddressAt(map, 24), length + 1);\n\x7D\n\npub func managedMapSetI64(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int, key: __rey_raw_address, value: int): void \x7B\n" +
+    "    containersMapInsert(context, map, nodeLayoutId, key, value, __reyRawNull(), false);\n\x7D\n\npub func managedMapSetReference(context: __rey_raw_address, map: __rey_raw_address, nodeLayoutId: int"))) +
+    ((", key: __rey_raw_address, value: __rey_raw_address): void \x7B\n    containersMapInsert(context, map, nodeLayoutId, key, 0, value, true);\n\x7D\n\npub func managedMapKeys(context: __rey_raw_address, map" +
+    (": __rey_raw_address, headerLayoutId: int, dataLayoutId: int): __rey_raw_address \x7B\n    var length = managedMapLength(context, map);\n    var vector = managedVecCreate(context, headerLayoutId, da" +
+    "taLayoutId, length);\n    var buckets = containersMapBuckets(context, map);\n    var capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);\n    var bucketIndex = 0;\n    while b")) +
+    ("ucketIndex < capacity \x7B\n        var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucketIndex * 8));\n        var steps = 0;\n        var limit = __reyRawLoadI64(containersAddress" +
+    ("At(map, 24));\n        while !__reyRawEqual(node, __reyRawNull()) \x7B\n            if steps >= limit \x7B containersFail(2202); return __reyRawNull(); \x7D\n            containersMapNodeIsReference(conte" +
+    "xt, node);\n            var key = __reyRawLoadAddress(containersAddressAt(node, 16));\n            managedVecPushReference(context"))))));
+}
+
+func embeddedRuntimeSource1Part15(): string {
+    return (((", vector, dataLayoutId, key);\n            node = __reyRawLoadAddress(containersAddressAt(node, 32));\n            steps = steps + 1;\n        \x7D\n        bucketIndex = bucketIndex + 1;\n    \x7D\n    r" +
+    "eturn vector;\n\x7D\n\npub func managedMapDelete(context: __rey_raw_address, map: __rey_raw_address, key: __rey_raw_address): bool \x7B\n    containersStringLayout(context, key);\n    var buckets = conta") +
+    ("inersMapBuckets(context, map);\n    var capacity = ((__reyRawLoadI64(containersAddressAt(buckets, 8)) - 8) / 8);\n    var keyLength = __reyRawLoadI64(containersAddressAt(key, 16));\n    var bucke" +
+    ("t = containersMapBucketValidated(key, keyLength, capacity);\n    var node = __reyRawLoadAddress(containersAddressAt(buckets, 24 + bucket * 8));\n    var previous = __reyRawNull();\n    var steps " +
+    "= 0;\n    var limit = __reyRawLoadI64(containersAddressAt(map, 24));\n    while !__reyRawEqual(node, __reyRawNull()) \x7B\n        if steps >= limit \x7B containersFail(2202); return false; \x7D\n        c"))) +
+    (("ontainersMapNodeIsReference(context, node);\n        var next = __reyRawLoadAddress(containersAddressAt(node, 32));\n        var nodeKey = __reyRawLoadAddress(containersAddressAt(node, 16));\n   " +
+    "     containersStringLayout(context, nodeKey);\n        var nodeKeyLength = __reyRawLoadI64(containersAddressAt(nodeKey, 16));\n        if containersStringEqualValidated(nodeKey, nodeKeyLength, ") +
+    ("key, keyLength) \x7B\n            if __reyRawEqual(previous, __reyRawNull()) \x7B managedStoreReference(context, buckets, 8 + bucket * 8, next); \x7D\n            else \x7B managedStoreReference(context, pr" +
+    ("evious, 16, next); \x7D\n            __reyRawStoreI64(containersAddressAt(map, 24), limit - 1);\n            return true;\n        \x7D\n        previous = node;\n        node = next;\n        steps = ste" +
+    "ps + 1;\n    \x7D\n    return false;\n\x7D\n\nfunc main(): void \x7B\x7D\n"))));
 }
 
 func embeddedRuntimeSource1(): string {
-    return (((embeddedRuntimeSource1Part0() +
-    (embeddedRuntimeSource1Part1() +
-    embeddedRuntimeSource1Part2())) +
-    ((embeddedRuntimeSource1Part3() +
-    embeddedRuntimeSource1Part4()) +
-    (embeddedRuntimeSource1Part5() +
-    embeddedRuntimeSource1Part6()))) +
-    (((embeddedRuntimeSource1Part7() +
-    embeddedRuntimeSource1Part8()) +
-    (embeddedRuntimeSource1Part9() +
-    embeddedRuntimeSource1Part10())) +
-    ((embeddedRuntimeSource1Part11() +
-    embeddedRuntimeSource1Part12()) +
-    (embeddedRuntimeSource1Part13() +
-    embeddedRuntimeSource1Part14()))));
+    return ((((embeddedRuntimeSource1Part0() +
+    embeddedRuntimeSource1Part1()) +
+    (embeddedRuntimeSource1Part2() +
+    embeddedRuntimeSource1Part3())) +
+    ((embeddedRuntimeSource1Part4() +
+    embeddedRuntimeSource1Part5()) +
+    (embeddedRuntimeSource1Part6() +
+    embeddedRuntimeSource1Part7()))) +
+    (((embeddedRuntimeSource1Part8() +
+    embeddedRuntimeSource1Part9()) +
+    (embeddedRuntimeSource1Part10() +
+    embeddedRuntimeSource1Part11())) +
+    ((embeddedRuntimeSource1Part12() +
+    embeddedRuntimeSource1Part13()) +
+    (embeddedRuntimeSource1Part14() +
+    embeddedRuntimeSource1Part15()))));
 }
 
 func embeddedRuntimeSource2Part0(): string {
@@ -1054,7 +1076,7 @@ func embeddedRuntimeSource7Part0(): string {
     (("ToInt(__reyRawHostSyscall(0, hostRawInt(fd), base, hostRawInt(length), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostOpen(path: __rey_raw_address, flags: int, mode: int): i" +
     "nt \x7B\n    return __reyRawToInt(__reyRawHostSyscall(2, path, hostRawInt(flags), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostClose(fd: int): int \x7B\n    retu") +
     ("rn __reyRawToInt(__reyRawHostSyscall(3, hostRawInt(fd), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostFchmod(fd: int, mode: int): int \x7B\n    " +
-    ("return __reyRawToInt(__reyRawHostSyscall(77, hostRawInt(fd), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostLseek(fd: int, offset: int, whe" +
+    ("return __reyRawToInt(__reyRawHostSyscall(91, hostRawInt(fd), hostRawInt(mode), __reyRawNull(), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostLseek(fd: int, offset: int, whe" +
     "nce: int): int \x7B\n    return __reyRawToInt(__reyRawHostSyscall(8, hostRawInt(fd), hostRawInt(offset), hostRawInt(whence), __reyRawNull(), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostOutpu")))) +
     ((("tSafetySupported(): bool \x7B\n    return true;\n\x7D\n\npub func hostOpenat(directory: int, path: __rey_raw_address, flags: int, mode: int): int \x7B\n    return __reyRawToInt(__reyRawHostSyscall(257, host" +
     "RawInt(directory), path, hostRawInt(flags), hostRawInt(mode), __reyRawNull(), __reyRawNull()));\n\x7D\n\npub func hostFstat(fd: int, buffer: __rey_raw_address): int \x7B\n    return __reyRawToInt(__reyR") +

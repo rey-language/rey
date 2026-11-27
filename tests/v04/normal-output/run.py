@@ -414,7 +414,7 @@ func o01FaultPath(path: __rey_raw_address, suffixLength: int, expectedHash: int)
         require(containers.count("return readOk && readClose == 0;") == 2,
                 "byte and packed writers do not check readback close")
         require("pub func hostFchmod(fd: int, mode: int): int {" in host and
-                "__reyRawHostSyscall(77, hostRawInt(fd), hostRawInt(mode)" in host,
+                "__reyRawHostSyscall(91, hostRawInt(fd), hostRawInt(mode)" in host,
                 "Linux x64 host fchmod syscall wrapper is missing")
         require("hostOpen(containersPathData(path), 577, 420)" in containers and
                 "if hostClose(fd) != 0 { containersFail(2208); }" in containers,

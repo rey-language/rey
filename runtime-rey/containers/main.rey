@@ -815,6 +815,52 @@ func containersWarnMapMayBeFromFailedBuild(): void {
     return;
 }
 
+func containersPublishCompilerOutputImageVector(context: __rey_raw_address, imagePath: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int, imageLength: int): bool {
+    var imageDirectory = containersOpenOutputDirectory(imagePath);
+    if !containersOutputValid(imageDirectory) { return false; }
+    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));
+    var state = containersTargetState(imageIdentity);
+    var safe = state >= 0 && !(state == 1 && containersInputIdentityProtected(context, containersTargetDevice(imageIdentity), containersTargetInode(imageIdentity)));
+    containersReleaseTargetIdentity(imageIdentity);
+    if !safe {
+        containersCloseOutputDirectory(imageDirectory);
+        return false;
+    }
+    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    var prepared = containersPrepareByteVector(context, imageDirectory, otherDirectory, vector, dataLayoutId, 0, imageLength, 493);
+    if !containersPreparedValid(prepared) {
+        containersCloseOutputDirectory(imageDirectory);
+        return false;
+    }
+    var published = containersPublishPreparedOutput(context, imageDirectory, prepared);
+    containersDiscardPreparedOutput(imageDirectory, prepared);
+    containersCloseOutputDirectory(imageDirectory);
+    return published;
+}
+
+func containersPublishCompilerOutputImageString(context: __rey_raw_address, imagePath: __rey_raw_address, content: __rey_raw_address, imageLength: int): bool {
+    var imageDirectory = containersOpenOutputDirectory(imagePath);
+    if !containersOutputValid(imageDirectory) { return false; }
+    var imageIdentity = containersTargetIdentity(containersOutputFd(imageDirectory), containersOutputName(imageDirectory));
+    var state = containersTargetState(imageIdentity);
+    var safe = state >= 0 && !(state == 1 && containersInputIdentityProtected(context, containersTargetDevice(imageIdentity), containersTargetInode(imageIdentity)));
+    containersReleaseTargetIdentity(imageIdentity);
+    if !safe {
+        containersCloseOutputDirectory(imageDirectory);
+        return false;
+    }
+    var otherDirectory = containersOutputDirectoryMake(-1, 0, 0, 0, 0, false);
+    var prepared = containersPrepareStringRange(context, imageDirectory, otherDirectory, content, 0, imageLength, 493);
+    if !containersPreparedValid(prepared) {
+        containersCloseOutputDirectory(imageDirectory);
+        return false;
+    }
+    var published = containersPublishPreparedOutput(context, imageDirectory, prepared);
+    containersDiscardPreparedOutput(imageDirectory, prepared);
+    containersCloseOutputDirectory(imageDirectory);
+    return published;
+}
+
 func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: __rey_raw_address, vector: __rey_raw_address, dataLayoutId: int): int {
     var protocolLength = managedStringLength(context, protocol);
     var protocolData = containersPathData(protocol);
@@ -845,7 +891,7 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
     var imagePathLength = separator - 20;
     var mapPathStart = separator + 1;
     var mapPathLength = protocolLength - mapPathStart;
-    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 { return 1; }
+    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength < 0 || mapPathLength >= 4096 { return 1; }
     var imagePath = __reyRawMap(4096);
     var mapPath = __reyRawMap(4096);
     if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 {
@@ -864,7 +910,15 @@ func containersPublishCompilerOutputPair(context: __rey_raw_address, protocol: _
     if containersVecRequireKind(context, backing, 1) != dataLayoutId { containersFail(2203); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
     var totalLength = __reyRawLoadI64(containersAddressAt(backing, 16));
     var capacity = (__reyRawLoadI64(containersAddressAt(backing, 8)) - 8) / 8;
-    if totalLength < 20 || totalLength > capacity { containersFail(2205); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
+    if totalLength < 0 || totalLength > capacity { containersFail(2205); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
+    if mapPathLength == 0 {
+        var published = containersPublishCompilerOutputImageVector(context, imagePath, vector, dataLayoutId, totalLength);
+        __reyRawUnmap(imagePath, 4096);
+        __reyRawUnmap(mapPath, 4096);
+        if published { return 0; }
+        return 1;
+    }
+    if totalLength < 20 { containersFail(2205); __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1; }
     var trailer = totalLength - 20;
     if __reyRawLoadI64(containersVecTailAddress(backing, trailer)) != 82 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 1)) != 89 ||
         __reyRawLoadI64(containersVecTailAddress(backing, trailer + 2)) != 80 || __reyRawLoadI64(containersVecTailAddress(backing, trailer + 3)) != 49 {
@@ -964,7 +1018,7 @@ func containersPublishCompilerOutputPairFromString(context: __rey_raw_address, p
     var imagePathLength = separator - 20;
     var mapPathStart = separator + 1;
     var mapPathLength = protocolLength - mapPathStart;
-    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength <= 0 || mapPathLength >= 4096 { return 1; }
+    if imagePathLength <= 0 || imagePathLength >= 4096 || mapPathLength < 0 || mapPathLength >= 4096 { return 1; }
     var imagePath = __reyRawMap(4096);
     var mapPath = __reyRawMap(4096);
     if __reyRawToInt(imagePath) < 0 || __reyRawToInt(mapPath) < 0 {
@@ -981,6 +1035,13 @@ func containersPublishCompilerOutputPairFromString(context: __rey_raw_address, p
 
     var contentLength = managedStringLength(context, content);
     var contentData = containersPathData(content);
+    if mapPathLength == 0 {
+        var published = containersPublishCompilerOutputImageString(context, imagePath, content, contentLength);
+        __reyRawUnmap(imagePath, 4096);
+        __reyRawUnmap(mapPath, 4096);
+        if published { return 0; }
+        return 1;
+    }
     if contentLength < 20 {
         __reyRawUnmap(imagePath, 4096); __reyRawUnmap(mapPath, 4096); return 1;
     }

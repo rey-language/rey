@@ -10,7 +10,11 @@ pub func writeFileBytes(path: string, bytes: Vec<int>): Result<bool, string> {
 }
 
 pub func writeCompilerOutputBytes(path: string, bytes: Vec<int>): Result<bool, string> {
-    if __reyPackedWriteBytesFallback(path, bytes) { return Result.Ok(true); }
+    var outputPath = path;
+    if !path.startsWith("\x00rey-output-pair-v1\x00") {
+        outputPath = "\x00rey-output-pair-v1\x00" + path + "\x00";
+    }
+    if __reyPackedWriteBytesFallback(outputPath, bytes) { return Result.Ok(true); }
     return Result.Err(path + ": error: native image write or verification failed");
 }
 
