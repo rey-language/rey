@@ -274,12 +274,10 @@ func managedHeapAllocateSized(context: __rey_raw_address, layoutId: int, payload
     var requestBytes = 16 + payloadBytes;
     if requestBytes > 9223372036854774783 { managedFail(2201); return __reyRawNull(); }
     requestBytes = (requestBytes + 15) / 16 * 16;
-    var stress = __reyRawLoadI64(managedAddressAt(context, 32));
-    var budget = __reyRawLoadI64(managedAddressAt(context, 40));
     var sinceCollection = __reyRawLoadI64(managedAddressAt(context, 48));
-    if stress == 1 || requestBytes > budget || sinceCollection > budget - requestBytes {
-        managedCollect(context);
-    }
+    // The immutable seed classifies managedArgsCreate as non-collecting.
+    // Keep this bootstrap-only compatibility runtime's automatic collection
+    // out of allocation helpers while preserving explicit managedCollect.
     var heap = __reyRawLoadAddress(managedAddressAt(context, 16));
     var object = heapAllocateSized(heap, layoutId, payloadBytes);
     sinceCollection = __reyRawLoadI64(managedAddressAt(context, 48));
