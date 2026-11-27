@@ -111,7 +111,17 @@ func allocInstructions(resultId: int): Vec<Instruction> {
 }
 
 func successModule(): ManagedProgram {
-    var mainInstructions: Vec<Instruction> = [ir.call(-1, ir.irVoid(), 11, [], source()), ir.call(-1, ir.irVoid(), 22, [], source())];
+    var mainInstructions: Vec<Instruction> = [
+        ir.call(-1, ir.irVoid(), 11, [], source()),
+        ir.call(0, ir.irRawAddress(), 12, [], source()),
+        ir.call(1, ir.irRawAddress(), 13, [], source()),
+        ir.call(-1, ir.irVoid(), 14, [], source()),
+        ir.call(-1, ir.irVoid(), 15, [], source()),
+        ir.call(-1, ir.irVoid(), 16, [], source()),
+        ir.call(2, ir.irRawAddress(), 17, [], source()),
+        ir.call(3, ir.irRawAddress(), 18, [], source()),
+        ir.call(-1, ir.irVoid(), 22, [], source()),
+    ];
     var mainFn = straight(10, "main", [], ir.irVoid(), [], mainInstructions, -1);
     var regionLocal = straight(11, "regionLocal", [], ir.irVoid(), [], allocInstructions(1), -1);
     var destinationReturn = straight(12, "destinationReturn", [], ir.irRawAddress(), [], allocInstructions(1), 1);
