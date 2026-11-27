@@ -145,10 +145,73 @@ class Probe:
             "compiler_builds": self.builds,
         }
 
+    def reusable_current_driver(self):
+        """Reuse a measured driver build when its complete compiler tree matches SOURCE."""
+        acceptance_root = self.out.parent.parent
+        expected_sources = tree_hashes(self.source / "rey-compiler/src")
+        expected_sources.pop("main.rey", None)
+        matches = []
+        for compiler_source in acceptance_root.glob("diag-*/compiler-src"):
+            diagnostic = compiler_source.parent
+            image = diagnostic / "bin/checked-allocator-driver"
+            timing = diagnostic / "logs/driver-build.time-v.txt"
+            stdout = diagnostic / "logs/driver-build.stdout"
+            stderr = diagnostic / "logs/driver-build.stderr"
+            if not (image.is_file() and os.access(image, os.X_OK) and timing.is_file()
+                    and stdout.is_file() and stderr.is_file()):
+                continue
+            if sha256(compiler_source / "main.rey") != sha256(DRIVER_SOURCE):
+                continue
+            candidate_sources = tree_hashes(compiler_source)
+            candidate_sources.pop("main.rey", None)
+            if candidate_sources != expected_sources:
+                continue
+            timing_text = timing.read_text(errors="replace")
+            if "Exit status: 0" not in timing_text:
+                continue
+            if str(image) not in timing_text or "Maximum resident set size (kbytes):" not in timing_text:
+                continue
+            matches.append((image.stat().st_mtime_ns, image, timing, stdout, stderr))
+        if not matches:
+            return None
+        _, image, timing, stdout, stderr = max(matches, key=lambda item: item[0])
+        return image.resolve(strict=True), timing, stdout, stderr
+
     def build_driver(self):
         compiler_source = self.out / "compiler-src"
         shutil.copytree(self.source / "rey-compiler/src", compiler_source)
         shutil.copyfile(DRIVER_SOURCE, compiler_source / "main.rey")
+        reusable = self.reusable_current_driver()
+        if reusable is not None:
+            image, timing, source_stdout, source_stderr = reusable
+            peak = parse_time(timing)
+            stdout_path = self.out / "logs" / "driver-build.stdout"
+            stderr_path = self.out / "logs" / "driver-build.stderr"
+            stdout_path.write_text(
+                "reused measured current-source driver from %s\n" % image.parent.parent)
+            stderr_path.write_text("")
+            self.driver = image
+            record = {
+                "runtime": "compiler-driver",
+                "command": ["reuse-verified-driver", str(image)],
+                "status": 0,
+                "image_sha256": sha256(image),
+                "time_v": str(timing),
+                "peak_rss_bytes": peak,
+                "reused_from": str(image.parent.parent),
+                "reused_stdout": str(source_stdout),
+                "reused_stderr": str(source_stderr),
+                "resource_policy": "reused completed /usr/bin/time -v measurement; compiler source hashes match SOURCE",
+            }
+            self.builds.append(record)
+            self.results["compiler_driver"] = str(image)
+            self.results["compiler_driver_source_sha256"] = sha256(DRIVER_SOURCE)
+            self.results["compiler_driver_reused"] = True
+            (self.out / "results.json").write_text(
+                json.dumps(self.results, indent=2, sort_keys=True) + "\n")
+            require(peak > 0, "reused compiler driver has no recorded peak RSS")
+            return image
+
         image = self.out / "bin" / "checked-allocator-driver"
         image.parent.mkdir()
         timing = self.out / "logs" / "driver-build.time"
