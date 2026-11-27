@@ -53,11 +53,12 @@ if [ -e "$OUT" ]; then
     mkdir -p "$OUT"
     OUT="$OUT/attempt-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 fi
-mkdir -p "$OUT/stage/compiler" "$OUT/stage/region" "$OUT/stage/runtime" "$OUT/bin" "$OUT/logs" "$OUT/results" "$OUT/rss"
+mkdir -p "$OUT/stage/compiler" "$OUT/stage/region" "$OUT/stage/runtime" "$OUT/stage/compiler-runtime" "$OUT/bin" "$OUT/logs" "$OUT/results" "$OUT/rss"
 OUT=$(CDPATH= cd -- "$OUT" && pwd -P)
 STAGE="$OUT/stage/compiler"
 REGION_STAGE="$OUT/stage/region"
 RUNTIME_STAGE="$OUT/stage/runtime"
+COMPILER_RUNTIME_STAGE="$OUT/stage/compiler-runtime"
 cp -R "$SRC/rey-compiler/src/." "$STAGE/"
 cp "$DRIVER_SOURCE" "$STAGE/main.rey"
 cp -R "$SRC/rey-compiler/src/." "$REGION_STAGE/"
@@ -66,6 +67,10 @@ cp "$RUNTIME_DRIVER_SOURCE" "$RUNTIME_STAGE/main.rey"
 python3 -B "$SRC/tests/v04/compiler-scratch/stage-runtime.py" \
     "$SRC/runtime-rey" "$RUNTIME_STAGE" >"$OUT/logs/stage-runtime.stdout"
 find "$RUNTIME_STAGE" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/staged-runtime.sha256"
+cp -R "$SRC/runtime-rey/." "$COMPILER_RUNTIME_STAGE/"
+cp "$SRC/tests/v04/compiler-scratch/legacy-managed.rey" "$COMPILER_RUNTIME_STAGE/managed/main.rey"
+sed '/^import regions;$/d' "$SRC/runtime-rey/main.rey" >"$COMPILER_RUNTIME_STAGE/main.rey"
+find "$COMPILER_RUNTIME_STAGE" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/staged-compiler-runtime.sha256"
 mkdir -p "$OUT/runtime-fixtures/original" "$OUT/runtime-fixtures/staged"
 cp "$RUNTIME_DRIVER_SOURCE" "$OUT/runtime-fixtures/original/region-basic.rey"
 cp "$RUNTIME_DRIVER_SOURCE" "$OUT/runtime-fixtures/staged/region-basic.rey"
@@ -82,16 +87,17 @@ ANALYSIS_DRIVER="$OUT/bin/compiler-scratch-analysis"
 REGION_LOWERING_DRIVER="$OUT/bin/compiler-scratch-region-lowering"
 run_build P02-build-scratch-analysis "$OUT/rss/build-analysis.time" \
     "$SEED" build "$STAGE/main.rey" -o "$ANALYSIS_DRIVER" --target linux-x64 \
-    --no-regions --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-driver.stdout" 2>"$OUT/logs/build-driver.stderr"
+    --no-regions --runtime-root "$COMPILER_RUNTIME_STAGE" >"$OUT/logs/build-driver.stdout" 2>"$OUT/logs/build-driver.stderr"
 test -x "$ANALYSIS_DRIVER"
 run_build P02-build-scratch-region-lowering "$OUT/rss/build-region-lowering.time" \
     "$SEED" build "$REGION_STAGE/main.rey" -o "$REGION_LOWERING_DRIVER" --target linux-x64 \
-    --no-regions --runtime-root "$SRC/runtime-rey" >"$OUT/logs/build-region-lowering.stdout" 2>"$OUT/logs/build-region-lowering.stderr"
+    --no-regions --runtime-root "$COMPILER_RUNTIME_STAGE" >"$OUT/logs/build-region-lowering.stdout" 2>"$OUT/logs/build-region-lowering.stderr"
 test -x "$REGION_LOWERING_DRIVER"
 find "$SRC/rey-compiler/src" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/compiler-source.sha256"
 find "$SRC/runtime-rey" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/runtime-source.sha256"
 sha256sum "$SEED" "$DRIVER_SOURCE" "$REGION_DRIVER_SOURCE" "$RUNTIME_DRIVER_SOURCE" \
-    "$SRC/tests/v04/compiler-scratch/stage-runtime.py" "$ANALYSIS_DRIVER" "$REGION_LOWERING_DRIVER" \
+    "$SRC/tests/v04/compiler-scratch/stage-runtime.py" "$SRC/tests/v04/compiler-scratch/legacy-managed.rey" \
+    "$ANALYSIS_DRIVER" "$REGION_LOWERING_DRIVER" \
     >"$OUT/producer-input-hashes.sha256"
 if [ -d "$BASE" ]; then
     find "$BASE/rey-compiler/src/ir/managed" -type f -print0 | sort -z | xargs -0 sha256sum >"$OUT/base-managed-source.sha256"

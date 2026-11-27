@@ -12,6 +12,12 @@ function closure of the exact layout, managed, and region APIs it calls;
 `stage-runtime.py` copies those function bodies verbatim from `$SRC` and
 fails if a reachable function or supported dependency is missing.
 
+The analysis and region-lowering drivers use `legacy-managed.rey` in a staged
+runtime root. The immutable S3 seed's `--no-regions` linker authorizes legacy
+collector modules but not `regions/main.rey`; this adapter supplies that seed's
+managed ABI using the existing heap and collector modules. The source runtime
+used by the region probe remains staged independently from the current tree.
+
 The runtime measurement warms a kind-1 cohort, records the maximum
 `managedRegionScratchUsed` for one iteration, then for ten iterations. Each
 iteration allocates the fixed payload and ends its cohort before continuing.
