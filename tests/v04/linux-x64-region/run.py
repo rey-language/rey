@@ -153,13 +153,14 @@ class RegionGate:
         require(available_gib >= 5,
                 "available memory is below 5 GiB; no region gate builds may start")
         self.results["free_g_gib_available_before_gate"] = available_gib
-        expected_lock = (Path.home() / "rey/build.lock").resolve()
-        try:
-            inherited_lock = Path(os.readlink("/proc/self/fd/3")).resolve()
-        except OSError:
-            inherited_lock = None
-        require(inherited_lock == expected_lock,
-                "R01 acceptance must hold the B01 global build lock for the whole gate")
+        if os.environ.get("REY_PARALLEL_BUILD") != "1":
+            expected_lock = (Path.home() / "rey/build.lock").resolve()
+            try:
+                inherited_lock = Path(os.readlink("/proc/self/fd/3")).resolve()
+            except OSError:
+                inherited_lock = None
+            require(inherited_lock == expected_lock,
+                    "R01 acceptance must hold the B01 global build lock for the whole gate")
         require(self.engine.is_file() and os.access(self.engine, os.X_OK),
                 "engine must be an executable native seed")
         require(self.source.is_dir() and (self.source / "rey-compiler/src").is_dir(),

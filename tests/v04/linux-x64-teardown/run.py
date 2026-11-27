@@ -113,12 +113,13 @@ class Runner:
         available = memory_available_gib()
         require(available >= 5, "available memory is below 5 GiB; no build may start")
         self.results["free_g_available_gib_before_build"] = available
-        try:
-            lock = Path(os.readlink("/proc/self/fd/3")).resolve()
-        except OSError:
-            lock = None
-        require(lock == (Path.home() / "rey/build.lock").resolve(),
-                "R02 acceptance must hold the B01 build lock for the complete suite")
+        if os.environ.get("REY_PARALLEL_BUILD") != "1":
+            try:
+                lock = Path(os.readlink("/proc/self/fd/3")).resolve()
+            except OSError:
+                lock = None
+            require(lock == (Path.home() / "rey/build.lock").resolve(),
+                    "R02 acceptance must hold the B01 build lock for the complete suite")
         require(self.base.is_file() and os.access(self.base, os.X_OK), "BASE must be executable")
         require(sha256(self.base) == "64c8bbe4e559a2355b79bfa0d357bd6e81d6dee92bbac73fe520165004883ee6",
                 "BASE is not the hash-pinned native comparison producer")

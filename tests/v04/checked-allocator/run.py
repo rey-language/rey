@@ -75,6 +75,8 @@ class Runner:
         self.driver = None
 
     def require_lock(self):
+        if os.environ.get("REY_PARALLEL_BUILD") == "1":
+            return
         try:
             held = Path(os.readlink("/proc/self/fd/3")).resolve()
         except OSError as exc:

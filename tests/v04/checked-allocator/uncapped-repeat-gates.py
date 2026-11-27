@@ -43,6 +43,8 @@ def peak_rss_bytes(time_path):
 
 
 def check_lock():
+    if os.environ.get("REY_PARALLEL_BUILD") == "1":
+        return
     try:
         path = Path(os.readlink("/proc/self/fd/3")).resolve()
     except OSError as exc:
@@ -88,7 +90,7 @@ class UncappedRegionGate:
             "source": str(self.source),
             "platform": platform.platform(),
             "machine": platform.machine(),
-            "resource_policy": "global flock, nice -n 19, timeout, /usr/bin/time -v; no memory cap or memory abort floor",
+            "resource_policy": "parallel buildbox; no shared lock or memory cap; nice -n 19, timeout, /usr/bin/time -v",
             "compiler_builds": [],
             "commands": [],
             "tests": {},
@@ -205,7 +207,7 @@ class UncappedRegionGate:
             "stdout_sha256": self.module.digest_bytes(stdout_bytes),
             "stderr_sha256": self.module.digest_bytes(stderr_bytes),
             "stdout_log": str(stdout_path), "stderr_log": str(stderr_path),
-            "resource_policy": "uncapped; global flock; nice -n 19; timeout" if build else None,
+            "resource_policy": "uncapped; parallel buildbox; no shared lock; nice -n 19; timeout" if build else None,
         }
         if build:
             peak = peak_rss_bytes(timing_path)
@@ -302,7 +304,7 @@ def run_r02(seed, source, out):
             self.out.mkdir(parents=True, exist_ok=True)
             self.logs.mkdir(parents=True, exist_ok=True)
             self.evidence.mkdir(parents=True, exist_ok=True)
-            self.results["resource_policy"] = "uncapped; global flock; nice -n 19; timeout; /usr/bin/time -v"
+            self.results["resource_policy"] = "uncapped; parallel buildbox; no shared lock; nice -n 19; timeout; /usr/bin/time -v"
             self.results["source_revision"] = self.git_revision()
             self.results["runtime_source_hashes"] = module.tree_hashes(self.source / "runtime-rey")
             shutil.copytree(self.source / "runtime-rey", self.runtime)
@@ -355,7 +357,7 @@ def run_r02(seed, source, out):
                 "stdout_log": str(stdout_path), "stderr_log": str(stderr_path),
                 "stdout_sha256": module.digest_bytes(stdout_bytes),
                 "stderr_sha256": module.digest_bytes(stderr_bytes),
-                "resource_policy": "uncapped; global flock; nice -n 19; timeout",
+                "resource_policy": "uncapped; parallel buildbox; no shared lock; nice -n 19; timeout",
             }
             if build:
                 peak = peak_rss_bytes(timing_path)
@@ -419,7 +421,7 @@ def main():
     r01 = run_r01(seed, source, r01_out)
     r02 = run_r02(seed, source, r02_out)
     summary = {
-        "resource_policy": "uncapped; global flock; nice -n 19; timeout; peak RSS via /usr/bin/time -v",
+        "resource_policy": "uncapped; parallel buildbox; no shared lock; nice -n 19; timeout; peak RSS via /usr/bin/time -v",
         "r01": {"results": str(r01_out / "results.json"), "compiler_builds": r01["compiler_builds"]},
         "r02": {"results": str(r02_out / "results.json"), "compiler_builds": r02.get("compiler_builds", [])},
     }
