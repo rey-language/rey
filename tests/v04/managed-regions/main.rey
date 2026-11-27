@@ -1,7 +1,7 @@
 import ir;
 import ir::{BasicBlock, EffectSummary, Escape, Fact, IRFunction, IRProgram, IRType, IRTypeKind, IRValue, Instruction, InstructionKind, SourceRef, TerminatorKind};
 import ir::managed::{ManagedAllocation, ManagedDerived, ManagedField, ManagedFunction, ManagedHook, ManagedLayout, ManagedProgram};
-import ir::managed::placement::{ManagedAllocationPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
+import ir::managed::placement::{ManagedAllocationPlacement, ManagedCallPlacement, ManagedPlacement, ManagedStorage, planManagedPlacement};
 import ir::managed::completion::{completeManagedMemory};
 import ir::managed::regions::{RegionBindings, RegionHookBinding, lowerManagedRegions, lowerManagedRegionsWithPromotionStress};
 import ir::managed::lifetime::{verifyManagedRegionPlan};
@@ -152,7 +152,13 @@ func successPlacement(): ManagedPlacement {
     var allocations: Vec<ManagedAllocationPlacement> = [
         place(11, 1, ManagedStorage::Region), place(12, 1, ManagedStorage::Destination), place(13, 1, ManagedStorage::Heap), place(13, 3, ManagedStorage::Heap), place(14, 1, ManagedStorage::Region), place(14, 3, ManagedStorage::Region), place(15, 1, ManagedStorage::Region), place(16, 1, ManagedStorage::Heap), place(17, 1, ManagedStorage::Region), place(17, 2, ManagedStorage::Heap),
     ];
-    return ManagedPlacement { allocations: allocations, calls: [], regionFunctions: [11, 14, 15, 17] };
+    var calls: Vec<ManagedCallPlacement> = [
+        ManagedCallPlacement { functionId: 10, blockId: 0, instructionIndex: 1, storage: ManagedStorage::Heap },
+        ManagedCallPlacement { functionId: 10, blockId: 0, instructionIndex: 2, storage: ManagedStorage::Heap },
+        ManagedCallPlacement { functionId: 10, blockId: 0, instructionIndex: 6, storage: ManagedStorage::Heap },
+        ManagedCallPlacement { functionId: 10, blockId: 0, instructionIndex: 7, storage: ManagedStorage::Heap },
+    ];
+    return ManagedPlacement { allocations: allocations, calls: calls, regionFunctions: [11, 14, 15, 17] };
 }
 
 func functionIndex(program: IRProgram, id: int): int {
