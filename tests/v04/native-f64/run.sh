@@ -11,14 +11,14 @@ REY=$1
 case "$REY" in /*) ;; *) REY="$(pwd -P)/$REY" ;; esac
 OUT=$2
 case "$OUT" in /*) ;; *) OUT="$(pwd -P)/$OUT" ;; esac
-test -x "$REY" || { echo "FAIL f64 core: compiler is not executable: $REY" >&2; exit 1; }
+SUITE=$4
+test -x "$REY" || { echo "FAIL f64 $SUITE: compiler is not executable: $REY" >&2; exit 1; }
 if [ -e "$OUT" ]; then
     attempt=2
     while [ -e "$OUT/attempt-$attempt" ]; do attempt=$((attempt + 1)); done
     OUT="$OUT/attempt-$attempt"
 fi
 mkdir -p "$OUT"
-SUITE=$4
 
 build() {
     label=$1
@@ -57,11 +57,11 @@ run_status() {
     actual=$?
     set -e
     if [ "$actual" -ne "$expected" ]; then
-        echo "FAIL f64 core: $label exited $actual, expected $expected" >&2
+        echo "FAIL f64 $SUITE: $label exited $actual, expected $expected" >&2
         cat "$OUT/$label.run.stderr" >&2
         exit 1
     fi
-    test ! -s "$OUT/$label.run.stdout" || { echo "FAIL f64 core: $label wrote unexpected stdout" >&2; exit 1; }
+    test ! -s "$OUT/$label.run.stdout" || { echo "FAIL f64 $SUITE: $label wrote unexpected stdout" >&2; exit 1; }
 }
 
 run_format_suite() {
