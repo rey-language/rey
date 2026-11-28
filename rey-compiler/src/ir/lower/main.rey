@@ -3012,9 +3012,9 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
     var receiver = lowerExprExpected(lowerer, access.object, receiverType);
     if lowerer.error != emptyString { return LowerValue { id: -1, ty: irVoid() }; }
     var method = access.name;
-    if receiverType.kind == kindFloat {
+    if receiverType.kind == kindFloat || receiverType.kind == kindInt {
         if method == litToInt { return lowerScalarNumericConversion(lowerer, expression, receiver, irI64(), source); }
-        if method == "toFloat" { return receiver; }
+        if method == "toFloat" { return lowerScalarNumericConversion(lowerer, expression, receiver, ir.irF64(), source); }
     }
     if receiver.id < 0 || receiver.ty.kind != IRTypeKind::RawAddress { return failExpression(lowerer, expression, "managed collection/string method receiver is not a canonical reference"); }
     var args: Vec<LowerValue> = [];
