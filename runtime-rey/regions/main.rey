@@ -1149,9 +1149,10 @@ func regionFindGroup(region: __rey_raw_address, groupId: int): __rey_raw_address
     var limit = __reyRawLoadI64(regionAddressAt(region, 48));
     while !__reyRawEqual(group, __reyRawNull()) {
         if steps >= limit { regionFail(2202); return __reyRawNull(); }
+        if __reyRawLoadI64(group) != 1380272222 || __reyRawLoadI64(regionAddressAt(group, 56)) != 0 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(group, 16)), region) { regionFail(2202); return __reyRawNull(); }
         var next = __reyRawLoadAddress(regionAddressAt(group, 8));
-        if __reyRawLoadI64(group) != 1380272222 || __reyRawLoadI64(regionAddressAt(group, 56)) != 0 { regionFail(2202); return __reyRawNull(); }
-        if __reyRawLoadI64(regionAddressAt(group, 24)) == groupId && __reyRawEqual(__reyRawLoadAddress(regionAddressAt(group, 16)), region) {
+        if __reyRawEqual(next, group) || (__reyRawEqual(next, __reyRawNull()) != (steps == limit - 1)) { regionFail(2202); return __reyRawNull(); }
+        if __reyRawLoadI64(regionAddressAt(group, 24)) == groupId {
             if !__reyRawEqual(previous, __reyRawNull()) {
                 __reyRawStoreAddress(regionAddressAt(previous, 8), next);
                 __reyRawStoreAddress(regionAddressAt(group, 8), __reyRawLoadAddress(regionAddressAt(region, 40)));
@@ -1163,6 +1164,7 @@ func regionFindGroup(region: __rey_raw_address, groupId: int): __rey_raw_address
         group = next;
         steps = steps + 1;
     }
+    if steps != limit { regionFail(2202); }
     return __reyRawNull();
 }
 
@@ -1172,6 +1174,8 @@ func regionEnsureGroup(region: __rey_raw_address, groupId: int): __rey_raw_addre
     var count = __reyRawLoadI64(regionAddressAt(region, 48));
     if count >= 9223372036854775807 { regionFail(2201); return __reyRawNull(); }
     var context = __reyRawLoadAddress(regionAddressAt(region, 16));
+    var total = __reyRawLoadI64(regionAddressAt(context, 200));
+    if total >= 9223372036854775807 { regionFail(2201); return __reyRawNull(); }
     var group = regionBlockMap(context, 64);
     __reyRawStoreI64(group, 1380272222);
     __reyRawStoreAddress(regionAddressAt(group, 8), __reyRawLoadAddress(regionAddressAt(region, 40)));
@@ -1183,8 +1187,6 @@ func regionEnsureGroup(region: __rey_raw_address, groupId: int): __rey_raw_addre
     __reyRawStoreI64(regionAddressAt(group, 56), 0);
     __reyRawStoreAddress(regionAddressAt(region, 40), group);
     __reyRawStoreI64(regionAddressAt(region, 48), count + 1);
-    var total = __reyRawLoadI64(regionAddressAt(context, 200));
-    if total >= 9223372036854775807 { regionFail(2201); return __reyRawNull(); }
     __reyRawStoreI64(regionAddressAt(context, 200), total + 1);
     return group;
 }

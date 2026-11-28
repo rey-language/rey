@@ -24,6 +24,8 @@ CASES = (
     ("foreign-context-handle", b"2", 1),
     ("corrupt-group-header", b"3", 1),
     ("corrupt-layout-descriptor", b"4", 1),
+    ("corrupt-group-owner", b"5", 1),
+    ("truncated-group-list", b"6", 1),
 )
 
 
