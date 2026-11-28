@@ -441,17 +441,8 @@ func floatCandidateFromDigits(digits: __rey_raw_address, digitsLength: int, prec
         value = value * 10 + __reyRawLoadByte(floatAddress(digits, index)) - 48;
         index += 1;
     }
-    if precision < digitsLength {
-        var next = __reyRawLoadByte(floatAddress(digits, precision)) - 48;
-        var roundUp = next > 5;
-        if next == 5 {
-            var rest = false;
-            var scan = precision + 1;
-            while scan < digitsLength { if __reyRawLoadByte(floatAddress(digits, scan)) != 48 { rest = true; } scan += 1; }
-            roundUp = rest || value % 2 != 0;
-        }
-        if roundUp { value += 1; }
-    }
+    // Rust Debug's shortest mode chooses the upper magnitude on a decimal tie.
+    if precision < digitsLength && __reyRawLoadByte(floatAddress(digits, precision)) >= 53 { value += 1; }
     return value;
 }
 

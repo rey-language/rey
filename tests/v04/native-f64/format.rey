@@ -42,6 +42,7 @@ func main(): void {
     expect(exponentLimit.toString() == "1e-5");
     expect(largeFixedLimit.toString() == "1e16");
     expect(two53.toString() == "9007199254740992");
+    expect("1000000000000000.25".toFloat().toString() == "1000000000000000.3");
     expect(two70.toString() == "1.1805916207174113e21");
     expect(largest.toString() == "1.7976931348623157e308");
     expect(smallestNormal.toString() == "2.2250738585072014e-308");
