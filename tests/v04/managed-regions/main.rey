@@ -300,7 +300,7 @@ func assertSuccess(): void {
     if stressed.isErr() { require(false, "promotion stress: " + stressed.unwrapErr()); }
     var stressedProgram = stressed.unwrap();
     var stressedMain = functionById(stressedProgram, 10);
-    require(countProgramCalls(stressedProgram, bindings.promotionCount) == 1 && countCalls(stressedMain, bindings.promotionCount) == 1 && firstCallIndex(stressedMain, bindings.promotionCount) < firstCallIndex(stressedMain, 11) && countProgramCalls(stressedProgram, 22) == 0, "promotion stress reads the promotion count before the user call and does not collect");
+    require(countProgramCalls(stressedProgram, bindings.promotionCount) == 8 && countCalls(stressedMain, bindings.promotionCount) == 8 && firstCallIndex(stressedMain, bindings.promotionCount) < firstCallIndex(stressedMain, 11) && countProgramCalls(stressedProgram, 22) == 0, "promotion stress checks all retained user calls and does not collect");
 }
 
 func requireFailure(failed: bool, message: string, fragment: string, label: string): void {
