@@ -1,6 +1,6 @@
 // variables, types, and basic operations
 
-func main(): Void {
+func main(): void {
     // inferred types
     var x = 10;
     var name = "rey";
