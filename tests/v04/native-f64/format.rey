@@ -47,6 +47,7 @@ func main(): void {
     expect(smallestNormal.toString() == "2.2250738585072014e-308");
     expect(largestSubnormal.toString() == "2.225073858507201e-308");
     expect(smallestSubnormal.toString() == "5e-324");
+    expect("7.120236347223045e-307".toFloat().toString() == "7.120236347223045e-307");
     expect(positiveInfinity.toString() == "inf");
     expect(negativeInfinity.toString() == "-inf");
     expect(nan.toString() == "NaN");

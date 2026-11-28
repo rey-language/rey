@@ -431,8 +431,7 @@ pub func floatParseF64String(value: __rey_raw_address, length: int): float {
     return result;
 }
 
-func floatCandidateFromDigits(digits: __rey_raw_address, digitsLength: int, precision: int,
-    order: int, candidate: __rey_raw_address): int {
+func floatCandidateFromDigits(digits: __rey_raw_address, digitsLength: int, precision: int): int {
     var used = precision;
     if used > digitsLength { used = digitsLength; }
     var value = 0;
@@ -452,15 +451,7 @@ func floatCandidateFromDigits(digits: __rey_raw_address, digitsLength: int, prec
         }
         if roundUp { value += 1; }
     }
-    var limit = 1;
-    index = 0;
-    while index < precision { limit *= 10; index += 1; }
-    var adjustedOrder = order;
-    if value >= limit { value /= 10; adjustedOrder += 1; }
-    while value > 10 && value % 10 == 0 { value /= 10; }
-    var resultLength = floatAppendUnsigned(candidate, 0, value, 0);
-    __reyRawStoreI64(floatAddress(candidate, 256), adjustedOrder);
-    return resultLength;
+    return value;
 }
 
 func floatRenderCandidate(candidate: __rey_raw_address, digitsLength: int, order: int,
@@ -597,22 +588,23 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
     var precision = 1;
     var found = false;
     var finalLength = 0;
+    var magnitude = value;
+    if negative { magnitude = -magnitude; }
     while precision <= 17 && !found {
-        var candidateLength = floatCandidateFromDigits(exactDigits, digitLength, precision, order, candidate);
-        var candidateOrder = __reyRawLoadI64(floatAddress(candidate, 256));
-        var candidateExponent = candidateOrder - candidateLength + 1;
-        var candidateValue = floatParseCoefficient(workspace, 0, 0, false);
-        var coefficient = 0;
-        var candidateIndex = 0;
-        while candidateIndex < candidateLength {
-            coefficient = coefficient * 10 + __reyRawLoadByte(floatAddress(candidate, candidateIndex)) - 48;
-            candidateIndex += 1;
+        var digitsUsed = precision;
+        if digitsUsed > digitLength { digitsUsed = digitLength; }
+        var exponent = order - digitsUsed + 1;
+        var coefficient = floatCandidateFromDigits(exactDigits, digitLength, precision);
+        var candidateValue = floatParseCoefficient(workspace, coefficient, exponent, false);
+        // A normal power of two has a wider rounding interval above it.
+        if candidateValue < magnitude && significand == 4503599627370496 && binaryExponent > -1074 {
+            coefficient += 1;
+            candidateValue = floatParseCoefficient(workspace, coefficient, exponent, false);
         }
-        candidateValue = floatParseCoefficient(workspace, coefficient, candidateExponent, false);
-        var magnitude = value;
-        if magnitude < 0.0 { magnitude = -magnitude; }
         if candidateValue == magnitude {
-            finalLength = floatRenderCandidate(candidate, candidateLength, candidateOrder, negative, output);
+            while coefficient % 10 == 0 { coefficient /= 10; exponent += 1; }
+            var candidateLength = floatAppendUnsigned(candidate, 0, coefficient, 0);
+            finalLength = floatRenderCandidate(candidate, candidateLength, exponent + candidateLength - 1, negative, output);
             found = true;
         }
         precision += 1;
