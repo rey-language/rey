@@ -26,6 +26,8 @@ CASES = (
     ("corrupt-layout-descriptor", b"4", 1),
     ("corrupt-group-owner", b"5", 1),
     ("truncated-group-list", b"6", 1),
+    ("corrupt-chunk-header", b"7", 1),
+    ("corrupt-chunk-cursor", b"8", 1),
 )
 
 
