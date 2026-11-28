@@ -250,7 +250,6 @@ func main(): void {
         else { written = writeVerifiedCompilerOutputs(output, image.unwrap(), symbolMapPath, mapContent); }
     }
     else if packedX64 { written = writeVerifiedCompilerOutputPackedSegments(output, packedHeader.unwrap(), emittedPackedCode.unwrap().bytes); }
-    else if target == "linux-x64" && checkedOutput { written = writeVerifiedCompilerOutputBytes(output, image.unwrap()); }
     else if target == "linux-x64" { written = writeCheckedCompilerOutputBytes(output, image.unwrap()); }
     else { written = writeVerifiedCompilerOutputBytes(output, image.unwrap()); }
     if written.isErr() { eprintln(written.unwrapErr()); exit(1); return; }
