@@ -300,7 +300,20 @@ func assertSuccess(): void {
     if stressed.isErr() { require(false, "promotion stress: " + stressed.unwrapErr()); }
     var stressedProgram = stressed.unwrap();
     var stressedMain = functionById(stressedProgram, 10);
-    require(countProgramCalls(stressedProgram, bindings.promotionCount) == 8 && countCalls(stressedMain, bindings.promotionCount) == 8 && firstCallIndex(stressedMain, bindings.promotionCount) < firstCallIndex(stressedMain, 11) && countProgramCalls(stressedProgram, 22) == 0, "promotion stress checks all retained user calls and does not collect");
+    require(countProgramCalls(stressedProgram, bindings.promotionCount) == 8 && countProgramCalls(stressedProgram, 22) == 0, "promotion stress checks all retained user calls and does not collect");
+    var lastCall = -1;
+    var nextUser = 11;
+    for block in stressedMain.blocks {
+        for instruction in block.instructions {
+            if instruction.kind != InstructionKind::Call { continue; }
+            if instruction.functionId == nextUser && nextUser <= 18 {
+                require(lastCall == bindings.promotionCount, "promotion stress reads the count before retained user call " + nextUser.toString());
+                nextUser += 1;
+            }
+            lastCall = instruction.functionId;
+        }
+    }
+    require(nextUser == 19, "promotion stress keeps all eight user calls in order");
 }
 
 func requireFailure(failed: bool, message: string, fragment: string, label: string): void {
