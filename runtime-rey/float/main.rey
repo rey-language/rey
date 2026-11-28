@@ -353,7 +353,7 @@ func floatParseCoefficient(workspace: __rey_raw_address, coefficient: int, decim
 }
 
 func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, length: int): float {
-    if length <= 0 || length > 8192 { return floatFailConversion(); }
+    if length <= 0 || length > 9223372036854774783 { return floatFailConversion(); }
     var index = 0;
     var negative = false;
     var first = __reyRawLoadByte(bytes);
@@ -364,6 +364,8 @@ func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, 
     var sawDigit = false;
     var started = false;
     var significantDigits = 0;
+    var keptDigits = 0;
+    var discardedNonzero = false;
     var fractionDigits = 0;
     var sawDot = false;
     while index < length {
@@ -371,12 +373,17 @@ func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, 
         if byte == 101 || byte == 69 { break; }
         if byte >= 48 && byte <= 57 {
             var digit = byte - 48;
-            floatBigMultiplySmall(numerator, 10);
-            floatBigAddSmall(numerator, digit);
             sawDigit = true;
             if sawDot { fractionDigits += 1; }
             if digit != 0 { started = true; }
-            if started { significantDigits += 1; }
+            if started {
+                significantDigits += 1;
+                if keptDigits < 1100 {
+                    floatBigMultiplySmall(numerator, 10);
+                    floatBigAddSmall(numerator, digit);
+                    keptDigits += 1;
+                } else if digit != 0 { discardedNonzero = true; }
+            }
             index += 1;
         } else if byte == 46 && !sawDot {
             sawDot = true;
@@ -395,10 +402,13 @@ func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, 
             if signByte == 45 || signByte == 43 { exponentNegative = signByte == 45; index += 1; }
         }
         var exponentDigits = 0;
+        var exponentLimit = length + 1024;
         while index < length {
             var byte = __reyRawLoadByte(floatAddress(bytes, index));
             if byte < 48 || byte > 57 { return floatFailConversion(); }
-            if decimalExponent < 10000000 { decimalExponent = decimalExponent * 10 + byte - 48; }
+            var digit = byte - 48;
+            if decimalExponent > (exponentLimit - digit) / 10 { decimalExponent = exponentLimit; }
+            else { decimalExponent = decimalExponent * 10 + digit; }
             exponentDigits += 1;
             index += 1;
         }
@@ -409,9 +419,17 @@ func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, 
         if negative { return -0.0; }
         return 0.0;
     }
-    var decimalOrder = significantDigits - 1 - fractionDigits + decimalExponent;
-    if decimalOrder > 308 || decimalOrder < -324 { return floatFailConversion(); }
-    var decimalScale = fractionDigits - decimalExponent;
+    var mantissaOrder = significantDigits - 1 - fractionDigits;
+    if decimalExponent < -324 - mantissaOrder || decimalExponent > 308 - mantissaOrder { return floatFailConversion(); }
+    var decimalOrder = mantissaOrder + decimalExponent;
+    // Every binary64 rounding midpoint has fewer than 1100 significant decimal
+    // digits. One extra digit preserves which side a discarded nonzero tail is on.
+    if discardedNonzero {
+        floatBigMultiplySmall(numerator, 10);
+        floatBigAddSmall(numerator, 1);
+        keptDigits += 1;
+    }
+    var decimalScale = keptDigits - 1 - decimalOrder;
     floatBigFromInt(denominator, 1);
     if decimalScale > 0 {
         var scaleIndex = 0;
