@@ -83,7 +83,13 @@ func rejectCorruptGroup(mode: int): void {
     require(!__reyRawEqual(group, __reyRawNull()));
     if mode == 3 { __reyRawStoreI64(group, 0); }
     else if mode == 5 { __reyRawStoreAddress(__reyRawOffset(group, 16), __reyRawNull()); }
-    else { __reyRawStoreI64(__reyRawOffset(region, 48), 2); }
+    else if mode == 6 { __reyRawStoreI64(__reyRawOffset(region, 48), 2); }
+    else {
+        var chunk = __reyRawLoadAddress(__reyRawOffset(group, 32));
+        require(!__reyRawEqual(chunk, __reyRawNull()));
+        if mode == 7 { __reyRawStoreI64(chunk, 0); }
+        else { __reyRawStoreI64(__reyRawOffset(chunk, 32), 9223372036854775807); }
+    }
     regionHandleAllocateFixed(context, handle, layout, 1);
     hostExit(90);
 }
@@ -107,6 +113,6 @@ func main(): void {
     if mode == 0 { checkPayloadZeroAndTypedNulls(); return; }
     if mode == 1 { rejectStaleRegion(); return; }
     if mode == 2 { rejectForeignContext(); return; }
-    if mode == 3 || mode == 5 || mode == 6 { rejectCorruptGroup(mode); return; }
+    if mode == 3 || (mode >= 5 && mode <= 8) { rejectCorruptGroup(mode); return; }
     rejectCorruptDescriptor();
 }

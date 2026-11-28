@@ -1217,12 +1217,19 @@ func regionAddChunk(context: __rey_raw_address, region: __rey_raw_address, group
     return chunk;
 }
 
-func regionChunkFits(chunk: __rey_raw_address, slot: int): bool {
+func regionChunkFits(chunk: __rey_raw_address, group: __rey_raw_address, slot: int): bool {
+    if __reyRawLoadI64(chunk) != 1380272223 || !__reyRawEqual(__reyRawLoadAddress(regionAddressAt(chunk, 40)), group) || __reyRawEqual(__reyRawLoadAddress(regionAddressAt(chunk, 16)), __reyRawNull()) {
+        regionFail(2202);
+        return false;
+    }
     var capacity = __reyRawLoadI64(regionAddressAt(chunk, 24));
     var used = __reyRawLoadI64(regionAddressAt(chunk, 32));
+    if capacity < 104 || used < 0 || used > capacity || (used != 0 && used % 16 != 8) {
+        regionFail(2202);
+        return false;
+    }
     var aligned = regionAlignCursor(used);
-    if aligned < 0 || slot > capacity || aligned > capacity - slot { return false; }
-    return true;
+    return aligned >= 0 && slot <= capacity && aligned <= capacity - slot;
 }
 
 func regionWriteObject(chunk: __rey_raw_address, group: __rey_raw_address, region: __rey_raw_address, registry: __rey_raw_address, layoutId: int, payload: int, slot: int): __rey_raw_address {
@@ -1306,10 +1313,14 @@ func regionAllocate(context: __rey_raw_address, region: __rey_raw_address, layou
     groupObjects = __reyRawLoadI64(regionAddressAt(group, 48));
     if groupObjects >= 9223372036854775807 { regionFail(2201); return __reyRawNull(); }
     var chunk = __reyRawLoadAddress(regionAddressAt(group, 32));
-    if __reyRawEqual(chunk, __reyRawNull()) || !regionChunkFits(chunk, slot) {
+    if __reyRawEqual(chunk, __reyRawNull()) || !regionChunkFits(chunk, group, slot) {
         var required = 8 + slot;
         var capacity = 128;
-        if !__reyRawEqual(chunk, __reyRawNull()) { capacity = __reyRawLoadI64(regionAddressAt(chunk, 24)) * 2; if capacity > 4096 { capacity = 4096; } }
+        if !__reyRawEqual(chunk, __reyRawNull()) {
+            var previousCapacity = __reyRawLoadI64(regionAddressAt(chunk, 24));
+            if previousCapacity >= 2048 { capacity = 4096; }
+            else { capacity = previousCapacity * 2; }
+        }
         while capacity < required && capacity < 4096 { capacity = capacity * 2; }
         if required > capacity { capacity = required; }
         chunk = regionAddChunk(context, region, group, capacity);
