@@ -332,7 +332,7 @@ func programHasF64(program: IRProgram): bool {
             var valueIndex = 0;
             while valueIndex < current.params.len() { if current.params[valueIndex].ty.kind == IRTypeKind::F64 { return true; } valueIndex += 1; }
             valueIndex = 0;
-            while valueIndex < current.instructions.len() { if current.instructions[valueIndex].ty.kind == IRTypeKind::F64 || current.instructions[valueIndex].kind == InstructionKind::CompareF64 { return true; } valueIndex += 1; }
+            while valueIndex < current.instructions.len() { if current.instructions[valueIndex].ty.kind == IRTypeKind::F64 || current.instructions[valueIndex].kind == InstructionKind::CompareF64 || current.instructions[valueIndex].kind == InstructionKind::SignBitF64 { return true; } valueIndex += 1; }
             block += 1;
         }
         index += 1;
@@ -1027,6 +1027,13 @@ func emitInstruction(emitter: Emitter, function: IRFunction, program: IRProgram,
     }
     if instruction.kind == InstructionKind::ConstF64 {
         emitMovImmediate(emitter, 0, instruction.immediate);
+        emitStoreValue(emitter, indexes, 0, instruction.resultId);
+        return;
+    }
+    if instruction.kind == InstructionKind::SignBitF64 {
+        emitLoadValue(emitter, indexes, 0, instruction.operands[0]);
+        // shr rax, 63
+        emitByte(emitter, 72); emitByte(emitter, 193); emitByte(emitter, 232); emitByte(emitter, 63);
         emitStoreValue(emitter, indexes, 0, instruction.resultId);
         return;
     }

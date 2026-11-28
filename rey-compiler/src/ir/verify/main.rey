@@ -758,6 +758,11 @@ func checkFunction(program: IRProgram, function: IRFunction, functionIndices: Ha
                 if operandCount != 1 { errors.push(context + ": i64.to.f64 requires exactly one operand"); }
                 if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": i64.to.f64 has invalid unused fields"); }
                 if operandCount > 0 { checkI64Operand(errors, definitionTable, instruction.operands[0], context); }
+            } else if instruction.kind == InstructionKind::SignBitF64 {
+                if instruction.ty.kind != IRTypeKind::Bool || instruction.resultId < 0 { errors.push(context + ": signbit.f64 requires a bool result"); }
+                if operandCount != 1 { errors.push(context + ": signbit.f64 requires exactly one operand"); }
+                if instruction.immediate != 0 || instruction.functionId != -1 || instruction.comparison != CompareI64Predicate::Eq { errors.push(context + ": signbit.f64 has invalid unused fields"); }
+                if operandCount > 0 { checkF64Operand(errors, definitionTable, instruction.operands[0], context); }
             } else if instruction.kind == InstructionKind.F64ToI64Checked {
                 if instruction.ty.kind != IRTypeKind::I64 || instruction.resultId < 0 { errors.push(context + ": f64.to.i64.checked requires an i64 result"); }
                 if operandCount != 1 { errors.push(context + ": f64.to.i64.checked requires exactly one operand"); }

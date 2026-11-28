@@ -48,7 +48,6 @@ struct LocalBinding {
     pub isConst: bool,
     pub layoutId: int,
     pub value: IRValue,
-    pub negativeZero: bool,
 }
 
 struct LocalScope {
@@ -2717,68 +2716,16 @@ func lowerManagedPrintable(lowerer: FunctionLowerer, expression: Expr, argument:
         return managedCallHook(lowerer, "managedStringFromInt", ir.irRawAddress(), [layoutValue.id, argument.id], source);
     }
     if argumentInfo.ty.kind == kindFloat {
-        var zeroHint = allocateValue(lowerer, irBool());
-        appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, expression), source));
-        return lowerManagedFloatString(lowerer, argument, zeroHint, source);
+        return lowerManagedFloatString(lowerer, argument, source);
     }
     return failExpression(lowerer, expression, "managed print supports string, bool, int, char, and float arguments");
 }
 
-func lowerManagedFloatString(lowerer: FunctionLowerer, value: LowerValue, negativeZeroHint: IRValue, source: SourceRef): LowerValue {
+func lowerManagedFloatString(lowerer: FunctionLowerer, value: LowerValue, source: SourceRef): LowerValue {
+    var sign = allocateValue(lowerer, irBool());
+    appendInstruction(lowerer, ir.signBitF64(sign.id, value.id, source));
     var stringLayout = managedI64Constant(lowerer, managedStringLayoutId(lowerer), source);
-    return managedCallHook(lowerer, "managedFloatToString", ir.irRawAddress(), [stringLayout.id, value.id, negativeZeroHint.id], source);
-}
-
-func managedNegativeZeroHint(lowerer: FunctionLowerer, expression: Expr): bool {
-    match expression {
-        Expr::Identifier(identifier) => {
-            var location = findLocalLocation(lowerer.scopes, identifier.name);
-            if location.found { return location.binding.negativeZero; }
-        },
-        Expr::Unary(unary) => {
-            if unary.op == opSub {
-                match unary.right {
-                    Expr::Literal(literal) => {
-                        if literal.kind == LiteralKind::Float {
-                            var bits = parseF64LiteralBits(literal.text);
-                            if bits.isOk() && bits.unwrap() == 0 { return true; }
-                        }
-                    },
-                    _ => {},
-                }
-            }
-        },
-        Expr::Call(callExpr) => {
-            var access: FieldAccessExpr? = null;
-            match callExpr.callee { Expr::FieldAccess(fieldAccess) => { access = fieldAccess; }, _ => {} }
-            if access != null {
-                var fieldAccess = requiredFieldAccess(access, fallbackFieldAccess(callExpr.callee));
-                if fieldAccess.name == "toFloat" {
-                    match fieldAccess.object {
-                        Expr::Literal(literal) => {
-                            if literal.kind == LiteralKind::String {
-                                var text = literal.text;
-                                if text.startsWith("-") {
-                                    var index = 1;
-                                    var sawZero = false;
-                                    while index < text.len() {
-                                        var byte = text.slice(index, index + 1);
-                                        if byte == "0" { sawZero = true; }
-                                        else if byte != "." && byte != "e" && byte != "E" && byte != "+" && byte != "-" { return false; }
-                                        index += 1;
-                                    }
-                                    if sawZero { return true; }
-                                }
-                            }
-                        },
-                        _ => {},
-                    }
-                }
-            }
-        },
-        _ => {},
-    }
-    return false;
+    return managedCallHook(lowerer, "managedFloatToString", ir.irRawAddress(), [stringLayout.id, value.id, sign.id], source);
 }
 
 func lowerManagedAssert(lowerer: FunctionLowerer, expression: Expr, callExpr: CallExpr, source: SourceRef): LowerValue {
@@ -2968,9 +2915,7 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         if intrinsic == litString && argInfo.ty.kind == kindChar { return lowerManagedStringCharValue(lowerer, argument, source); }
         if intrinsic == litString && argInfo.ty.kind == kindBool { return lowerManagedBoolString(lowerer, argument, expression); }
         if intrinsic == litString && argInfo.ty.kind == kindFloat {
-            var zeroHint = allocateValue(lowerer, irBool());
-            appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, callExpr.args[0]), source));
-            return lowerManagedFloatString(lowerer, argument, zeroHint, source);
+            return lowerManagedFloatString(lowerer, argument, source);
         }
         if intrinsic == litString && (argInfo.ty.kind == kindInt || argInfo.ty.kind == kindChar) {
             var layoutId = managedStringLayoutId(lowerer);
@@ -2992,9 +2937,7 @@ func lowerManagedBuiltinCall(lowerer: FunctionLowerer, expression: Expr, callExp
         if receiverTypeForString.kind == kindBool { return lowerManagedBoolString(lowerer, value, expression); }
         if receiverTypeForString.kind == kindChar { return lowerManagedStringCharValue(lowerer, value, source); }
         if receiverTypeForString.kind == kindFloat {
-            var zeroHint = allocateValue(lowerer, irBool());
-            appendInstruction(lowerer, constBool(zeroHint.id, managedNegativeZeroHint(lowerer, receiverAccess.object), source));
-            return lowerManagedFloatString(lowerer, value, zeroHint, source);
+            return lowerManagedFloatString(lowerer, value, source);
         }
         if receiverTypeForString.kind == kindInt {
             var stringLayoutValue = managedI64Constant(lowerer, managedStringLayoutId(lowerer), source);
@@ -3387,7 +3330,7 @@ func findLocalLocation(scopes: Vec<LocalScope>, name: string): LocalLocation {
         }
         scopeIndex = scopeIndex - 1;
     }
-    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()), negativeZero: false } };
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()) } };
 }
 
 func findLocal(lowerer: FunctionLowerer, name: string): IRValue? {
@@ -3405,7 +3348,6 @@ func updateLocal(lowerer: FunctionLowerer, location: LocalLocation, value: IRVal
         isConst: binding.isConst,
         layoutId: binding.layoutId,
         value: value,
-        negativeZero: binding.negativeZero,
     });
     lowerer.scopes.set(location.scopeIndex, scope);
 }
@@ -3417,23 +3359,8 @@ func bindLocal(lowerer: FunctionLowerer, name: string, identity: string, isConst
     }
     var scopeIndex = lowerer.scopes.len() - 1;
     var scope = lowerer.scopes[scopeIndex];
-    scope.bindings.push(LocalBinding { name: name, identity: identity, isConst: isConst, layoutId: layoutId, value: value, negativeZero: false });
+    scope.bindings.push(LocalBinding { name: name, identity: identity, isConst: isConst, layoutId: layoutId, value: value });
     lowerer.scopes.set(scopeIndex, scope);
-}
-
-func setLocalNegativeZero(lowerer: FunctionLowerer, location: LocalLocation, negativeZero: bool) {
-    if !location.found { return; }
-    var scope = lowerer.scopes[location.scopeIndex];
-    var binding = scope.bindings[location.bindingIndex];
-    scope.bindings.set(location.bindingIndex, LocalBinding {
-        name: binding.name,
-        identity: binding.identity,
-        isConst: binding.isConst,
-        layoutId: binding.layoutId,
-        value: binding.value,
-        negativeZero: negativeZero,
-    });
-    lowerer.scopes.set(location.scopeIndex, scope);
 }
 
 func allocateValue(lowerer: FunctionLowerer, ty: IRType): IRValue {
@@ -3459,7 +3386,6 @@ func cloneScopes(scopes: Vec<LocalScope>): Vec<LocalScope> {
                 isConst: sourceBinding.isConst,
                 layoutId: sourceBinding.layoutId,
                 value: sourceBinding.value,
-                negativeZero: sourceBinding.negativeZero,
             });
             bindingIndex = bindingIndex + 1;
         }
@@ -3485,7 +3411,7 @@ func findBindingIdentity(scopes: Vec<LocalScope>, identity: string): LocalLocati
         }
         scopeIndex = scopeIndex - 1;
     }
-    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()), negativeZero: false } };
+    return LocalLocation { found: false, scopeIndex: -1, bindingIndex: -1, binding: LocalBinding { name: emptyString, identity: emptyString, isConst: false, layoutId: 0, value: irValue(-1, irVoid()) } };
 }
 
 func makeBlockEnvironment(lowerer: FunctionLowerer, sourceScopes: Vec<LocalScope>): BlockEnvironment {
@@ -3513,7 +3439,6 @@ func makeBlockEnvironment(lowerer: FunctionLowerer, sourceScopes: Vec<LocalScope
                 isConst: targetBinding.isConst,
                 layoutId: targetBinding.layoutId,
                 value: parameter,
-                negativeZero: targetBinding.negativeZero,
             });
             bindingIndex = bindingIndex + 1;
         }
@@ -5007,8 +4932,6 @@ func lowerDeclaration(lowerer: FunctionLowerer, statement: Stmt, name: string, i
         var layoutId = 0;
         if lowerer.managed { layoutId = managedLayoutId(lowerer.managedLayouts, binding.ty); }
         bindLocal(lowerer, name, identity, binding.isConst, layoutId, irValue(initializerValue.id, initializerValue.ty));
-        var location = findLocalLocation(lowerer.scopes, name);
-        setLocalNegativeZero(lowerer, location, managedNegativeZeroHint(lowerer, initializer));
         return;
     }
     lowerer.error = lowerError(lowerer.sourcePath, span.start, "checked local binding metadata is missing");
@@ -5424,7 +5347,6 @@ func lowerAssignment(lowerer: FunctionLowerer, statement: AssignStmt) {
                 }
             }
             updateLocal(lowerer, location, irValue(newValue.id, newValue.ty));
-            setLocalNegativeZero(lowerer, findLocalLocation(lowerer.scopes, identifier.name), managedNegativeZeroHint(lowerer, statement.value));
         },
         Expr::FieldAccess(access) => {
             if !lowerer.managed {

@@ -770,6 +770,13 @@ func evalFunction(program: IRProgram, state: RawState, functionId: int, argument
                 var intToFloat = readValue(frame, instruction.operands[0]);
                 if !intToFloat.found || intToFloat.isF64 { return failAt("i64 to f64 conversion references a non-i64 or unavailable SSA value", instruction.source, currentSteps); }
                 writeFloatValue(frame, instruction.resultId, i64ToF64Bits(intToFloat.value));
+            } else if instruction.kind == InstructionKind::SignBitF64 {
+                if instruction.operands.len() != 1 { return failAt("signbit.f64 requires exactly one operand", instruction.source, currentSteps); }
+                var operand = readValue(frame, instruction.operands[0]);
+                if !operand.found || !operand.isF64 { return failAt("signbit.f64 requires an f64 operand", instruction.source, currentSteps); }
+                var sign = 0;
+                if operand.value < 0 { sign = 1; }
+                writeValue(frame, instruction.resultId, sign);
             } else if instruction.kind == InstructionKind::F64ToI64Checked {
                 var floatToInt = readValue(frame, instruction.operands[0]);
                 if !floatToInt.found || !floatToInt.isF64 { return failAt("f64 to i64 conversion references a non-f64 or unavailable SSA value", instruction.source, currentSteps); }

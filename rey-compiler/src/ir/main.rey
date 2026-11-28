@@ -22,6 +22,7 @@ pub enum InstructionKind {
     CompareF64,
     I64ToF64,
     F64ToI64Checked,
+    SignBitF64,
     AddCheckedI64,
     CompareI64,
     Call,
@@ -334,6 +335,12 @@ pub func i64ToF64(resultId: int, valueId: int, source: SourceRef): Instruction {
     return instruction;
 }
 
+pub func signBitF64(resultId: int, valueId: int, source: SourceRef): Instruction {
+    var instruction = emptyInstruction(InstructionKind::SignBitF64, resultId, irBool(), source);
+    instruction.operands.push(valueId);
+    return instruction;
+}
+
 pub func f64ToI64Checked(resultId: int, valueId: int, source: SourceRef): Instruction {
     var instruction = emptyInstruction(InstructionKind::F64ToI64Checked, resultId, irI64(), source);
     instruction.operands.push(valueId);
@@ -599,6 +606,9 @@ func instructionText(instruction: Instruction): string {
     }
     if instruction.kind == InstructionKind::ConstF64 {
         return prefix + "const.f64.bits " + instruction.immediate.toString() + " " + sourceText(instruction.source);
+    }
+    if instruction.kind == InstructionKind::SignBitF64 {
+        return prefix + "signbit.f64 " + valueText(instruction.operands[0]) + " " + sourceText(instruction.source);
     }
     if instruction.kind == InstructionKind::NegF64 || instruction.kind == InstructionKind::I64ToF64 || instruction.kind == InstructionKind::F64ToI64Checked {
         var operation = "neg.f64";
