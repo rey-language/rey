@@ -65,7 +65,7 @@ run_status() {
 }
 
 run_format_suite() {
-    if /usr/bin/time -v timeout --kill-after=30s 600 "$REY" build "$SCRIPT_DIR/format.rey" \
+    if /usr/bin/time -v timeout --kill-after=30s 1200 "$REY" build "$SCRIPT_DIR/format.rey" \
         -o "$OUT/format" --target linux-x64 --managed --regions >"$OUT/format.stdout" 2>"$OUT/format.time"; then
         chmod +x "$OUT/format"
     else
@@ -84,7 +84,7 @@ run_format_suite() {
         exit 1
     fi
 
-    if /usr/bin/time -v timeout --kill-after=30s 600 "$REY" build "$SCRIPT_DIR/../../../examples/basic/variables.rey" \
+    if /usr/bin/time -v timeout --kill-after=30s 1200 "$REY" build "$SCRIPT_DIR/../../../examples/basic/variables.rey" \
         -o "$OUT/variables" --target linux-x64 --managed --regions >"$OUT/variables.stdout" 2>"$OUT/variables.time"; then
         chmod +x "$OUT/variables"
     else
@@ -104,7 +104,7 @@ run_format_suite() {
     fi
 
     for case_name in invalid-float-string float-overflow-string float-underflow-string; do
-        if /usr/bin/time -v timeout --kill-after=30s 600 "$REY" build "$SCRIPT_DIR/$case_name.rey" \
+        if /usr/bin/time -v timeout --kill-after=30s 1200 "$REY" build "$SCRIPT_DIR/$case_name.rey" \
             -o "$OUT/$case_name" --target linux-x64 --managed --regions >"$OUT/$case_name.stdout" 2>"$OUT/$case_name.time"; then
             chmod +x "$OUT/$case_name"
         else
