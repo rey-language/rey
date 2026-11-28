@@ -1,13 +1,13 @@
 // Exact binary64 decimal parsing and shortest-round-trip formatting.
 // The routines use checked integer arithmetic and raw scratch buffers only.
 
-var floatBigBase = 65536;
-var floatBigCapacity = 2048;
-var floatBigBytes = 16392;
-var floatWorkspaceBytes = 180000;
-var floatDigitsOffset = 163920;
-var floatGroupsOffset = 168016;
-var floatCandidateOffset = 172112;
+func floatBigBase(): int { return 65536; }
+func floatBigCapacity(): int { return 2048; }
+func floatBigBytes(): int { return 16392; }
+func floatWorkspaceBytes(): int { return 180000; }
+func floatDigitsOffset(): int { return 163920; }
+func floatGroupsOffset(): int { return 168016; }
+func floatCandidateOffset(): int { return 172112; }
 
 func floatOverflowValue(): float {
     var infinity: float = 1.0;
@@ -21,7 +21,7 @@ func floatAddress(base: __rey_raw_address, offset: int): __rey_raw_address {
 }
 
 func floatBigAt(workspace: __rey_raw_address, index: int): __rey_raw_address {
-    return floatAddress(workspace, index * floatBigBytes);
+    return floatAddress(workspace, index * floatBigBytes());
 }
 
 func floatBigLength(value: __rey_raw_address): int {
@@ -64,9 +64,9 @@ func floatBigFromInt(value: __rey_raw_address, number: int) {
     floatBigZero(value);
     var remaining = number;
     while remaining > 0 {
-        floatBigSetLimb(value, floatBigLength(value), remaining % floatBigBase);
+        floatBigSetLimb(value, floatBigLength(value), remaining % floatBigBase());
         floatBigSetLength(value, floatBigLength(value) + 1);
-        remaining /= floatBigBase;
+        remaining /= floatBigBase();
     }
 }
 
@@ -77,14 +77,14 @@ func floatBigMultiplySmall(value: __rey_raw_address, factor: int) {
     var index = 0;
     while index < length {
         var product = floatBigLimb(value, index) * factor + carry;
-        floatBigSetLimb(value, index, product % floatBigBase);
-        carry = product / floatBigBase;
+        floatBigSetLimb(value, index, product % floatBigBase());
+        carry = product / floatBigBase();
         index += 1;
     }
     while carry > 0 {
-        if length >= floatBigCapacity { __reyRawFail(2205); return; }
-        floatBigSetLimb(value, length, carry % floatBigBase);
-        carry /= floatBigBase;
+        if length >= floatBigCapacity() { __reyRawFail(2205); return; }
+        floatBigSetLimb(value, length, carry % floatBigBase());
+        carry /= floatBigBase();
         length += 1;
     }
     floatBigSetLength(value, length);
@@ -95,12 +95,12 @@ func floatBigAddSmall(value: __rey_raw_address, number: int) {
     var index = 0;
     var length = floatBigLength(value);
     while carry > 0 {
-        if index >= floatBigCapacity { __reyRawFail(2205); return; }
+        if index >= floatBigCapacity() { __reyRawFail(2205); return; }
         var prior = 0;
         if index < length { prior = floatBigLimb(value, index); }
         var sum = prior + carry;
-        floatBigSetLimb(value, index, sum % floatBigBase);
-        carry = sum / floatBigBase;
+        floatBigSetLimb(value, index, sum % floatBigBase());
+        carry = sum / floatBigBase();
         if index >= length { length = index + 1; }
         index += 1;
     }
@@ -124,15 +124,15 @@ func floatBigShiftLeft(source: __rey_raw_address, destination: __rey_raw_address
     index = 0;
     while index < sourceLength {
         var product = floatBigLimb(source, index) * factor + carry;
-        floatBigSetLimb(destination, wordShift + index, product % floatBigBase);
-        carry = product / floatBigBase;
+        floatBigSetLimb(destination, wordShift + index, product % floatBigBase());
+        carry = product / floatBigBase();
         index += 1;
     }
     var resultLength = wordShift + sourceLength;
     while carry > 0 {
-        if resultLength >= floatBigCapacity { __reyRawFail(2205); return; }
-        floatBigSetLimb(destination, resultLength, carry % floatBigBase);
-        carry /= floatBigBase;
+        if resultLength >= floatBigCapacity() { __reyRawFail(2205); return; }
+        floatBigSetLimb(destination, resultLength, carry % floatBigBase());
+        carry /= floatBigBase();
         resultLength += 1;
     }
     floatBigSetLength(destination, resultLength);
@@ -164,7 +164,7 @@ func floatBigSubtract(left: __rey_raw_address, right: __rey_raw_address) {
         if index < floatBigLength(right) { b = floatBigLimb(right, index); }
         var difference = floatBigLimb(left, index) - b - borrow;
         borrow = 0;
-        if difference < 0 { difference += floatBigBase; borrow = 1; }
+        if difference < 0 { difference += floatBigBase(); borrow = 1; }
         floatBigSetLimb(left, index, difference);
         index += 1;
     }
@@ -423,11 +423,11 @@ func floatParseF64Bytes(workspace: __rey_raw_address, bytes: __rey_raw_address, 
 }
 
 pub func floatParseF64String(value: __rey_raw_address, length: int): float {
-    var workspace = __reyRawMap(floatWorkspaceBytes);
+    var workspace = __reyRawMap(floatWorkspaceBytes());
     if __reyRawToInt(workspace) < 0 { return floatFailConversion(); }
     var bytes = floatAddress(value, 24);
     var result = floatParseF64Bytes(workspace, bytes, length);
-    __reyRawUnmap(workspace, floatWorkspaceBytes);
+    __reyRawUnmap(workspace, floatWorkspaceBytes());
     return result;
 }
 
@@ -551,7 +551,7 @@ func floatDecompose(value: float, negativeZeroHint: bool, output: __rey_raw_addr
 
 pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __rey_raw_address): int {
     var parts = __reyRawMap(32);
-    var workspace = __reyRawMap(floatWorkspaceBytes);
+    var workspace = __reyRawMap(floatWorkspaceBytes());
     if __reyRawToInt(parts) < 0 || __reyRawToInt(workspace) < 0 { return -1; }
     var finite = floatDecompose(value, negativeZeroHint, parts);
     if !finite {
@@ -572,7 +572,7 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
             position = floatAppendByte(output, position, 48);
         }
         __reyRawUnmap(parts, 32);
-        __reyRawUnmap(workspace, floatWorkspaceBytes);
+        __reyRawUnmap(workspace, floatWorkspaceBytes());
         return position;
     }
     var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;
@@ -589,11 +589,11 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
         while count < 0 - binaryExponent { floatBigMultiplySmall(exact, 5); count += 1; }
         decimalPower = binaryExponent;
     }
-    var exactDigits = floatAddress(workspace, floatDigitsOffset);
-    var groups = floatAddress(workspace, floatGroupsOffset);
+    var exactDigits = floatAddress(workspace, floatDigitsOffset());
+    var groups = floatAddress(workspace, floatGroupsOffset());
     var digitLength = floatBigToDecimal(exact, floatBigAt(workspace, 8), groups, exactDigits);
     var order = digitLength - 1 + decimalPower;
-    var candidate = floatAddress(workspace, floatCandidateOffset);
+    var candidate = floatAddress(workspace, floatCandidateOffset());
     var precision = 1;
     var found = false;
     var finalLength = 0;
@@ -619,7 +619,7 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
     }
     if !found { __reyRawFail(2205); finalLength = 0; }
     __reyRawUnmap(parts, 32);
-    __reyRawUnmap(workspace, floatWorkspaceBytes);
+    __reyRawUnmap(workspace, floatWorkspaceBytes());
     return finalLength;
 }
 
