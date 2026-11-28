@@ -112,6 +112,7 @@ func floatBigShiftLeft(source: __rey_raw_address, destination: __rey_raw_address
     var sourceLength = floatBigLength(source);
     if sourceLength == 0 { floatBigZero(destination); return; }
     var wordShift = shift / 16;
+    if wordShift > floatBigCapacity() - sourceLength { __reyRawFail(2205); return; }
     var bitShift = shift % 16;
     var factor = 1;
     while bitShift > 0 { factor *= 2; bitShift -= 1; }
