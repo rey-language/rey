@@ -142,7 +142,7 @@ func successModule(): ManagedProgram {
     var containerReturn = straight(18, "containerReturn", [], ir.irRawAddress(), [], [ir.call(1, ir.irRawAddress(), 23, [], source())], 1);
     var users: Vec<IRFunction> = [mainFn, regionLocal, destinationReturn, programGraph, groupPair, aliasLocal, cyclicHeap, promotedReturn, containerReturn];
     var managed: Vec<ManagedFunction> = [
-        userMeta(10, [], [], 0), userMeta(11, [1], [], 0), userMeta(12, [1], [], 1), userMeta(13, [1, 3], [], 1), userMeta(14, [1, 3], [], 0), userMeta(15, [1, 2], [], 0), userMeta(16, [1], [], 0), userMeta(17, [1, 2], [], 1), userMeta(18, [1], [], 1),
+        userMeta(10, [0, 1, 2, 3], [], 0), userMeta(11, [1], [], 0), userMeta(12, [1], [], 1), userMeta(13, [1, 3], [], 1), userMeta(14, [1, 3], [], 0), userMeta(15, [1, 2], [], 0), userMeta(16, [1], [], 0), userMeta(17, [1, 2], [], 1), userMeta(18, [1], [], 1),
     ];
     var allocations: Vec<ManagedAllocation> = [allocAnn(11, 0, 1), allocAnn(12, 0, 1), allocAnn(13, 0, 1), allocAnn(13, 0, 3), allocAnn(14, 0, 1), allocAnn(14, 0, 3), allocAnn(15, 0, 1), allocAnn(16, 1, 1), allocAnn(17, 0, 1), allocAnn(17, 0, 2)];
     return managedModule(10, users, managed, allocations, [], true);
