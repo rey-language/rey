@@ -303,8 +303,10 @@ func assertSuccess(): void {
     require(countProgramCalls(stressedProgram, bindings.promotionCount) == 8 && countProgramCalls(stressedProgram, 22) == 0, "promotion stress checks all retained user calls and does not collect");
     var lastCall = -1;
     var nextUser = 11;
-    for block in stressedMain.blocks {
-        for instruction in block.instructions {
+    for blockIndex in range(0, stressedMain.blocks.len()) {
+        var block = stressedMain.blocks[blockIndex];
+        for instructionIndex in range(0, block.instructions.len()) {
+            var instruction = block.instructions[instructionIndex];
             if instruction.kind != InstructionKind::Call { continue; }
             if instruction.functionId == nextUser && nextUser <= 18 {
                 require(lastCall == bindings.promotionCount, "promotion stress reads the count before retained user call " + nextUser.toString());
