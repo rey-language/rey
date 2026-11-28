@@ -29,6 +29,11 @@ func main(): void {
     expect(positiveZero.toString() == "0");
     expect(negativeZero.toString() == "-0");
     expect("-0.0".toFloat().toString() == "-0");
+    expect((-negativeZero).toString() == "0");
+    var zeroText = "-0e12";
+    var parsedZero = zeroText.toFloat();
+    expect(parsedZero.toString() == "-0");
+    expect((one * parsedZero).toString() == "-0");
     expect(one.toString() == "1");
     expect(negativeOne.toString() == "-1");
     expect(oneAndHalf.toString() == "1.5");
