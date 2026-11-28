@@ -542,8 +542,7 @@ func floatDecompose(value: float, negativeZeroHint: bool, output: __rey_raw_addr
 
 pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __rey_raw_address): int {
     var parts = __reyRawMap(32);
-    var workspace = __reyRawMap(floatWorkspaceBytes());
-    if __reyRawToInt(parts) < 0 || __reyRawToInt(workspace) < 0 { return -1; }
+    if __reyRawToInt(parts) < 0 { return -1; }
     var finite = floatDecompose(value, negativeZeroHint, parts);
     if !finite {
         var kind = __reyRawLoadI64(parts);
@@ -563,12 +562,14 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
             position = floatAppendByte(output, position, 48);
         }
         __reyRawUnmap(parts, 32);
-        __reyRawUnmap(workspace, floatWorkspaceBytes());
         return position;
     }
     var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;
     var significand = __reyRawLoadI64(floatAddress(parts, 16));
     var binaryExponent = __reyRawLoadI64(floatAddress(parts, 24));
+    __reyRawUnmap(parts, 32);
+    var workspace = __reyRawMap(floatWorkspaceBytes());
+    if __reyRawToInt(workspace) < 0 { return -1; }
     var exact = floatBigAt(workspace, 0);
     floatBigFromInt(exact, significand);
     var decimalPower = 0;
@@ -610,7 +611,6 @@ pub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: __
         precision += 1;
     }
     if !found { __reyRawFail(2205); finalLength = 0; }
-    __reyRawUnmap(parts, 32);
     __reyRawUnmap(workspace, floatWorkspaceBytes());
     return finalLength;
 }

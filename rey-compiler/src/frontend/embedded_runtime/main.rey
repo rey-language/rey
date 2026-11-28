@@ -875,25 +875,25 @@ func embeddedRuntimeSource2Part2(): string {
     ("normalized = normalized / 2.0; exponent += 1; \x7D\n        while normalized < 1.0 \x7B normalized = normalized * 2.0; exponent -= 1; \x7D\n    significand = (normalized * 4503599627370496.0).toInt();\n  " +
     "  exponent -= 52;\n    __reyRawStoreI64(output, 0);\n    __reyRawStoreI64(floatAddress(output, 8), 0);\n    if negative \x7B __reyRawStoreI64(floatAddress(output, 8), 1); \x7D\n    __reyRawStoreI64(floa"))))) +
     (((("tAddress(output, 16), significand);\n    __reyRawStoreI64(floatAddress(output, 24), exponent);\n    return true;\n\x7D\n\npub func floatFormatF64ToBuffer(value: float, negativeZeroHint: bool, output: " +
-    "__rey_raw_address): int \x7B\n    var parts = __reyRawMap(32);\n    var workspace = __reyRawMap(floatWorkspaceBytes());\n    if __reyRawToInt(parts) < 0 || __reyRawToInt(workspace) < 0 \x7B return -1; ") +
-    ("\x7D\n    var finite = floatDecompose(value, negativeZeroHint, parts);\n    if !finite \x7B\n        var kind = __reyRawLoadI64(parts);\n        var negative = __reyRawLoadI64(floatAddress(parts, 8)) !=" +
-    (" 0;\n        var position = 0;\n        if kind == 1 \x7B\n            position = floatAppendByte(output, position, 78);\n            position = floatAppendByte(output, position, 97);\n            pos" +
-    "ition = floatAppendByte(output, position, 78);\n        \x7D else if kind == 2 \x7B\n            if negative \x7B position = floatAppendByte(output, position, 45); \x7D\n            position = floatAppendByt"))) +
-    (("e(output, position, 105);\n            position = floatAppendByte(output, position, 110);\n            position = floatAppendByte(output, position, 102);\n        \x7D else \x7B\n            if negative" +
-    " \x7B position = floatAppendByte(output, position, 45); \x7D\n            position = floatAppendByte(output, position, 48);\n        \x7D\n        __reyRawUnmap(parts, 32);\n        __reyRawUnmap(workspace") +
-    (", floatWorkspaceBytes());\n        return position;\n    \x7D\n    var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;\n    var significand = __reyRawLoadI64(floatAddress(parts, 16));\n    va" +
-    ("r binaryExponent = __reyRawLoadI64(floatAddress(parts, 24));\n    var exact = floatBigAt(workspace, 0);\n    floatBigFromInt(exact, significand);\n    var decimalPower = 0;\n    if binaryExponent " +
-    ">= 0 \x7B\n        floatBigShiftLeft(exact, floatBigAt(workspace, 7), binaryExponent);\n        floatBigCopy(floatBigAt(workspace, 7), exact);\n    \x7D else \x7B\n        var count = 0;\n        while coun")))) +
-    ((("t < 0 - binaryExponent \x7B floatBigMultiplySmall(exact, 5); count += 1; \x7D\n        decimalPower = binaryExponent;\n    \x7D\n    var exactDigits = floatAddress(workspace, floatDigitsOffset());\n    var" +
-    " groups = floatAddress(workspace, floatGroupsOffset());\n    var digitLength = floatBigToDecimal(exact, floatBigAt(workspace, 8), groups, exactDigits);\n    var order = digitLength - 1 + decimal") +
-    ("Power;\n    var candidate = floatAddress(workspace, floatCandidateOffset());\n    var precision = 1;\n    var found = false;\n    var finalLength = 0;\n    var magnitude = value;\n    if negative \x7B " +
-    ("magnitude = -magnitude; \x7D\n    while precision <= 17 && !found \x7B\n        var digitsUsed = precision;\n        if digitsUsed > digitLength \x7B digitsUsed = digitLength; \x7D\n        var exponent = ord" +
-    "er - digitsUsed + 1;\n        var coefficient = floatCandidateFromDigits(exactDigits, digitLength, precision);\n        var candidateValue = floatParseCoefficient(workspace, coefficient, exponen"))) +
-    (("t, false);\n        // A normal power of two has a wider rounding interval above it.\n        if candidateValue < magnitude && significand == 4503599627370496 && binaryExponent > -1074 \x7B\n       " +
-    "     coefficient += 1;\n            candidateValue = floatParseCoefficient(workspace, coefficient, exponent, false);\n        \x7D\n        if candidateValue == magnitude \x7B\n            while coeffic") +
-    ("ient % 10 == 0 \x7B coefficient /= 10; exponent += 1; \x7D\n            var candidateLength = floatAppendUnsigned(candidate, 0, coefficient, 0);\n            finalLength = floatRenderCandidate(candida" +
-    ("te, candidateLength, exponent + candidateLength - 1, negative, output);\n            found = true;\n        \x7D\n        precision += 1;\n    \x7D\n    if !found \x7B __reyRawFail(2205); finalLength = 0; \x7D" +
-    "\n    __reyRawUnmap(parts, 32);\n    __reyRawUnmap(workspace, floatWorkspaceBytes());\n    return finalLength;\n\x7D\n\nfunc main(): void \x7B\x7D\n"))))));
+    "__rey_raw_address): int \x7B\n    var parts = __reyRawMap(32);\n    if __reyRawToInt(parts) < 0 \x7B return -1; \x7D\n    var finite = floatDecompose(value, negativeZeroHint, parts);\n    if !finite \x7B\n    ") +
+    ("    var kind = __reyRawLoadI64(parts);\n        var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;\n        var position = 0;\n        if kind == 1 \x7B\n            position = floatAppendB" +
+    ("yte(output, position, 78);\n            position = floatAppendByte(output, position, 97);\n            position = floatAppendByte(output, position, 78);\n        \x7D else if kind == 2 \x7B\n           " +
+    " if negative \x7B position = floatAppendByte(output, position, 45); \x7D\n            position = floatAppendByte(output, position, 105);\n            position = floatAppendByte(output, position, 110);"))) +
+    (("\n            position = floatAppendByte(output, position, 102);\n        \x7D else \x7B\n            if negative \x7B position = floatAppendByte(output, position, 45); \x7D\n            position = floatAppen" +
+    "dByte(output, position, 48);\n        \x7D\n        __reyRawUnmap(parts, 32);\n        return position;\n    \x7D\n    var negative = __reyRawLoadI64(floatAddress(parts, 8)) != 0;\n    var significand = _") +
+    ("_reyRawLoadI64(floatAddress(parts, 16));\n    var binaryExponent = __reyRawLoadI64(floatAddress(parts, 24));\n    __reyRawUnmap(parts, 32);\n    var workspace = __reyRawMap(floatWorkspaceBytes())" +
+    (";\n    if __reyRawToInt(workspace) < 0 \x7B return -1; \x7D\n    var exact = floatBigAt(workspace, 0);\n    floatBigFromInt(exact, significand);\n    var decimalPower = 0;\n    if binaryExponent >= 0 \x7B\n " +
+    "       floatBigShiftLeft(exact, floatBigAt(workspace, 7), binaryExponent);\n        floatBigCopy(floatBigAt(workspace, 7), exact);\n    \x7D else \x7B\n        var count = 0;\n        while count < 0 - ")))) +
+    ((("binaryExponent \x7B floatBigMultiplySmall(exact, 5); count += 1; \x7D\n        decimalPower = binaryExponent;\n    \x7D\n    var exactDigits = floatAddress(workspace, floatDigitsOffset());\n    var groups " +
+    "= floatAddress(workspace, floatGroupsOffset());\n    var digitLength = floatBigToDecimal(exact, floatBigAt(workspace, 8), groups, exactDigits);\n    var order = digitLength - 1 + decimalPower;\n ") +
+    ("   var candidate = floatAddress(workspace, floatCandidateOffset());\n    var precision = 1;\n    var found = false;\n    var finalLength = 0;\n    var magnitude = value;\n    if negative \x7B magnitud" +
+    ("e = -magnitude; \x7D\n    while precision <= 17 && !found \x7B\n        var digitsUsed = precision;\n        if digitsUsed > digitLength \x7B digitsUsed = digitLength; \x7D\n        var exponent = order - dig" +
+    "itsUsed + 1;\n        var coefficient = floatCandidateFromDigits(exactDigits, digitLength, precision);\n        var candidateValue = floatParseCoefficient(workspace, coefficient, exponent, false"))) +
+    ((");\n        // A normal power of two has a wider rounding interval above it.\n        if candidateValue < magnitude && significand == 4503599627370496 && binaryExponent > -1074 \x7B\n            coe" +
+    "fficient += 1;\n            candidateValue = floatParseCoefficient(workspace, coefficient, exponent, false);\n        \x7D\n        if candidateValue == magnitude \x7B\n            while coefficient % 1") +
+    ("0 == 0 \x7B coefficient /= 10; exponent += 1; \x7D\n            var candidateLength = floatAppendUnsigned(candidate, 0, coefficient, 0);\n            finalLength = floatRenderCandidate(candidate, cand" +
+    ("idateLength, exponent + candidateLength - 1, negative, output);\n            found = true;\n        \x7D\n        precision += 1;\n    \x7D\n    if !found \x7B __reyRawFail(2205); finalLength = 0; \x7D\n    __r" +
+    "eyRawUnmap(workspace, floatWorkspaceBytes());\n    return finalLength;\n\x7D\n\nfunc main(): void \x7B\x7D\n"))))));
 }
 
 func embeddedRuntimeSource2(): string {
