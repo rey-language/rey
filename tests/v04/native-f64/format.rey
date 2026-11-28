@@ -54,6 +54,10 @@ func main(): void {
     expect(nan.toString() == "NaN");
 
     expect("0.1".toFloat() == tenth);
+    expect(("0." + "0".repeat(9000) + "1e9001").toFloat() == one);
+    var halfway = "1.00000000000000011102230246251565404236316680908203125";
+    expect((halfway + "0".repeat(9000)).toFloat() == one);
+    expect((halfway + "0".repeat(9000) + "1").toFloat() == "1.0000000000000002".toFloat());
     expect("1e-4".toFloat() == fixedLimit);
     expect("1e-5".toFloat() == exponentLimit);
     expect("9007199254740992".toFloat() == two53);
