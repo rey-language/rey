@@ -72,7 +72,7 @@ func rejectForeignContext(): void {
     hostExit(90);
 }
 
-func rejectCorruptGroup(): void {
+func rejectCorruptGroup(mode: int): void {
     var registry = layoutRegistryCreate(1);
     var layout = fixedLayout(registry);
     var context = regionContextCreate(registry);
@@ -81,7 +81,9 @@ func rejectCorruptGroup(): void {
     var region = regionCurrent(context);
     var group = __reyRawLoadAddress(__reyRawOffset(region, 40));
     require(!__reyRawEqual(group, __reyRawNull()));
-    __reyRawStoreI64(group, 0);
+    if mode == 3 { __reyRawStoreI64(group, 0); }
+    else if mode == 5 { __reyRawStoreAddress(__reyRawOffset(group, 16), __reyRawNull()); }
+    else { __reyRawStoreI64(__reyRawOffset(region, 48), 2); }
     regionHandleAllocateFixed(context, handle, layout, 1);
     hostExit(90);
 }
@@ -105,6 +107,6 @@ func main(): void {
     if mode == 0 { checkPayloadZeroAndTypedNulls(); return; }
     if mode == 1 { rejectStaleRegion(); return; }
     if mode == 2 { rejectForeignContext(); return; }
-    if mode == 3 { rejectCorruptGroup(); return; }
+    if mode == 3 || mode == 5 || mode == 6 { rejectCorruptGroup(mode); return; }
     rejectCorruptDescriptor();
 }
