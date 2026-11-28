@@ -3732,12 +3732,11 @@ func parseF64LiteralBits(text: string): Result<int, string> {
         var parsedExponent = parseIntegerLiteral(exponentText, exponentNegative);
         if parsedExponent.isErr() { return Result.Err("floating literal exponent is outside the supported range"); }
         decimalExponent = parsedExponent.unwrap();
-        if decimalExponent > 10000 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
-        if decimalExponent < -10000 { return Result.Ok(0); }
     }
     var numerator = bigFromZero();
     var fractionDigits = 0;
     var digitCount = 0;
+    var significantDigits = 0;
     var sawDot = false;
     var previousDigit = false;
     scan = 0;
@@ -3758,13 +3757,17 @@ func parseF64LiteralBits(text: string): Result<int, string> {
             numerator = bigMultiplySmall(numerator, 10);
             numerator = bigAddSmall(numerator, digit);
             digitCount += 1;
+            if digit != 0 || significantDigits > 0 { significantDigits += 1; }
             if sawDot { fractionDigits += 1; }
             previousDigit = true;
         }
         scan += 1;
     }
     if digitCount == 0 || !previousDigit { return Result.Err("floating literal has an incomplete decimal value"); }
-    var order = digitCount - fractionDigits + decimalExponent - 1;
+    if significantDigits == 0 { return Result.Ok(0); }
+    if decimalExponent > 10000 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
+    if decimalExponent < -10000 { return Result.Ok(0); }
+    var order = significantDigits - fractionDigits + decimalExponent - 1;
     if order > 309 { return Result.Ok(signedF64Bits(9218868437227405312, false)); }
     if order < -400 { return Result.Ok(0); }
     var decimalScale = fractionDigits - decimalExponent;
@@ -3779,7 +3782,6 @@ func parseF64LiteralBits(text: string): Result<int, string> {
         while tenMultiply < numeratorScale { numerator = bigMultiplySmall(numerator, 10); tenMultiply += 1; }
         denominator.limbs.set(0, 1);
     }
-    if bigCompare(numerator, bigFromZero()) == 0 { return Result.Ok(0); }
     var exponent = bigBitLength(numerator) - bigBitLength(denominator);
     if exponent >= 0 {
         if bigCompare(numerator, bigShiftLeft(denominator, exponent)) < 0 { exponent -= 1; }
